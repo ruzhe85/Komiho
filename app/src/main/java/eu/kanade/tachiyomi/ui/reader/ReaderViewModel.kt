@@ -9,6 +9,11 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+// Komiho V2 (R-3) -->
+import app.mihonsy.komga.data.KomgaApiClient
+import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.source.KomgaSource
+// Komiho V2 (R-3) <--
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.chapter.interactor.SetReadStatus
 import eu.kanade.domain.chapter.model.toDbChapter
@@ -850,6 +855,10 @@ class ReaderViewModel @JvmOverloads constructor(
             // sync even before the chapter is completed.
             syncKomgaPageProgress(readerChapter, pageIndex)
 
+            // Komiho V2 (R-3): direct book-level progress sync to Komga — the
+            // bookId comes straight from chapter.url, no track service involved.
+            syncKomgaBookProgress(readerChapter, pageIndex)
+
             // SY -->
             if (
                 readerChapter.pages?.lastIndex == pageIndex ||
@@ -1466,6 +1475,36 @@ class ReaderViewModel @JvmOverloads constructor(
             )
         }
     }
+
+    // Komiho V2 (R-3) -->
+    private var lastKomgaBookSyncTimestamp = 0L
+
+    /**
+     * Komiho V2 (R-3): writes the current page position of a Komga book back to
+     * the server, so progress is visible in Komga Web in near-real time.
+     * - bookId is parsed from chapter.url (komga://book/{id}) — independent of
+     *   the Mihon track service.
+     * - Throttled to [KOMGA_PAGE_SYNC_INTERVAL_MS]; reaching the last page
+     *   forces an immediate sync with completed = true.
+     */
+    private fun syncKomgaBookProgress(readerChapter: ReaderChapter, pageIndex: Int) {
+        val url = readerChapter.chapter.url
+        if (!url.startsWith(KomgaSource.BOOK_URL_PREFIX)) return
+        val bookId = url.removePrefix(KomgaSource.BOOK_URL_PREFIX)
+        val pages = readerChapter.pages ?: return
+        val completed = pageIndex >= pages.lastIndex
+        val now = System.currentTimeMillis()
+        if (!completed && now - lastKomgaBookSyncTimestamp < KOMGA_PAGE_SYNC_INTERVAL_MS) return
+        lastKomgaBookSyncTimestamp = now
+
+        viewModelScope.launchNonCancellable {
+            runCatching {
+                val prefs = KomgaPreferences(Injekt.get<Application>())
+                KomgaApiClient(prefs.connection()).updateReadProgress(bookId, pageIndex + 1, completed)
+            }
+        }
+    }
+    // Komiho V2 (R-3) <--
 
     /**
      * Starts the service that updates the last chapter read in sync services. This operation
