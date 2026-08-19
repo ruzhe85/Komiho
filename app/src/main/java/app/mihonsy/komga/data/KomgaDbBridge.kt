@@ -2,6 +2,7 @@ package app.mihonsy.komga.data
 
 import app.mihonsy.komga.source.KomgaSource
 import kotlinx.serialization.json.JsonObject
+import mihon.core.common.extensions.EMPTY
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.manga.model.Manga
