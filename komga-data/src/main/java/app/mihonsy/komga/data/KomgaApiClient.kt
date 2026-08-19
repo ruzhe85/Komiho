@@ -19,8 +19,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import okio.buffer
-import okio.source
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 
@@ -253,7 +251,10 @@ class KomgaApiClient(
         // 保存会话 token（如返回）
         resp.header("X-Auth-Token")?.let { authToken = it }
         resp.headers("Set-Cookie").let { if (it.isNotEmpty()) cookies = it }
-        val body = resp.body?.source()?.buffer()?.readUtf8().orEmpty()
+        // FIX(V2): body.string() reads the full response — the old
+        // .source().buffer().readUtf8() returned an empty body (the classic
+        // komiho M1 bug), making every connection test fail with "响应为空".
+        val body = resp.body?.string().orEmpty()
         return if (body.isBlank()) null else parse(body)
     }
 
