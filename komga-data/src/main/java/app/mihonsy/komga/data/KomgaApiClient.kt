@@ -11,6 +11,10 @@ import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import logcat.LogPriority
 import okhttp3.Credentials
 import okhttp3.HttpUrl
@@ -206,6 +210,20 @@ class KomgaApiClient(
         )
     }
 
+    /** Removes the read progress of a book (Komga's "mark as unread"). */
+    suspend fun deleteReadProgress(bookId: String) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/books/$bookId/read-progress").toHttpUrl())
+                .apply { authHeaders() }
+                .delete()
+                .build()
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) throw KomgaException("清除进度失败（${resp.code}）")
+            }
+        }
+    }
+
     // ---------- 阅读列表 ----------
 
     // Komiho fix: /readlists returns PageableDto<ReadingListDto> (same shape as
@@ -228,6 +246,15 @@ class KomgaApiClient(
         val page: PageableDto<BookDto> =
             get("/api/v1/readlists/$readlistId/books?unpaged=true", PageableSerializer())
         return page.content
+    }
+
+    /** Adds books to a readlist — POST /api/v1/readlists/{id}/books {"bookIds": [...]} */
+    suspend fun addBooksToReadlist(readlistId: String, bookIds: List<String>) {
+        postJson(
+            "/api/v1/readlists/$readlistId/books",
+            buildJsonObject { put("bookIds", JsonArray(bookIds.map { JsonPrimitive(it) })) },
+            JsonObject.serializer(),
+        )
     }
 
     // ---------- 收藏（collections） ----------
