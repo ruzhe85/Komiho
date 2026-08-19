@@ -33,6 +33,75 @@ class KomgaPreferences(context: Context) {
         get() = prefs.getString(KEY_PASSWORD, "").orEmpty()
         set(v) = prefs.edit().putString(KEY_PASSWORD, v).apply()
 
+    // Komiho M3.10: library shelf display mode and sort, persisted across
+    // sessions — mirrors Mihon's libraryDisplayMode / librarySortingMode.
+    // M3.20: mode is now one of compact/comfy/list (LibraryDisplayMode name).
+    var libraryDisplayMode: String
+        get() = prefs.getString(KEY_LIBRARY_DISPLAY_MODE, "COMPACT_GRID").orEmpty()
+        set(v) = prefs.edit().putString(KEY_LIBRARY_DISPLAY_MODE, v).apply()
+
+    /** M3.20: columns per row, 0 = auto (Adaptive). Portrait/landscape stored
+     *  separately like Mihon's portraitColumns / landscapeColumns. */
+    var libraryPortraitColumns: Int
+        get() = prefs.getInt(KEY_LIBRARY_PORTRAIT_COLUMNS, 0).coerceIn(0, 10)
+        set(v) = prefs.edit().putInt(KEY_LIBRARY_PORTRAIT_COLUMNS, v.coerceIn(0, 10)).apply()
+
+    var libraryLandscapeColumns: Int
+        get() = prefs.getInt(KEY_LIBRARY_LANDSCAPE_COLUMNS, 0).coerceIn(0, 10)
+        set(v) = prefs.edit().putInt(KEY_LIBRARY_LANDSCAPE_COLUMNS, v.coerceIn(0, 10)).apply()
+
+    /** One of "title"/"lastModified"/"lastRead"/"dateAdded", plus ",asc"/",desc". */
+    var librarySort: String
+        get() = prefs.getString(KEY_LIBRARY_SORT, "title,asc").orEmpty()
+        set(v) = prefs.edit().putString(KEY_LIBRARY_SORT, v).apply()
+
+    /** Home tab: how many series/books each section shows. Default 10, max 15. */
+    var homeSectionLimit: Int
+        get() = prefs.getInt(KEY_HOME_SECTION_LIMIT, 10).coerceIn(1, 15)
+        set(v) = prefs.edit().putInt(KEY_HOME_SECTION_LIMIT, v.coerceIn(1, 15)).apply()
+
+    /**
+     * Home tab: visible section order, comma-separated section names
+     * (see HomeSection). Sections not in this list are hidden. Defaults to
+     * all five in the natural order.
+     */
+    var homeSectionOrder: String
+        get() = prefs.getString(
+            KEY_HOME_SECTION_ORDER,
+            "ContinueReading,RecentlyAddedBooks,RecentlyAddedSeries,RecentlyUpdatedSeries,RecentlyReadBooks",
+        ).orEmpty()
+        set(v) = prefs.edit().putString(KEY_HOME_SECTION_ORDER, v).apply()
+
+    /** Reader: double-page spread mode (Comics-style side-by-side pages). */
+    var readerDoublePage: Boolean
+        get() = prefs.getBoolean(KEY_READER_DOUBLE_PAGE, false)
+        set(v) = prefs.edit().putBoolean(KEY_READER_DOUBLE_PAGE, v).apply()
+
+    /**
+     * Reader mode: "" = auto (follow series.metadata.readingDirection:
+     * WEBTOON → continuous, otherwise paged), "PAGED" / "CONTINUOUS" = user override.
+     */
+    var readerMode: String
+        get() = prefs.getString(KEY_READER_MODE, "").orEmpty()
+        set(v) = prefs.edit().putString(KEY_READER_MODE, v).apply()
+
+    // ---- 外观 / 皮肤（M5 启用 Mihon 皮肤）----
+    // 明暗模式："SYSTEM"（跟随系统，默认）/ "LIGHT" / "DARK"。
+    var themeMode: String
+        get() = prefs.getString(KEY_THEME_MODE, "SYSTEM").orEmpty()
+        set(v) = prefs.edit().putString(KEY_THEME_MODE, v).apply()
+
+    // 皮肤：AppTheme 枚举名（"DEFAULT"/"MONET"/"CATPPUCCIN"/...），默认 DEFAULT。
+    var appTheme: String
+        get() = prefs.getString(KEY_APP_THEME, "DEFAULT").orEmpty()
+        set(v) = prefs.edit().putString(KEY_APP_THEME, v).apply()
+
+    // 深色 AMOLED 纯黑（仅深色模式生效）。
+    var themeDarkAmoled: Boolean
+        get() = prefs.getBoolean(KEY_THEME_DARK_AMOLED, false)
+        set(v) = prefs.edit().putBoolean(KEY_THEME_DARK_AMOLED, v).apply()
+
+
     fun hasConnection(): Boolean = baseUrl.isNotBlank()
 
     fun connection(): KomgaConnection = KomgaConnection(
@@ -53,5 +122,16 @@ class KomgaPreferences(context: Context) {
         const val KEY_API_KEY = "api_key"
         const val KEY_USERNAME = "username"
         const val KEY_PASSWORD = "password"
+        const val KEY_LIBRARY_DISPLAY_MODE = "library_display_mode"
+        const val KEY_LIBRARY_SORT = "library_sort"
+        const val KEY_LIBRARY_PORTRAIT_COLUMNS = "library_portrait_columns"
+        const val KEY_LIBRARY_LANDSCAPE_COLUMNS = "library_landscape_columns"
+        const val KEY_HOME_SECTION_LIMIT = "home_section_limit"
+        const val KEY_HOME_SECTION_ORDER = "home_section_order"
+        const val KEY_READER_DOUBLE_PAGE = "reader_double_page"
+        const val KEY_READER_MODE = "reader_mode"
+        const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_APP_THEME = "app_theme"
+        const val KEY_THEME_DARK_AMOLED = "theme_dark_amoled"
     }
 }

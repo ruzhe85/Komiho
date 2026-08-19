@@ -75,23 +75,44 @@
             android:theme="@style/Theme.Tachiyomi.SplashScreen">
         </activity>
 
+        <!-- Komiho M3: main tabbed activity (Home/Library/Lists/Settings).
+             Replaces the removed single-screen KomgaHomeActivity.
+             configChanges keeps tab/scroll state across orientation changes. -->
         <activity
-            android:name="app.mihonsy.komga.ui.KomgaHomeActivity"
-            android:exported="false">
+            android:name="app.mihonsy.komga.ui.KomgaMainActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+        </activity>
+
+        <!-- Komiho M3: readlist detail (books inside a reading list) -->
+        <activity
+            android:name="app.mihonsy.komga.ui.KomgaReadlistActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+        </activity>
+
+        <!-- Komiho M3: collection detail (series inside a Komga collection) -->
+        <activity
+            android:name="app.mihonsy.komga.ui.KomgaCollectionActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+        </activity>
+
+        <!-- Komiho M3: full list for a Home section ("全部" button) -->
+        <activity
+            android:name="app.mihonsy.komga.ui.KomgaSectionListActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
         </activity>
 
         <activity
             android:name="app.mihonsy.komga.ui.KomgaSeriesActivity"
-            android:exported="false">
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
         </activity>
 
-        <activity
-            android:name="app.mihonsy.komga.ui.KomgaReaderActivity"
-            android:exported="false">
-        </activity>
-
-        <!-- Komga client: app entry point (M3-1). Routes to Home when a
-             connection is configured, otherwise to connection setup. -->
+        <!-- Komga client: app entry point (M3-1). Routes to the main tabbed
+             activity when a connection is configured, otherwise to setup. -->
         <activity
             android:name="app.mihonsy.komga.ui.KomgaLauncherActivity"
             android:exported="true"

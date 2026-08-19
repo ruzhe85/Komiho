@@ -46,7 +46,19 @@ import kotlinx.coroutines.launch
 class KomgaConnectActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { KomgaConnectScreen() }
+        val prefs = KomgaPreferences(applicationContext)
+        // Komiho: if a connection was already saved, skip the setup screen and
+        // go straight to the main tabs (user reported the app always showing
+        // the connect screen on relaunch).
+        if (prefs.hasConnection() && savedInstanceState == null) {
+            startActivity(
+                android.content.Intent(this, KomgaMainActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK),
+            )
+            finish()
+            return
+        }
+        setContent { KomihoTheme { KomgaConnectScreen() } }
     }
 }
 
@@ -76,8 +88,12 @@ private fun KomgaConnectScreen() {
         val client = KomgaApiClient(conn)
         scope.launch {
             if (testOnly) testing = true else connecting = true
-            val ok = runCatching { client.testConnection().isSuccess }.getOrDefault(false)
+            // testConnection() already returns Result<Unit> (never throws), so
+            // unwrap it directly — wrapping it in another runCatching would
+            // always succeed and mask the failure.
+            val result = client.testConnection()
             if (testOnly) testing = false else connecting = false
+            val ok = result.isSuccess
             if (ok) {
                 if (!testOnly) {
                     prefs.baseUrl = conn.baseUrl
@@ -87,16 +103,18 @@ private fun KomgaConnectScreen() {
                     prefs.password = password
                     Toast.makeText(context, "连接成功", Toast.LENGTH_SHORT).show()
                     context.startActivity(
-                        android.content.Intent(context, KomgaHomeActivity::class.java)
+                        android.content.Intent(context, KomgaMainActivity::class.java)
                             .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP),
                     )
-                    // M3-1: connection success goes straight to Komga Home
-                    // (was MainActivity in M1).
                 } else {
                     Toast.makeText(context, "连接正常", Toast.LENGTH_SHORT).show()
                 }
             } else {
-                Toast.makeText(context, "连接失败：请检查地址与凭据", Toast.LENGTH_LONG).show()
+                // Komiho: surface the real failure instead of a generic message.
+                // Common case — server logs show successful auth, so a 4xx/5xx
+                // (often 403: API key missing library permission) gets swallowed.
+                val msg = describeFailure(result.exceptionOrNull())
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -194,5 +212,23 @@ private fun KomgaConnectScreen() {
                 }
             }
         }
+    }
+}
+
+// File-private helper for surfacing connection errors. Extracted from the
+// Composable so it can be unit-tested in isolation later.
+private fun describeFailure(e: Throwable?): String {
+    if (e == null) return "连接失败：未知错误"
+    val raw = e.message.orEmpty()
+    return when {
+        // KomgaApiClient tags 401 / 5xx specifically
+        raw.contains("401") -> "认证失败（401）：请检查 API Key 或账号密码"
+        raw.contains("403") -> "权限不足（403）：请在 Komga 用户设置 → API Key 创建时勾选 Library 权限"
+        raw.contains("500") || raw.contains("502") || raw.contains("503") -> "服务器错误（$raw）：请查看 Komga 服务端日志"
+        raw.contains("Failed to connect") || raw.contains("Unable to resolve host") ||
+            raw.contains("ConnectException") || raw.contains("UnknownHost") ->
+            "网络失败：$raw（请检查服务器地址和端口）"
+        raw.isNotBlank() -> "连接失败：$raw"
+        else -> "连接失败：${e::class.java.simpleName}"
     }
 }

@@ -1,6 +1,7 @@
 package app.mihonsy.komga.data
 
 import app.mihonsy.komga.data.model.BookDto
+import app.mihonsy.komga.data.model.CollectionDto
 import app.mihonsy.komga.data.model.LibraryDto
 import app.mihonsy.komga.data.model.PageDto
 import app.mihonsy.komga.data.model.PageableDto
@@ -19,6 +20,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okio.buffer
+import okio.source
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 
@@ -99,6 +102,13 @@ class KomgaApiClient(
         return get("/api/v1/series", PageableSerializer(), params)
     }
 
+    /** Recently updated series — GET /api/v1/series/updated (official endpoint, mirrors the web UI). */
+    suspend fun getUpdatedSeries(size: Int = 200): List<SeriesDto> {
+        val params = buildMap { put("size", size.toString()) }
+        val page: PageableDto<SeriesDto> = get("/api/v1/series/updated", PageableSerializer(), params)
+        return page.content
+    }
+
     suspend fun getSeriesDetail(seriesId: String): SeriesDto {
         return get("/api/v1/series/$seriesId", ObjectSerializer())
     }
@@ -117,6 +127,45 @@ class KomgaApiClient(
         return get("/api/v1/books/$bookId", ObjectSerializer())
     }
 
+    /** Next book in the series — GET /api/v1/books/{id}/next. null = no next. */
+    suspend fun getBookNext(bookId: String): BookDto? {
+        return runCatching { get<BookDto>("/api/v1/books/$bookId/next", ObjectSerializer()) }.getOrNull()
+    }
+
+    /** Previous book in the series — GET /api/v1/books/{id}/previous. null = none. */
+    suspend fun getBookPrevious(bookId: String): BookDto? {
+        return runCatching { get<BookDto>("/api/v1/books/$bookId/previous", ObjectSerializer()) }.getOrNull()
+    }
+
+    /** Global books list (Home "recently added books" / "recently read books"). */
+    suspend fun getBooks(
+        sort: String? = null,
+        size: Int = 20,
+        page: Int = 0,
+        readStatus: String? = null,
+    ): PageableDto<BookDto> {
+        val params = buildMap {
+            put("page", page.toString())
+            put("size", size.toString())
+            sort?.let { put("sort", it) }
+            readStatus?.let { put("read_status", it) }
+        }
+        return get("/api/v1/books", PageableSerializer(), params)
+    }
+
+    /**
+     * Continue-reading books — GET /api/v1/books/ondeck. This is the data
+     * source behind the Komga web UI's "Continue Reading" row (books with
+     * a read progress, next up to read), NOT series?read_status=IN_PROGRESS.
+     */
+    suspend fun getBooksOnDeck(size: Int = 20): List<BookDto> {
+        val params = buildMap {
+            put("size", size.toString())
+        }
+        val page: PageableDto<BookDto> = get("/api/v1/books/ondeck", PageableSerializer(), params)
+        return page.content
+    }
+
     suspend fun getBookPages(bookId: String): List<PageDto> {
         return get("/api/v1/books/$bookId/pages", ListSerializer())
     }
@@ -127,7 +176,15 @@ class KomgaApiClient(
         return apiUrl("/api/v1/books/$bookId/pages/$pageNumber$suffix")
     }
 
-    /** 封面 URL */
+    /**
+     * Cover thumbnail URLs. NOTE: Komga's thumbnail endpoints accept NO size
+     * query parameters (openapi confirmed — /series/{id}/thumbnail and
+     * /books/{id}/thumbnail have only the id path param). A ?height= hint is
+     * silently ignored, so the URL must stay identical to what the Komga web
+     * UI uses. Thumbnail resolution is fixed by what the server generated;
+     * to get sharper covers the server must regenerate them
+     * (PUT /api/v1/books/thumbnails?for_bigger_result_only=true, ADMIN).
+     */
     fun seriesThumbnailUrl(seriesId: String): String {
         return apiUrl("/api/v1/series/$seriesId/thumbnail")
     }
@@ -138,8 +195,11 @@ class KomgaApiClient(
 
     // ---------- 进度 ----------
     // 读取进度在 book 详情（BookDto.readProgress）；这里只写回。
+    // Komiho fix: Komga updates read progress via PATCH (the handoff doc §4
+    // says PATCH; the previous code used POST → 404/405, so progress never
+    // synced to the server — exactly what the user observed).
     suspend fun updateReadProgress(bookId: String, page: Int, completed: Boolean = false) {
-        postJson(
+        patchJson(
             "/api/v1/books/$bookId/read-progress",
             ReadProgressUpdateDto(page = page, completed = completed),
             ReadProgressUpdateDto.serializer(),
@@ -148,12 +208,40 @@ class KomgaApiClient(
 
     // ---------- 阅读列表 ----------
 
+    // Komiho fix: /readlists returns PageableDto<ReadingListDto> (same shape as
+    // /series), NOT a bare array. The previous ListSerializer() raised
+    // "Expected start of array '[', but had '{'" — exactly what the user saw.
     suspend fun getReadlists(): List<ReadingListDto> {
-        return get("/api/v1/readlists", ListSerializer())
+        val page: PageableDto<ReadingListDto> = get("/api/v1/readlists", PageableSerializer())
+        return page.content
     }
 
+    // /readlists/{id} returns a single ReadingListDto (not paginated) — matches
+    // the official keiyoushi extension which does parseAs<ReadListDto>() here.
     suspend fun getReadlist(id: String): ReadingListDto {
         return get("/api/v1/readlists/$id", ObjectSerializer())
+    }
+
+    /** Books inside a readlist — GET /api/v1/readlists/{id}/books?unpaged=true */
+    suspend fun getReadlistBooks(readlistId: String): List<BookDto> {
+        // Explicit type so the reified PageableSerializer<T> can infer T=BookDto.
+        val page: PageableDto<BookDto> =
+            get("/api/v1/readlists/$readlistId/books?unpaged=true", PageableSerializer())
+        return page.content
+    }
+
+    // ---------- 收藏（collections） ----------
+
+    /** GET /api/v1/collections?unpaged=true */
+    suspend fun getCollections(): List<CollectionDto> {
+        val page: PageableDto<CollectionDto> =
+            get("/api/v1/collections?unpaged=true", PageableSerializer())
+        return page.content
+    }
+
+    /** GET /api/v1/collections/{id} — single collection detail. */
+    suspend fun getCollection(collectionId: String): CollectionDto {
+        return get("/api/v1/collections/$collectionId", ObjectSerializer())
     }
 
     // ---------- 底层 ----------
@@ -171,7 +259,9 @@ class KomgaApiClient(
                 .build()
             client.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) throw KomgaException("下载失败（${resp.code}）")
-                resp.body?.source()?.buffer()?.readByteArray() ?: throw KomgaException("响应为空")
+                // Komiho fix: same as handleResponse — use ResponseBody.bytes() instead
+                // of source()?.buffer()?.readByteArray() which could return empty.
+                resp.body?.bytes() ?: throw KomgaException("响应为空")
             }
         }
     }
@@ -202,6 +292,26 @@ class KomgaApiClient(
             addHeader("Cookie", cookies.joinToString("; "))
         }
         return this
+    }
+
+    /** Auth headers as a map, for Coil ImageRequests (covers/pages). */
+    fun authHeadersMap(): Map<String, String> {
+        val map = mutableMapOf<String, String>()
+        when (connection.authType) {
+            KomgaAuthType.API_KEY -> {
+                if (connection.apiKey.isNotBlank()) {
+                    map["X-API-Key"] = connection.apiKey
+                }
+            }
+            KomgaAuthType.BASIC -> {
+                map["Authorization"] = Credentials.basic(connection.username, connection.password)
+            }
+        }
+        authToken?.let { map["X-Auth-Token"] = it }
+        if (cookies.isNotEmpty()) {
+            map["Cookie"] = cookies.joinToString("; ")
+        }
+        return map
     }
 
     private suspend fun <T> get(
@@ -237,6 +347,20 @@ class KomgaApiClient(
         }
     }
 
+    /** Same as postJson but with the PATCH verb (Komga read-progress uses PATCH). */
+    private suspend fun <T> patchJson(path: String, body: T, serializer: kotlinx.serialization.KSerializer<T>) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl(path).toHttpUrl())
+                .apply { authHeaders() }
+                .patch(json.encodeToString(serializer, body).toRequestBody(jsonMedia))
+                .build()
+            client.newCall(request).execute().use { resp ->
+                handleResponse(resp) { null }
+            }
+        }
+    }
+
     private fun <T> handleResponse(resp: Response, parse: (String) -> T?): T? {
         if (!resp.isSuccessful) {
             logcat(LogPriority.ERROR, tag = "KomgaApi") { "HTTP ${resp.code} ${resp.message}" }
@@ -251,9 +375,11 @@ class KomgaApiClient(
         // 保存会话 token（如返回）
         resp.header("X-Auth-Token")?.let { authToken = it }
         resp.headers("Set-Cookie").let { if (it.isNotEmpty()) cookies = it }
-        // FIX(V2): body.string() reads the full response — the old
-        // .source().buffer().readUtf8() returned an empty body (the classic
-        // komiho M1 bug), making every connection test fail with "响应为空".
+        // Komiho fix: use ResponseBody.string() — the safe, documented way to read a
+        // response body. The previous `body?.source()?.buffer()?.readUtf8()` chain
+        // could yield an empty Buffer on some OkHttp 5 internals, which made every
+        // successful response decode as blank → "响应为空" even when the server
+        // returned valid JSON (confirmed against a live Komga server).
         val body = resp.body?.string().orEmpty()
         return if (body.isBlank()) null else parse(body)
     }

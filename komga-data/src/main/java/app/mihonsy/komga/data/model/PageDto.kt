@@ -22,3 +22,15 @@ data class ReadingListDto(
     val url: String? = null,
     @SerialName("filtered") val filtered: Boolean = false,
 )
+
+/** Komga collection (收藏). Matches the keiyoushi extension's CollectionDto. */
+@Serializable
+data class CollectionDto(
+    val id: String,
+    val name: String,
+    @SerialName("ordered") val ordered: Boolean = false,
+    @SerialName("seriesIds") val seriesIds: List<String> = emptyList(),
+    @SerialName("createdDate") val createdDate: String? = null,
+    @SerialName("lastModifiedDate") val lastModifiedDate: String? = null,
+    @SerialName("filtered") val filtered: Boolean = false,
+)
