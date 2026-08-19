@@ -252,6 +252,7 @@ private fun ReadlistPickerDialog(
     onAdded: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var readlists by remember { mutableStateOf<List<ReadingListDto>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -282,7 +283,7 @@ private fun ReadlistPickerDialog(
                                         .onSuccess { onAdded() }
                                         .onFailure {
                                             android.widget.Toast.makeText(
-                                                LocalContext.current, "添加失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                                context, "添加失败：${it.message}", android.widget.Toast.LENGTH_LONG,
                                             ).show()
                                         }
                                 }

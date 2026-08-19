@@ -219,7 +219,7 @@ private fun KomgaMainScreen(refreshSignal: StateFlow<Int>) {
                                 libraryPickerOpen = true
                             } else {
                                 // 点击 tab（含重复点击当前 tab）触发刷新。
-                                if (currentTab == index) refreshTick++ else currentTab = index
+                                if (currentTab == index) refreshSignal.update { it + 1 } else currentTab = index
                             }
                         },
                         icon = { Icon(tab.icon, contentDescription = tab.label) },
