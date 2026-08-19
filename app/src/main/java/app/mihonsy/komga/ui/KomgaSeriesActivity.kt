@@ -180,16 +180,23 @@ private fun KomgaSeriesScreen(seriesId: String) {
                     Spacer(Modifier.height(4.dp))
                     // Unified shelf — grid or list, same as everywhere else.
                     Box(Modifier.weight(1f)) {
-                        BookShelf(client, books, mode, columns) { bookId ->
-                            loadScope.launch {
-                                runCatching { KomgaReaderLauncher.open(context, client, bookId) }
-                                    .onFailure {
-                                        android.widget.Toast.makeText(
-                                            context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
-                                        ).show()
-                                    }
-                            }
-                        }
+                        BookShelf(
+                            client = client,
+                            books = books,
+                            mode = mode,
+                            columns = columns,
+                            onBookClick = { bookId ->
+                                loadScope.launch {
+                                    runCatching { KomgaReaderLauncher.open(context, client, bookId) }
+                                        .onFailure {
+                                            android.widget.Toast.makeText(
+                                                context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                            ).show()
+                                        }
+                                }
+                            },
+                            onDataChanged = { load() },
+                        )
                     }
                 }
             }

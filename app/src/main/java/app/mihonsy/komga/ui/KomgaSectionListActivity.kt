@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -154,16 +155,23 @@ private fun KomgaSectionListScreen(section: HomeSection) {
                         )
                     }
                 } else {
-                    BookShelf(client, books, mode, columns) { b ->
-                        scope.launch {
-                            runCatching { KomgaReaderLauncher.open(context, client, b) }
-                                .onFailure {
-                                    android.widget.Toast.makeText(
-                                        context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
-                                    ).show()
-                                }
-                        }
-                    }
+                    BookShelf(
+                        client = client,
+                        books = books,
+                        mode = mode,
+                        columns = columns,
+                        onBookClick = { b ->
+                            scope.launch {
+                                runCatching { KomgaReaderLauncher.open(context, client, b) }
+                                    .onFailure {
+                                        android.widget.Toast.makeText(
+                                            context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                            }
+                        },
+                        onDataChanged = { scope.launch { load() } },
+                    )
                 }
             }
         }
@@ -202,12 +210,14 @@ fun BookShelfCard(
     modifier: Modifier = Modifier,
     titleInside: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
 ) {
     Surface(
-        onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         color = Color.Transparent,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Column {
             Box(

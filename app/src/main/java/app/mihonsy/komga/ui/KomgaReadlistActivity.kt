@@ -72,19 +72,23 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String) {
     val mode = LibraryDisplayMode.fromPref(prefs.libraryDisplayMode)
     var displayOpen by remember { mutableStateOf(false) }
 
-    LaunchedEffect(readlistId) {
-        runCatching {
-            val rl = client.getReadlist(readlistId)
-            val bs = client.getReadlistBooks(readlistId)
-            rl to bs
-        }.onSuccess {
-            readlist = it.first
-            books = it.second
-        }.onFailure {
-            error = it.message
+    fun reload() {
+        scope.launch {
+            runCatching {
+                val rl = client.getReadlist(readlistId)
+                val bs = client.getReadlistBooks(readlistId)
+                rl to bs
+            }.onSuccess {
+                readlist = it.first
+                books = it.second
+            }.onFailure {
+                error = it.message
+            }
+            loading = false
         }
-        loading = false
     }
+
+    LaunchedEffect(readlistId) { reload() }
 
     Scaffold(
         topBar = {
@@ -119,16 +123,23 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String) {
                 Text("该阅读列表暂无书籍")
             }
             else -> Box(Modifier.fillMaxSize().padding(padding)) {
-                BookShelf(client, books, mode, columns) { bookId ->
-                    scope.launch {
-                        runCatching { KomgaReaderLauncher.open(context, client, bookId) }
-                            .onFailure {
-                                android.widget.Toast.makeText(
-                                    context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
-                                ).show()
-                            }
-                    }
-                }
+                BookShelf(
+                    client = client,
+                    books = books,
+                    mode = mode,
+                    columns = columns,
+                    onBookClick = { bookId ->
+                        scope.launch {
+                            runCatching { KomgaReaderLauncher.open(context, client, bookId) }
+                                .onFailure {
+                                    android.widget.Toast.makeText(
+                                        context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                        }
+                    },
+                    onDataChanged = { reload() },
+                )
             }
         }
     }
