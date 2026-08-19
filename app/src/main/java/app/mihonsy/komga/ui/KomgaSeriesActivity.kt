@@ -30,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,10 +38,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.KomgaApiClient
+import app.mihonsy.komga.data.KomgaDbBridge
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.SeriesDto
 import kotlin.math.ceil
+import kotlinx.coroutines.launch
 
 /**
  * 系列详情：元数据 + tag + 书籍列表（M1）。
@@ -64,6 +67,7 @@ private fun KomgaSeriesScreen(seriesId: String) {
     var books by remember { mutableStateOf<List<BookDto>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(seriesId) {
         runCatching {
@@ -102,11 +106,29 @@ private fun KomgaSeriesScreen(seriesId: String) {
                     )
                 }
                 items(books) { book -> BookRow(book) { bookId ->
-                    context.startActivity(
-                        android.content.Intent(context, KomgaReaderActivity::class.java)
-                            .putExtra("bookId", bookId)
-                            .putExtra("bookName", book.metadata.title ?: book.name),
-                    )
+                    // R-1: bridge the Komga book into the local DB and open the
+                    // native MihonSY reader (replaces the self-written reader).
+                    scope.launch {
+                        runCatching {
+                            val seriesDto = series ?: client.getSeriesDetail(seriesId)
+                            val manga = KomgaDbBridge.ensureManga(client, seriesDto.id, seriesDto.name)
+                            val chapters = KomgaDbBridge.ensureChapters(client, seriesDto.id, manga.id)
+                            val chapter = chapters.firstOrNull {
+                                it.url == app.mihonsy.komga.source.KomgaSource.BOOK_URL_PREFIX + bookId
+                            }
+                            if (chapter != null) {
+                                context.startActivity(
+                                    android.content.Intent(context, eu.kanade.tachiyomi.ui.reader.ReaderActivity::class.java)
+                                        .putExtra("manga", manga.id)
+                                        .putExtra("chapter", chapter.id),
+                                )
+                            } else {
+                                android.widget.Toast.makeText(context, "章节未同步", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }.onFailure {
+                            android.widget.Toast.makeText(context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
                 } }
             }
         }
