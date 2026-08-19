@@ -65,12 +65,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.rememberScrollState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -103,9 +107,18 @@ import kotlinx.coroutines.launch
  * source of truth; nothing is cached locally).
  */
 class KomgaMainActivity : ComponentActivity() {
+    // Incremented on every onResume so the tabs reload data when returning
+    // from the reader (read progress / unread counts change while reading).
+    private val refreshSignal = MutableStateFlow(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { KomihoTheme { KomgaMainScreen() } }
+        setContent { KomihoTheme { KomgaMainScreen(refreshSignal) } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshSignal.update { it + 1 }
     }
 }
 
@@ -117,7 +130,7 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
 }
 
 @Composable
-private fun KomgaMainScreen() {
+private fun KomgaMainScreen(refreshSignal: StateFlow<Int>) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
@@ -125,8 +138,9 @@ private fun KomgaMainScreen() {
     // Tab state is preserved across configuration changes by the Activity's
     // configChanges flag (orientation) — no need for rememberSaveable.
     var currentTab by remember { mutableIntStateOf(MainTab.Home.ordinal) }
-    // tab 重复点击刷新计数（传给各 tab 内容触发重载）。
-    var refreshTick by remember { mutableIntStateOf(0) }
+    // Refresh counter: bumped by tab re-tap and by Activity onResume (returning
+    // from the reader). Passed to tabs to trigger data reload.
+    val refreshTick by refreshSignal.collectAsState()
     // M3.12: search collapsed to an icon in the title row; expands the field.
     var searchOpen by remember { mutableStateOf(false) }
 
@@ -236,6 +250,7 @@ private fun KomgaMainScreen() {
                         selectedLibraryId = selectedLibraryId,
                         displayMode = displayMode,
                         columns = columns,
+                        refreshTick = refreshTick,
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
@@ -739,6 +754,7 @@ private fun LibraryTab(
     selectedLibraryId: String?,
     displayMode: LibraryDisplayMode,
     columns: Int,
+    refreshTick: Int,
     onSeriesClick: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -775,7 +791,7 @@ private fun LibraryTab(
         }
     }
 
-    LaunchedEffect(selectedLibraryId, readFilter, sortMode) { reload() }
+    LaunchedEffect(selectedLibraryId, readFilter, sortMode, refreshTick) { reload() }
 
     // Client-side sort for "最近阅读" (Komga has no read-progress sort field).
     val sortedSeries = remember(series, sortMode) {
