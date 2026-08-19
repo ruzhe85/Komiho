@@ -90,16 +90,20 @@ object KomgaDbBridge {
     }
 
     /**
-     * Applies the Komga series reading direction (LEFT_TO_RIGHT / RIGHT_TO_LEFT /
-     * VERTICAL) to the manga's per-manga reading mode, so the native reader opens
-     * with the matching mode. Only applies when the user hasn't set a custom
-     * per-manga mode yet (viewerFlags ReadingMode bits == 0).
+     * Applies the Komga series reading direction to the manga's per-manga
+     * reading mode, so the native reader opens with the matching mode —
+     * no aspect-ratio auto-detection needed (that path only kicks in as a
+     * fallback and switches mode a page or two late).
+     *
+     * Komga ReadingDirection values: LEFT_TO_RIGHT / RIGHT_TO_LEFT / VERTICAL / WEBTOON.
+     * Only applies when the user hasn't set a custom per-manga mode yet
+     * (viewerFlags ReadingMode bits == 0).
      */
     suspend fun applyReadingMode(manga: Manga, readingDirection: String?) {
         val mode = when (readingDirection) {
             "LEFT_TO_RIGHT" -> ReadingMode.LEFT_TO_RIGHT
             "RIGHT_TO_LEFT" -> ReadingMode.RIGHT_TO_LEFT
-            "VERTICAL" -> ReadingMode.WEBTOON // Komga vertical = continuous scroll
+            "VERTICAL", "WEBTOON" -> ReadingMode.WEBTOON // Komga vertical/webtoon = continuous scroll
             else -> return
         }
         val currentMode = manga.viewerFlags and ReadingMode.MASK.toLong()
