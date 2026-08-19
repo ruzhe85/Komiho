@@ -90,17 +90,24 @@
             android:exported="false">
         </activity>
 
+        <!-- Komga client: app entry point (M3-1). Routes to Home when a
+             connection is configured, otherwise to connection setup. -->
         <activity
-            android:name=".ui.main.MainActivity"
+            android:name="app.mihonsy.komga.ui.KomgaLauncherActivity"
             android:exported="true"
-            android:launchMode="singleTop"
             android:theme="@style/Theme.Tachiyomi.SplashScreen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
 
+        <activity
+            android:name=".ui.main.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Tachiyomi.SplashScreen">
             <!-- Legacy deeplink to add extension store -->
             <intent-filter android:label="@string/action_addExtensionStore">
                 <action android:name="android.intent.action.VIEW" />

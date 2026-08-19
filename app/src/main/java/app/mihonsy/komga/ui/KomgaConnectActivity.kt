@@ -37,7 +37,6 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
-import eu.kanade.tachiyomi.ui.main.MainActivity
 import kotlinx.coroutines.launch
 
 /**
@@ -88,9 +87,11 @@ private fun KomgaConnectScreen() {
                     prefs.password = password
                     Toast.makeText(context, "连接成功", Toast.LENGTH_SHORT).show()
                     context.startActivity(
-                        android.content.Intent(context, MainActivity::class.java)
+                        android.content.Intent(context, KomgaHomeActivity::class.java)
                             .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP),
                     )
+                    // M3-1: connection success goes straight to Komga Home
+                    // (was MainActivity in M1).
                 } else {
                     Toast.makeText(context, "连接正常", Toast.LENGTH_SHORT).show()
                 }

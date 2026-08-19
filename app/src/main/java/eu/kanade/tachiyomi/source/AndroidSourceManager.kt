@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.source
 
 import android.content.Context
+import app.mihonsy.komga.source.KomgaSource
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
@@ -103,6 +104,9 @@ class AndroidSourceManager(
                         }
                         put(MERGED_SOURCE_ID, MergedSource())
                         // SY <--
+                        // Komga client (V2) -->
+                        put(KomgaSource.ID, KomgaSource(context))
+                        // Komga client (V2) <--
                     }
 
                     extensions.forEach { extension ->
