@@ -48,6 +48,19 @@ android {
             keyAlias = "mihonmod"
             keyPassword = System.getenv("MIHONSY_KEY_PASSWORD") ?: "mihonmod123"
         }
+        // Komiho V2: fixed debug keystore so every CI build carries the same
+        // signature and can be installed over the previous APK (no uninstall
+        // required between builds). Falls back to the default debug signing
+        // when the keystore file is absent (local dev without the file).
+        create("komihoDebug") {
+            val ks = file("../keystore/komiho-debug.jks")
+            if (ks.exists()) {
+                storeFile = ks
+                storePassword = System.getenv("KOMIHO_DEBUG_KEYSTORE_PASSWORD") ?: "komihodbg"
+                keyAlias = "komiho"
+                keyPassword = System.getenv("KOMIHO_DEBUG_KEYSTORE_PASSWORD") ?: "komihodbg"
+            }
+        }
     }
 
     // MihonSY: lightweight native enhancement (Anime4K GPU shaders + Lanczos3 CPU resampler)
@@ -67,6 +80,10 @@ android {
             versionNameSuffix = "-${getLatestCommitCount()}"
             applicationIdSuffix = ".debug"
             isPseudoLocalesEnabled = true
+            // Komiho V2: fixed signature across CI builds (fallback: default debug key)
+            if (file("../keystore/komiho-debug.jks").exists()) {
+                signingConfig = signingConfigs.getByName("komihoDebug")
+            }
         }
         named("release") {
             val shrink = !project.hasProperty("disable-code-shrink")

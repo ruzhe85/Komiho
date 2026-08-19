@@ -47,6 +47,14 @@ jobs:
       - name: Grant gradlew execute permission
         run: chmod +x gradlew
 
+      # Komiho V2: fixed debug keystore — every build carries the same signature
+      # so APKs can be installed over the previous one (no uninstall needed).
+      - name: Decode fixed debug keystore
+        run: |
+          mkdir -p keystore
+          echo "${{ secrets.KOMIHO_DEBUG_KEYSTORE_BASE64 }}" | base64 -d > keystore/komiho-debug.jks
+          ls -la keystore/
+
       # Komiho M1: compile-verify only (no signing/release yet — M5 adds the
       # release pipeline with keystore secrets). Debug APK is enough to validate
       # compilation of the Komga data layer + UI.
