@@ -8,6 +8,8 @@ name: Build Komiho V2 APK
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,10 +53,14 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug -Pdisable-code-shrink --no-daemon --stacktrace
 
-      - name: Upload APKs (artifact)
-        uses: actions/upload-artifact@v4
-        with:
-          name: komiho-apk
-          path: |
-            app/build/outputs/apk/debug/*.apk
-          retention-days: 30
+      # Upload to a fixed-tag Release instead of Actions artifacts — the
+      # artifact storage quota is exhausted, Release assets have no such limit.
+      - name: Upload APKs to Release (ci-apk)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ci-apk app/build/outputs/apk/debug/*.apk \
+            --repo "${{ github.repository }}" \
+            --title "Komiho V2 CI APK" \
+            --notes "Auto build $(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null \
+            || gh release upload ci-apk app/build/outputs/apk/debug/*.apk --repo "${{ github.repository }}" --clobber
