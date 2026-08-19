@@ -26,6 +26,8 @@ object KomgaReaderLauncher {
         val seriesId = book.seriesId ?: throw IllegalStateException("书缺少 seriesId")
         val series = client.getSeriesDetail(seriesId)
         val manga = KomgaDbBridge.ensureManga(client, series.id, series.name)
+        // Auto reading mode from Komga series metadata (LTR/RTL/VERTICAL→webtoon)
+        KomgaDbBridge.applyReadingMode(manga, series.metadata.readingDirection)
         val chapters = KomgaDbBridge.ensureChapters(client, series.id, manga.id)
         val chapter = chapters.firstOrNull {
             it.url == KomgaSource.BOOK_URL_PREFIX + book.id

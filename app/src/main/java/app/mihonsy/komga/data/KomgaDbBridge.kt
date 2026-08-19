@@ -1,11 +1,13 @@
 package app.mihonsy.komga.data
 
 import app.mihonsy.komga.source.KomgaSource
+import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import kotlinx.serialization.json.JsonObject
 import mihon.core.common.extensions.EMPTY
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.manga.repository.MangaRepository
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -85,5 +87,24 @@ object KomgaDbBridge {
             chapterRepository.addAll(toAdd)
         }
         return chapterRepository.getChapterByMangaId(mangaId)
+    }
+
+    /**
+     * Applies the Komga series reading direction (LEFT_TO_RIGHT / RIGHT_TO_LEFT /
+     * VERTICAL) to the manga's per-manga reading mode, so the native reader opens
+     * with the matching mode. Only applies when the user hasn't set a custom
+     * per-manga mode yet (viewerFlags ReadingMode bits == 0).
+     */
+    suspend fun applyReadingMode(manga: Manga, readingDirection: String?) {
+        val mode = when (readingDirection) {
+            "LEFT_TO_RIGHT" -> ReadingMode.LEFT_TO_RIGHT
+            "RIGHT_TO_LEFT" -> ReadingMode.RIGHT_TO_LEFT
+            "VERTICAL" -> ReadingMode.WEBTOON // Komga vertical = continuous scroll
+            else -> return
+        }
+        val currentMode = manga.viewerFlags and ReadingMode.MASK.toLong()
+        if (currentMode == 0L) {
+            mangaRepository.update(MangaUpdate(id = manga.id, viewerFlags = mode.flagValue.toLong()))
+        }
     }
 }
