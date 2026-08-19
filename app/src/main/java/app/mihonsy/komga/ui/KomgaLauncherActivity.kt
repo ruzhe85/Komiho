@@ -6,16 +6,17 @@ import androidx.activity.ComponentActivity
 import app.mihonsy.komga.data.KomgaPreferences
 
 /**
- * Komga client launcher (M3-1): app entry point that routes to Home when a
- * Komga connection is configured, otherwise to the connection setup screen.
- * Replaces Mihon's MainActivity as the MAIN/LAUNCHER target.
+ * Komga client launcher (M3-1): app entry point that routes to the main
+ * tabbed activity when a Komga connection is configured, otherwise to the
+ * connection setup screen. Replaces Mihon's MainActivity as the
+ * MAIN/LAUNCHER target.
  */
 class KomgaLauncherActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = KomgaPreferences(applicationContext)
         val target = if (prefs.hasConnection()) {
-            KomgaHomeActivity::class.java
+            KomgaMainActivity::class.java
         } else {
             KomgaConnectActivity::class.java
         }
