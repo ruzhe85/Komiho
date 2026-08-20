@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
  * Collections carry only seriesIds, so we resolve each id via the
  * series thumbnail endpoint and the collection detail endpoint.
  */
-class KomgaCollectionActivity : ComponentActivity() {
+class KomgaCollectionActivity : KomgaBaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val collectionId = intent.getStringExtra("collectionId").orEmpty()

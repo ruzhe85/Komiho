@@ -43,7 +43,7 @@ import kotlinx.coroutines.launch
  * Komga 服务器连接设置页（M1）。
  * 支持 API Key / 账号密码两种认证；连接成功后进入主界面。
  */
-class KomgaConnectActivity : ComponentActivity() {
+class KomgaConnectActivity : KomgaBaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = KomgaPreferences(applicationContext)

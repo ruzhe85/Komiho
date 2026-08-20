@@ -101,6 +101,16 @@ class KomgaPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_THEME_DARK_AMOLED, false)
         set(v) = prefs.edit().putBoolean(KEY_THEME_DARK_AMOLED, v).apply()
 
+    /**
+     * 应用语言："" = 跟随系统（默认），"zh-CN" / "zh-TW" / "en"。
+     * 由 KomgaBaseActivity.attachBaseContext 应用（ComponentActivity 不走
+     * AppCompatDelegate 的 per-app locale），选择时同时调
+     * AppCompatDelegate.setApplicationLocales 以覆盖 MihonSY 的 AppCompat 页面。
+     */
+    var appLanguage: String
+        get() = prefs.getString(KEY_APP_LANGUAGE, "").orEmpty()
+        set(v) = prefs.edit().putString(KEY_APP_LANGUAGE, v).apply()
+
 
     fun hasConnection(): Boolean = baseUrl.isNotBlank()
 
@@ -133,5 +143,6 @@ class KomgaPreferences(context: Context) {
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_APP_THEME = "app_theme"
         const val KEY_THEME_DARK_AMOLED = "theme_dark_amoled"
+        const val KEY_APP_LANGUAGE = "app_language"
     }
 }
