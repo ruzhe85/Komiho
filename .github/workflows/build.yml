@@ -61,10 +61,11 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug -Pdisable-code-shrink --no-daemon --stacktrace
 
-      # Multi-version CI: each push gets a uniquely-tagged Release (history,
-      # never overwritten) plus an always-fresh "ci-apk" pointer for the latest
-      # build, so the documented download URLs stay stable.
-      - name: Upload APKs to per-build Release (history)
+      # Multi-version CI: every push produces one uniquely-tagged Release
+      # (ci-<run>-<sha>) marked as Pre-release. No "ci-apk" latest pointer —
+      # each build is an independent, never-overwritten history entry, newest
+      # sorts to the top of the Releases list.
+      - name: Upload APKs to per-build Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -78,25 +79,6 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "$TITLE" \
             --notes "$NOTES" \
-            --latest=false \
             --prerelease \
             || gh release upload "$TAG" app/build/outputs/apk/debug/*.apk \
                  --repo "${{ github.repository }}" --clobber
-
-      - name: Update latest pointer (ci-apk)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          RUN_NO="${{ github.run_number }}"
-          BUILD_DATE=$(date -u +%Y-%m-%d)
-          gh release create ci-apk app/build/outputs/apk/debug/*.apk \
-            --repo "${{ github.repository }}" \
-            --title "Komiho V2 Latest APK" \
-            --notes "Latest build · #${RUN_NO} · ${{ github.sha }} · ${BUILD_DATE}T$(date -u +%H:%M:%SZ)" \
-            2>/dev/null \
-            || gh release upload ci-apk app/build/outputs/apk/debug/*.apk \
-                 --repo "${{ github.repository }}" --clobber
-          # ci-apk stays a normal "Latest" release (GitHub forbids marking a
-          # prerelease as Latest). The per-build ci-* releases above carry the
-          # Pre-release badge so CI history is clearly distinct from "formal".
