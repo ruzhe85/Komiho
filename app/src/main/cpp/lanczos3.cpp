@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <thread>
 #include <vector>
 
 #define TAG "MihonSyLanczos"
@@ -13,7 +14,15 @@ namespace {
 
 constexpr int LANCZOS_A = 3;
 
-// Lanczos-3 kernel (a=3 windowed sinc).
+// ---- Kernel LUT (perf optimization) -------------------------------------------------
+// The argument to the kernel (cx - i) is ALWAYS within [-radius, radius], so we
+// pre-sample the kernel once over that bounded domain and replace every hot-loop
+// sin()/polynomial call with a table lookup + linear interpolation. This removes
+// millions of transcendental calls per page (the real 1-3s bottleneck) and is
+// correct at image edges (unlike a per-output-index periodic table, which breaks
+// when clamping hits the boundary).
+constexpr int KERNEL_LUT_N = 2048;
+
 inline float lanczosKernel(float x) {
   if (x == 0.0f) return 1.0f;
   if (x <= -LANCZOS_A || x >= LANCZOS_A) return 0.0f;
@@ -21,7 +30,6 @@ inline float lanczosKernel(float x) {
   return (LANCZOS_A * std::sin(pix) * std::sin(pix / LANCZOS_A)) / (pix * pix);
 }
 
-// Catmull-Rom cubic spline (Mitchell-Netravali with b=0, c=0.5), support |x| < 2.
 inline float catmullRomKernel(float x) {
   x = std::fabs(x);
   if (x >= 2.0f) return 0.0f;
@@ -29,9 +37,6 @@ inline float catmullRomKernel(float x) {
   return -0.5f * x * x * x + 2.5f * x * x - 4.0f * x + 2.0f;
 }
 
-// Spline36 (AviSynth 6-tap spline), support |x| < 3. Coefficients from the
-// reference implementation: ((13/11)x - 453/209)x - 3/209)x + 1 and the
-// shifted (x-1), (x-2) pieces.
 inline float spline36Kernel(float x) {
   x = std::fabs(x);
   if (x >= 3.0f) return 0.0f;
@@ -46,87 +51,149 @@ inline float spline36Kernel(float x) {
 
 using KernelFn = float (*)(float);
 
+struct KernelLUT {
+  std::vector<float> tbl;
+  float invStep;  // (N-1) / (2*radius)
+  float radius;
+
+  KernelLUT(KernelFn fn, int radius) : radius(static_cast<float>(radius)) {
+    tbl.resize(KERNEL_LUT_N);
+    invStep = static_cast<float>(KERNEL_LUT_N - 1) / (2.0f * radius);
+    for (int i = 0; i < KERNEL_LUT_N; ++i) {
+      const float t = (static_cast<float>(i) / (KERNEL_LUT_N - 1)) * 2.0f * radius - radius;
+      tbl[i] = fn(t);
+    }
+  }
+
+  inline float at(float x) const {
+    if (x <= -radius) return tbl[0];
+    if (x >= radius) return tbl[KERNEL_LUT_N - 1];
+    const float f = (x + radius) * invStep;
+    const int i0 = static_cast<int>(f);
+    if (i0 >= KERNEL_LUT_N - 1) return tbl[KERNEL_LUT_N - 1];
+    const float frac = f - static_cast<float>(i0);
+    return tbl[i0] * (1.0f - frac) + tbl[i0 + 1] * frac;
+  }
+};
+
+// ---- Parallel-for over row range ---------------------------------------------------
+// One nativeResample task is internally multithreaded (NOT N concurrent JNI calls
+// from Kotlin — that would explode memory / bitmap copies / cache thrashing).
+// Thread count is dynamic but capped at 4: the reader also shares CPU with Coil
+// decode, UI, network and GC.
+template <typename F>
+void parallelRows(int n, F&& fn) {
+  unsigned int hw = std::thread::hardware_concurrency();
+  int threads = static_cast<int>(std::max(1u, std::min(hw, 4u)));
+  if (n <= threads * 2) threads = 1;  // not worth the thread overhead
+  if (threads <= 1) {
+    fn(0, n);
+    return;
+  }
+  std::vector<std::thread> pool;
+  const int chunk = (n + threads - 1) / threads;
+  for (int t = 0; t < threads; ++t) {
+    const int s = t * chunk;
+    const int e = std::min(n, s + chunk);
+    if (s >= e) break;
+    pool.emplace_back(fn, s, e);
+  }
+  for (auto& th : pool) th.join();
+}
+
 /**
  * Straight-alpha aware separable resampler over RGBA_8888 pixels.
  *
- * Implemented as two separable 1D passes (horizontal then vertical) instead of
- * a direct 2D convolution: the kernel factorizes k(x,y)=k(x)*k(y), so a 2D
- * window collapses to 2*radius taps per output pixel — ~3x faster on CPU with
- * bit-identical results. [kernel] selects Lanczos3 / Catmull-Rom / Spline36.
+ * Two separable 1D passes (horizontal then vertical) instead of a direct 2D
+ * convolution: the kernel factorizes k(x,y)=k(x)*k(y), so a 2D window collapses
+ * to 2*radius taps per output pixel — ~3x faster on CPU with bit-identical
+ * results.
+ *
+ * Optimizations vs. the original:
+ *   - Kernel weights come from a precomputed LUT (no sin() in the hot loop).
+ *   - Both passes are partitioned across Y blocks and run on a bounded thread
+ *     pool (see parallelRows). Pass 1 fully completes (join) before pass 2
+ *     starts, so the temporary buffer is safe to read.
  */
 void resizeGeneric(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw,
                    int dh, KernelFn kernel, int radius) {
+  KernelLUT lut(kernel, radius);
+
   // Pass 1: horizontal scale into a temporary buffer (dw x sh).
   std::vector<unsigned char> tmp(static_cast<size_t>(dw) * sh * 4);
   {
     const float sx = sw / static_cast<float>(dw);
-    for (int y = 0; y < sh; ++y) {
-      const unsigned char *srow = src + static_cast<size_t>(y) * sw * 4;
-      unsigned char *trow = tmp.data() + static_cast<size_t>(y) * dw * 4;
-      for (int x = 0; x < dw; ++x) {
-        const float cx = (x + 0.5f) * sx - 0.5f;
-        const int x0 = static_cast<int>(std::floor(cx - radius));
-        const int x1 = static_cast<int>(std::ceil(cx + radius));
-        float r = 0, g = 0, b = 0, alpha = 0;
-        for (int i = x0; i <= x1; ++i) {
-          const int sxx = std::max(0, std::min(sw - 1, i));
-          const float w = kernel(cx - i);
-          const unsigned char *p = srow + static_cast<size_t>(sxx) * 4;
-          const float pa = p[3] / 255.0f;
-          r += p[0] * pa * w;
-          g += p[1] * pa * w;
-          b += p[2] * pa * w;
-          alpha += pa * w;
-        }
-        unsigned char *t = trow + static_cast<size_t>(x) * 4;
-        const float alphaSum = std::max(0.0f, alpha);
-        if (alphaSum > 0.0001f) {
-          const float inv = 1.0f / alphaSum;
-          t[0] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, r * inv)));
-          t[1] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, g * inv)));
-          t[2] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, b * inv)));
-          t[3] = static_cast<unsigned char>(std::min(255.0f, alphaSum * 255.0f));
-        } else {
-          t[0] = t[1] = t[2] = t[3] = 0;
+    parallelRows(sh, [&](int y0, int y1) {
+      for (int y = y0; y < y1; ++y) {
+        const unsigned char *srow = src + static_cast<size_t>(y) * sw * 4;
+        unsigned char *trow = tmp.data() + static_cast<size_t>(y) * dw * 4;
+        for (int x = 0; x < dw; ++x) {
+          const float cx = (x + 0.5f) * sx - 0.5f;
+          const int x0 = static_cast<int>(std::floor(cx - radius));
+          const int x1 = static_cast<int>(std::ceil(cx + radius));
+          float r = 0, g = 0, b = 0, alpha = 0;
+          for (int i = x0; i <= x1; ++i) {
+            const int sxx = std::max(0, std::min(sw - 1, i));
+            const float w = lut.at(cx - i);
+            const unsigned char *p = srow + static_cast<size_t>(sxx) * 4;
+            const float pa = p[3] / 255.0f;
+            r += p[0] * pa * w;
+            g += p[1] * pa * w;
+            b += p[2] * pa * w;
+            alpha += pa * w;
+          }
+          unsigned char *t = trow + static_cast<size_t>(x) * 4;
+          const float alphaSum = std::max(0.0f, alpha);
+          if (alphaSum > 0.0001f) {
+            const float inv = 1.0f / alphaSum;
+            t[0] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, r * inv)));
+            t[1] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, g * inv)));
+            t[2] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, b * inv)));
+            t[3] = static_cast<unsigned char>(std::min(255.0f, alphaSum * 255.0f));
+          } else {
+            t[0] = t[1] = t[2] = t[3] = 0;
+          }
         }
       }
-    }
+    });
   }
 
   // Pass 2: vertical scale (tmp dw x sh -> dst dw x dh).
   {
     const float sy = sh / static_cast<float>(dh);
-    for (int y = 0; y < dh; ++y) {
-      const float cy = (y + 0.5f) * sy - 0.5f;
-      const int y0 = static_cast<int>(std::floor(cy - radius));
-      const int y1 = static_cast<int>(std::ceil(cy + radius));
-      unsigned char *drow = dst + static_cast<size_t>(y) * dw * 4;
-      for (int x = 0; x < dw; ++x) {
-        float r = 0, g = 0, b = 0, alpha = 0;
-        const unsigned char *trow0 = tmp.data() + static_cast<size_t>(x) * 4;
-        for (int j = y0; j <= y1; ++j) {
-          const int syy = std::max(0, std::min(sh - 1, j));
-          const float w = kernel(cy - j);
-          const unsigned char *t = trow0 + static_cast<size_t>(syy) * dw * 4;
-          const float pa = t[3] / 255.0f;
-          r += t[0] * pa * w;
-          g += t[1] * pa * w;
-          b += t[2] * pa * w;
-          alpha += pa * w;
-        }
-        unsigned char *d = drow + static_cast<size_t>(x) * 4;
-        const float alphaSum = std::max(0.0f, alpha);
-        if (alphaSum > 0.0001f) {
-          const float inv = 1.0f / alphaSum;
-          d[0] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, r * inv)));
-          d[1] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, g * inv)));
-          d[2] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, b * inv)));
-          d[3] = static_cast<unsigned char>(std::min(255.0f, alphaSum * 255.0f));
-        } else {
-          d[0] = d[1] = d[2] = d[3] = 0;
+    parallelRows(dh, [&](int y0, int y1) {
+      for (int y = y0; y < y1; ++y) {
+        const float cy = (y + 0.5f) * sy - 0.5f;
+        const int y0b = static_cast<int>(std::floor(cy - radius));
+        const int y1b = static_cast<int>(std::ceil(cy + radius));
+        unsigned char *drow = dst + static_cast<size_t>(y) * dw * 4;
+        for (int x = 0; x < dw; ++x) {
+          float r = 0, g = 0, b = 0, alpha = 0;
+          const unsigned char *trow0 = tmp.data() + static_cast<size_t>(x) * 4;
+          for (int j = y0b; j <= y1b; ++j) {
+            const int syy = std::max(0, std::min(sh - 1, j));
+            const float w = lut.at(cy - j);
+            const unsigned char *t = trow0 + static_cast<size_t>(syy) * dw * 4;
+            const float pa = t[3] / 255.0f;
+            r += t[0] * pa * w;
+            g += t[1] * pa * w;
+            b += t[2] * pa * w;
+            alpha += pa * w;
+          }
+          unsigned char *d = drow + static_cast<size_t>(x) * 4;
+          const float alphaSum = std::max(0.0f, alpha);
+          if (alphaSum > 0.0001f) {
+            const float inv = 1.0f / alphaSum;
+            d[0] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, r * inv)));
+            d[1] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, g * inv)));
+            d[2] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, b * inv)));
+            d[3] = static_cast<unsigned char>(std::min(255.0f, alphaSum * 255.0f));
+          } else {
+            d[0] = d[1] = d[2] = d[3] = 0;
+          }
         }
       }
-    }
+    });
   }
 }
 
@@ -230,8 +297,8 @@ static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jin
     if (nonZeroRgb == 0 || nonZeroAlpha == 0) {
       LOGE("Resample output is blank (rgb=%zu alpha=%zu), returning original bitmap",
            nonZeroRgb, nonZeroAlpha);
-      jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
-      jmethodID recycleMethod = env->GetMethodID(bitmapClass, "recycle", "()V");
+      jclass bitmapClass2 = env->FindClass("android/graphics/Bitmap");
+      jmethodID recycleMethod = env->GetMethodID(bitmapClass2, "recycle", "()V");
       env->CallVoidMethod(outBitmap, recycleMethod);
       AndroidBitmap_unlockPixels(env, bitmap);
       AndroidBitmap_unlockPixels(env, outBitmap);

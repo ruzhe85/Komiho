@@ -61,14 +61,32 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug -Pdisable-code-shrink --no-daemon --stacktrace
 
-      # Upload to a fixed-tag Release instead of Actions artifacts — the
-      # artifact storage quota is exhausted, Release assets have no such limit.
-      - name: Upload APKs to Release (ci-apk)
+      # Multi-version CI: each push gets a uniquely-tagged Release (history,
+      # never overwritten) plus an always-fresh "ci-apk" pointer for the latest
+      # build, so the documented download URLs stay stable.
+      - name: Upload APKs to per-build Release (history)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TAG="ci-${SHORT_SHA}"
+          TITLE="Komiho V2 ${SHORT_SHA} (#${{ github.run_number }})"
+          NOTES="Auto build $(date -u +%Y-%m-%dT%H:%M:%SZ) commit ${{ github.sha }}"
+          gh release create "$TAG" app/build/outputs/apk/debug/*.apk \
+            --repo "${{ github.repository }}" \
+            --title "$TITLE" \
+            --notes "$NOTES" \
+            || gh release upload "$TAG" app/build/outputs/apk/debug/*.apk \
+                 --repo "${{ github.repository }}" --clobber
+
+      - name: Update latest pointer (ci-apk)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create ci-apk app/build/outputs/apk/debug/*.apk \
             --repo "${{ github.repository }}" \
-            --title "Komiho V2 CI APK" \
-            --notes "Auto build $(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null \
-            || gh release upload ci-apk app/build/outputs/apk/debug/*.apk --repo "${{ github.repository }}" --clobber
+            --title "Komiho V2 CI APK (latest)" \
+            --notes "Latest auto build $(date -u +%Y-%m-%dT%H:%M:%SZ) commit ${{ github.sha }}" \
+            2>/dev/null \
+            || gh release upload ci-apk app/build/outputs/apk/debug/*.apk \
+                 --repo "${{ github.repository }}" --clobber
