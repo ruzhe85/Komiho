@@ -209,12 +209,15 @@ fun BookShelfCard(
     book: BookDto,
     modifier: Modifier = Modifier,
     titleInside: Boolean = false,
+    selected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
 ) {
+    val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = Color.Transparent,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
+        border = androidx.compose.foundation.BorderStroke(2.dp, borderColor),
         modifier = modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),

@@ -248,6 +248,27 @@ class KomgaApiClient(
         return page.content
     }
 
+    /**
+     * Creates a new readlist — POST /api/v1/readlists {"name": "..."}.
+     * Returns the created readlist (Komga replies with the DTO).
+     */
+    suspend fun createReadlist(name: String): ReadingListDto {
+        return withIOContext {
+            val body = buildJsonObject { put("name", JsonPrimitive(name)) }
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/readlists").toHttpUrl())
+                .apply { authHeaders() }
+                .post(json.encodeToString(JsonObject.serializer(), body).toRequestBody(jsonMedia))
+                .build()
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) throw KomgaException("创建阅读列表失败（${resp.code}）")
+                val b = resp.body?.string().orEmpty()
+                if (b.isBlank()) throw KomgaException("创建响应为空")
+                json.decodeFromString(ReadingListDto.serializer(), b)
+            }
+        }
+    }
+
     /** Adds books to a readlist — POST /api/v1/readlists/{id}/books {"bookIds": [...]} */
     suspend fun addBooksToReadlist(readlistId: String, bookIds: List<String>) {
         postJson(
