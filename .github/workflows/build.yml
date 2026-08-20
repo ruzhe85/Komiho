@@ -79,6 +79,7 @@ jobs:
             --title "$TITLE" \
             --notes "$NOTES" \
             --latest=false \
+            --prerelease \
             || gh release upload "$TAG" app/build/outputs/apk/debug/*.apk \
                  --repo "${{ github.repository }}" --clobber
 
@@ -96,3 +97,6 @@ jobs:
             2>/dev/null \
             || gh release upload ci-apk app/build/outputs/apk/debug/*.apk \
                  --repo "${{ github.repository }}" --clobber
+          # ci-apk stays a normal "Latest" release (GitHub forbids marking a
+          # prerelease as Latest). The per-build ci-* releases above carry the
+          # Pre-release badge so CI history is clearly distinct from "formal".
