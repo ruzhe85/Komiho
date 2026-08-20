@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
@@ -76,12 +77,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.KomgaApiClient
@@ -91,6 +95,9 @@ import app.mihonsy.komga.data.model.CollectionDto
 import app.mihonsy.komga.data.model.LibraryDto
 import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
+import cafe.adriel.voyager.navigator.Navigator
+import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
+import eu.kanade.presentation.util.LocalBackPress
 import kotlinx.coroutines.launch
 
 /**
@@ -1514,6 +1521,57 @@ private fun SettingsTab(context: android.content.Context) {
                     activity?.recreate()
                 },
             )
+        }
+
+        // ---- 阅读设置：复用 MihonSY 原生阅读器偏好（SettingsReaderScreen）----
+        Spacer(Modifier.height(24.dp))
+        Text("阅读", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        var showReaderSettings by remember { mutableStateOf(false) }
+        Surface(
+            onClick = { showReaderSettings = true },
+            color = Color.Transparent,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "阅读设置",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = "翻页/方向/缩放/增强/导航…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Filled.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (showReaderSettings) {
+            Dialog(
+                onDismissRequest = { showReaderSettings = false },
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false,
+                ),
+            ) {
+                CompositionLocalProvider(LocalBackPress provides { showReaderSettings = false }) {
+                    Surface(Modifier.fillMaxSize()) {
+                        Navigator(SettingsReaderScreen)
+                    }
+                }
+            }
         }
 
         Spacer(Modifier.height(20.dp))
