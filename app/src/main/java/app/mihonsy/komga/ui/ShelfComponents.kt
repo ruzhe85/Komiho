@@ -1,5 +1,6 @@
 package app.mihonsy.komga.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -106,7 +107,17 @@ fun SeriesShelf(
     }
 }
 
-/** Unified book shelf (grid or list rows). columns: 0 = auto-adaptive. */
+/**
+ * Unified book shelf with Mihon-style multi-select.
+ *
+ * - Short tap: open the book (or toggle selection if already in selection mode).
+ * - Long press: enter selection mode (or toggle the pressed book).
+ * - Selection toolbar (mihon library style) appears above the grid:
+ *   "已选 N 项" + 标记已读 / 标记未读 / 加入阅读列表 / 取消.
+ *
+ * The "add to readlist" toolbar button opens a Mihon-style dialog that lets
+ * the user either pick an existing readlist or type a new name to create one.
+ */
 @Composable
 fun BookShelf(
     client: KomgaApiClient,
@@ -118,136 +129,134 @@ fun BookShelf(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var menuBook by remember { mutableStateOf<BookDto?>(null) }
-    var readlistPickerBook by remember { mutableStateOf<BookDto?>(null) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showReadlistPicker by remember { mutableStateOf(false) }
 
-    // Long-press action menu: mark read / mark unread / add to readlist / download.
-    menuBook?.let { book ->
-        BookActionDialog(
-            book = book,
-            onDismiss = { menuBook = null },
-            onMarkRead = {
-                menuBook = null
-                scope.launch {
-                    runCatching { client.updateReadProgress(book.id, book.media.pagesCount.coerceAtLeast(1), true) }
-                        .onSuccess {
-                            android.widget.Toast.makeText(context, "已标记为已读", android.widget.Toast.LENGTH_SHORT).show()
-                            onDataChanged()
-                        }
-                        .onFailure { android.widget.Toast.makeText(context, "操作失败：${it.message}", android.widget.Toast.LENGTH_LONG).show() }
+    val inSelection = selectedIds.isNotEmpty()
+    val selectedBooks = remember(selectedIds, books) { books.filter { it.id in selectedIds } }
+
+    val toggleSelect: (String) -> Unit = { id ->
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    }
+    val exitSelection: () -> Unit = { selectedIds = emptySet() }
+
+    fun performBatchUpdate(completed: Boolean) {
+        val snapshot = selectedBooks
+        scope.launch {
+            runCatching {
+                snapshot.forEach { b ->
+                    if (completed) {
+                        client.updateReadProgress(b.id, b.media.pagesCount.coerceAtLeast(1), true)
+                    } else {
+                        client.deleteReadProgress(b.id)
+                    }
                 }
-            },
-            onMarkUnread = {
-                menuBook = null
-                scope.launch {
-                    runCatching { client.deleteReadProgress(book.id) }
-                        .onSuccess {
-                            android.widget.Toast.makeText(context, "已标记为未读", android.widget.Toast.LENGTH_SHORT).show()
-                            onDataChanged()
-                        }
-                        .onFailure { android.widget.Toast.makeText(context, "操作失败：${it.message}", android.widget.Toast.LENGTH_LONG).show() }
-                }
-            },
-            onAddToReadlist = {
-                menuBook = null
-                readlistPickerBook = book
-            },
-            onDownload = {
-                menuBook = null
-                android.widget.Toast.makeText(context, "下载功能开发中（M4）", android.widget.Toast.LENGTH_SHORT).show()
-            },
-        )
+            }.onSuccess {
+                android.widget.Toast.makeText(context, "已批量标记${snapshot.size}本", android.widget.Toast.LENGTH_SHORT).show()
+                exitSelection()
+                onDataChanged()
+            }.onFailure {
+                android.widget.Toast.makeText(context, "操作失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
-    // Readlist picker shown after "加入阅读列表".
-    readlistPickerBook?.let { book ->
+    if (showReadlistPicker) {
         ReadlistPickerDialog(
             client = client,
-            book = book,
-            onDismiss = { readlistPickerBook = null },
+            bookIds = selectedBooks.map { it.id },
+            onDismiss = { showReadlistPicker = false },
             onAdded = {
-                readlistPickerBook = null
-                android.widget.Toast.makeText(context, "已加入阅读列表", android.widget.Toast.LENGTH_SHORT).show()
+                showReadlistPicker = false
+                exitSelection()
                 onDataChanged()
             },
         )
     }
 
-    val onLongPress: (BookDto) -> Unit = { menuBook = it }
-    if (mode == LibraryDisplayMode.List) {
-        LazyColumn(
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            items(books) { b ->
-                BookShelfListRow(client, b, onClick = { onBookClick(b.id) }, onLongClick = { onLongPress(b) })
+    Column {
+        if (inSelection) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "已选 ${selectedIds.size} 项",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { performBatchUpdate(true) }) { Text("标记已读") }
+                    TextButton(onClick = { performBatchUpdate(false) }) { Text("标记未读") }
+                    TextButton(onClick = { showReadlistPicker = true }) { Text("加入阅读列表") }
+                    TextButton(onClick = exitSelection) { Text("取消") }
+                }
             }
         }
-    } else {
-        val minSize = if (mode == LibraryDisplayMode.ComfortableGrid) 168.dp else 108.dp
-        val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
-        LazyVerticalGrid(
-            columns = cells,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            gridItems(books) { b ->
-                BookShelfCard(
-                    client = client,
-                    book = b,
-                    // Compact grid overlays the title on the cover; comfortable
-                    // grid keeps the title below the cover.
-                    titleInside = mode == LibraryDisplayMode.CompactGrid,
-                    onClick = { onBookClick(b.id) },
-                    onLongClick = { onLongPress(b) },
-                )
+
+        val itemOnClick: (BookDto) -> Unit = { b ->
+            if (inSelection) toggleSelect(b.id) else onBookClick(b.id)
+        }
+        val itemOnLongClick: (BookDto) -> Unit = { b -> toggleSelect(b.id) }
+
+        if (mode == LibraryDisplayMode.List) {
+            LazyColumn(
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(books) { b ->
+                    BookShelfListRow(
+                        client = client,
+                        book = b,
+                        selected = b.id in selectedIds,
+                        onClick = { itemOnClick(b) },
+                        onLongClick = { itemOnLongClick(b) },
+                    )
+                }
+            }
+        } else {
+            val minSize = if (mode == LibraryDisplayMode.ComfortableGrid) 168.dp else 108.dp
+            val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
+            LazyVerticalGrid(
+                columns = cells,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                gridItems(books) { b ->
+                    BookShelfCard(
+                        client = client,
+                        book = b,
+                        // Compact grid overlays the title on the cover; comfortable
+                        // grid keeps the title below the cover.
+                        titleInside = mode == LibraryDisplayMode.CompactGrid,
+                        selected = b.id in selectedIds,
+                        onClick = { itemOnClick(b) },
+                        onLongClick = { itemOnLongClick(b) },
+                    )
+                }
             }
         }
     }
 }
 
 /**
- * Long-press action dialog for a book: 标记已读 / 标记未读 / 加入阅读列表 / 下载.
+ * Mihon-style "add to readlist" dialog. The top row is a search-or-create
+ * field + "创建" button. Typing a non-existing name and tapping 创建 both
+ * creates the readlist and adds the selected books. Typing a query filters
+ * the list of existing readlists below; tapping one adds the books.
  */
-@Composable
-private fun BookActionDialog(
-    book: BookDto,
-    onDismiss: () -> Unit,
-    onMarkRead: () -> Unit,
-    onMarkUnread: () -> Unit,
-    onAddToReadlist: () -> Unit,
-    onDownload: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(book.metadata.title ?: book.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        text = {
-            Column {
-                listOf(
-                    "标记已读" to onMarkRead,
-                    "标记未读" to onMarkUnread,
-                    "加入阅读列表" to onAddToReadlist,
-                    "下载" to onDownload,
-                ).forEach { (label, action) ->
-                    TextButton(
-                        onClick = action,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(label, modifier = Modifier.fillMaxWidth()) }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
-}
-
-/** Readlist picker — loads the user's readlists and adds the book to the chosen one. */
 @Composable
 private fun ReadlistPickerDialog(
     client: KomgaApiClient,
-    book: BookDto,
+    bookIds: List<String>,
     onDismiss: () -> Unit,
     onAdded: () -> Unit,
 ) {
@@ -256,6 +265,7 @@ private fun ReadlistPickerDialog(
     var readlists by remember { mutableStateOf<List<ReadingListDto>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         runCatching { client.getReadlists() }
@@ -264,33 +274,84 @@ private fun ReadlistPickerDialog(
         loading = false
     }
 
+    val filtered = remember(readlists, query) {
+        if (query.isBlank()) readlists
+        else readlists.filter { it.name.contains(query, ignoreCase = true) }
+    }
+
+    fun addToReadlist(readlistId: String) {
+        scope.launch {
+            runCatching { client.addBooksToReadlist(readlistId, bookIds) }
+                .onSuccess {
+                    android.widget.Toast.makeText(context, "已加入阅读列表", android.widget.Toast.LENGTH_SHORT).show()
+                    onAdded()
+                }
+                .onFailure {
+                    android.widget.Toast.makeText(context, "添加失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
+    fun createAndAdd() {
+        val name = query.trim()
+        if (name.isBlank()) return
+        scope.launch {
+            runCatching { client.createReadlist(name) }
+                .onSuccess { created ->
+                    runCatching { client.addBooksToReadlist(created.id, bookIds) }
+                        .onSuccess {
+                            android.widget.Toast.makeText(context, "已创建并加入", android.widget.Toast.LENGTH_SHORT).show()
+                            onAdded()
+                        }
+                        .onFailure {
+                            android.widget.Toast.makeText(context, "创建成功但添加失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                }
+                .onFailure {
+                    android.widget.Toast.makeText(context, "创建失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("加入阅读列表") },
+        title = { Text("添加到阅读列表") },
         text = {
-            when {
-                loading -> Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text("搜索或创建阅读列表") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = ::createAndAdd,
+                        enabled = query.isNotBlank(),
+                    ) { Text("创建") }
                 }
-                error != null -> Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
-                readlists.isEmpty() -> Text("暂无阅读列表")
-                else -> Column {
-                    readlists.forEach { rl ->
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    runCatching { client.addBooksToReadlist(rl.id, listOf(book.id)) }
-                                        .onSuccess { onAdded() }
-                                        .onFailure {
-                                            android.widget.Toast.makeText(
-                                                context, "添加失败：${it.message}", android.widget.Toast.LENGTH_LONG,
-                                            ).show()
-                                        }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(rl.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth()) }
-                        HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                when {
+                    loading -> Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    error != null -> Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
+                    filtered.isEmpty() -> Text(
+                        if (query.isBlank()) "暂无阅读列表" else "无匹配，输入名字点「创建」",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    else -> Column {
+                        filtered.forEach { rl ->
+                            TextButton(
+                                onClick = { addToReadlist(rl.id) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(rl.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+                            }
+                            HorizontalDivider()
+                        }
                     }
                 }
             }
@@ -305,12 +366,15 @@ private fun ReadlistPickerDialog(
 fun BookShelfListRow(
     client: KomgaApiClient,
     book: BookDto,
+    selected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
 ) {
+    val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = Color.Transparent,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
+        border = androidx.compose.foundation.BorderStroke(2.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
