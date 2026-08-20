@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <thread>
 #include <vector>
 
@@ -22,6 +23,7 @@ constexpr int LANCZOS_A = 3;
 // correct at image edges (unlike a per-output-index periodic table, which breaks
 // when clamping hits the boundary).
 constexpr int KERNEL_LUT_N = 2048;
+constexpr int KQ = 14;  // kernel weight fixed-point bits (Q14)
 
 inline float lanczosKernel(float x) {
   if (x == 0.0f) return 1.0f;
@@ -51,30 +53,51 @@ inline float spline36Kernel(float x) {
 
 using KernelFn = float (*)(float);
 
+// Fixed-point kernel LUT. The kernel is precomputed over its bounded domain
+// [-radius, radius] and stored as int16 Q14. The hot loop then runs on integers
+// only (no sin, no float mul/add) — see resizeGeneric.
 struct KernelLUT {
-  std::vector<float> tbl;
+  std::vector<int16_t> tbl;
   float invStep;  // (N-1) / (2*radius)
   float radius;
 
   KernelLUT(KernelFn fn, int radius) : radius(static_cast<float>(radius)) {
     tbl.resize(KERNEL_LUT_N);
     invStep = static_cast<float>(KERNEL_LUT_N - 1) / (2.0f * radius);
+    const int scale = 1 << KQ;
     for (int i = 0; i < KERNEL_LUT_N; ++i) {
       const float t = (static_cast<float>(i) / (KERNEL_LUT_N - 1)) * 2.0f * radius - radius;
-      tbl[i] = fn(t);
+      int v = static_cast<int>(fn(t) * scale);
+      if (v > 32767) v = 32767;
+      if (v < -32768) v = -32768;
+      tbl[i] = static_cast<int16_t>(v);
     }
   }
 
-  inline float at(float x) const {
+  inline int16_t at(float x) const {
     if (x <= -radius) return tbl[0];
     if (x >= radius) return tbl[KERNEL_LUT_N - 1];
     const float f = (x + radius) * invStep;
     const int i0 = static_cast<int>(f);
     if (i0 >= KERNEL_LUT_N - 1) return tbl[KERNEL_LUT_N - 1];
     const float frac = f - static_cast<float>(i0);
-    return tbl[i0] * (1.0f - frac) + tbl[i0 + 1] * frac;
+    const int a = tbl[i0];
+    const int b = tbl[i0 + 1];
+    return static_cast<int16_t>(a + static_cast<int>((b - a) * frac));
   }
 };
+
+// Alpha lookup: a/255 stored as int16 Q8 (a=255 -> 256). Replaces the hot-loop
+// float division p[3]/255.0f — the single most expensive scalar op before this
+// change (tens of millions of divisions per page).
+inline int16_t alphaQ8(int a) {
+  static const int16_t* t = []() {
+    static int16_t buf[256];
+    for (int i = 0; i < 256; ++i) buf[i] = static_cast<int16_t>((i * 256 + 127) / 255);
+    return buf;
+  }();
+  return t[a];
+}
 
 // ---- Parallel-for over row range ---------------------------------------------------
 // One nativeResample task is internally multithreaded (NOT N concurrent JNI calls
@@ -131,27 +154,36 @@ void resizeGeneric(const unsigned char *src, int sw, int sh, unsigned char *dst,
           const float cx = (x + 0.5f) * sx - 0.5f;
           const int x0 = static_cast<int>(std::floor(cx - radius));
           const int x1 = static_cast<int>(std::ceil(cx + radius));
-          float r = 0, g = 0, b = 0, alpha = 0;
+          int32_t ar = 0, ag = 0, ab = 0, aa = 0;
           for (int i = x0; i <= x1; ++i) {
             const int sxx = std::max(0, std::min(sw - 1, i));
-            const float w = lut.at(cx - i);
             const unsigned char *p = srow + static_cast<size_t>(sxx) * 4;
-            const float pa = p[3] / 255.0f;
-            r += p[0] * pa * w;
-            g += p[1] * pa * w;
-            b += p[2] * pa * w;
-            alpha += pa * w;
+            const int16_t wQ = lut.at(cx - i);
+            // fp = (a/255) * w, in Q14. Removes the per-tap float division.
+            const int32_t fp = (static_cast<int32_t>(alphaQ8(p[3])) * static_cast<int32_t>(wQ)) >> 8;
+            ar += static_cast<int32_t>(p[0]) * fp;
+            ag += static_cast<int32_t>(p[1]) * fp;
+            ab += static_cast<int32_t>(p[2]) * fp;
+            aa += fp;
           }
           unsigned char *t = trow + static_cast<size_t>(x) * 4;
-          const float alphaSum = std::max(0.0f, alpha);
-          if (alphaSum > 0.0001f) {
-            const float inv = 1.0f / alphaSum;
-            t[0] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, r * inv)));
-            t[1] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, g * inv)));
-            t[2] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, b * inv)));
-            t[3] = static_cast<unsigned char>(std::min(255.0f, alphaSum * 255.0f));
-          } else {
+          if (aa <= 0) {
             t[0] = t[1] = t[2] = t[3] = 0;
+          } else {
+            // Straight-alpha un-premultiply: ratio is denominator-independent.
+            const int32_t half = aa >> 1;
+            int r = (ar + half) / aa;
+            int g = (ag + half) / aa;
+            int b = (ab + half) / aa;
+            int a = ((aa * 255) + (1 << (KQ - 1))) >> KQ;
+            if (r < 0) r = 0; else if (r > 255) r = 255;
+            if (g < 0) g = 0; else if (g > 255) g = 255;
+            if (b < 0) b = 0; else if (b > 255) b = 255;
+            if (a < 0) a = 0; else if (a > 255) a = 255;
+            t[0] = static_cast<unsigned char>(r);
+            t[1] = static_cast<unsigned char>(g);
+            t[2] = static_cast<unsigned char>(b);
+            t[3] = static_cast<unsigned char>(a);
           }
         }
       }
@@ -168,28 +200,35 @@ void resizeGeneric(const unsigned char *src, int sw, int sh, unsigned char *dst,
         const int y1b = static_cast<int>(std::ceil(cy + radius));
         unsigned char *drow = dst + static_cast<size_t>(y) * dw * 4;
         for (int x = 0; x < dw; ++x) {
-          float r = 0, g = 0, b = 0, alpha = 0;
+          int32_t ar = 0, ag = 0, ab = 0, aa = 0;
           const unsigned char *trow0 = tmp.data() + static_cast<size_t>(x) * 4;
           for (int j = y0b; j <= y1b; ++j) {
             const int syy = std::max(0, std::min(sh - 1, j));
-            const float w = lut.at(cy - j);
             const unsigned char *t = trow0 + static_cast<size_t>(syy) * dw * 4;
-            const float pa = t[3] / 255.0f;
-            r += t[0] * pa * w;
-            g += t[1] * pa * w;
-            b += t[2] * pa * w;
-            alpha += pa * w;
+            const int16_t wQ = lut.at(cy - j);
+            const int32_t fp = (static_cast<int32_t>(alphaQ8(t[3])) * static_cast<int32_t>(wQ)) >> 8;
+            ar += static_cast<int32_t>(t[0]) * fp;
+            ag += static_cast<int32_t>(t[1]) * fp;
+            ab += static_cast<int32_t>(t[2]) * fp;
+            aa += fp;
           }
           unsigned char *d = drow + static_cast<size_t>(x) * 4;
-          const float alphaSum = std::max(0.0f, alpha);
-          if (alphaSum > 0.0001f) {
-            const float inv = 1.0f / alphaSum;
-            d[0] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, r * inv)));
-            d[1] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, g * inv)));
-            d[2] = static_cast<unsigned char>(std::min(255.0f, std::max(0.0f, b * inv)));
-            d[3] = static_cast<unsigned char>(std::min(255.0f, alphaSum * 255.0f));
-          } else {
+          if (aa <= 0) {
             d[0] = d[1] = d[2] = d[3] = 0;
+          } else {
+            const int32_t half = aa >> 1;
+            int r = (ar + half) / aa;
+            int g = (ag + half) / aa;
+            int b = (ab + half) / aa;
+            int a = ((aa * 255) + (1 << (KQ - 1))) >> KQ;
+            if (r < 0) r = 0; else if (r > 255) r = 255;
+            if (g < 0) g = 0; else if (g > 255) g = 255;
+            if (b < 0) b = 0; else if (b > 255) b = 255;
+            if (a < 0) a = 0; else if (a > 255) a = 255;
+            d[0] = static_cast<unsigned char>(r);
+            d[1] = static_cast<unsigned char>(g);
+            d[2] = static_cast<unsigned char>(b);
+            d[3] = static_cast<unsigned char>(a);
           }
         }
       }
