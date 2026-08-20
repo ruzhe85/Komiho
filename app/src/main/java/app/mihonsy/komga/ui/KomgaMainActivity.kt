@@ -130,7 +130,7 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
 }
 
 @Composable
-private fun KomgaMainScreen(refreshSignal: StateFlow<Int>) {
+private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
