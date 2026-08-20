@@ -103,7 +103,9 @@ import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.presentation.util.LocalBackPress
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.annotation.StringRes
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
 
@@ -136,11 +138,15 @@ class KomgaMainActivity : KomgaBaseActivity() {
     }
 }
 
-private enum class MainTab(val label: String, val icon: ImageVector) {
-    Home("主页", Icons.Filled.Home),
-    Library("库", Icons.Filled.Book),
-    Lists("列表", Icons.AutoMirrored.Filled.List),
-    Settings("设置", Icons.Filled.Settings),
+private enum class MainTab(@StringRes val labelRes: Int, val icon: ImageVector) {
+    Home(R.string.tab_home, Icons.Filled.Home),
+    Library(R.string.tab_library, Icons.Filled.Book),
+    Lists(R.string.tab_lists, Icons.AutoMirrored.Filled.List),
+    Settings(R.string.tab_settings, Icons.Filled.Settings),
+    ;
+
+    @Composable
+    fun labelText(): String = composeStringResource(labelRes)
 }
 
 @Composable
@@ -201,7 +207,7 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(MainTab.entries[currentTab].label) },
+                title = { Text(MainTab.entries[currentTab].labelText()) },
                 actions = {
                     // Shelf toggle on Library/Lists tabs only — the Home tab
                     // has no grid modes (its sections are configured in
@@ -214,7 +220,7 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                         androidx.compose.material3.IconButton(onClick = { searchOpen = !searchOpen }) {
                             Icon(
                                 imageVector = if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
-                                contentDescription = if (searchOpen) "关闭搜索" else "搜索",
+                                contentDescription = if (searchOpen) composeStringResource(R.string.cd_close_search) else composeStringResource(R.string.cd_search),
                             )
                         }
                     }
@@ -238,7 +244,7 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                                 if (currentTab == index) refreshSignal.update { it + 1 } else currentTab = index
                             }
                         },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
+                        icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
                         label = null,
                     )
                 }
@@ -316,12 +322,12 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
     if (libraryPickerOpen) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { libraryPickerOpen = false },
-            title = { Text("选择库") },
+            title = { Text(composeStringResource(R.string.select_library)) },
             text = {
                 Column {
                     if (libraries.isEmpty()) {
                         Text(
-                            text = "暂无库",
+                            text = composeStringResource(R.string.no_libraries),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -355,7 +361,7 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                 }
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { libraryPickerOpen = false }) { Text("取消") }
+                androidx.compose.material3.TextButton(onClick = { libraryPickerOpen = false }) { Text(composeStringResource(R.string.cancel)) }
             },
         )
     }
@@ -411,7 +417,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
             readBooks = it.readBooks
             error = null
         }.onFailure {
-            error = "加载失败：${it.message}"
+            error = context.getString(R.string.load_failed, it.message)
         }
         loading = false
     }
@@ -428,7 +434,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(error ?: "", color = MaterialTheme.colorScheme.error)
                         Spacer(Modifier.height(12.dp))
-                        TextButton(onClick = { scope.launch { loadAll() } }) { Text("重试") }
+                        TextButton(onClick = { scope.launch { loadAll() } }) { Text(composeStringResource(R.string.retry)) }
                     }
                 }
                 inProgress.isEmpty() && recentSeries.isEmpty() && addedSeries.isEmpty() &&
@@ -436,7 +442,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                     Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("暂无系列")
+                    Text(composeStringResource(R.string.no_series))
                 }
                 else -> LazyColumn(
                     contentPadding = PaddingValues(vertical = 8.dp),
@@ -453,7 +459,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                             HomeSection.ContinueReading -> {
                                 if (data.inProgress.isNotEmpty()) {
                                     item {
-                                        HomeSectionHeader(section.label, onClick = {
+                                        HomeSectionHeader(section.labelText(), onClick = {
                                             context.startActivity(
                                                 Intent(context, KomgaSectionListActivity::class.java)
                                                     .putExtra("section", section.name),
@@ -467,7 +473,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                                                 runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                                     .onFailure {
                                                         android.widget.Toast.makeText(
-                                                            context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                                            context, context.getString(R.string.open_reader_failed, it.message), android.widget.Toast.LENGTH_LONG,
                                                         ).show()
                                                     }
                                             }
@@ -478,7 +484,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                             HomeSection.RecentlyAddedBooks -> {
                                 if (data.addedBooks.isNotEmpty()) {
                                     item {
-                                        HomeSectionHeader(section.label, onClick = {
+                                        HomeSectionHeader(section.labelText(), onClick = {
                                             context.startActivity(
                                                 Intent(context, KomgaSectionListActivity::class.java)
                                                     .putExtra("section", section.name),
@@ -491,7 +497,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                                                 runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                                     .onFailure {
                                                         android.widget.Toast.makeText(
-                                                            context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                                            context, context.getString(R.string.open_reader_failed, it.message), android.widget.Toast.LENGTH_LONG,
                                                         ).show()
                                                     }
                                             }
@@ -502,7 +508,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                             HomeSection.RecentlyAddedSeries -> {
                                 if (data.addedSeries.isNotEmpty()) {
                                     item {
-                                        HomeSectionHeader(section.label, onClick = {
+                                        HomeSectionHeader(section.labelText(), onClick = {
                                             context.startActivity(
                                                 Intent(context, KomgaSectionListActivity::class.java)
                                                     .putExtra("section", section.name),
@@ -517,7 +523,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                             HomeSection.RecentlyUpdatedSeries -> {
                                 if (data.recentSeries.isNotEmpty()) {
                                     item {
-                                        HomeSectionHeader(section.label, onClick = {
+                                        HomeSectionHeader(section.labelText(), onClick = {
                                             context.startActivity(
                                                 Intent(context, KomgaSectionListActivity::class.java)
                                                     .putExtra("section", section.name),
@@ -532,7 +538,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                             HomeSection.RecentlyReadBooks -> {
                                 if (data.readBooks.isNotEmpty()) {
                                     item {
-                                        HomeSectionHeader(section.label, onClick = {
+                                        HomeSectionHeader(section.labelText(), onClick = {
                                             context.startActivity(
                                                 Intent(context, KomgaSectionListActivity::class.java)
                                                     .putExtra("section", section.name),
@@ -545,7 +551,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                                                 runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                                     .onFailure {
                                                         android.widget.Toast.makeText(
-                                                            context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                                            context, context.getString(R.string.open_reader_failed, it.message), android.widget.Toast.LENGTH_LONG,
                                                         ).show()
                                                     }
                                             }
@@ -572,14 +578,18 @@ private data class HomeData(
  * Home tab sections. Also used by KomgaSectionListActivity ("全部" full lists).
  * The display type tells the list activity whether to show series or books.
  */
-enum class HomeSection(val label: String, val isSeries: Boolean) {
+enum class HomeSection(@StringRes val labelRes: Int, val isSeries: Boolean) {
     // Continue reading = Komga's /books/ondeck (book-level, same as the web UI),
     // NOT series?read_status=IN_PROGRESS — the two never matched each other.
-    ContinueReading("继续阅读", false),
-    RecentlyAddedBooks("最近添加书籍", false),
-    RecentlyAddedSeries("最近添加系列", true),
-    RecentlyUpdatedSeries("最近更新系列", true),
-    RecentlyReadBooks("最近阅读书籍", false),
+    ContinueReading(R.string.home_section_continue, false),
+    RecentlyAddedBooks(R.string.home_section_added_books, false),
+    RecentlyAddedSeries(R.string.home_section_added_series, true),
+    RecentlyUpdatedSeries(R.string.home_section_updated_series, true),
+    RecentlyReadBooks(R.string.home_section_read_books, false),
+    ;
+
+    @Composable
+    fun labelText(): String = composeStringResource(labelRes)
 }
 
 /** Horizontal scrollable row of book covers (used on the Home tab). */
@@ -702,7 +712,7 @@ private fun HomeSectionHeader(title: String, onClick: () -> Unit) {
     ) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         Text(
-            text = "全部 ›",
+            text = composeStringResource(R.string.section_all),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clickable(onClick = onClick),
@@ -802,7 +812,7 @@ private fun LibraryTab(
                 ).content
             }
                 .onSuccess { series = it; error = null }
-                .onFailure { error = "加载系列失败：${it.message}" }
+                .onFailure { error = context.getString(R.string.load_series_failed, it.message) }
             loading = false
         }
     }
@@ -837,7 +847,7 @@ private fun LibraryTab(
                 androidx.compose.material3.IconButton(onClick = { filterOpen = true }) {
                     Icon(
                         imageVector = Icons.Filled.FilterList,
-                        contentDescription = "筛选/排序",
+                        contentDescription = composeStringResource(R.string.cd_filter_sort),
                     )
                 }
                 androidx.compose.material3.DropdownMenu(
@@ -845,14 +855,14 @@ private fun LibraryTab(
                     onDismissRequest = { filterOpen = false },
                 ) {
                     Text(
-                        text = "阅读状态",
+                        text = composeStringResource(R.string.read_status_header),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     )
                     ReadFilter.entries.forEach { f ->
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(f.label) },
+                            text = { Text(f.labelText()) },
                             onClick = {
                                 readFilter = f
                             },
@@ -870,14 +880,14 @@ private fun LibraryTab(
                         modifier = Modifier.padding(vertical = 4.dp),
                     )
                     Text(
-                        text = "排序",
+                        text = composeStringResource(R.string.sort_header),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     )
                     LibrarySortMode.entries.forEach { m ->
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(m.label) },
+                            text = { Text(m.labelText()) },
                             onClick = {
                                 sortMode = m
                                 prefs.librarySort = m.prefValue
@@ -904,11 +914,11 @@ private fun LibraryTab(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(error ?: "", color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = { scope.launch { reload() } }) { Text("重试") }
+                    TextButton(onClick = { scope.launch { reload() } }) { Text(composeStringResource(R.string.retry)) }
                 }
             }
             series.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("该库暂无系列")
+                Text(composeStringResource(R.string.no_series_in_library))
             }
             else -> if (displayMode == LibraryDisplayMode.List) {
                 LazyColumn(
@@ -946,11 +956,14 @@ private fun LibraryTab(
 }
 
 /** Shelf display modes (mihon libraryDisplayMode analog). */
-private enum class LibrarySortMode(val label: String, val komgaSort: String?, val prefValue: String) {
-    Title("标题", "name,asc", "title,asc"),
-    LastModified("最近更新", "dateModified,desc", "lastModified,desc"),
-    LastRead("最近阅读", null, "lastRead,desc"),
-    DateAdded("添加日期", "createdDate,desc", "dateAdded,desc");
+private enum class LibrarySortMode(@StringRes val labelRes: Int, val komgaSort: String?, val prefValue: String) {
+    Title(R.string.sort_title, "name,asc", "title,asc"),
+    LastModified(R.string.sort_last_modified, "dateModified,desc", "lastModified,desc"),
+    LastRead(R.string.sort_last_read, null, "lastRead,desc"),
+    DateAdded(R.string.sort_date_added, "createdDate,desc", "dateAdded,desc");
+
+    @Composable
+    fun labelText(): String = composeStringResource(labelRes)
 
     companion object {
         fun fromPref(v: String): LibrarySortMode =
@@ -959,10 +972,13 @@ private enum class LibrarySortMode(val label: String, val komgaSort: String?, va
 }
 
 /** M3.20: library display modes, mirroring Mihon's LibraryDisplayMode. */
-enum class LibraryDisplayMode(val label: String, val prefValue: String) {
-    CompactGrid("紧凑网格", "COMPACT_GRID"),
-    ComfortableGrid("舒适网格", "COMFORTABLE_GRID"),
-    List("列表", "LIST");
+enum class LibraryDisplayMode(@StringRes val labelRes: Int, val prefValue: String) {
+    CompactGrid(R.string.display_compact_grid, "COMPACT_GRID"),
+    ComfortableGrid(R.string.display_comfortable_grid, "COMFORTABLE_GRID"),
+    List(R.string.display_list, "LIST");
+
+    @Composable
+    fun labelText(): String = composeStringResource(labelRes)
 
     companion object {
         fun fromPref(v: String): LibraryDisplayMode =
@@ -999,7 +1015,7 @@ fun LibrarySeriesListRow(client: KomgaApiClient, series: SeriesDto, onClick: () 
             Column(Modifier.weight(1f)) {
                 Text(series.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
                 Text(
-                    text = "${series.booksCount} 本 · ${series.booksReadCount} 已读 · ${series.booksUnreadCount} 未读",
+                    text = composeStringResource(R.string.series_books_summary, series.booksCount, series.booksReadCount, series.booksUnreadCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1085,6 +1101,7 @@ private fun ListsTab(client: KomgaApiClient, onReadlistClick: (String, String) -
 @Composable
 private fun ReadlistsContent(client: KomgaApiClient, onReadlistClick: (String, String) -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var readlists by remember { mutableStateOf<List<ReadingListDto>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -1092,7 +1109,7 @@ private fun ReadlistsContent(client: KomgaApiClient, onReadlistClick: (String, S
     LaunchedEffect(Unit) {
         runCatching { client.getReadlists() }
             .onSuccess { readlists = it }
-            .onFailure { error = "加载阅读列表失败：${it.message}" }
+            .onFailure { error = context.getString(R.string.load_readlists_failed, it.message) }
         loading = false
     }
 
@@ -1109,13 +1126,13 @@ private fun ReadlistsContent(client: KomgaApiClient, onReadlistClick: (String, S
                         scope.launch {
                             runCatching { client.getReadlists() }
                                 .onSuccess { readlists = it; error = null }
-                                .onFailure { error = "加载失败：${it.message}" }
+                                .onFailure { error = context.getString(R.string.load_failed, it.message) }
                         }
-                    }) { Text("重试") }
+                    }) { Text(composeStringResource(R.string.retry)) }
                 }
             }
             readlists.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无阅读列表")
+                Text(composeStringResource(R.string.no_readlists))
             }
             else -> LazyColumn(
                 contentPadding = PaddingValues(16.dp),
@@ -1158,7 +1175,7 @@ private fun ReadlistsContent(client: KomgaApiClient, onReadlistClick: (String, S
                                 Text(rl.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    text = "${rl.booksCount} 本",
+                                    text = composeStringResource(R.string.books_count, rl.booksCount),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -1195,6 +1212,7 @@ private fun EmbeddedSearch(
     onSeriesClick: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<SeriesDto>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
@@ -1205,7 +1223,7 @@ private fun EmbeddedSearch(
         error = null
         runCatching { client.getSeries(search = q, size = 100).content }
             .onSuccess { results = it }
-            .onFailure { error = "搜索失败：${it.message}" }
+            .onFailure { error = context.getString(R.string.search_failed, it.message) }
         searching = false
     }
 
@@ -1233,14 +1251,14 @@ private fun EmbeddedSearch(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("搜索系列…") },
+                placeholder = { Text(composeStringResource(R.string.search_series_hint)) },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
             TextButton(
                 onClick = { scope.launch { if (query.isNotBlank()) runSearch(query) } },
                 enabled = query.isNotBlank() && !searching,
-            ) { Text("搜索") }
+            ) { Text(composeStringResource(R.string.search_action)) }
         }
 
         when {
@@ -1254,7 +1272,7 @@ private fun EmbeddedSearch(
                 Modifier.fillMaxWidth().height(120.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("无匹配结果", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(composeStringResource(R.string.no_match_results), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             query.isNotBlank() -> LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
@@ -1301,25 +1319,28 @@ private fun SettingsTab(context: android.content.Context) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        Text("服务器连接", style = MaterialTheme.typography.titleMedium)
+        Text(composeStringResource(R.string.settings_server), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(12.dp))
-        Text("地址：${prefs.baseUrl}", style = MaterialTheme.typography.bodyMedium)
+        Text(composeStringResource(R.string.settings_address_fmt, prefs.baseUrl), style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "认证：${if (prefs.authType.name == "API_KEY") "API Key" else "账号密码"}",
+            text = composeStringResource(
+                R.string.settings_auth_fmt,
+                composeStringResource(if (prefs.authType.name == "API_KEY") R.string.auth_api_key else R.string.auth_username_password),
+            ),
             style = MaterialTheme.typography.bodyMedium,
         )
 
         // M3.17: home section item count.
         Spacer(Modifier.height(24.dp))
-        Text("主页设置", style = MaterialTheme.typography.titleMedium)
+        Text(composeStringResource(R.string.settings_home), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "每区块显示数量",
+                text = composeStringResource(R.string.settings_section_limit),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
@@ -1351,10 +1372,10 @@ private fun SettingsTab(context: android.content.Context) {
 
         // M3.18: home section visibility + ordering.
         Spacer(Modifier.height(24.dp))
-        Text("主页区块", style = MaterialTheme.typography.titleMedium)
+        Text(composeStringResource(R.string.settings_home_sections), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "显示/隐藏区块，上下调整顺序（主页从上到下显示）",
+            text = composeStringResource(R.string.settings_home_sections_summary),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1385,7 +1406,7 @@ private fun SettingsTab(context: android.content.Context) {
                         Text("↑", style = MaterialTheme.typography.titleMedium)
                     }
                     Text(
-                        text = section.label,
+                        text = section.labelText(),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
@@ -1403,7 +1424,7 @@ private fun SettingsTab(context: android.content.Context) {
                             persistOrder(list)
                         },
                     ) {
-                        Text("隐藏", style = MaterialTheme.typography.labelSmall)
+                        Text(composeStringResource(R.string.settings_hide), style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -1411,7 +1432,7 @@ private fun SettingsTab(context: android.content.Context) {
         if (hiddenSections.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "已隐藏",
+                text = composeStringResource(R.string.settings_hidden),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1421,21 +1442,21 @@ private fun SettingsTab(context: android.content.Context) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = section.label,
+                        text = section.labelText(),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(onClick = {
                         persistOrder(visibleSections + section)
-                    }) { Text("显示") }
+                    }) { Text(composeStringResource(R.string.settings_show)) }
                 }
             }
         }
 
         // ---- 外观（复用 MihonSY 主题控件）----
         Spacer(Modifier.height(24.dp))
-        Text("外观", style = MaterialTheme.typography.titleMedium)
+        Text(composeStringResource(R.string.settings_appearance), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(12.dp))
 
         val activity = context as? android.app.Activity
@@ -1468,7 +1489,7 @@ private fun SettingsTab(context: android.content.Context) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "深色 AMOLED 纯黑",
+                text = composeStringResource(R.string.settings_amoled),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
@@ -1485,10 +1506,10 @@ private fun SettingsTab(context: android.content.Context) {
         // 应用语言：默认 / 中文简体 / 中文繁體 / English。
         Spacer(Modifier.height(8.dp))
         val currentLangLabel = when (prefs.appLanguage) {
-            "zh-CN" -> "中文（简体）"
-            "zh-TW" -> "中文（繁體）"
-            "en" -> "English"
-            else -> "默认（跟随系统）"
+            "zh-CN" -> composeStringResource(R.string.lang_zh_cn)
+            "zh-TW" -> composeStringResource(R.string.lang_zh_tw)
+            "en" -> composeStringResource(R.string.lang_en)
+            else -> composeStringResource(R.string.lang_default)
         }
         var showAppLanguage by remember { mutableStateOf(false) }
         Surface(
@@ -1504,7 +1525,7 @@ private fun SettingsTab(context: android.content.Context) {
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "应用语言",
+                        text = composeStringResource(R.string.settings_app_language),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
@@ -1523,14 +1544,14 @@ private fun SettingsTab(context: android.content.Context) {
 
         if (showAppLanguage) {
             val langOptions = listOf(
-                "" to "默认（跟随系统）",
-                "zh-CN" to "中文（简体）",
-                "zh-TW" to "中文（繁體）",
-                "en" to "English",
+                "" to composeStringResource(R.string.lang_default),
+                "zh-CN" to composeStringResource(R.string.lang_zh_cn),
+                "zh-TW" to composeStringResource(R.string.lang_zh_tw),
+                "en" to composeStringResource(R.string.lang_en),
             )
             AlertDialog(
                 onDismissRequest = { showAppLanguage = false },
-                title = { Text("应用语言") },
+                title = { Text(composeStringResource(R.string.settings_app_language)) },
                 text = {
                     Column {
                         langOptions.forEach { (tag, label) ->
@@ -1572,7 +1593,7 @@ private fun SettingsTab(context: android.content.Context) {
 
         // ---- 阅读设置：复用 MihonSY 原生阅读器偏好（SettingsReaderScreen）----
         Spacer(Modifier.height(24.dp))
-        Text("阅读", style = MaterialTheme.typography.titleMedium)
+        Text(composeStringResource(R.string.settings_reading), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
         var showReaderSettings by remember { mutableStateOf(false) }
         Surface(
@@ -1588,11 +1609,11 @@ private fun SettingsTab(context: android.content.Context) {
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "阅读设置",
+                        text = composeStringResource(R.string.settings_reader),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        text = "翻页/方向/缩放/增强/导航…",
+                        text = composeStringResource(R.string.settings_reader_summary),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1624,16 +1645,16 @@ private fun SettingsTab(context: android.content.Context) {
         Spacer(Modifier.height(20.dp))
         TextButton(onClick = {
             context.startActivity(Intent(context, KomgaConnectActivity::class.java))
-        }) { Text("重新配置连接") }
+        }) { Text(composeStringResource(R.string.settings_reconfigure)) }
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = {
             prefs.clear()
-            Toast.makeText(context, "连接已清除", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.connection_cleared), Toast.LENGTH_SHORT).show()
             context.startActivity(
                 Intent(context, KomgaConnectActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),
             )
-        }) { Text("清除连接并重新登录") }
+        }) { Text(composeStringResource(R.string.settings_clear_login)) }
     }
 }
 
@@ -1643,11 +1664,15 @@ private fun SettingsTab(context: android.content.Context) {
  * M3: read-status filter for the Library tab.
  * Maps to Komga's `read_status` query parameter on GET /series.
  */
-private enum class ReadFilter(val label: String, val komgaValue: String?) {
-    All("全部", null),
-    Unread("未读", "UNREAD"),
-    InProgress("在读", "IN_PROGRESS"),
-    Read("已读", "READ"),
+private enum class ReadFilter(@StringRes val labelRes: Int, val komgaValue: String?) {
+    All(R.string.filter_all, null),
+    Unread(R.string.filter_unread, "UNREAD"),
+    InProgress(R.string.filter_in_progress, "IN_PROGRESS"),
+    Read(R.string.filter_read, "READ"),
+    ;
+
+    @Composable
+    fun labelText(): String = composeStringResource(labelRes)
 }
 
 @Composable
@@ -1678,7 +1703,7 @@ fun SeriesCard(client: KomgaApiClient, series: SeriesDto, onClick: () -> Unit) {
                             .padding(6.dp),
                     ) {
                         Text(
-                            text = "${series.booksUnreadCount} 未读",
+                            text = composeStringResource(R.string.unread_count, series.booksUnreadCount),
                             color = MaterialTheme.colorScheme.onPrimary,
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
