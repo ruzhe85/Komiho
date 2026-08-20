@@ -64,7 +64,7 @@ jobs:
       # Single CI tag: every push overwrites the same `ci` Release (Pre-release,
       # yellow — never the green "Latest"). No per-build tags; the title/notes
       # still carry run · sha · date so each build stays identifiable.
-      - name: Upload APK to CI Release (tag: ci)
+      - name: "Upload APK to CI Release (tag: ci)"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
