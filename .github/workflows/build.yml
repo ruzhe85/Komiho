@@ -61,24 +61,24 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug -Pdisable-code-shrink --no-daemon --stacktrace
 
-      # Multi-version CI: every push produces one uniquely-tagged Release
-      # (ci-<run>-<sha>) marked as Pre-release. No "ci-apk" latest pointer —
-      # each build is an independent, never-overwritten history entry, newest
-      # sorts to the top of the Releases list.
-      - name: Upload APKs to per-build Release
+      # Single CI tag: every push overwrites the same `ci` Release (Pre-release,
+      # yellow — never the green "Latest"). No per-build tags; the title/notes
+      # still carry run · sha · date so each build stays identifiable.
+      - name: Upload APK to CI Release (tag: ci)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           RUN_NO="${{ github.run_number }}"
           BUILD_DATE=$(date -u +%Y-%m-%d)
-          TAG="ci-${RUN_NO}-${SHORT_SHA}"
+          TAG="ci"
           TITLE="Komiho V2 CI #${RUN_NO} · ${SHORT_SHA} · ${BUILD_DATE}"
           NOTES="Auto build #${RUN_NO} · ${{ github.sha }} · ${BUILD_DATE}T$(date -u +%H:%M:%SZ)"
+          # Overwrite the single 'ci' release each push (idempotent: delete is
+          # a no-op on the very first run when the tag does not yet exist).
+          gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
           gh release create "$TAG" app/build/outputs/apk/debug/*.apk \
             --repo "${{ github.repository }}" \
             --title "$TITLE" \
             --notes "$NOTES" \
-            --prerelease \
-            || gh release upload "$TAG" app/build/outputs/apk/debug/*.apk \
-                 --repo "${{ github.repository }}" --clobber
+            --prerelease
