@@ -97,6 +97,11 @@ import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
 import cafe.adriel.voyager.navigator.Navigator
 import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
+import eu.kanade.presentation.more.settings.screen.appearance.AppLanguageScreen
+import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
+import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
+import eu.kanade.domain.ui.model.ThemeMode
+import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.presentation.util.LocalBackPress
 import kotlinx.coroutines.launch
 
@@ -1424,85 +1429,35 @@ private fun SettingsTab(context: android.content.Context) {
             }
         }
 
-        // ---- 外观（M5：启用 Mihon 皮肤体系）----
+        // ---- 外观（复用 MihonSY 主题控件）----
         Spacer(Modifier.height(24.dp))
         Text("外观", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
 
         val activity = context as? android.app.Activity
-        // 明暗模式：跟随系统 / 浅色 / 深色。修改写 prefs 并 recreate 即时生效。
-        var themeModeSel by remember { mutableStateOf(prefs.themeMode) }
-        var themeMenuOpen by remember { mutableStateOf(false) }
-        val themeModeLabel = when (themeModeSel) {
-            "LIGHT" -> "浅色"
-            "DARK" -> "深色"
-            else -> "跟随系统"
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "明暗模式",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            Box {
-                TextButton(onClick = { themeMenuOpen = true }) { Text(themeModeLabel) }
-                androidx.compose.material3.DropdownMenu(
-                    expanded = themeMenuOpen,
-                    onDismissRequest = { themeMenuOpen = false },
-                ) {
-                    listOf("SYSTEM" to "跟随系统", "LIGHT" to "浅色", "DARK" to "深色").forEach { (v, label) ->
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(label) },
-                            onClick = {
-                                themeMenuOpen = false
-                                themeModeSel = v
-                                prefs.themeMode = v
-                                activity?.recreate()
-                            },
-                        )
-                    }
-                }
-            }
-        }
+        // 主题模式：复用 MihonSY 分段选择器（跟随系统 / 浅色 / 深色）。
+        val themeModeEnum = runCatching { ThemeMode.valueOf(prefs.themeMode) }
+            .getOrDefault(ThemeMode.SYSTEM)
+        AppThemeModePreferenceWidget(
+            value = themeModeEnum,
+            onItemClick = {
+                prefs.themeMode = it.name
+                activity?.recreate()
+            },
+        )
+        Spacer(Modifier.height(12.dp))
 
-        // 皮肤（AppTheme）：仅列有配色的主题（titleRes != null）。
-        var themeSel by remember { mutableStateOf(prefs.appTheme) }
-        var themePickOpen by remember { mutableStateOf(false) }
-        val themeLabel = appThemeLabel(runCatching { eu.kanade.domain.ui.model.AppTheme.valueOf(themeSel) }.getOrDefault(eu.kanade.domain.ui.model.AppTheme.DEFAULT))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "皮肤",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            Box {
-                TextButton(onClick = { themePickOpen = true }) { Text(themeLabel) }
-                androidx.compose.material3.DropdownMenu(
-                    expanded = themePickOpen,
-                    onDismissRequest = { themePickOpen = false },
-                ) {
-                    eu.kanade.domain.ui.model.AppTheme.entries.filter { it.titleRes != null }.forEach { t ->
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(appThemeLabel(t)) },
-                            onClick = {
-                                themePickOpen = false
-                                themeSel = t.name
-                                prefs.appTheme = t.name
-                                activity?.recreate()
-                            },
-                        )
-                    }
-                }
-            }
-        }
+        // 皮肤（AppTheme）：复用 MihonSY 预览卡片；控件内部点击后已 recreate。
+        val appThemeEnum = runCatching { AppTheme.valueOf(prefs.appTheme) }
+            .getOrDefault(AppTheme.DEFAULT)
+        AppThemePreferenceWidget(
+            value = appThemeEnum,
+            amoled = prefs.themeDarkAmoled,
+            onItemClick = { prefs.appTheme = it.name },
+        )
+        Spacer(Modifier.height(8.dp))
 
-        // AMOLED 纯黑（仅深色模式生效）。
+        // 深色 AMOLED 纯黑（仅深色模式生效）。
         var amoledSel by remember { mutableStateOf(prefs.themeDarkAmoled) }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1521,6 +1476,55 @@ private fun SettingsTab(context: android.content.Context) {
                     activity?.recreate()
                 },
             )
+        }
+
+        // 应用语言：复用 MihonSY AppLanguageScreen（按应用设置区域）。
+        Spacer(Modifier.height(8.dp))
+        var showAppLanguage by remember { mutableStateOf(false) }
+        Surface(
+            onClick = { showAppLanguage = true },
+            color = Color.Transparent,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "应用语言",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = "选择应用显示语言",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Filled.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (showAppLanguage) {
+            Dialog(
+                onDismissRequest = { showAppLanguage = false },
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false,
+                ),
+            ) {
+                CompositionLocalProvider(LocalBackPress provides { showAppLanguage = false }) {
+                    Surface(Modifier.fillMaxSize()) {
+                        Navigator(AppLanguageScreen())
+                    }
+                }
+            }
         }
 
         // ---- 阅读设置：复用 MihonSY 原生阅读器偏好（SettingsReaderScreen）----
@@ -1589,10 +1593,6 @@ private fun SettingsTab(context: android.content.Context) {
         }) { Text("清除连接并重新登录") }
     }
 }
-
-/** AppTheme 枚举名 → 可读标签（"MIDNIGHT_DUSK" → "Midnight Dusk"）。 */
-private fun appThemeLabel(t: eu.kanade.domain.ui.model.AppTheme): String =
-    t.name.split('_').joinToString(" ") { w -> w.lowercase().replaceFirstChar { it.uppercase() } }
 
 // ---------- Shared components ----------
 
