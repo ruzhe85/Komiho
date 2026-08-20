@@ -69,13 +69,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          TAG="ci-${SHORT_SHA}"
-          TITLE="Komiho V2 ${SHORT_SHA} (#${{ github.run_number }})"
-          NOTES="Auto build $(date -u +%Y-%m-%dT%H:%M:%SZ) commit ${{ github.sha }}"
+          RUN_NO="${{ github.run_number }}"
+          BUILD_DATE=$(date -u +%Y-%m-%d)
+          TAG="ci-${RUN_NO}-${SHORT_SHA}"
+          TITLE="Komiho V2 CI #${RUN_NO} · ${SHORT_SHA} · ${BUILD_DATE}"
+          NOTES="Auto build #${RUN_NO} · ${{ github.sha }} · ${BUILD_DATE}T$(date -u +%H:%M:%SZ)"
           gh release create "$TAG" app/build/outputs/apk/debug/*.apk \
             --repo "${{ github.repository }}" \
             --title "$TITLE" \
             --notes "$NOTES" \
+            --latest=false \
             || gh release upload "$TAG" app/build/outputs/apk/debug/*.apk \
                  --repo "${{ github.repository }}" --clobber
 
@@ -83,10 +86,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          RUN_NO="${{ github.run_number }}"
+          BUILD_DATE=$(date -u +%Y-%m-%d)
           gh release create ci-apk app/build/outputs/apk/debug/*.apk \
             --repo "${{ github.repository }}" \
-            --title "Komiho V2 CI APK (latest)" \
-            --notes "Latest auto build $(date -u +%Y-%m-%dT%H:%M:%SZ) commit ${{ github.sha }}" \
+            --title "Komiho V2 Latest APK" \
+            --notes "Latest build · #${RUN_NO} · ${{ github.sha }} · ${BUILD_DATE}T$(date -u +%H:%M:%SZ)" \
             2>/dev/null \
             || gh release upload ci-apk app/build/outputs/apk/debug/*.apk \
                  --repo "${{ github.repository }}" --clobber
