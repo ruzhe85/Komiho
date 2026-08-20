@@ -53,7 +53,7 @@ import app.mihonsy.komga.data.model.SeriesDto
  * - Books are shown as a compact shelf grid (the same BookShelfCard used
  *   in section full lists)
  */
-class KomgaSeriesActivity : ComponentActivity() {
+class KomgaSeriesActivity : KomgaBaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val seriesId = intent.getStringExtra("seriesId").orEmpty()

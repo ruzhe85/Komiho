@@ -51,7 +51,7 @@ import kotlinx.coroutines.launch
  * Loads the whole section (series or books) and shows it as a compact grid;
  * tapping an item opens the series detail / reader.
  */
-class KomgaSectionListActivity : ComponentActivity() {
+class KomgaSectionListActivity : KomgaBaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sectionName = intent.getStringExtra("section").orEmpty()

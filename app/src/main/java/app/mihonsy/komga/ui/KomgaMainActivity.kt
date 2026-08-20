@@ -97,12 +97,14 @@ import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
 import cafe.adriel.voyager.navigator.Navigator
 import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
-import eu.kanade.presentation.more.settings.screen.appearance.AppLanguageScreen
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
 import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.presentation.util.LocalBackPress
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
 
 /**
@@ -118,7 +120,7 @@ import kotlinx.coroutines.launch
  * All data is fetched live from the Komga server (Komga is the single
  * source of truth; nothing is cached locally).
  */
-class KomgaMainActivity : ComponentActivity() {
+class KomgaMainActivity : KomgaBaseActivity() {
     // Incremented on every onResume so the tabs reload data when returning
     // from the reader (read progress / unread counts change while reading).
     private val refreshSignal = MutableStateFlow(0)
@@ -148,8 +150,10 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
     val client = remember { KomgaApiClient(prefs.connection()) }
 
     // Tab state is preserved across configuration changes by the Activity's
-    // configChanges flag (orientation) — no need for rememberSaveable.
-    var currentTab by remember { mutableIntStateOf(MainTab.Home.ordinal) }
+    // configChanges flag (orientation). rememberSaveable additionally keeps
+    // the current tab across activity.recreate() — theme/language switches
+    // in Settings would otherwise bounce back to the Home tab.
+    var currentTab by rememberSaveable { mutableIntStateOf(MainTab.Home.ordinal) }
     // Refresh counter: bumped by tab re-tap and by Activity onResume (returning
     // from the reader). Passed to tabs to trigger data reload.
     val refreshTick by refreshSignal.collectAsState()
@@ -1478,8 +1482,14 @@ private fun SettingsTab(context: android.content.Context) {
             )
         }
 
-        // 应用语言：复用 MihonSY AppLanguageScreen（按应用设置区域）。
+        // 应用语言：默认 / 中文简体 / 中文繁體 / English。
         Spacer(Modifier.height(8.dp))
+        val currentLangLabel = when (prefs.appLanguage) {
+            "zh-CN" -> "中文（简体）"
+            "zh-TW" -> "中文（繁體）"
+            "en" -> "English"
+            else -> "默认（跟随系统）"
+        }
         var showAppLanguage by remember { mutableStateOf(false) }
         Surface(
             onClick = { showAppLanguage = true },
@@ -1498,7 +1508,7 @@ private fun SettingsTab(context: android.content.Context) {
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        text = "选择应用显示语言",
+                        text = currentLangLabel,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1512,19 +1522,52 @@ private fun SettingsTab(context: android.content.Context) {
         }
 
         if (showAppLanguage) {
-            Dialog(
+            val langOptions = listOf(
+                "" to "默认（跟随系统）",
+                "zh-CN" to "中文（简体）",
+                "zh-TW" to "中文（繁體）",
+                "en" to "English",
+            )
+            AlertDialog(
                 onDismissRequest = { showAppLanguage = false },
-                properties = DialogProperties(
-                    usePlatformDefaultWidth = false,
-                    decorFitsSystemWindows = false,
-                ),
-            ) {
-                CompositionLocalProvider(LocalBackPress provides { showAppLanguage = false }) {
-                    Surface(Modifier.fillMaxSize()) {
-                        Navigator(AppLanguageScreen())
+                title = { Text("应用语言") },
+                text = {
+                    Column {
+                        langOptions.forEach { (tag, label) ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (prefs.appLanguage != tag) {
+                                            prefs.appLanguage = tag
+                                            AppCompatDelegate.setApplicationLocales(
+                                                if (tag.isEmpty()) {
+                                                    LocaleListCompat.getEmptyLocaleList()
+                                                } else {
+                                                    LocaleListCompat.forLanguageTags(tag)
+                                                },
+                                            )
+                                        }
+                                        showAppLanguage = false
+                                        activity?.recreate()
+                                    }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(label, modifier = Modifier.weight(1f))
+                                if (prefs.appLanguage == tag) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
                     }
-                }
-            }
+                },
+                confirmButton = {},
+            )
         }
 
         // ---- 阅读设置：复用 MihonSY 原生阅读器偏好（SettingsReaderScreen）----

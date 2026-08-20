@@ -11,7 +11,7 @@ import app.mihonsy.komga.data.KomgaPreferences
  * connection setup screen. Replaces Mihon's MainActivity as the
  * MAIN/LAUNCHER target.
  */
-class KomgaLauncherActivity : ComponentActivity() {
+class KomgaLauncherActivity : KomgaBaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = KomgaPreferences(applicationContext)

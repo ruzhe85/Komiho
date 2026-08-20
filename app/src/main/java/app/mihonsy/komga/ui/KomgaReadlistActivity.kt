@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
  * Renders the same compact BookShelfCard grid as the rest of the app so
  * the look matches the library / section-list / series-detail pages.
  */
-class KomgaReadlistActivity : ComponentActivity() {
+class KomgaReadlistActivity : KomgaBaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val readlistId = intent.getStringExtra("readlistId").orEmpty()
