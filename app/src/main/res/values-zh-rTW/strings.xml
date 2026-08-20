@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Komiho 主介面字串 — 繁體中文。 -->
+<resources>
+
+    <!-- 底部導覽 tab -->
+    <string name="tab_home">主頁</string>
+    <string name="tab_library">庫</string>
+    <string name="tab_lists">列表</string>
+    <string name="tab_settings">設定</string>
+
+    <!-- 搜尋 -->
+    <string name="cd_close_search">關閉搜尋</string>
+    <string name="cd_search">搜尋</string>
+    <string name="search_series_hint">搜尋系列…</string>
+    <string name="search_action">搜尋</string>
+    <string name="no_match_results">無符合結果</string>
+    <string name="search_failed">搜尋失敗：%1$s</string>
+
+    <!-- 庫選擇 -->
+    <string name="select_library">選擇庫</string>
+    <string name="no_libraries">暫無庫</string>
+    <string name="cancel">取消</string>
+
+    <!-- 通用 -->
+    <string name="retry">重試</string>
+    <string name="no_series">暫無系列</string>
+    <string name="load_failed">載入失敗：%1$s</string>
+    <string name="load_failed_short">載入失敗</string>
+    <string name="open_reader_failed">開啟閱讀器失敗：%1$s</string>
+    <string name="section_all">全部 ›</string>
+
+    <!-- 主頁區塊 -->
+    <string name="home_section_continue">繼續閱讀</string>
+    <string name="home_section_added_books">最近新增書籍</string>
+    <string name="home_section_added_series">最近新增系列</string>
+    <string name="home_section_updated_series">最近更新系列</string>
+    <string name="home_section_read_books">最近閱讀書籍</string>
+
+    <!-- 庫 -->
+    <string name="load_series_failed">載入系列失敗：%1$s</string>
+    <string name="no_series_in_library">此庫暫無系列</string>
+    <string name="cd_filter_sort">篩選/排序</string>
+    <string name="read_status_header">閱讀狀態</string>
+    <string name="sort_header">排序</string>
+    <string name="sort_title">標題</string>
+    <string name="sort_last_modified">最近更新</string>
+    <string name="sort_last_read">最近閱讀</string>
+    <string name="sort_date_added">新增日期</string>
+    <string name="display_compact_grid">緊湊網格</string>
+    <string name="display_comfortable_grid">舒適網格</string>
+    <string name="display_list">列表</string>
+    <string name="series_books_summary">%1$d 本 · %2$d 已讀 · %3$d 未讀</string>
+
+    <!-- 閱讀列表 -->
+    <string name="load_readlists_failed">載入閱讀列表失敗：%1$s</string>
+    <string name="no_readlists">暫無閱讀列表</string>
+    <string name="books_count">%1$d 本</string>
+
+    <!-- 閱讀狀態篩選 -->
+    <string name="filter_all">全部</string>
+    <string name="filter_unread">未讀</string>
+    <string name="filter_in_progress">閱讀中</string>
+    <string name="filter_read">已讀</string>
+
+    <!-- 系列卡片 -->
+    <string name="unread_count">%1$d 未讀</string>
+
+    <!-- 設定：伺服器連線 -->
+    <string name="settings_server">伺服器連線</string>
+    <string name="settings_address_fmt">位址：%1$s</string>
+    <string name="settings_auth_fmt">認證：%1$s</string>
+    <string name="auth_api_key">API Key</string>
+    <string name="auth_username_password">帳號密碼</string>
+
+    <!-- 設定：主頁 -->
+    <string name="settings_home">主頁設定</string>
+    <string name="settings_section_limit">每區塊顯示數量</string>
+    <string name="settings_home_sections">主頁區塊</string>
+    <string name="settings_home_sections_summary">顯示/隱藏區塊，用上下按鈕調整順序（主頁由上到下顯示）</string>
+    <string name="settings_hide">隱藏</string>
+    <string name="settings_hidden">已隱藏</string>
+    <string name="settings_show">顯示</string>
+
+    <!-- 設定：外觀 -->
+    <string name="settings_appearance">外觀</string>
+    <string name="settings_amoled">深色 AMOLED 純黑</string>
+    <string name="settings_app_language">應用語言</string>
+    <string name="lang_default">預設（跟隨系統）</string>
+    <string name="lang_zh_cn">簡體中文</string>
+    <string name="lang_zh_tw">繁體中文</string>
+    <string name="lang_en">English</string>
+
+    <!-- 設定：閱讀 -->
+    <string name="settings_reading">閱讀</string>
+    <string name="settings_reader">閱讀設定</string>
+    <string name="settings_reader_summary">翻頁/方向/縮放/增強/導覽…</string>
+    <string name="settings_reconfigure">重新設定連線</string>
+    <string name="connection_cleared">連線已清除</string>
+    <string name="settings_clear_login">清除連線並重新登入</string>
+
+    <!-- 書架元件（ShelfComponents） -->
+    <string name="cd_toggle_grid">切換平鋪</string>
+    <string name="cd_toggle_list">切換列表</string>
+    <string name="selected_count">已選 %1$d 項</string>
+    <string name="mark_read">標記已讀</string>
+    <string name="mark_unread">標記未讀</string>
+    <string name="add_to_readlist">加入閱讀列表</string>
+    <string name="batch_marked">已批量標記%1$d本</string>
+    <string name="operation_failed">操作失敗：%1$s</string>
+    <string name="added_to_readlist">已加入閱讀列表</string>
+    <string name="add_failed">新增失敗：%1$s</string>
+    <string name="created_and_added">已建立並加入</string>
+    <string name="created_but_add_failed">建立成功但新增失敗：%1$s</string>
+    <string name="create_failed">建立失敗：%1$s</string>
+    <string name="add_to_readlist_title">新增到閱讀列表</string>
+    <string name="search_or_create_readlist">搜尋或建立閱讀列表</string>
+    <string name="create">建立</string>
+    <string name="no_match_create_hint">無符合，輸入名稱後點「建立」</string>
+    <string name="book_status_read">已讀</string>
+    <string name="book_status_unread">未讀</string>
+    <string name="book_status_read_pages">已讀 %1$d頁</string>
+    <string name="display_settings_title">顯示設定</string>
+    <string name="display_mode">顯示模式</string>
+    <string name="columns_per_row">每行數量（%1$s）</string>
+    <string name="orientation_landscape">橫向</string>
+    <string name="orientation_portrait">直向</string>
+    <string name="auto">自動</string>
+    <string name="columns_count">%1$d 列</string>
+    <string name="done">完成</string>
+
+</resources>

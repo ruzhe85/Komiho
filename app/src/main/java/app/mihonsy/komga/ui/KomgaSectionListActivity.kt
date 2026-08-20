@@ -122,7 +122,7 @@ private fun KomgaSectionListScreen(section: HomeSection) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(section.label) },
+                title = { Text(section.labelText()) },
                 actions = {
                     ShelfModeToggle(mode) { displayOpen = true }
                 },

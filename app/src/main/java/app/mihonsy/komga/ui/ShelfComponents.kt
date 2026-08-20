@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.KomgaApiClient
@@ -67,7 +68,7 @@ fun ShelfModeToggle(mode: LibraryDisplayMode, onToggle: () -> Unit) {
     IconButton(onClick = onToggle) {
         Icon(
             imageVector = if (mode == LibraryDisplayMode.List) Icons.Filled.GridView else Icons.Filled.ViewList,
-            contentDescription = if (mode == LibraryDisplayMode.List) "切换平铺" else "切换列表",
+            contentDescription = if (mode == LibraryDisplayMode.List) composeStringResource(R.string.cd_toggle_grid) else composeStringResource(R.string.cd_toggle_list),
         )
     }
 }
@@ -152,11 +153,11 @@ fun BookShelf(
                     }
                 }
             }.onSuccess {
-                android.widget.Toast.makeText(context, "已批量标记${snapshot.size}本", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(context, context.getString(R.string.batch_marked, snapshot.size), android.widget.Toast.LENGTH_SHORT).show()
                 exitSelection()
                 onDataChanged()
             }.onFailure {
-                android.widget.Toast.makeText(context, "操作失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(context, context.getString(R.string.operation_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -188,14 +189,14 @@ fun BookShelf(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "已选 ${selectedIds.size} 项",
+                        composeStringResource(R.string.selected_count, selectedIds.size),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = { performBatchUpdate(true) }) { Text("标记已读") }
-                    TextButton(onClick = { performBatchUpdate(false) }) { Text("标记未读") }
-                    TextButton(onClick = { showReadlistPicker = true }) { Text("加入阅读列表") }
-                    TextButton(onClick = exitSelection) { Text("取消") }
+                    TextButton(onClick = { performBatchUpdate(true) }) { Text(composeStringResource(R.string.mark_read)) }
+                    TextButton(onClick = { performBatchUpdate(false) }) { Text(composeStringResource(R.string.mark_unread)) }
+                    TextButton(onClick = { showReadlistPicker = true }) { Text(composeStringResource(R.string.add_to_readlist)) }
+                    TextButton(onClick = exitSelection) { Text(composeStringResource(R.string.cancel)) }
                 }
             }
         }
@@ -283,11 +284,11 @@ private fun ReadlistPickerDialog(
         scope.launch {
             runCatching { client.addBooksToReadlist(readlistId, bookIds) }
                 .onSuccess {
-                    android.widget.Toast.makeText(context, "已加入阅读列表", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, context.getString(R.string.added_to_readlist), android.widget.Toast.LENGTH_SHORT).show()
                     onAdded()
                 }
                 .onFailure {
-                    android.widget.Toast.makeText(context, "添加失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                    android.widget.Toast.makeText(context, context.getString(R.string.add_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
                 }
         }
     }
@@ -300,29 +301,29 @@ private fun ReadlistPickerDialog(
                 .onSuccess { created ->
                     runCatching { client.addBooksToReadlist(created.id, bookIds) }
                         .onSuccess {
-                            android.widget.Toast.makeText(context, "已创建并加入", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(context, context.getString(R.string.created_and_added), android.widget.Toast.LENGTH_SHORT).show()
                             onAdded()
                         }
                         .onFailure {
-                            android.widget.Toast.makeText(context, "创建成功但添加失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                            android.widget.Toast.makeText(context, context.getString(R.string.created_but_add_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
                         }
                 }
                 .onFailure {
-                    android.widget.Toast.makeText(context, "创建失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                    android.widget.Toast.makeText(context, context.getString(R.string.create_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
                 }
         }
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加到阅读列表") },
+        title = { Text(composeStringResource(R.string.add_to_readlist_title)) },
         text = {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
-                        placeholder = { Text("搜索或创建阅读列表") },
+                        placeholder = { Text(composeStringResource(R.string.search_or_create_readlist)) },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
@@ -330,16 +331,16 @@ private fun ReadlistPickerDialog(
                     TextButton(
                         onClick = ::createAndAdd,
                         enabled = query.isNotBlank(),
-                    ) { Text("创建") }
+                    ) { Text(composeStringResource(R.string.create)) }
                 }
                 Spacer(Modifier.height(8.dp))
                 when {
                     loading -> Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
-                    error != null -> Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
+                    error != null -> Text(error ?: context.getString(R.string.load_failed_short), color = MaterialTheme.colorScheme.error)
                     filtered.isEmpty() -> Text(
-                        if (query.isBlank()) "暂无阅读列表" else "无匹配，输入名字点「创建」",
+                        if (query.isBlank()) composeStringResource(R.string.no_readlists) else composeStringResource(R.string.no_match_create_hint),
                         style = MaterialTheme.typography.bodySmall,
                     )
                     else -> Column {
@@ -357,7 +358,7 @@ private fun ReadlistPickerDialog(
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.cancel)) } },
     )
 }
 
@@ -409,11 +410,11 @@ fun BookShelfListRow(
             }
             val rp = book.readProgress
             val status = when {
-                rp?.completed == true -> "已读"
+                rp?.completed == true -> composeStringResource(R.string.book_status_read)
                 rp != null && rp.page > 0 && book.media.pagesCount > 0 ->
                     (rp.page.toFloat() / book.media.pagesCount * 100).toInt().toString() + "%"
-                rp != null && rp.page > 0 -> "已读 ${rp.page}页"
-                else -> "未读"
+                rp != null && rp.page > 0 -> composeStringResource(R.string.book_status_read_pages, rp.page)
+                else -> composeStringResource(R.string.book_status_unread)
             }
             Text(
                 text = status,
@@ -440,11 +441,11 @@ fun DisplaySettingsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("显示设置") },
+        title = { Text(composeStringResource(R.string.display_settings_title)) },
         text = {
             Column {
                 Text(
-                    text = "显示模式",
+                    text = composeStringResource(R.string.display_mode),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -454,14 +455,17 @@ fun DisplaySettingsDialog(
                         FilterChip(
                             selected = displayMode == m,
                             onClick = { onModeChange(m) },
-                            label = { Text(m.label) },
+                            label = { Text(m.labelText()) },
                         )
                     }
                 }
                 if (displayMode != LibraryDisplayMode.List) {
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "每行数量（${if (isLandscape) "横屏" else "竖屏"}）",
+                        text = composeStringResource(
+                            R.string.columns_per_row,
+                            composeStringResource(if (isLandscape) R.string.orientation_landscape else R.string.orientation_portrait),
+                        ),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -473,13 +477,13 @@ fun DisplaySettingsDialog(
                         steps = 9,
                     )
                     Text(
-                        text = if (columnCount == 0) "自动" else "${columnCount} 列",
+                        text = if (columnCount == 0) composeStringResource(R.string.auto) else composeStringResource(R.string.columns_count, columnCount),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.done)) } },
     )
 }
