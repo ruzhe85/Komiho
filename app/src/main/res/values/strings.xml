@@ -86,7 +86,7 @@
     <string name="settings_appearance">外观</string>
     <string name="settings_amoled">深色 AMOLED 纯黑</string>
     <string name="settings_app_language">应用语言</string>
-    <string name="lang_default">默认（跟随系统）</string>
+    <string name="lang_default">自动（跟随系统）</string>
     <string name="lang_zh_cn">中文（简体）</string>
     <string name="lang_zh_tw">中文（繁體）</string>
     <string name="lang_en">English</string>
