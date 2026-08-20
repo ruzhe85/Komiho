@@ -52,6 +52,7 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
+import eu.kanade.tachiyomi.R
 import kotlinx.coroutines.launch
 
 /**

@@ -97,6 +97,7 @@ import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
 import cafe.adriel.voyager.navigator.Navigator
 import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
+import eu.kanade.tachiyomi.R
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
 import eu.kanade.domain.ui.model.ThemeMode
