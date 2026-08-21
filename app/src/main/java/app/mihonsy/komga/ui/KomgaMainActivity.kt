@@ -1,5 +1,18 @@
 package app.mihonsy.komga.ui
 
+// 划动选择命中检测：在可见 item 中按指针 Y 坐标找对应 id。
+// 本 BOM(2026.06.01) 中 LazyListItemInfo.offset 为 IntOffset、size 为 IntSize，
+// 用 .y/.height 取 Int 分量做区间命中。
+private fun resolveSeriesAtList(info: LazyListLayoutInfo, q3x9y: Float): String? {
+    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
+    return hit?.key as? String
+}
+
+private fun resolveSeriesAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String? {
+    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
+    return hit?.key as? String
+}
+
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
@@ -866,18 +879,6 @@ private fun LibraryTab(
     val onSeriesDragSelectAt: (String) -> Unit = { id ->
         if (dragActive) setSeriesSelect(id, dragValue)
     }
-    val resolveSeriesAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, pointerY, _ ->
-        val hit = info.visibleItemsInfo.firstOrNull { item ->
-            pointerY >= item.offset && pointerY < item.offset + item.size
-        }
-        hit?.key as? String
-    }
-    val resolveSeriesAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, pointerY, _ ->
-        val hit = info.visibleItemsInfo.firstOrNull { item ->
-            pointerY >= item.offset && pointerY < item.offset + item.size
-        }
-        hit?.key as? String
-    }
     val exitSeriesSelection: () -> Unit = { selectedIds = emptySet() }
 
     fun markSeriesBatch(completed: Boolean) {
@@ -992,13 +993,13 @@ private fun LibraryTab(
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { start: Offset ->
                                     val pointerY = start.y - padTop
-                                    val id = resolveSeriesAtList(listState.layoutInfo, pointerY, start.x)
+                                    val id = resolveSeriesAtList(listState.layoutInfo, pointerY)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
                                 onDrag = { change: PointerInputChange, _: Offset ->
                                     change.consume()
                                     val pointerY = change.position.y - padTop
-                                    val id = resolveSeriesAtList(listState.layoutInfo, pointerY, change.position.x)
+                                    val id = resolveSeriesAtList(listState.layoutInfo, pointerY)
                                     if (id != null) onSeriesDragSelectAt(id)
                                 },
                                 onDragEnd = { dragActive = false },
@@ -1046,13 +1047,13 @@ private fun LibraryTab(
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { start: Offset ->
                                     val pointerY = start.y - padTop
-                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY, start.x)
+                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
                                 onDrag = { change: PointerInputChange, _: Offset ->
                                     change.consume()
                                     val pointerY = change.position.y - padTop
-                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY, change.position.x)
+                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY)
                                     if (id != null) onSeriesDragSelectAt(id)
                                 },
                                 onDragEnd = { dragActive = false },
