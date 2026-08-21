@@ -193,13 +193,13 @@ fun BookShelf(
     // container's content area), using the lazy layout's visible items.
     val resolveItemAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, y, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            y >= item.offset && y < item.offset + item.size
+            y >= item.offset.y && y < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
     val resolveItemAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, y, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            y >= item.offset && y < item.offset + item.size
+            y >= item.offset.y && y < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
@@ -284,9 +284,9 @@ fun BookShelf(
                     // then every row the finger passes over gets selected.
                     .pointerInput(Unit) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = { change: PointerInputChange ->
-                                val y = change.position.y - padTop
-                                val id = resolveItemAtList(listState.layoutInfo, y, change.position.x)
+                            onDragStart = { start: Offset ->
+                                val y = start.y - padTop
+                                val id = resolveItemAtList(listState.layoutInfo, y, start.x)
                                 if (id != null) startDragSelect(id)
                             },
                             onDrag = { change: PointerInputChange, _: Offset ->
@@ -332,9 +332,9 @@ fun BookShelf(
                     // Mihon-style slide-to-select across grid cells.
                     .pointerInput(Unit) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = { change: PointerInputChange ->
-                                val y = change.position.y - padTop
-                                val id = resolveItemAtGrid(gridState.layoutInfo, y, change.position.x)
+                            onDragStart = { start: Offset ->
+                                val y = start.y - padTop
+                                val id = resolveItemAtGrid(gridState.layoutInfo, y, start.x)
                                 if (id != null) startDragSelect(id)
                             },
                             onDrag = { change: PointerInputChange, _: Offset ->
