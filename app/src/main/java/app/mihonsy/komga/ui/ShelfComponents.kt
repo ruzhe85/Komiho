@@ -191,15 +191,15 @@ fun BookShelf(
 
     // Resolve which item id sits under a pointer Y (relative to the lazy
     // container's content area), using the lazy layout's visible items.
-    val resolveItemAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, py, _ ->
+    val resolveItemAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, pointerY, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            py >= item.offset.y && py < item.offset.y + item.size.height
+            pointerY >= item.offset.y && pointerY < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
-    val resolveItemAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, py, _ ->
+    val resolveItemAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, pointerY, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            py >= item.offset.y && py < item.offset.y + item.size.height
+            pointerY >= item.offset.y && pointerY < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
@@ -285,14 +285,14 @@ fun BookShelf(
                     .pointerInput(Unit) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { start: Offset ->
-                                val y = start.y - padTop
-                                val id = resolveItemAtList(listState.layoutInfo, y, start.x)
+                                val pointerY = start.y - padTop
+                                val id = resolveItemAtList(listState.layoutInfo, pointerY, start.x)
                                 if (id != null) startDragSelect(id)
                             },
                             onDrag = { change: PointerInputChange, _: Offset ->
                                 change.consume()
-                                val y = change.position.y - padTop
-                                val id = resolveItemAtList(listState.layoutInfo, y, change.position.x)
+                                val pointerY = change.position.y - padTop
+                                val id = resolveItemAtList(listState.layoutInfo, pointerY, change.position.x)
                                 if (id != null) onDragSelectAt(id)
                             },
                             onDragEnd = { dragActive = false },
@@ -333,14 +333,14 @@ fun BookShelf(
                     .pointerInput(Unit) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { start: Offset ->
-                                val y = start.y - padTop
-                                val id = resolveItemAtGrid(gridState.layoutInfo, y, start.x)
+                                val pointerY = start.y - padTop
+                                val id = resolveItemAtGrid(gridState.layoutInfo, pointerY, start.x)
                                 if (id != null) startDragSelect(id)
                             },
                             onDrag = { change: PointerInputChange, _: Offset ->
                                 change.consume()
-                                val y = change.position.y - padTop
-                                val id = resolveItemAtGrid(gridState.layoutInfo, y, change.position.x)
+                                val pointerY = change.position.y - padTop
+                                val id = resolveItemAtGrid(gridState.layoutInfo, pointerY, change.position.x)
                                 if (id != null) onDragSelectAt(id)
                             },
                             onDragEnd = { dragActive = false },

@@ -866,15 +866,15 @@ private fun LibraryTab(
     val onSeriesDragSelectAt: (String) -> Unit = { id ->
         if (dragActive) setSeriesSelect(id, dragValue)
     }
-    val resolveSeriesAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, py, _ ->
+    val resolveSeriesAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, pointerY, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            py >= item.offset.y && py < item.offset.y + item.size.height
+            pointerY >= item.offset.y && pointerY < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
-    val resolveSeriesAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, py, _ ->
+    val resolveSeriesAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, pointerY, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            py >= item.offset.y && py < item.offset.y + item.size.height
+            pointerY >= item.offset.y && pointerY < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
@@ -991,14 +991,14 @@ private fun LibraryTab(
                         .pointerInput(Unit) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { start: Offset ->
-                                    val y = start.y - padTop
-                                    val id = resolveSeriesAtList(listState.layoutInfo, y, start.x)
+                                    val pointerY = start.y - padTop
+                                    val id = resolveSeriesAtList(listState.layoutInfo, pointerY, start.x)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
                                 onDrag = { change: PointerInputChange, _: Offset ->
                                     change.consume()
-                                    val y = change.position.y - padTop
-                                    val id = resolveSeriesAtList(listState.layoutInfo, y, change.position.x)
+                                    val pointerY = change.position.y - padTop
+                                    val id = resolveSeriesAtList(listState.layoutInfo, pointerY, change.position.x)
                                     if (id != null) onSeriesDragSelectAt(id)
                                 },
                                 onDragEnd = { dragActive = false },
@@ -1045,14 +1045,14 @@ private fun LibraryTab(
                         .pointerInput(Unit) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { start: Offset ->
-                                    val y = start.y - padTop
-                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, y, start.x)
+                                    val pointerY = start.y - padTop
+                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY, start.x)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
                                 onDrag = { change: PointerInputChange, _: Offset ->
                                     change.consume()
-                                    val y = change.position.y - padTop
-                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, y, change.position.x)
+                                    val pointerY = change.position.y - padTop
+                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY, change.position.x)
                                     if (id != null) onSeriesDragSelectAt(id)
                                 },
                                 onDragEnd = { dragActive = false },
