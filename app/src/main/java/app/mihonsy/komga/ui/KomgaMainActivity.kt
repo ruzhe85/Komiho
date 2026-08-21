@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -31,12 +32,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.awaitPointerEvent
-import androidx.compose.foundation.gestures.awaitPointerEventScope
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
@@ -105,14 +106,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
@@ -860,8 +860,14 @@ private fun LibraryTab(
         dragActive = true
         dragValue = newValue
     }
-    val onSeriesDragSelect: (String) -> Unit = { id ->
+    val onSeriesDragSelectAt: (String) -> Unit = { id ->
         if (dragActive) setSeriesSelect(id, dragValue)
+    }
+    val resolveSeriesAt: (LazyListLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+        val hit = info.visibleItemsInfo.firstOrNull { item ->
+            y >= item.offset && y < item.offset + item.size
+        }
+        (hit?.key as? String) ?: sortedSeries.getOrNull(hit?.index ?: -1)?.id
     }
     val exitSeriesSelection: () -> Unit = { selectedIds = emptySet() }
 
@@ -965,17 +971,30 @@ private fun LibraryTab(
                 Text(composeStringResource(R.string.no_series_in_library))
             }
             else -> if (displayMode == LibraryDisplayMode.List) {
+                val listState = rememberLazyListState()
+                val padTop = with(LocalDensity.current) { 4.dp.toPx() }
                 LazyColumn(
+                    state = listState,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                     modifier = shelfModifier
-                        // End drag-select when the finger is lifted anywhere on the list.
+                        // Mihon-style slide-to-select: long-press starts the drag,
+                        // then every row the finger passes over gets selected.
                         .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (event.type == PointerEventType.Release) dragActive = false
-                                }
-                            }
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { change ->
+                                    val y = change.position.y - padTop
+                                    val id = resolveSeriesAt(listState.layoutInfo, y, change.position.x)
+                                    if (id != null) startSeriesDragSelect(id)
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    val y = change.position.y - padTop
+                                    val id = resolveSeriesAt(listState.layoutInfo, y, change.position.x)
+                                    if (id != null) onSeriesDragSelectAt(id)
+                                },
+                                onDragEnd = { dragActive = false },
+                                onDragCancel = { dragActive = false },
+                            )
                         },
                 ) {
                     items(sortedSeries) { s ->
@@ -985,8 +1004,6 @@ private fun LibraryTab(
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
                             selected = s.id in selectedIds,
                             onLongClick = { startSeriesDragSelect(s.id) },
-                            onDragSelect = { onSeriesDragSelect(s.id) },
-                            dragSelecting = dragActive,
                         )
                     }
                 }
@@ -1006,20 +1023,32 @@ private fun LibraryTab(
                 } else {
                     GridCells.Adaptive(minSize = adaptiveMin)
                 }
+                val gridState = rememberLazyGridState()
+                val padTop = with(LocalDensity.current) { 8.dp.toPx() }
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = cells,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(hSpace),
                     verticalArrangement = Arrangement.spacedBy(vSpace),
                     modifier = shelfModifier
-                        // End drag-select when the finger is lifted anywhere on the grid.
+                        // Mihon-style slide-to-select across grid cells.
                         .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (event.type == PointerEventType.Release) dragActive = false
-                                }
-                            }
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { change ->
+                                    val y = change.position.y - padTop
+                                    val id = resolveSeriesAt(gridState.layoutInfo, y, change.position.x)
+                                    if (id != null) startSeriesDragSelect(id)
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    val y = change.position.y - padTop
+                                    val id = resolveSeriesAt(gridState.layoutInfo, y, change.position.x)
+                                    if (id != null) onSeriesDragSelectAt(id)
+                                },
+                                onDragEnd = { dragActive = false },
+                                onDragCancel = { dragActive = false },
+                            )
                         },
                 ) {
                     items(sortedSeries) { s ->
@@ -1029,8 +1058,6 @@ private fun LibraryTab(
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
                             selected = s.id in selectedIds,
                             onLongClick = { startSeriesDragSelect(s.id) },
-                            onDragSelect = { onSeriesDragSelect(s.id) },
-                            dragSelecting = dragActive,
                             titleInside = isCompact,
                         )
                     }
@@ -1235,8 +1262,6 @@ fun LibrarySeriesListRow(
     onClick: () -> Unit,
     selected: Boolean = false,
     onLongClick: () -> Unit = {},
-    onDragSelect: () -> Unit = {},
-    dragSelecting: Boolean = false,
 ) {
     val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
@@ -1245,22 +1270,7 @@ fun LibrarySeriesListRow(
         border = BorderStroke(2.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            // While a drag-select gesture is active, mark this row when the
-            // pointer passes over it (Mihon-style slide-to-select).
-            .pointerInput(dragSelecting) {
-                if (!dragSelecting) return@pointerInput
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (event.type == PointerEventType.Move ||
-                            event.type == PointerEventType.Enter
-                        ) {
-                            if (event.changes.any { it.pressed }) onDragSelect()
-                        }
-                    }
-                }
-            },
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Row(
             modifier = Modifier.padding(vertical = 6.dp),
@@ -1306,8 +1316,6 @@ fun LibrarySeriesCard(
     onClick: () -> Unit,
     selected: Boolean = false,
     onLongClick: () -> Unit = {},
-    onDragSelect: () -> Unit = {},
-    dragSelecting: Boolean = false,
     titleInside: Boolean = false,
 ) {
     val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
@@ -1317,22 +1325,7 @@ fun LibrarySeriesCard(
         border = BorderStroke(2.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            // While a drag-select gesture is active, mark this card when the
-            // pointer passes over it (Mihon-style slide-to-select).
-            .pointerInput(dragSelecting) {
-                if (!dragSelecting) return@pointerInput
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (event.type == PointerEventType.Move ||
-                            event.type == PointerEventType.Enter
-                        ) {
-                            if (event.changes.any { it.pressed }) onDragSelect()
-                        }
-                    }
-                }
-            },
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Column {
             Box(

@@ -2,8 +2,7 @@ package app.mihonsy.komga.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.awaitPointerEvent
-import androidx.compose.foundation.gestures.awaitPointerEventScope
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,11 +20,14 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridView
@@ -55,12 +57,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -181,8 +182,17 @@ fun BookShelf(
         dragActive = true
         dragValue = newValue
     }
-    val onDragSelect: (String) -> Unit = { id ->
+    val onDragSelectAt: (String) -> Unit = { id ->
         if (dragActive) setSelect(id, dragValue)
+    }
+
+    // Resolve which item id sits under a pointer Y (relative to the lazy
+    // container's content area), using the lazy layout's visible items.
+    val resolveItemAt: (LazyListLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+        val hit = info.visibleItemsInfo.firstOrNull { item ->
+            y >= item.offset && y < item.offset + item.size
+        }
+        (hit?.key as? String) ?: books.getOrNull(hit?.index ?: -1)?.id
     }
 
     fun performBatchUpdate(completed: Boolean) {
@@ -253,19 +263,32 @@ fun BookShelf(
         }
 
         if (mode == LibraryDisplayMode.List) {
+            val listState = rememberLazyListState()
+            val padTop = with(LocalDensity.current) { 4.dp.toPx() }
             LazyColumn(
+                state = listState,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 modifier = Modifier
                     .fillMaxSize()
                     .then(if (inSelection) Modifier.weight(1f) else Modifier)
-                    // End drag-select when the finger is lifted anywhere on the list.
+                    // Mihon-style slide-to-select: long-press starts the drag,
+                    // then every row the finger passes over gets selected.
                     .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent(PointerEventPass.Initial)
-                                if (event.type == PointerEventType.Release) dragActive = false
-                            }
-                        }
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { change ->
+                                val y = change.position.y - padTop
+                                val id = resolveItemAt(listState.layoutInfo, y, change.position.x)
+                                if (id != null) startDragSelect(id)
+                            },
+                            onDrag = { change, _ ->
+                                change.consume()
+                                val y = change.position.y - padTop
+                                val id = resolveItemAt(listState.layoutInfo, y, change.position.x)
+                                if (id != null) onDragSelectAt(id)
+                            },
+                            onDragEnd = { dragActive = false },
+                            onDragCancel = { dragActive = false },
+                        )
                     },
             ) {
                 items(books) { b ->
@@ -275,8 +298,6 @@ fun BookShelf(
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
                         onLongClick = { startDragSelect(b.id) },
-                        onDragSelect = { onDragSelect(b.id) },
-                        dragSelecting = dragActive,
                     )
                 }
             }
@@ -288,7 +309,10 @@ fun BookShelf(
             val hSpace = if (isCompact) 4.dp else 8.dp
             val vSpace = if (isCompact) 6.dp else 12.dp
             val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
+            val gridState = rememberLazyGridState()
+            val padTop = with(LocalDensity.current) { 8.dp.toPx() }
             LazyVerticalGrid(
+                state = gridState,
                 columns = cells,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(hSpace),
@@ -296,14 +320,23 @@ fun BookShelf(
                 modifier = Modifier
                     .fillMaxSize()
                     .then(if (inSelection) Modifier.weight(1f) else Modifier)
-                    // End drag-select when the finger is lifted anywhere on the grid.
+                    // Mihon-style slide-to-select across grid cells.
                     .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent(PointerEventPass.Initial)
-                                if (event.type == PointerEventType.Release) dragActive = false
-                            }
-                        }
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { change ->
+                                val y = change.position.y - padTop
+                                val id = resolveItemAt(gridState.layoutInfo, y, change.position.x)
+                                if (id != null) startDragSelect(id)
+                            },
+                            onDrag = { change, _ ->
+                                change.consume()
+                                val y = change.position.y - padTop
+                                val id = resolveItemAt(gridState.layoutInfo, y, change.position.x)
+                                if (id != null) onDragSelectAt(id)
+                            },
+                            onDragEnd = { dragActive = false },
+                            onDragCancel = { dragActive = false },
+                        )
                     },
             ) {
                 gridItems(books) { b ->
@@ -316,8 +349,6 @@ fun BookShelf(
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
                         onLongClick = { startDragSelect(b.id) },
-                        onDragSelect = { onDragSelect(b.id) },
-                        dragSelecting = dragActive,
                     )
                 }
             }
@@ -500,8 +531,6 @@ fun BookShelfListRow(
     selected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
-    onDragSelect: () -> Unit = {},
-    dragSelecting: Boolean = false,
 ) {
     val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
@@ -510,22 +539,7 @@ fun BookShelfListRow(
         border = androidx.compose.foundation.BorderStroke(2.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            // While a drag-select gesture is active, mark this row when the
-            // pointer passes over it (Mihon-style slide-to-select).
-            .pointerInput(dragSelecting) {
-                if (!dragSelecting) return@pointerInput
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (event.type == PointerEventType.Move ||
-                            event.type == PointerEventType.Enter
-                        ) {
-                            if (event.changes.any { it.pressed }) onDragSelect()
-                        }
-                    }
-                }
-            },
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
