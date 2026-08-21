@@ -20,7 +20,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListLayoutInfo
+import androidx.compose.foundation.lazy.layout.LazyLayoutInfo
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -188,11 +188,11 @@ fun BookShelf(
 
     // Resolve which item id sits under a pointer Y (relative to the lazy
     // container's content area), using the lazy layout's visible items.
-    val resolveItemAt: (LazyListLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+    val resolveItemAt: (LazyLayoutInfo, Float, Float) -> String? = { info, y, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
             y >= item.offset && y < item.offset + item.size
         }
-        (hit?.key as? String) ?: books.getOrNull(hit?.index ?: -1)?.id
+        hit?.key as? String
     }
 
     fun performBatchUpdate(completed: Boolean) {
@@ -291,7 +291,7 @@ fun BookShelf(
                         )
                     },
             ) {
-                items(books) { b ->
+                items(books, key = { it.id }) { b ->
                     BookShelfListRow(
                         client = client,
                         book = b,
@@ -339,7 +339,7 @@ fun BookShelf(
                         )
                     },
             ) {
-                gridItems(books) { b ->
+                gridItems(books, key = { it.id }) { b ->
                     BookShelfCard(
                         client = client,
                         book = b,

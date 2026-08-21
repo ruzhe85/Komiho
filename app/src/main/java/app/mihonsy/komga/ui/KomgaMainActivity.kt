@@ -23,7 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListLayoutInfo
+import androidx.compose.foundation.lazy.layout.LazyLayoutInfo
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -863,11 +863,11 @@ private fun LibraryTab(
     val onSeriesDragSelectAt: (String) -> Unit = { id ->
         if (dragActive) setSeriesSelect(id, dragValue)
     }
-    val resolveSeriesAt: (LazyListLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+    val resolveSeriesAt: (LazyLayoutInfo, Float, Float) -> String? = { info, y, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
             y >= item.offset && y < item.offset + item.size
         }
-        (hit?.key as? String) ?: sortedSeries.getOrNull(hit?.index ?: -1)?.id
+        hit?.key as? String
     }
     val exitSeriesSelection: () -> Unit = { selectedIds = emptySet() }
 
@@ -997,7 +997,7 @@ private fun LibraryTab(
                             )
                         },
                 ) {
-                    items(sortedSeries) { s ->
+                    items(sortedSeries, key = { it.id }) { s ->
                         LibrarySeriesListRow(
                             client,
                             s,
@@ -1051,7 +1051,7 @@ private fun LibraryTab(
                             )
                         },
                 ) {
-                    items(sortedSeries) { s ->
+                    items(sortedSeries, key = { it.id }) { s ->
                         LibrarySeriesCard(
                             client,
                             s,
