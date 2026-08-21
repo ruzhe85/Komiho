@@ -992,15 +992,22 @@ private fun LibraryTab(
                         // Mihon-style slide-to-select: long-press starts the drag,
                         // then every row the finger passes over gets selected.
                         .pointerInput(Unit) {
+                            // onDragStart.start 是相对 pointerInput 作用域的绝对坐标，
+                            // 但 onDrag 的 change.position 是屏幕绝对坐标（含状态栏偏移），
+                            // 坐标系不一致会导致划过命中错位。改用 dragAmount 从 start 累加，
+                            // 全程保持相对作用域坐标，稳定命中。
+                            var currentDragY = 0f
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { start: Offset ->
-                                    val pointerY = start.y - padTop
+                                    currentDragY = start.y
+                                    val pointerY = currentDragY - padTop
                                     val id = resolveSeriesAtList(listState.layoutInfo, pointerY)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
-                                onDrag = { change: PointerInputChange, _: Offset ->
+                                onDrag = { change: PointerInputChange, dragAmount: Offset ->
                                     change.consume()
-                                    val pointerY = change.position.y - padTop
+                                    currentDragY += dragAmount.y
+                                    val pointerY = currentDragY - padTop
                                     val id = resolveSeriesAtList(listState.layoutInfo, pointerY)
                                     if (id != null) onSeriesDragSelectAt(id)
                                 },
@@ -1045,15 +1052,18 @@ private fun LibraryTab(
                     modifier = shelfModifier
                         // Mihon-style slide-to-select across grid cells.
                         .pointerInput(Unit) {
+                            var currentDragY = 0f
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { start: Offset ->
-                                    val pointerY = start.y - padTop
+                                    currentDragY = start.y
+                                    val pointerY = currentDragY - padTop
                                     val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
-                                onDrag = { change: PointerInputChange, _: Offset ->
+                                onDrag = { change: PointerInputChange, dragAmount: Offset ->
                                     change.consume()
-                                    val pointerY = change.position.y - padTop
+                                    currentDragY += dragAmount.y
+                                    val pointerY = currentDragY - padTop
                                     val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY)
                                     if (id != null) onSeriesDragSelectAt(id)
                                 },
