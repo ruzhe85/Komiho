@@ -1427,6 +1427,10 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
         .getOrDefault(ThemeMode.SYSTEM)
     val appThemeEnum = runCatching { AppTheme.valueOf(prefs.appTheme) }
         .getOrDefault(AppTheme.DEFAULT)
+    // U4: selected skin is held in state so the checkmark appears instantly on
+    // click (the widget's internal `ActivityCompat.recreate` is a no-op inside a
+    // Dialog, so we drive the actual theme apply via `activity?.recreate()`).
+    var appThemeSel by remember { mutableStateOf(appThemeEnum) }
     var amoledSel by remember { mutableStateOf(prefs.themeDarkAmoled) }
     var showAppLanguage by remember { mutableStateOf(false) }
 
@@ -1450,9 +1454,13 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
         }
         item {
             AppThemePreferenceWidget(
-                value = appThemeEnum,
+                value = appThemeSel,
                 amoled = amoledSel,
-                onItemClick = { prefs.appTheme = it.name },
+                onItemClick = {
+                    prefs.appTheme = it.name
+                    appThemeSel = it
+                    activity?.recreate()
+                },
             )
         }
         item {
