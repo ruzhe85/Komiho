@@ -42,6 +42,8 @@
     <string name="cd_filter_sort">篩選/排序</string>
     <string name="read_status_header">閱讀狀態</string>
     <string name="sort_header">排序</string>
+    <string name="display_mode_header">顯示模式</string>
+    <string name="cd_display_options">顯示選項</string>
     <string name="sort_title">標題</string>
     <string name="sort_last_modified">最近更新</string>
     <string name="sort_last_read">最近閱讀</string>
