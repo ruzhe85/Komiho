@@ -149,38 +149,76 @@ import kotlinx.coroutines.launch
 //   LazyListItemInfo.offset/size 为 Int（绝对 Y/高度）
 //   LazyGridItemInfo.offset/size 为 IntOffset/IntSize（用 .y/.height）
 // 以下两函数分别按各自真实类型做区间命中。
-private fun resolveSeriesAtList(info: LazyListLayoutInfo, q3x9y: Float): String? {
-    val hit = info.visibleItemsInfo.firstOrNull { q3x9y >= it.offset.toFloat() && q3x9y < (it.offset + it.size).toFloat() }
+private fun resolveSeriesAtList(
+    info: LazyListLayoutInfo,
+    y: Float,
+): String? {
+    val hit = info.visibleItemsInfo.firstOrNull {
+        val top = it.offset.toFloat()
+        val bottom = (it.offset + it.size).toFloat()
+        y >= top && y < bottom
+    }
+
     return hit?.key as? String
 }
 
-private fun resolveSeriesAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String? {
-    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
-    return hit?.key as? String
-}
-
-// 线段命中：返回 fromY..toY 区间内所有相交 item 的 id（含起点与终点之间的所有项）。
-// 解决单点检测在快速滑动时跨多个 item 只命中终点、漏掉中间项的问题。
-// 不再做 padTop 人工修正——offset 本身是 Lazy 布局坐标，直接用 start.y/currentY。
-private fun resolveSeriesBetweenList(info: LazyListLayoutInfo, fromY: Float, toY: Float): List<String> {
+/**
+ * 返回一次 drag 从 fromY 到 toY 之间经过的所有 item。
+ *
+ * 这样即使一次 onDrag 的 dragAmount.y 很大，
+ * 中间跨过多个 item，也不会漏选。
+ */
+private fun resolveSeriesBetweenList(
+    info: LazyListLayoutInfo,
+    fromY: Float,
+    toY: Float,
+): List<String> {
     val minY = minOf(fromY, toY)
     val maxY = maxOf(fromY, toY)
+
     return info.visibleItemsInfo
         .filter { item ->
             val itemTop = item.offset.toFloat()
             val itemBottom = (item.offset + item.size).toFloat()
+
             maxY >= itemTop && minY < itemBottom
         }
         .mapNotNull { it.key as? String }
 }
 
-private fun resolveSeriesBetweenGrid(info: LazyGridLayoutInfo, fromY: Float, toY: Float): List<String> {
+private fun resolveSeriesAtGrid(
+    info: LazyGridLayoutInfo,
+    y: Float,
+): String? {
+    val hit = info.visibleItemsInfo.firstOrNull {
+        val top = it.offset.y.toFloat()
+        val bottom = (it.offset.y + it.size.height).toFloat()
+
+        y >= top && y < bottom
+    }
+
+    return hit?.key as? String
+}
+
+/**
+ * 返回一次 drag 从 fromY 到 toY 之间经过的所有 Grid item。
+ *
+ * 注意：这一版仍然按照 Y 方向处理，
+ * 与当前项目的原有命中逻辑保持一致。
+ */
+private fun resolveSeriesBetweenGrid(
+    info: LazyGridLayoutInfo,
+    fromY: Float,
+    toY: Float,
+): List<String> {
     val minY = minOf(fromY, toY)
     val maxY = maxOf(fromY, toY)
+
     return info.visibleItemsInfo
         .filter { item ->
             val itemTop = item.offset.y.toFloat()
             val itemBottom = (item.offset.y + item.size.height).toFloat()
+
             maxY >= itemTop && minY < itemBottom
         }
         .mapNotNull { it.key as? String }

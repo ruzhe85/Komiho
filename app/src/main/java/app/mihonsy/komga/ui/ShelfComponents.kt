@@ -79,13 +79,27 @@ import kotlinx.coroutines.launch
 // 注意本 BOM(2026.06.01) 类型差异：
 //   LazyListItemInfo.offset/size 为 Int（绝对 Y/高度）
 //   LazyGridItemInfo.offset/size 为 IntOffset/IntSize（用 .y/.height）
-private fun resolveItemAtList(info: LazyListLayoutInfo, q3x9y: Float): String? {
-    val hit = info.visibleItemsInfo.firstOrNull { q3x9y >= it.offset.toFloat() && q3x9y < (it.offset + it.size).toFloat() }
+private fun resolveItemAtList(
+    info: LazyListLayoutInfo,
+    y: Float,
+): String? {
+    val hit = info.visibleItemsInfo.firstOrNull {
+        val top = it.offset.toFloat()
+        val bottom = (it.offset + it.size).toFloat()
+        y >= top && y < bottom
+    }
     return hit?.key as? String
 }
 
-private fun resolveItemAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String? {
-    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
+private fun resolveItemAtGrid(
+    info: LazyGridLayoutInfo,
+    y: Float,
+): String? {
+    val hit = info.visibleItemsInfo.firstOrNull {
+        val top = it.offset.y.toFloat()
+        val bottom = (it.offset.y + it.size.height).toFloat()
+        y >= top && y < bottom
+    }
     return hit?.key as? String
 }
 
