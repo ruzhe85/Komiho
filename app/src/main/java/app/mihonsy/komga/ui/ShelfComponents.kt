@@ -193,13 +193,13 @@ fun BookShelf(
     // container's content area), using the lazy layout's visible items.
     val resolveItemAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, py, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            py >= item.offset.y && py < item.offset.y + item.size.height
+            py >= item.offset && py < item.offset + item.size
         }
         hit?.key as? String
     }
     val resolveItemAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, py, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            py >= item.offset.y && py < item.offset.y + item.size.height
+            py >= item.offset && py < item.offset + item.size
         }
         hit?.key as? String
     }
