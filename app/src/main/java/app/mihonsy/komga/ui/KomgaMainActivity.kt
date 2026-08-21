@@ -868,13 +868,13 @@ private fun LibraryTab(
     }
     val resolveSeriesAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, y, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            y >= item.offset && y < item.offset + item.size
+            y >= item.offset.y && y < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
     val resolveSeriesAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, y, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            y >= item.offset && y < item.offset + item.size
+            y >= item.offset.y && y < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
@@ -990,9 +990,9 @@ private fun LibraryTab(
                         // then every row the finger passes over gets selected.
                         .pointerInput(Unit) {
                             detectDragGesturesAfterLongPress(
-                                onDragStart = { change: PointerInputChange ->
-                                    val y = change.position.y - padTop
-                                    val id = resolveSeriesAtList(listState.layoutInfo, y, change.position.x)
+                                onDragStart = { start: Offset ->
+                                    val y = start.y - padTop
+                                    val id = resolveSeriesAtList(listState.layoutInfo, y, start.x)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
                                 onDrag = { change: PointerInputChange, _: Offset ->
@@ -1044,9 +1044,9 @@ private fun LibraryTab(
                         // Mihon-style slide-to-select across grid cells.
                         .pointerInput(Unit) {
                             detectDragGesturesAfterLongPress(
-                                onDragStart = { change: PointerInputChange ->
-                                    val y = change.position.y - padTop
-                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, y, change.position.x)
+                                onDragStart = { start: Offset ->
+                                    val y = start.y - padTop
+                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, y, start.x)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
                                 onDrag = { change: PointerInputChange, _: Offset ->
