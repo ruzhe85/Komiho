@@ -45,6 +45,8 @@
     <string name="sort_header">排序</string>
     <string name="display_mode_header">显示模式</string>
     <string name="cd_display_options">显示选项</string>
+    <string name="pref_library_columns">每行数量</string>
+    <string name="label_auto">自动</string>
     <string name="sort_title">标题</string>
     <string name="sort_last_modified">最近更新</string>
     <string name="sort_last_read">最近阅读</string>

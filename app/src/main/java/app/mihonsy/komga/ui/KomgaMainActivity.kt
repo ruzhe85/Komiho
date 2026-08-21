@@ -23,6 +23,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -51,12 +53,12 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
+import eu.kanade.presentation.components.TabbedDialog
+import tachiyomi.presentation.core.components.CheckboxItem
+import tachiyomi.presentation.core.components.SliderItem
+import tachiyomi.presentation.core.components.SortItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -191,7 +193,9 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
     val isLandscape = remember(configuration) {
         configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     }
-    val columns = if (isLandscape) prefs.libraryLandscapeColumns else prefs.libraryPortraitColumns
+    var portraitColumns by remember { mutableStateOf(prefs.libraryPortraitColumns) }
+    var landscapeColumns by remember { mutableStateOf(prefs.libraryLandscapeColumns) }
+    val columns = if (isLandscape) landscapeColumns else portraitColumns
 
     // Library picker — owned at the top level so the bottom-bar icon can
     // pop a dialog listing all libraries; picking one enters that library.
@@ -241,6 +245,16 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                                 onDisplayModeChange = {
                                     displayMode = it
                                     prefs.libraryDisplayMode = it.prefValue
+                                },
+                                columns = columns,
+                                onColumnChange = { newColumns ->
+                                    if (isLandscape) {
+                                        landscapeColumns = newColumns
+                                        prefs.libraryLandscapeColumns = newColumns
+                                    } else {
+                                        portraitColumns = newColumns
+                                        prefs.libraryPortraitColumns = newColumns
+                                    }
                                 },
                                 sortMode = librarySortMode,
                                 onSortModeChange = {
@@ -890,8 +904,8 @@ private fun LibraryTab(
 
 /**
  * M3.11 / UI simplification: the single toolbar "display options" (Tune)
- * button opens this one composite menu — display mode · sort · read-status
- * filter — replacing the old separate funnel dropdown + display dialog.
+ * button opens a MihonSY-style tabbed bottom sheet — Filter · Sort · Display —
+ * replacing the old separate funnel dropdown + display dialog.
  */
 @Composable
 private fun ShelfOptionsMenu(
@@ -899,79 +913,85 @@ private fun ShelfOptionsMenu(
     onDismiss: () -> Unit,
     displayMode: LibraryDisplayMode,
     onDisplayModeChange: (LibraryDisplayMode) -> Unit,
+    columns: Int,
+    onColumnChange: (Int) -> Unit,
     sortMode: LibrarySortMode,
     onSortModeChange: (LibrarySortMode) -> Unit,
     readFilter: ReadFilter,
     onReadFilterChange: (ReadFilter) -> Unit,
 ) {
-    DropdownMenu(
-        expanded = expanded,
+    if (!expanded) return
+
+    val tabTitles = listOf(
+        composeStringResource(R.string.read_status_header),
+        composeStringResource(R.string.sort_header),
+        composeStringResource(R.string.display_mode_header),
+    )
+
+    TabbedDialog(
         onDismissRequest = onDismiss,
-    ) {
-        // --- Display mode group ---
-        Text(
-            text = composeStringResource(R.string.display_mode_header),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-        LibraryDisplayMode.entries.forEach { m ->
-            DropdownMenuItem(
-                text = { Text(m.labelText()) },
-                onClick = {
-                    onDisplayModeChange(m)
-                    onDismiss()
-                },
-                leadingIcon = {
-                    if (displayMode == m) {
-                        Icon(imageVector = Icons.Filled.Check, contentDescription = null)
+        tabTitles = tabTitles,
+    ) { page ->
+        Column(
+            modifier = Modifier
+                .padding(vertical = 8.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            when (page) {
+                0 -> {
+                    ReadFilter.entries.forEach { f ->
+                        CheckboxItem(
+                            label = f.labelText(),
+                            checked = readFilter == f,
+                            onClick = { onReadFilterChange(f) },
+                        )
                     }
-                },
-            )
-        }
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-        // --- Sort group ---
-        Text(
-            text = composeStringResource(R.string.sort_header),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-        LibrarySortMode.entries.forEach { m ->
-            DropdownMenuItem(
-                text = { Text(m.labelText()) },
-                onClick = {
-                    onSortModeChange(m)
-                    onDismiss()
-                },
-                leadingIcon = {
-                    if (sortMode == m) {
-                        Icon(imageVector = Icons.Filled.Check, contentDescription = null)
+                }
+                1 -> {
+                    LibrarySortMode.entries.forEach { m ->
+                        SortItem(
+                            label = m.labelText(),
+                            sortDescending = if (sortMode == m) true else null,
+                            onClick = { onSortModeChange(m) },
+                        )
                     }
-                },
-            )
-        }
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-        // --- Read-status filter group ---
-        Text(
-            text = composeStringResource(R.string.read_status_header),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-        ReadFilter.entries.forEach { f ->
-            DropdownMenuItem(
-                text = { Text(f.labelText()) },
-                onClick = {
-                    onReadFilterChange(f)
-                    onDismiss()
-                },
-                leadingIcon = {
-                    if (readFilter == f) {
-                        Icon(imageVector = Icons.Filled.Check, contentDescription = null)
+                }
+                2 -> {
+                    Text(
+                        text = composeStringResource(R.string.display_mode_header),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        LibraryDisplayMode.entries.forEach { m ->
+                            FilterChip(
+                                selected = displayMode == m,
+                                onClick = { onDisplayModeChange(m) },
+                                label = { Text(m.labelText()) },
+                            )
+                        }
                     }
-                },
-            )
+                    if (displayMode != LibraryDisplayMode.List) {
+                        SliderItem(
+                            value = columns,
+                            valueRange = 0..10,
+                            label = composeStringResource(R.string.pref_library_columns),
+                            valueString = if (columns > 0) {
+                                columns.toString()
+                            } else {
+                                composeStringResource(R.string.label_auto)
+                            },
+                            onChange = onColumnChange,
+                        )
+                    }
+                }
+            }
         }
     }
 }
