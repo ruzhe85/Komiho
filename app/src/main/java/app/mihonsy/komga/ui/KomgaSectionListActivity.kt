@@ -6,6 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitPointerEvent
+import androidx.compose.foundation.gestures.awaitPointerEventScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +35,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -116,7 +121,8 @@ private fun KomgaSectionListScreen(section: HomeSection) {
 
     // Read directly from prefs every recomposition so the TopAppBar toggle
     // shows the current mode across the whole app.
-    val mode = LibraryDisplayMode.fromPref(prefs.libraryDisplayMode)
+    // Book-level display mode (independent from the series shelf).
+    val mode = LibraryDisplayMode.fromPref(prefs.bookDisplayMode)
     var displayOpen by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -186,7 +192,7 @@ private fun KomgaSectionListScreen(section: HomeSection) {
             displayMode = dialogMode,
             onModeChange = {
                 dialogMode = it
-                prefs.libraryDisplayMode = it.prefValue
+                prefs.bookDisplayMode = it.prefValue
             },
             columnCount = dialogColumns,
             isLandscape = isLandscape,
@@ -212,6 +218,8 @@ fun BookShelfCard(
     selected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
+    onDragSelect: () -> Unit = {},
+    dragSelecting: Boolean = false,
 ) {
     val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
@@ -220,7 +228,22 @@ fun BookShelfCard(
         border = androidx.compose.foundation.BorderStroke(2.dp, borderColor),
         modifier = modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            // While a drag-select gesture is active, mark this card when the
+            // pointer passes over it (Mihon-style slide-to-select).
+            .pointerInput(dragSelecting) {
+                if (!dragSelecting) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.type == PointerEventType.Move ||
+                            event.type == PointerEventType.Enter
+                        ) {
+                            if (event.changes.any { it.pressed }) onDragSelect()
+                        }
+                    }
+                }
+            },
     ) {
         Column {
             Box(

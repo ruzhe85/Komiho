@@ -35,6 +35,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitPointerEvent
+import androidx.compose.foundation.gestures.awaitPointerEventScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
@@ -103,7 +105,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -836,11 +842,26 @@ private fun LibraryTab(
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showReadlistPicker by remember { mutableStateOf(false) }
     var showCollectionPicker by remember { mutableStateOf(false) }
+
+    // ── Mihon-style drag-to-select (划动选择) ──
+    var dragActive by remember { mutableStateOf(false) }
+    var dragValue by remember { mutableStateOf(true) }
+
     val inSelection = selectedIds.isNotEmpty()
     val selectedSeries = remember(selectedIds, series) { series.filter { it.id in selectedIds } }
 
-    val toggleSeriesSelect: (String) -> Unit = { id ->
-        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    val setSeriesSelect: (String, Boolean) -> Unit = { id, value ->
+        selectedIds = if (value) selectedIds + id else selectedIds - id
+    }
+    val toggleSeriesSelect: (String) -> Unit = { id -> setSeriesSelect(id, id !in selectedIds) }
+    val startSeriesDragSelect: (String) -> Unit = { id ->
+        val newValue = id !in selectedIds
+        setSeriesSelect(id, newValue)
+        dragActive = true
+        dragValue = newValue
+    }
+    val onSeriesDragSelect: (String) -> Unit = { id ->
+        if (dragActive) setSeriesSelect(id, dragValue)
     }
     val exitSeriesSelection: () -> Unit = { selectedIds = emptySet() }
 
@@ -946,7 +967,16 @@ private fun LibraryTab(
             else -> if (displayMode == LibraryDisplayMode.List) {
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                    modifier = shelfModifier,
+                    modifier = shelfModifier
+                        // End drag-select when the finger is lifted anywhere on the list.
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (event.type == PointerEventType.Release) dragActive = false
+                                }
+                            }
+                        },
                 ) {
                     items(sortedSeries) { s ->
                         LibrarySeriesListRow(
@@ -954,7 +984,9 @@ private fun LibraryTab(
                             s,
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
                             selected = s.id in selectedIds,
-                            onLongClick = { toggleSeriesSelect(s.id) },
+                            onLongClick = { startSeriesDragSelect(s.id) },
+                            onDragSelect = { onSeriesDragSelect(s.id) },
+                            dragSelecting = dragActive,
                         )
                     }
                 }
@@ -979,7 +1011,16 @@ private fun LibraryTab(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(hSpace),
                     verticalArrangement = Arrangement.spacedBy(vSpace),
-                    modifier = shelfModifier,
+                    modifier = shelfModifier
+                        // End drag-select when the finger is lifted anywhere on the grid.
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (event.type == PointerEventType.Release) dragActive = false
+                                }
+                            }
+                        },
                 ) {
                     items(sortedSeries) { s ->
                         LibrarySeriesCard(
@@ -987,7 +1028,10 @@ private fun LibraryTab(
                             s,
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
                             selected = s.id in selectedIds,
-                            onLongClick = { toggleSeriesSelect(s.id) },
+                            onLongClick = { startSeriesDragSelect(s.id) },
+                            onDragSelect = { onSeriesDragSelect(s.id) },
+                            dragSelecting = dragActive,
+                            titleInside = isCompact,
                         )
                     }
                 }
@@ -1191,16 +1235,32 @@ fun LibrarySeriesListRow(
     onClick: () -> Unit,
     selected: Boolean = false,
     onLongClick: () -> Unit = {},
+    onDragSelect: () -> Unit = {},
+    dragSelecting: Boolean = false,
 ) {
     val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
-        onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
         border = BorderStroke(2.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            // While a drag-select gesture is active, mark this row when the
+            // pointer passes over it (Mihon-style slide-to-select).
+            .pointerInput(dragSelecting) {
+                if (!dragSelecting) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.type == PointerEventType.Move ||
+                            event.type == PointerEventType.Enter
+                        ) {
+                            if (event.changes.any { it.pressed }) onDragSelect()
+                        }
+                    }
+                }
+            },
     ) {
         Row(
             modifier = Modifier.padding(vertical = 6.dp),
@@ -1246,16 +1306,33 @@ fun LibrarySeriesCard(
     onClick: () -> Unit,
     selected: Boolean = false,
     onLongClick: () -> Unit = {},
+    onDragSelect: () -> Unit = {},
+    dragSelecting: Boolean = false,
+    titleInside: Boolean = false,
 ) {
     val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
-        onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
         border = BorderStroke(2.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            // While a drag-select gesture is active, mark this card when the
+            // pointer passes over it (Mihon-style slide-to-select).
+            .pointerInput(dragSelecting) {
+                if (!dragSelecting) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.type == PointerEventType.Move ||
+                            event.type == PointerEventType.Enter
+                        ) {
+                            if (event.changes.any { it.pressed }) onDragSelect()
+                        }
+                    }
+                }
+            },
     ) {
         Column {
             Box(
@@ -1301,14 +1378,39 @@ fun LibrarySeriesCard(
                         )
                     }
                 }
+                // Compact grid overlays the title on the cover bottom (like
+                // Mihon's library grid); comfortable grid shows it below.
+                if (titleInside) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f)),
+                                ),
+                            )
+                            .padding(horizontal = 6.dp, vertical = 5.dp),
+                    ) {
+                        Text(
+                            text = series.name,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
-            Text(
-                text = series.name,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 4.dp),
-            )
+            if (!titleInside) {
+                Text(
+                    text = series.name,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
     }
 }
