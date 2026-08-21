@@ -282,15 +282,18 @@ fun BookShelf(
                     // Mihon-style slide-to-select: long-press starts the drag,
                     // then every row the finger passes over gets selected.
                     .pointerInput(Unit) {
+                        var currentDragY = 0f
                         detectDragGesturesAfterLongPress(
                             onDragStart = { start: Offset ->
-                                val pointerY = start.y - padTop
+                                currentDragY = start.y
+                                val pointerY = currentDragY - padTop
                                 val id = resolveItemAtList(listState.layoutInfo, pointerY)
                                 if (id != null) startDragSelect(id)
                             },
-                            onDrag = { change: PointerInputChange, _: Offset ->
+                            onDrag = { change: PointerInputChange, dragAmount: Offset ->
                                 change.consume()
-                                val pointerY = change.position.y - padTop
+                                currentDragY += dragAmount.y
+                                val pointerY = currentDragY - padTop
                                 val id = resolveItemAtList(listState.layoutInfo, pointerY)
                                 if (id != null) onDragSelectAt(id)
                             },
@@ -329,15 +332,18 @@ fun BookShelf(
                     .then(if (inSelection) Modifier.weight(1f) else Modifier)
                     // Mihon-style slide-to-select across grid cells.
                     .pointerInput(Unit) {
+                        var currentDragY = 0f
                         detectDragGesturesAfterLongPress(
                             onDragStart = { start: Offset ->
-                                val pointerY = start.y - padTop
+                                currentDragY = start.y
+                                val pointerY = currentDragY - padTop
                                 val id = resolveItemAtGrid(gridState.layoutInfo, pointerY)
                                 if (id != null) startDragSelect(id)
                             },
-                            onDrag = { change: PointerInputChange, _: Offset ->
+                            onDrag = { change: PointerInputChange, dragAmount: Offset ->
                                 change.consume()
-                                val pointerY = change.position.y - padTop
+                                currentDragY += dragAmount.y
+                                val pointerY = currentDragY - padTop
                                 val id = resolveItemAtGrid(gridState.layoutInfo, pointerY)
                                 if (id != null) onDragSelectAt(id)
                             },
