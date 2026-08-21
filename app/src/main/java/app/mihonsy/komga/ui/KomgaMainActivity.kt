@@ -155,7 +155,6 @@ private fun resolveSeriesAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String?
     val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
     return hit?.key as? String
 }
-import kotlinx.coroutines.launch
 
 /**
  * Komiho M3: main activity with bottom navigation.

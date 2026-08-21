@@ -66,6 +66,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource as composeStringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import app.mihonsy.komga.data.KomgaApiClient
+import app.mihonsy.komga.data.model.BookDto
+import app.mihonsy.komga.data.model.ReadingListDto
+import app.mihonsy.komga.data.model.SeriesDto
+import eu.kanade.tachiyomi.R
+import kotlinx.coroutines.launch
 
 // 划动选择命中检测：在可见 item 中按指针 Y 坐标找对应 id。
 // 本 BOM(2026.06.01) 中 LazyListItemInfo.offset 为 IntOffset、size 为 IntSize，
@@ -79,14 +87,6 @@ private fun resolveItemAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String? {
     val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
     return hit?.key as? String
 }
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import app.mihonsy.komga.data.KomgaApiClient
-import app.mihonsy.komga.data.model.BookDto
-import app.mihonsy.komga.data.model.ReadingListDto
-import app.mihonsy.komga.data.model.SeriesDto
-import eu.kanade.tachiyomi.R
-import kotlinx.coroutines.launch
 
 /**
  * Shared shelf rendering for every page that lists series or books.
