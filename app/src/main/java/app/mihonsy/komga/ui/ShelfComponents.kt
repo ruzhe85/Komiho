@@ -305,7 +305,6 @@ fun BookShelf(
                         book = b,
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
-                        onLongClick = { startDragSelect(b.id) },
                     )
                 }
             }
@@ -356,7 +355,6 @@ fun BookShelf(
                         titleInside = mode == LibraryDisplayMode.CompactGrid,
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
-                        onLongClick = { startDragSelect(b.id) },
                     )
                 }
             }
