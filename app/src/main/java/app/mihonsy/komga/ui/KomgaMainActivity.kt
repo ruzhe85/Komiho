@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
 import androidx.compose.material.icons.filled.ArrowBack
@@ -179,15 +180,18 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
     // can drive every page (KomgaMainScreen's tabs + child activities that
     // also read prefs.libraryDisplayMode).
     var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.libraryDisplayMode)) }
-    // Library tab also gets per-orientation column counts.
+    // Library shelf sort + read-status filter lifted here so the single
+    // toolbar "display options" button can drive them in one composite menu.
+    var librarySortMode by remember { mutableStateOf(LibrarySortMode.fromPref(prefs.librarySort)) }
+    var libraryReadFilter by remember { mutableStateOf(ReadFilter.All) }
+    var shelfMenuOpen by remember { mutableStateOf(false) }
+    // Library tab also gets per-orientation column counts (read-only from
+    // prefs; the old columns slider was folded into the toolbar menu).
     val configuration = LocalConfiguration.current
     val isLandscape = remember(configuration) {
         configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     }
-    var portraitColumns by remember { mutableStateOf(prefs.libraryPortraitColumns) }
-    var landscapeColumns by remember { mutableStateOf(prefs.libraryLandscapeColumns) }
-    val columns = if (isLandscape) landscapeColumns else portraitColumns
-    var displayOpen by remember { mutableStateOf(false) }
+    val columns = if (isLandscape) prefs.libraryLandscapeColumns else prefs.libraryPortraitColumns
 
     // Library picker — owned at the top level so the bottom-bar icon can
     // pop a dialog listing all libraries; picking one enters that library.
@@ -218,12 +222,35 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
             TopAppBar(
                 title = { Text(MainTab.entries[currentTab].labelText()) },
                 actions = {
-                    // Shelf toggle on Library/Lists tabs only — the Home tab
-                    // has no grid modes (its sections are configured in
-                    // Settings), and Settings manages itself.
                     val currentTabEnum = MainTab.entries[currentTab]
-                    if (currentTabEnum == MainTab.Library || currentTabEnum == MainTab.Lists) {
-                        ShelfModeToggle(displayMode) { displayOpen = true }
+                    // Single "display options" button on the Library shelf:
+                    // opens one composite menu (display mode · sort · filter),
+                    // replacing the old separate filter funnel + display dialog.
+                    if (currentTabEnum == MainTab.Library) {
+                        Box {
+                            IconButton(onClick = { shelfMenuOpen = true }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Tune,
+                                    contentDescription = composeStringResource(R.string.cd_display_options),
+                                )
+                            }
+                            ShelfOptionsMenu(
+                                expanded = shelfMenuOpen,
+                                onDismiss = { shelfMenuOpen = false },
+                                displayMode = displayMode,
+                                onDisplayModeChange = {
+                                    displayMode = it
+                                    prefs.libraryDisplayMode = it.prefValue
+                                },
+                                sortMode = librarySortMode,
+                                onSortModeChange = {
+                                    librarySortMode = it
+                                    prefs.librarySort = it.prefValue
+                                },
+                                readFilter = libraryReadFilter,
+                                onReadFilterChange = { libraryReadFilter = it },
+                            )
+                        }
                     }
                     if (currentTabEnum != MainTab.Settings) {
                         androidx.compose.material3.IconButton(onClick = { searchOpen = !searchOpen }) {
@@ -282,6 +309,10 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                         displayMode = displayMode,
                         columns = columns,
                         refreshTick = refreshTick,
+                        sortMode = librarySortMode,
+                        onSortModeChange = { librarySortMode = it },
+                        readFilter = libraryReadFilter,
+                        onReadFilterChange = { libraryReadFilter = it },
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
@@ -296,36 +327,6 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                 }
             }
         }
-    }
-
-    if (displayOpen) {
-        // Dialog-local state: the slider must only recompose the dialog while
-        // dragging — writing page-level columns per tick recomposed the whole
-        // library grid and made drags unresponsive (worst on narrow portrait
-        // screens). Values sync to prefs/page state on dismiss.
-        var dialogMode by remember { mutableStateOf(displayMode) }
-        var dialogColumns by remember {
-            mutableStateOf(if (isLandscape) prefs.libraryLandscapeColumns else prefs.libraryPortraitColumns)
-        }
-        DisplaySettingsDialog(
-            displayMode = dialogMode,
-            onModeChange = { dialogMode = it },
-            columnCount = dialogColumns,
-            isLandscape = isLandscape,
-            onColumnChange = { dialogColumns = it },
-            onDismiss = {
-                displayMode = dialogMode
-                prefs.libraryDisplayMode = dialogMode.prefValue
-                if (isLandscape) {
-                    landscapeColumns = dialogColumns
-                    prefs.libraryLandscapeColumns = dialogColumns
-                } else {
-                    portraitColumns = dialogColumns
-                    prefs.libraryPortraitColumns = dialogColumns
-                }
-                displayOpen = false
-            },
-        )
     }
 
     if (libraryPickerOpen) {
@@ -790,6 +791,10 @@ private fun LibraryTab(
     displayMode: LibraryDisplayMode,
     columns: Int,
     refreshTick: Int,
+    sortMode: LibrarySortMode,
+    onSortModeChange: (LibrarySortMode) -> Unit,
+    readFilter: ReadFilter,
+    onReadFilterChange: (ReadFilter) -> Unit,
     onSeriesClick: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -798,16 +803,8 @@ private fun LibraryTab(
     var series by remember { mutableStateOf<List<SeriesDto>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    // M3: read-status filter (all / unread / in-progress / read)
-    var readFilter by remember { mutableStateOf(ReadFilter.All) }
-    // M3.20: sort persisted.
-    var sortMode by remember { mutableStateOf(LibrarySortMode.fromPref(prefs.librarySort)) }
-    // M3.11: dropdown menus for filter / sort (collapsed from chip rows).
-    var filterOpen by remember { mutableStateOf(false) }
-    var sortOpen by remember { mutableStateOf(false) }
-    // Display mode + columns come from KomgaMainScreen; the library picker
-    // lives in the bottom bar (top-level dialog). The library tab only
-    // renders the selected library's series.
+    // sortMode / readFilter (filter) are owned by the top-level toolbar menu
+    // (ShelfOptionsMenu); this tab just renders from them.
 
     suspend fun reload() {
         if (selectedLibraryId != null) {
@@ -840,81 +837,8 @@ private fun LibraryTab(
     }
 
     Column(Modifier.fillMaxSize()) {
-        // Search is hosted at the screen level (title-row icon), not per tab.
-        // Library picker moved to the bottom-bar icon (top-level dialog);
-        // this row only keeps the filter/sort funnel.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End,
-        ) {
-            // Funnel: collapses read-status filter + sort into a single
-            // DropdownMenu (header + two groups).
-            Box {
-                androidx.compose.material3.IconButton(onClick = { filterOpen = true }) {
-                    Icon(
-                        imageVector = Icons.Filled.FilterList,
-                        contentDescription = composeStringResource(R.string.cd_filter_sort),
-                    )
-                }
-                androidx.compose.material3.DropdownMenu(
-                    expanded = filterOpen,
-                    onDismissRequest = { filterOpen = false },
-                ) {
-                    Text(
-                        text = composeStringResource(R.string.read_status_header),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                    ReadFilter.entries.forEach { f ->
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(f.labelText()) },
-                            onClick = {
-                                readFilter = f
-                            },
-                            leadingIcon = {
-                                if (readFilter == f) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Check,
-                                        contentDescription = null,
-                                    )
-                                }
-                            },
-                        )
-                    }
-                    androidx.compose.material3.HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    )
-                    Text(
-                        text = composeStringResource(R.string.sort_header),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                    LibrarySortMode.entries.forEach { m ->
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(m.labelText()) },
-                            onClick = {
-                                sortMode = m
-                                prefs.librarySort = m.prefValue
-                            },
-                            leadingIcon = {
-                                if (sortMode == m) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Check,
-                                        contentDescription = null,
-                                    )
-                                }
-                            },
-                        )
-                    }
-                }
-            }
-        }
-
+        // Search + filter/sort/display live in the toolbar (Tune button →
+        // ShelfOptionsMenu); the shelf body just renders the results.
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -960,6 +884,94 @@ private fun LibraryTab(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * M3.11 / UI simplification: the single toolbar "display options" (Tune)
+ * button opens this one composite menu — display mode · sort · read-status
+ * filter — replacing the old separate funnel dropdown + display dialog.
+ */
+@Composable
+private fun ShelfOptionsMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    displayMode: LibraryDisplayMode,
+    onDisplayModeChange: (LibraryDisplayMode) -> Unit,
+    sortMode: LibrarySortMode,
+    onSortModeChange: (LibrarySortMode) -> Unit,
+    readFilter: ReadFilter,
+    onReadFilterChange: (ReadFilter) -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+    ) {
+        // --- Display mode group ---
+        Text(
+            text = composeStringResource(R.string.display_mode_header),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+        LibraryDisplayMode.entries.forEach { m ->
+            DropdownMenuItem(
+                text = { Text(m.labelText()) },
+                onClick = {
+                    onDisplayModeChange(m)
+                    onDismiss()
+                },
+                leadingIcon = {
+                    if (displayMode == m) {
+                        Icon(imageVector = Icons.Filled.Check, contentDescription = null)
+                    }
+                },
+            )
+        }
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        // --- Sort group ---
+        Text(
+            text = composeStringResource(R.string.sort_header),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+        LibrarySortMode.entries.forEach { m ->
+            DropdownMenuItem(
+                text = { Text(m.labelText()) },
+                onClick = {
+                    onSortModeChange(m)
+                    onDismiss()
+                },
+                leadingIcon = {
+                    if (sortMode == m) {
+                        Icon(imageVector = Icons.Filled.Check, contentDescription = null)
+                    }
+                },
+            )
+        }
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        // --- Read-status filter group ---
+        Text(
+            text = composeStringResource(R.string.read_status_header),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+        ReadFilter.entries.forEach { f ->
+            DropdownMenuItem(
+                text = { Text(f.labelText()) },
+                onClick = {
+                    onReadFilterChange(f)
+                    onDismiss()
+                },
+                leadingIcon = {
+                    if (readFilter == f) {
+                        Icon(imageVector = Icons.Filled.Check, contentDescription = null)
+                    }
+                },
+            )
         }
     }
 }
