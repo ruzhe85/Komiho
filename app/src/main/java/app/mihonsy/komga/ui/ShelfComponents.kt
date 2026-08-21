@@ -13,8 +13,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -98,7 +101,7 @@ fun SeriesShelf(
             modifier = Modifier.fillMaxSize(),
         ) {
             items(series) { s ->
-                LibrarySeriesListRow(client, s) { onSeriesClick(s.id) }
+                LibrarySeriesListRow(client, s, onClick = { onSeriesClick(s.id) })
             }
         }
     } else {
@@ -118,7 +121,7 @@ fun SeriesShelf(
             modifier = Modifier.fillMaxSize(),
         ) {
             gridItems(series) { s ->
-                LibrarySeriesCard(client, s) { onSeriesClick(s.id) }
+                LibrarySeriesCard(client, s, onClick = { onSeriesClick(s.id) })
             }
         }
     }
