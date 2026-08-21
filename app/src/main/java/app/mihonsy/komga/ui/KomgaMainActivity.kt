@@ -45,6 +45,10 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -61,6 +65,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -100,6 +105,8 @@ import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
 import eu.kanade.tachiyomi.R
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
+import eu.kanade.presentation.more.settings.widget.PreferenceGroupHeader
+import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.presentation.util.LocalBackPress
@@ -1295,8 +1302,225 @@ private fun EmbeddedSearch(
 @Composable
 private fun SettingsTab(context: android.content.Context) {
     val prefs = remember { KomgaPreferences(context.applicationContext) }
+    var showAppearance by remember { mutableStateOf(false) }
+    var showHome by remember { mutableStateOf(false) }
+    var showServer by remember { mutableStateOf(false) }
+    var showReaderSettings by remember { mutableStateOf(false) }
+
+    // MihonSY 风格：分类行列表，点击进入子页面（不再平铺展开全部选项）。
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        TextPreferenceWidget(
+            title = composeStringResource(R.string.settings_appearance),
+            subtitle = composeStringResource(R.string.settings_appearance_summary),
+            icon = Icons.Outlined.Palette,
+            onPreferenceClick = { showAppearance = true },
+        )
+        TextPreferenceWidget(
+            title = composeStringResource(R.string.settings_home),
+            subtitle = composeStringResource(R.string.settings_home_summary),
+            icon = Icons.Filled.Home,
+            onPreferenceClick = { showHome = true },
+        )
+        TextPreferenceWidget(
+            title = composeStringResource(R.string.settings_reading),
+            subtitle = composeStringResource(R.string.settings_reader_summary),
+            icon = Icons.AutoMirrored.Outlined.ChromeReaderMode,
+            onPreferenceClick = { showReaderSettings = true },
+        )
+        TextPreferenceWidget(
+            title = composeStringResource(R.string.settings_server),
+            subtitle = prefs.baseUrl,
+            icon = Icons.Outlined.Cloud,
+            onPreferenceClick = { showServer = true },
+        )
+    }
+
+    if (showAppearance) {
+        SettingsCategoryDialog(
+            onDismiss = { showAppearance = false },
+            title = composeStringResource(R.string.settings_appearance),
+        ) { padding -> KomgaAppearanceSettings(Modifier.padding(padding), context) }
+    }
+    if (showHome) {
+        SettingsCategoryDialog(
+            onDismiss = { showHome = false },
+            title = composeStringResource(R.string.settings_home),
+        ) { padding -> KomgaHomeSettings(Modifier.padding(padding), context) }
+    }
+    if (showServer) {
+        SettingsCategoryDialog(
+            onDismiss = { showServer = false },
+            title = composeStringResource(R.string.settings_server),
+        ) { padding -> KomgaServerSettings(Modifier.padding(padding), context) }
+    }
+    if (showReaderSettings) {
+        Dialog(
+            onDismissRequest = { showReaderSettings = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+            ),
+        ) {
+            CompositionLocalProvider(LocalBackPress provides { showReaderSettings = false }) {
+                Surface(Modifier.fillMaxSize()) {
+                    Navigator(SettingsReaderScreen)
+                }
+            }
+        }
+    }
+}
+
+/** 通用分类子页面容器：全屏对话框 + 顶栏返回键（MihonSY 子页面风格）。 */
+@Composable
+private fun SettingsCategoryDialog(
+    onDismiss: () -> Unit,
+    title: String,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Surface(Modifier.fillMaxSize()) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text(title) },
+                        navigationIcon = {
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = null)
+                            }
+                        },
+                    )
+                },
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content.Context) {
+    val prefs = remember { KomgaPreferences(context.applicationContext) }
+    val activity = context as? android.app.Activity
+    val themeModeEnum = runCatching { ThemeMode.valueOf(prefs.themeMode) }
+        .getOrDefault(ThemeMode.SYSTEM)
+    val appThemeEnum = runCatching { AppTheme.valueOf(prefs.appTheme) }
+        .getOrDefault(AppTheme.DEFAULT)
+    var amoledSel by remember { mutableStateOf(prefs.themeDarkAmoled) }
+    var showAppLanguage by remember { mutableStateOf(false) }
+
+    val currentLangLabel = when (prefs.appLanguage) {
+        "zh-CN" -> composeStringResource(R.string.lang_zh_cn)
+        "zh-TW" -> composeStringResource(R.string.lang_zh_tw)
+        "en" -> composeStringResource(R.string.lang_en)
+        else -> composeStringResource(R.string.lang_default)
+    }
+
+    LazyColumn(modifier.fillMaxSize()) {
+        item { PreferenceGroupHeader(composeStringResource(R.string.settings_group_theme)) }
+        item {
+            AppThemeModePreferenceWidget(
+                value = themeModeEnum,
+                onItemClick = {
+                    prefs.themeMode = it.name
+                    activity?.recreate()
+                },
+            )
+        }
+        item {
+            AppThemePreferenceWidget(
+                value = appThemeEnum,
+                amoled = amoledSel,
+                onItemClick = { prefs.appTheme = it.name },
+            )
+        }
+        item {
+            TextPreferenceWidget(
+                title = composeStringResource(R.string.settings_amoled),
+                widget = {
+                    Switch(
+                        checked = amoledSel,
+                        onCheckedChange = {
+                            amoledSel = it
+                            prefs.themeDarkAmoled = it
+                            activity?.recreate()
+                        },
+                    )
+                },
+            )
+        }
+        item { PreferenceGroupHeader(composeStringResource(R.string.settings_group_display)) }
+        item {
+            TextPreferenceWidget(
+                title = composeStringResource(R.string.settings_app_language),
+                subtitle = currentLangLabel,
+                onPreferenceClick = { showAppLanguage = true },
+            )
+        }
+    }
+
+    if (showAppLanguage) {
+        val langOptions = listOf(
+            "" to composeStringResource(R.string.lang_default),
+            "zh-CN" to composeStringResource(R.string.lang_zh_cn),
+            "zh-TW" to composeStringResource(R.string.lang_zh_tw),
+            "en" to composeStringResource(R.string.lang_en),
+        )
+        AlertDialog(
+            onDismissRequest = { showAppLanguage = false },
+            title = { Text(composeStringResource(R.string.settings_app_language)) },
+            text = {
+                Column {
+                    langOptions.forEach { (tag, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (prefs.appLanguage != tag) {
+                                        prefs.appLanguage = tag
+                                        AppCompatDelegate.setApplicationLocales(
+                                            if (tag.isEmpty()) {
+                                                LocaleListCompat.getEmptyLocaleList()
+                                            } else {
+                                                LocaleListCompat.forLanguageTags(tag)
+                                            },
+                                        )
+                                    }
+                                    showAppLanguage = false
+                                    activity?.recreate()
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(label, modifier = Modifier.weight(1f))
+                            if (prefs.appLanguage == tag) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+}
+
+@Composable
+private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Context) {
+    val prefs = remember { KomgaPreferences(context.applicationContext) }
     var sectionLimit by remember { mutableStateOf(prefs.homeSectionLimit) }
-    // M3.18: visible sections in order (comma-separated HomeSection names).
     var sectionOrder by remember { mutableStateOf(prefs.homeSectionOrder) }
 
     fun persistOrder(order: List<HomeSection>) {
@@ -1304,140 +1528,102 @@ private fun SettingsTab(context: android.content.Context) {
         prefs.homeSectionOrder = sectionOrder
     }
 
-    // Ordered list of currently-visible sections.
     val visibleSections = remember(sectionOrder) {
         sectionOrder.split(',')
             .mapNotNull { name -> runCatching { HomeSection.valueOf(name) }.getOrNull() }
     }
-    // Sections not visible (available to re-enable).
     val hiddenSections = remember(sectionOrder) {
         HomeSection.entries.filter { it !in visibleSections }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-    ) {
-        Text(composeStringResource(R.string.settings_server), style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(12.dp))
-        Text(composeStringResource(R.string.settings_address_fmt, prefs.baseUrl), style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = composeStringResource(
-                R.string.settings_auth_fmt,
-                composeStringResource(if (prefs.authType.name == "API_KEY") R.string.auth_api_key else R.string.auth_username_password),
-            ),
-            style = MaterialTheme.typography.bodyMedium,
-        )
+    fun move(section: HomeSection, delta: Int) {
+        val cur = visibleSections.indexOf(section)
+        val target = cur + delta
+        if (cur >= 0 && target in 0 until visibleSections.size) {
+            val list = visibleSections.toMutableList()
+            list[cur] = list[target]
+            list[target] = section
+            persistOrder(list)
+        }
+    }
 
-        // M3.17: home section item count.
-        Spacer(Modifier.height(24.dp))
-        Text(composeStringResource(R.string.settings_home), style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = composeStringResource(R.string.settings_section_limit),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            androidx.compose.material3.IconButton(
-                onClick = {
-                    sectionLimit = (sectionLimit - 1).coerceAtLeast(1)
-                    prefs.homeSectionLimit = sectionLimit
-                },
-                enabled = sectionLimit > 1,
+    LazyColumn(modifier.fillMaxSize()) {
+        item { PreferenceGroupHeader(composeStringResource(R.string.settings_home)) }
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("−", style = MaterialTheme.typography.titleLarge)
-            }
-            Text(
-                text = "$sectionLimit",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.width(36.dp),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-            androidx.compose.material3.IconButton(
-                onClick = {
-                    sectionLimit = (sectionLimit + 1).coerceAtMost(15)
-                    prefs.homeSectionLimit = sectionLimit
-                },
-                enabled = sectionLimit < 15,
-            ) {
-                Text("+", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    text = composeStringResource(R.string.settings_section_limit),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = {
+                        sectionLimit = (sectionLimit - 1).coerceAtLeast(1)
+                        prefs.homeSectionLimit = sectionLimit
+                    },
+                    enabled = sectionLimit > 1,
+                ) { Text("-", style = MaterialTheme.typography.titleLarge) }
+                Text(
+                    text = "$sectionLimit",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.width(36.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                IconButton(
+                    onClick = {
+                        sectionLimit = (sectionLimit + 1).coerceAtMost(15)
+                        prefs.homeSectionLimit = sectionLimit
+                    },
+                    enabled = sectionLimit < 15,
+                ) { Text("+", style = MaterialTheme.typography.titleLarge) }
             }
         }
-
-        // M3.18: home section visibility + ordering.
-        Spacer(Modifier.height(24.dp))
-        Text(composeStringResource(R.string.settings_home_sections), style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = composeStringResource(R.string.settings_home_sections_summary),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(8.dp))
-        // 分区排序：↑/↓ 按钮调整顺序（拖动在设置页滚动容器里不可靠，放弃手柄）。
-        // 注意：设置页是 Column(verticalScroll)，不能用 LazyColumn（infinity 约束崩溃）。
-        fun move(section: HomeSection, delta: Int) {
-            val cur = visibleSections.indexOf(section)
-            val target = cur + delta
-            if (cur >= 0 && target in 0 until visibleSections.size) {
-                val list = visibleSections.toMutableList()
-                list[cur] = list[target]
-                list[target] = section
-                persistOrder(list)
-            }
+        item {
+            Text(
+                text = composeStringResource(R.string.settings_home_sections_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
         }
-        Column(modifier = Modifier.fillMaxWidth()) {
-            visibleSections.forEachIndexed { _, section ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // ↑ 上移
-                    androidx.compose.material3.IconButton(
-                        onClick = { move(section, -1) },
-                        enabled = visibleSections.indexOf(section) > 0,
-                    ) {
-                        Text("↑", style = MaterialTheme.typography.titleMedium)
-                    }
-                    Text(
-                        text = section.labelText(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    // ↓ 下移
-                    androidx.compose.material3.IconButton(
-                        onClick = { move(section, +1) },
-                        enabled = visibleSections.indexOf(section) < visibleSections.size - 1,
-                    ) {
-                        Text("↓", style = MaterialTheme.typography.titleMedium)
-                    }
-                    // 隐藏
-                    androidx.compose.material3.IconButton(
-                        onClick = {
-                            val list = visibleSections.toMutableList().apply { remove(section) }
-                            persistOrder(list)
-                        },
-                    ) {
-                        Text(composeStringResource(R.string.settings_hide), style = MaterialTheme.typography.labelSmall)
-                    }
+        items(visibleSections) { section ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = { move(section, -1) },
+                    enabled = visibleSections.indexOf(section) > 0,
+                ) { Text("↑", style = MaterialTheme.typography.titleMedium) }
+                Text(
+                    text = section.labelText(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = { move(section, +1) },
+                    enabled = visibleSections.indexOf(section) < visibleSections.size - 1,
+                ) { Text("↓", style = MaterialTheme.typography.titleMedium) }
+                TextButton(onClick = { persistOrder(visibleSections.filter { it != section }) }) {
+                    Text(composeStringResource(R.string.settings_hide))
                 }
             }
         }
         if (hiddenSections.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = composeStringResource(R.string.settings_hidden),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            hiddenSections.forEach { section ->
+            item {
+                Text(
+                    text = composeStringResource(R.string.settings_hidden),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+            items(hiddenSections) { section ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1448,216 +1634,66 @@ private fun SettingsTab(context: android.content.Context) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = {
-                        persistOrder(visibleSections + section)
-                    }) { Text(composeStringResource(R.string.settings_show)) }
-                }
-            }
-        }
-
-        // ---- 外观（复用 MihonSY 主题控件）----
-        Spacer(Modifier.height(24.dp))
-        Text(composeStringResource(R.string.settings_appearance), style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(12.dp))
-
-        val activity = context as? android.app.Activity
-        // 主题模式：复用 MihonSY 分段选择器（跟随系统 / 浅色 / 深色）。
-        val themeModeEnum = runCatching { ThemeMode.valueOf(prefs.themeMode) }
-            .getOrDefault(ThemeMode.SYSTEM)
-        AppThemeModePreferenceWidget(
-            value = themeModeEnum,
-            onItemClick = {
-                prefs.themeMode = it.name
-                activity?.recreate()
-            },
-        )
-        Spacer(Modifier.height(12.dp))
-
-        // 皮肤（AppTheme）：复用 MihonSY 预览卡片；控件内部点击后已 recreate。
-        val appThemeEnum = runCatching { AppTheme.valueOf(prefs.appTheme) }
-            .getOrDefault(AppTheme.DEFAULT)
-        AppThemePreferenceWidget(
-            value = appThemeEnum,
-            amoled = prefs.themeDarkAmoled,
-            onItemClick = { prefs.appTheme = it.name },
-        )
-        Spacer(Modifier.height(8.dp))
-
-        // 深色 AMOLED 纯黑（仅深色模式生效）。
-        var amoledSel by remember { mutableStateOf(prefs.themeDarkAmoled) }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = composeStringResource(R.string.settings_amoled),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            androidx.compose.material3.Switch(
-                checked = amoledSel,
-                onCheckedChange = {
-                    amoledSel = it
-                    prefs.themeDarkAmoled = it
-                    activity?.recreate()
-                },
-            )
-        }
-
-        // 应用语言：默认 / 中文简体 / 中文繁體 / English。
-        Spacer(Modifier.height(8.dp))
-        val currentLangLabel = when (prefs.appLanguage) {
-            "zh-CN" -> composeStringResource(R.string.lang_zh_cn)
-            "zh-TW" -> composeStringResource(R.string.lang_zh_tw)
-            "en" -> composeStringResource(R.string.lang_en)
-            else -> composeStringResource(R.string.lang_default)
-        }
-        var showAppLanguage by remember { mutableStateOf(false) }
-        Surface(
-            onClick = { showAppLanguage = true },
-            color = Color.Transparent,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = composeStringResource(R.string.settings_app_language),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = currentLangLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(
-                    imageVector = Icons.Filled.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        if (showAppLanguage) {
-            val langOptions = listOf(
-                "" to composeStringResource(R.string.lang_default),
-                "zh-CN" to composeStringResource(R.string.lang_zh_cn),
-                "zh-TW" to composeStringResource(R.string.lang_zh_tw),
-                "en" to composeStringResource(R.string.lang_en),
-            )
-            AlertDialog(
-                onDismissRequest = { showAppLanguage = false },
-                title = { Text(composeStringResource(R.string.settings_app_language)) },
-                text = {
-                    Column {
-                        langOptions.forEach { (tag, label) ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        if (prefs.appLanguage != tag) {
-                                            prefs.appLanguage = tag
-                                            AppCompatDelegate.setApplicationLocales(
-                                                if (tag.isEmpty()) {
-                                                    LocaleListCompat.getEmptyLocaleList()
-                                                } else {
-                                                    LocaleListCompat.forLanguageTags(tag)
-                                                },
-                                            )
-                                        }
-                                        showAppLanguage = false
-                                        activity?.recreate()
-                                    }
-                                    .padding(vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(label, modifier = Modifier.weight(1f))
-                                if (prefs.appLanguage == tag) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {},
-            )
-        }
-
-        // ---- 阅读设置：复用 MihonSY 原生阅读器偏好（SettingsReaderScreen）----
-        Spacer(Modifier.height(24.dp))
-        Text(composeStringResource(R.string.settings_reading), style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-        var showReaderSettings by remember { mutableStateOf(false) }
-        Surface(
-            onClick = { showReaderSettings = true },
-            color = Color.Transparent,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = composeStringResource(R.string.settings_reader),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = composeStringResource(R.string.settings_reader_summary),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(
-                    imageVector = Icons.Filled.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        if (showReaderSettings) {
-            Dialog(
-                onDismissRequest = { showReaderSettings = false },
-                properties = DialogProperties(
-                    usePlatformDefaultWidth = false,
-                    decorFitsSystemWindows = false,
-                ),
-            ) {
-                CompositionLocalProvider(LocalBackPress provides { showReaderSettings = false }) {
-                    Surface(Modifier.fillMaxSize()) {
-                        Navigator(SettingsReaderScreen)
+                    TextButton(onClick = { persistOrder(visibleSections + section) }) {
+                        Text(composeStringResource(R.string.settings_show))
                     }
                 }
             }
         }
-
-        Spacer(Modifier.height(20.dp))
-        TextButton(onClick = {
-            context.startActivity(Intent(context, KomgaConnectActivity::class.java))
-        }) { Text(composeStringResource(R.string.settings_reconfigure)) }
-        Spacer(Modifier.height(8.dp))
-        TextButton(onClick = {
-            prefs.clear()
-            Toast.makeText(context, context.getString(R.string.connection_cleared), Toast.LENGTH_SHORT).show()
-            context.startActivity(
-                Intent(context, KomgaConnectActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),
-            )
-        }) { Text(composeStringResource(R.string.settings_clear_login)) }
     }
 }
+
+@Composable
+private fun KomgaServerSettings(modifier: Modifier, context: android.content.Context) {
+    val prefs = remember { KomgaPreferences(context.applicationContext) }
+    LazyColumn(modifier.fillMaxSize()) {
+        item { PreferenceGroupHeader(composeStringResource(R.string.settings_server)) }
+        item {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(
+                    text = composeStringResource(R.string.settings_address_fmt, prefs.baseUrl),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = composeStringResource(
+                        R.string.settings_auth_fmt,
+                        composeStringResource(
+                            if (prefs.authType.name == "API_KEY") {
+                                R.string.auth_api_key
+                            } else {
+                                R.string.auth_username_password
+                            },
+                        ),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        item {
+            TextPreferenceWidget(
+                title = composeStringResource(R.string.settings_reconfigure),
+                onPreferenceClick = {
+                    context.startActivity(Intent(context, KomgaConnectActivity::class.java))
+                },
+            )
+        }
+        item {
+            TextPreferenceWidget(
+                title = composeStringResource(R.string.settings_clear_login),
+                onPreferenceClick = {
+                    prefs.clear()
+                    Toast.makeText(context, context.getString(R.string.connection_cleared), Toast.LENGTH_SHORT).show()
+                    context.startActivity(
+                        Intent(context, KomgaConnectActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                    )
+                },
+            )
+        }
+    }
+}
+
 
 // ---------- Shared components ----------
 

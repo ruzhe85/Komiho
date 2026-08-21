@@ -74,6 +74,7 @@
 
     <!-- 設定：主頁 -->
     <string name="settings_home">主頁設定</string>
+    <string name="settings_home_summary">主頁區塊數量與排序</string>
     <string name="settings_section_limit">每區塊顯示數量</string>
     <string name="settings_home_sections">主頁區塊</string>
     <string name="settings_home_sections_summary">顯示/隱藏區塊，用上下按鈕調整順序（主頁由上到下顯示）</string>
@@ -83,12 +84,15 @@
 
     <!-- 設定：外觀 -->
     <string name="settings_appearance">外觀</string>
+    <string name="settings_appearance_summary">主題、皮膚與應用語言</string>
     <string name="settings_amoled">深色 AMOLED 純黑</string>
     <string name="settings_app_language">應用語言</string>
     <string name="lang_default">自動（跟隨系統）</string>
     <string name="lang_zh_cn">簡體中文</string>
     <string name="lang_zh_tw">繁體中文</string>
     <string name="lang_en">English</string>
+    <string name="settings_group_theme">主題</string>
+    <string name="settings_group_display">顯示</string>
 
     <!-- 設定：閱讀 -->
     <string name="settings_reading">閱讀</string>
