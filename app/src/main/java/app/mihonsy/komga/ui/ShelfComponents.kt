@@ -1,5 +1,18 @@
 package app.mihonsy.komga.ui
 
+// 划动选择命中检测：在可见 item 中按指针 Y 坐标找对应 id。
+// 本 BOM(2026.06.01) 中 LazyListItemInfo.offset 为 IntOffset、size 为 IntSize，
+// 用 .y/.height 取 Int 分量做区间命中。
+private fun resolveItemAtList(info: LazyListLayoutInfo, q3x9y: Float): String? {
+    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
+    return hit?.key as? String
+}
+
+private fun resolveItemAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String? {
+    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
+    return hit?.key as? String
+}
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -189,21 +202,6 @@ fun BookShelf(
         if (dragActive) setSelect(id, dragValue)
     }
 
-    // Resolve which item id sits under a pointer Y (relative to the lazy
-    // container's content area), using the lazy layout's visible items.
-    val resolveItemAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, pointerY, _ ->
-        val hit = info.visibleItemsInfo.firstOrNull { item ->
-            pointerY >= item.offset && pointerY < item.offset + item.size
-        }
-        hit?.key as? String
-    }
-    val resolveItemAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, pointerY, _ ->
-        val hit = info.visibleItemsInfo.firstOrNull { item ->
-            pointerY >= item.offset && pointerY < item.offset + item.size
-        }
-        hit?.key as? String
-    }
-
     fun performBatchUpdate(completed: Boolean) {
         val snapshot = selectedBooks
         scope.launch {
@@ -286,13 +284,13 @@ fun BookShelf(
                         detectDragGesturesAfterLongPress(
                             onDragStart = { start: Offset ->
                                 val pointerY = start.y - padTop
-                                val id = resolveItemAtList(listState.layoutInfo, pointerY, start.x)
+                                val id = resolveItemAtList(listState.layoutInfo, pointerY)
                                 if (id != null) startDragSelect(id)
                             },
                             onDrag = { change: PointerInputChange, _: Offset ->
                                 change.consume()
                                 val pointerY = change.position.y - padTop
-                                val id = resolveItemAtList(listState.layoutInfo, pointerY, change.position.x)
+                                val id = resolveItemAtList(listState.layoutInfo, pointerY)
                                 if (id != null) onDragSelectAt(id)
                             },
                             onDragEnd = { dragActive = false },
@@ -334,13 +332,13 @@ fun BookShelf(
                         detectDragGesturesAfterLongPress(
                             onDragStart = { start: Offset ->
                                 val pointerY = start.y - padTop
-                                val id = resolveItemAtGrid(gridState.layoutInfo, pointerY, start.x)
+                                val id = resolveItemAtGrid(gridState.layoutInfo, pointerY)
                                 if (id != null) startDragSelect(id)
                             },
                             onDrag = { change: PointerInputChange, _: Offset ->
                                 change.consume()
                                 val pointerY = change.position.y - padTop
-                                val id = resolveItemAtGrid(gridState.layoutInfo, pointerY, change.position.x)
+                                val id = resolveItemAtGrid(gridState.layoutInfo, pointerY)
                                 if (id != null) onDragSelectAt(id)
                             },
                             onDragEnd = { dragActive = false },
