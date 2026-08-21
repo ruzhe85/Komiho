@@ -159,6 +159,33 @@ private fun resolveSeriesAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String?
     return hit?.key as? String
 }
 
+// 线段命中：返回 fromY..toY 区间内所有相交 item 的 id（含起点与终点之间的所有项）。
+// 解决单点检测在快速滑动时跨多个 item 只命中终点、漏掉中间项的问题。
+// 不再做 padTop 人工修正——offset 本身是 Lazy 布局坐标，直接用 start.y/currentY。
+private fun resolveSeriesBetweenList(info: LazyListLayoutInfo, fromY: Float, toY: Float): List<String> {
+    val minY = minOf(fromY, toY)
+    val maxY = maxOf(fromY, toY)
+    return info.visibleItemsInfo
+        .filter { item ->
+            val itemTop = item.offset.toFloat()
+            val itemBottom = (item.offset + item.size).toFloat()
+            maxY >= itemTop && minY < itemBottom
+        }
+        .mapNotNull { it.key as? String }
+}
+
+private fun resolveSeriesBetweenGrid(info: LazyGridLayoutInfo, fromY: Float, toY: Float): List<String> {
+    val minY = minOf(fromY, toY)
+    val maxY = maxOf(fromY, toY)
+    return info.visibleItemsInfo
+        .filter { item ->
+            val itemTop = item.offset.y.toFloat()
+            val itemBottom = (item.offset.y + item.size.height).toFloat()
+            maxY >= itemTop && minY < itemBottom
+        }
+        .mapNotNull { it.key as? String }
+}
+
 /**
  * Komiho M3: main activity with bottom navigation.
  *
@@ -984,7 +1011,6 @@ private fun LibraryTab(
             }
             else -> if (displayMode == LibraryDisplayMode.List) {
                 val listState = rememberLazyListState()
-                val padTop = with(LocalDensity.current) { 4.dp.toPx() }
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
@@ -992,24 +1018,22 @@ private fun LibraryTab(
                         // Mihon-style slide-to-select: long-press starts the drag,
                         // then every row the finger passes over gets selected.
                         .pointerInput(Unit) {
-                            // onDragStart.start 是相对 pointerInput 作用域的绝对坐标，
-                            // 但 onDrag 的 change.position 是屏幕绝对坐标（含状态栏偏移），
-                            // 坐标系不一致会导致划过命中错位。改用 dragAmount 从 start 累加，
-                            // 全程保持相对作用域坐标，稳定命中。
-                            var currentDragY = 0f
+                            // 线段命中：onDragStart 记录起点，onDrag 用 previousDragY→currentY
+                            // 区间扫描所有经过的 item（解决快速滑动跨多 item 只命中终点的问题）。
+                            // 直接用 offset 坐标（Lazy 布局坐标），不再做 padTop 人工修正。
+                            var previousDragY = 0f
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { start: Offset ->
-                                    currentDragY = start.y
-                                    val pointerY = currentDragY - padTop
-                                    val id = resolveSeriesAtList(listState.layoutInfo, pointerY)
+                                    previousDragY = start.y
+                                    val id = resolveSeriesAtList(listState.layoutInfo, start.y)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
                                 onDrag = { change: PointerInputChange, dragAmount: Offset ->
                                     change.consume()
-                                    currentDragY += dragAmount.y
-                                    val pointerY = currentDragY - padTop
-                                    val id = resolveSeriesAtList(listState.layoutInfo, pointerY)
-                                    if (id != null) onSeriesDragSelectAt(id)
+                                    val currentY = previousDragY + dragAmount.y
+                                    resolveSeriesBetweenList(listState.layoutInfo, previousDragY, currentY)
+                                        .forEach { id -> onSeriesDragSelectAt(id) }
+                                    previousDragY = currentY
                                 },
                                 onDragEnd = { dragActive = false },
                                 onDragCancel = { dragActive = false },
@@ -1042,7 +1066,6 @@ private fun LibraryTab(
                     GridCells.Adaptive(minSize = adaptiveMin)
                 }
                 val gridState = rememberLazyGridState()
-                val padTop = with(LocalDensity.current) { 8.dp.toPx() }
                 LazyVerticalGrid(
                     state = gridState,
                     columns = cells,
@@ -1052,20 +1075,19 @@ private fun LibraryTab(
                     modifier = shelfModifier
                         // Mihon-style slide-to-select across grid cells.
                         .pointerInput(Unit) {
-                            var currentDragY = 0f
+                            var previousDragY = 0f
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { start: Offset ->
-                                    currentDragY = start.y
-                                    val pointerY = currentDragY - padTop
-                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY)
+                                    previousDragY = start.y
+                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, start.y)
                                     if (id != null) startSeriesDragSelect(id)
                                 },
                                 onDrag = { change: PointerInputChange, dragAmount: Offset ->
                                     change.consume()
-                                    currentDragY += dragAmount.y
-                                    val pointerY = currentDragY - padTop
-                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, pointerY)
-                                    if (id != null) onSeriesDragSelectAt(id)
+                                    val currentY = previousDragY + dragAmount.y
+                                    resolveSeriesBetweenGrid(gridState.layoutInfo, previousDragY, currentY)
+                                        .forEach { id -> onSeriesDragSelectAt(id) }
+                                    previousDragY = currentY
                                 },
                                 onDragEnd = { dragActive = false },
                                 onDragCancel = { dragActive = false },
