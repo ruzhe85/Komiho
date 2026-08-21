@@ -20,7 +20,8 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.layout.LazyLayoutInfo
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
+import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -57,6 +58,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -188,7 +191,13 @@ fun BookShelf(
 
     // Resolve which item id sits under a pointer Y (relative to the lazy
     // container's content area), using the lazy layout's visible items.
-    val resolveItemAt: (LazyLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+    val resolveItemAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+        val hit = info.visibleItemsInfo.firstOrNull { item ->
+            y >= item.offset && y < item.offset + item.size
+        }
+        hit?.key as? String
+    }
+    val resolveItemAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, y, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
             y >= item.offset && y < item.offset + item.size
         }
@@ -275,15 +284,15 @@ fun BookShelf(
                     // then every row the finger passes over gets selected.
                     .pointerInput(Unit) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = { change ->
+                            onDragStart = { change: PointerInputChange ->
                                 val y = change.position.y - padTop
-                                val id = resolveItemAt(listState.layoutInfo, y, change.position.x)
+                                val id = resolveItemAtList(listState.layoutInfo, y, change.position.x)
                                 if (id != null) startDragSelect(id)
                             },
-                            onDrag = { change, _ ->
+                            onDrag = { change: PointerInputChange, _: Offset ->
                                 change.consume()
                                 val y = change.position.y - padTop
-                                val id = resolveItemAt(listState.layoutInfo, y, change.position.x)
+                                val id = resolveItemAtList(listState.layoutInfo, y, change.position.x)
                                 if (id != null) onDragSelectAt(id)
                             },
                             onDragEnd = { dragActive = false },
@@ -323,15 +332,15 @@ fun BookShelf(
                     // Mihon-style slide-to-select across grid cells.
                     .pointerInput(Unit) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = { change ->
+                            onDragStart = { change: PointerInputChange ->
                                 val y = change.position.y - padTop
-                                val id = resolveItemAt(gridState.layoutInfo, y, change.position.x)
+                                val id = resolveItemAtGrid(gridState.layoutInfo, y, change.position.x)
                                 if (id != null) startDragSelect(id)
                             },
-                            onDrag = { change, _ ->
+                            onDrag = { change: PointerInputChange, _: Offset ->
                                 change.consume()
                                 val y = change.position.y - padTop
-                                val id = resolveItemAt(gridState.layoutInfo, y, change.position.x)
+                                val id = resolveItemAtGrid(gridState.layoutInfo, y, change.position.x)
                                 if (id != null) onDragSelectAt(id)
                             },
                             onDragEnd = { dragActive = false },
