@@ -61,22 +61,26 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug -Pdisable-code-shrink --no-daemon --stacktrace
 
-      # Single CI tag: every push overwrites the same `ci` Release (Pre-release,
-      # yellow — never the green "Latest"). No per-build tags; the title/notes
-      # still carry run · sha · date so each build stays identifiable.
-      - name: "Upload APK to CI Release (tag: ci)"
+      # Per-build unique CI tag: ci-<YYYYMMDD>-<short-sha>. Every build keeps its
+      # own tag (never overwritten) so any old version is downloadable from GitHub
+      # Releases for rollback. (A Git tag is a unique ref, so it CANNOT be reused;
+      # using date+sha keeps the list self-identifying.) Pre-release (yellow),
+      # never the green "Latest".
+      - name: "Upload APK to CI Release (tag: ci-<date>-<sha>)"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           RUN_NO="${{ github.run_number }}"
-          BUILD_DATE=$(date -u +%Y-%m-%d)
-          TAG="ci"
+          BUILD_DATE=$(date -u +%Y%m%d)
+          TAG="ci-${BUILD_DATE}-${SHORT_SHA}"
+          # Same commit re-run (workflow_dispatch) would collide on the tag —
+          # append the run number so the build still publishes instead of failing.
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            TAG="${TAG}-r${RUN_NO}"
+          fi
           TITLE="Komiho V2 CI #${RUN_NO} · ${SHORT_SHA} · ${BUILD_DATE}"
           NOTES="Auto build #${RUN_NO} · ${{ github.sha }} · ${BUILD_DATE}T$(date -u +%H:%M:%SZ)"
-          # Overwrite the single 'ci' release each push (idempotent: delete is
-          # a no-op on the very first run when the tag does not yet exist).
-          gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
           gh release create "$TAG" app/build/outputs/apk/debug/*.apk \
             --repo "${{ github.repository }}" \
             --title "$TITLE" \
