@@ -191,15 +191,15 @@ fun BookShelf(
 
     // Resolve which item id sits under a pointer Y (relative to the lazy
     // container's content area), using the lazy layout's visible items.
-    val resolveItemAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+    val resolveItemAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, py, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            y >= item.offset && y < item.offset + item.size
+            py >= item.offset.y && py < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
-    val resolveItemAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+    val resolveItemAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, py, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            y >= item.offset && y < item.offset + item.size
+            py >= item.offset.y && py < item.offset.y + item.size.height
         }
         hit?.key as? String
     }

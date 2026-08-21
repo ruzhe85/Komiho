@@ -866,15 +866,15 @@ private fun LibraryTab(
     val onSeriesDragSelectAt: (String) -> Unit = { id ->
         if (dragActive) setSeriesSelect(id, dragValue)
     }
-    val resolveSeriesAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+    val resolveSeriesAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, py, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            y >= item.offset && y < item.offset + item.size
+            py >= item.offset.y && py < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
-    val resolveSeriesAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, y, _ ->
+    val resolveSeriesAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, py, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            y >= item.offset && y < item.offset + item.size
+            py >= item.offset.y && py < item.offset.y + item.size.height
         }
         hit?.key as? String
     }
