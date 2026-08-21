@@ -868,13 +868,13 @@ private fun LibraryTab(
     }
     val resolveSeriesAtList: (LazyListLayoutInfo, Float, Float) -> String? = { info, py, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            py >= item.offset.y && py < item.offset.y + item.size.height
+            py >= item.offset && py < item.offset + item.size
         }
         hit?.key as? String
     }
     val resolveSeriesAtGrid: (LazyGridLayoutInfo, Float, Float) -> String? = { info, py, _ ->
         val hit = info.visibleItemsInfo.firstOrNull { item ->
-            py >= item.offset.y && py < item.offset.y + item.size.height
+            py >= item.offset && py < item.offset + item.size
         }
         hit?.key as? String
     }
