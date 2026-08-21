@@ -13,12 +13,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -36,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.KomgaApiClient
@@ -77,8 +83,8 @@ private fun KomgaSeriesScreen(seriesId: String) {
     }
     // Column count for this page's grid (0 = auto).
     val columns = if (isLandscape) prefs.libraryLandscapeColumns else prefs.libraryPortraitColumns
-    // U3: shared display mode (read live from prefs so other pages' edits apply).
-    val mode = LibraryDisplayMode.fromPref(prefs.libraryDisplayMode)
+    // U3: book-level display mode (independent from the series shelf).
+    val mode = LibraryDisplayMode.fromPref(prefs.bookDisplayMode)
     var displayOpen by remember { mutableStateOf(false) }
 
     val loadScope = rememberCoroutineScope()
@@ -212,7 +218,7 @@ private fun KomgaSeriesScreen(seriesId: String) {
             displayMode = dialogMode,
             onModeChange = {
                 dialogMode = it
-                prefs.libraryDisplayMode = it.prefValue
+                prefs.bookDisplayMode = it.prefValue
             },
             columnCount = dialogColumns,
             isLandscape = isLandscape,
@@ -274,12 +280,58 @@ private fun SeriesHeader(client: KomgaApiClient, series: SeriesDto, books: List<
         val summary = series.metadata.summary
         if (summary?.isNotBlank() == true) {
             Spacer(Modifier.height(8.dp))
-            Text(
-                text = summary,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-            )
+            ExpandableSummary(text = summary)
+        }
+    }
+}
+
+/**
+ * Mihon-style expandable summary: defaults to FULLY expanded so the whole
+ * description is visible on open. Once the text exceeds [collapsedMaxLines]
+ * a "收回" (collapse) button appears — tapping it folds the text back to
+ * [collapsedMaxLines] and swaps the button to "展开" (expand) again.
+ */
+@Composable
+private fun ExpandableSummary(
+    text: String,
+    collapsedMaxLines: Int = 6,
+) {
+    var expanded by remember { mutableStateOf(true) }
+    // True only after the first layout pass, when we know how many lines the
+    // text actually takes — this avoids flashing the toggle for short blurbs.
+    var canCollapse by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = if (expanded) Int.MAX_VALUE else collapsedMaxLines,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { result: TextLayoutResult ->
+                canCollapse = result.lineCount > collapsedMaxLines
+            },
+        )
+        if (canCollapse) {
+            Spacer(Modifier.height(2.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (expanded) "收回" else "展开",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(2.dp))
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
     }
 }

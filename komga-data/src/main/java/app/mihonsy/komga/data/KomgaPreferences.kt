@@ -36,9 +36,17 @@ class KomgaPreferences(context: Context) {
     // Komiho M3.10: library shelf display mode and sort, persisted across
     // sessions — mirrors Mihon's libraryDisplayMode / librarySortingMode.
     // M3.20: mode is now one of compact/comfy/list (LibraryDisplayMode name).
+    // M5: split into two independent prefs — `libraryDisplayMode` drives the
+    // SERIES-level shelf (LibraryTab, collections, readlists), `bookDisplayMode`
+    // drives the BOOK-level shelf (BookShelf in series/readlist/section pages).
     var libraryDisplayMode: String
         get() = prefs.getString(KEY_LIBRARY_DISPLAY_MODE, "COMPACT_GRID").orEmpty()
         set(v) = prefs.edit().putString(KEY_LIBRARY_DISPLAY_MODE, v).apply()
+
+    /** Book-level (BookShelf) display mode — independent from the series shelf. */
+    var bookDisplayMode: String
+        get() = prefs.getString(KEY_BOOK_DISPLAY_MODE, "COMFORTABLE_GRID").orEmpty()
+        set(v) = prefs.edit().putString(KEY_BOOK_DISPLAY_MODE, v).apply()
 
     /** M3.20: columns per row, 0 = auto (Adaptive). Portrait/landscape stored
      *  separately like Mihon's portraitColumns / landscapeColumns. */
@@ -133,6 +141,7 @@ class KomgaPreferences(context: Context) {
         const val KEY_USERNAME = "username"
         const val KEY_PASSWORD = "password"
         const val KEY_LIBRARY_DISPLAY_MODE = "library_display_mode"
+        const val KEY_BOOK_DISPLAY_MODE = "book_display_mode"
         const val KEY_LIBRARY_SORT = "library_sort"
         const val KEY_LIBRARY_PORTRAIT_COLUMNS = "library_portrait_columns"
         const val KEY_LIBRARY_LANDSCAPE_COLUMNS = "library_landscape_columns"

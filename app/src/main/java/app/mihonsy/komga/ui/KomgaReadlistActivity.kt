@@ -68,8 +68,8 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String) {
     }
     // Column count for this page's grid (0 = auto).
     val columns = if (isLandscape) prefs.libraryLandscapeColumns else prefs.libraryPortraitColumns
-    // U3: shared display mode (live from prefs).
-    val mode = LibraryDisplayMode.fromPref(prefs.libraryDisplayMode)
+    // U3: book-level display mode (independent from the series shelf).
+    val mode = LibraryDisplayMode.fromPref(prefs.bookDisplayMode)
     var displayOpen by remember { mutableStateOf(false) }
 
     fun reload() {
@@ -153,7 +153,7 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String) {
             displayMode = dialogMode,
             onModeChange = {
                 dialogMode = it
-                prefs.libraryDisplayMode = it.prefValue
+                prefs.bookDisplayMode = it.prefValue
             },
             columnCount = dialogColumns,
             isLandscape = isLandscape,
