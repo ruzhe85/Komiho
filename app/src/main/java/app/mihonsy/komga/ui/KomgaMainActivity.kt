@@ -1,18 +1,5 @@
 package app.mihonsy.komga.ui
 
-// 划动选择命中检测：在可见 item 中按指针 Y 坐标找对应 id。
-// 本 BOM(2026.06.01) 中 LazyListItemInfo.offset 为 IntOffset、size 为 IntSize，
-// 用 .y/.height 取 Int 分量做区间命中。
-private fun resolveSeriesAtList(info: LazyListLayoutInfo, q3x9y: Float): String? {
-    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
-    return hit?.key as? String
-}
-
-private fun resolveSeriesAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String? {
-    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
-    return hit?.key as? String
-}
-
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
@@ -155,6 +142,19 @@ import androidx.annotation.StringRes
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
+
+// 划动选择命中检测：在可见 item 中按指针 Y 坐标找对应 id。
+// 本 BOM(2026.06.01) 中 LazyListItemInfo.offset 为 IntOffset、size 为 IntSize，
+// 用 .y/.height 取 Int 分量做区间命中。
+private fun resolveSeriesAtList(info: LazyListLayoutInfo, q3x9y: Float): String? {
+    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
+    return hit?.key as? String
+}
+
+private fun resolveSeriesAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String? {
+    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
+    return hit?.key as? String
+}
 import kotlinx.coroutines.launch
 
 /**
