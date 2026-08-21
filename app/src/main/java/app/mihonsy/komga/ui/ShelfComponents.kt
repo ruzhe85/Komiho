@@ -89,6 +89,31 @@ private fun resolveItemAtGrid(info: LazyGridLayoutInfo, q3x9y: Float): String? {
     return hit?.key as? String
 }
 
+// 线段命中：返回 fromY..toY 区间内所有相交 item 的 id（含起点与终点之间的所有项）。
+private fun resolveItemBetweenList(info: LazyListLayoutInfo, fromY: Float, toY: Float): List<String> {
+    val minY = minOf(fromY, toY)
+    val maxY = maxOf(fromY, toY)
+    return info.visibleItemsInfo
+        .filter { item ->
+            val itemTop = item.offset.toFloat()
+            val itemBottom = (item.offset + item.size).toFloat()
+            maxY >= itemTop && minY < itemBottom
+        }
+        .mapNotNull { it.key as? String }
+}
+
+private fun resolveItemBetweenGrid(info: LazyGridLayoutInfo, fromY: Float, toY: Float): List<String> {
+    val minY = minOf(fromY, toY)
+    val maxY = maxOf(fromY, toY)
+    return info.visibleItemsInfo
+        .filter { item ->
+            val itemTop = item.offset.y.toFloat()
+            val itemBottom = (item.offset.y + item.size.height).toFloat()
+            maxY >= itemTop && minY < itemBottom
+        }
+        .mapNotNull { it.key as? String }
+}
+
 /**
  * Shared shelf rendering for every page that lists series or books.
  * One display mode (LibraryDisplayMode from KomgaPreferences) drives
@@ -272,7 +297,6 @@ fun BookShelf(
 
         if (mode == LibraryDisplayMode.List) {
             val listState = rememberLazyListState()
-            val padTop = with(LocalDensity.current) { 4.dp.toPx() }
             LazyColumn(
                 state = listState,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
@@ -282,20 +306,19 @@ fun BookShelf(
                     // Mihon-style slide-to-select: long-press starts the drag,
                     // then every row the finger passes over gets selected.
                     .pointerInput(Unit) {
-                        var currentDragY = 0f
+                        var previousDragY = 0f
                         detectDragGesturesAfterLongPress(
                             onDragStart = { start: Offset ->
-                                currentDragY = start.y
-                                val pointerY = currentDragY - padTop
-                                val id = resolveItemAtList(listState.layoutInfo, pointerY)
+                                previousDragY = start.y
+                                val id = resolveItemAtList(listState.layoutInfo, start.y)
                                 if (id != null) startDragSelect(id)
                             },
                             onDrag = { change: PointerInputChange, dragAmount: Offset ->
                                 change.consume()
-                                currentDragY += dragAmount.y
-                                val pointerY = currentDragY - padTop
-                                val id = resolveItemAtList(listState.layoutInfo, pointerY)
-                                if (id != null) onDragSelectAt(id)
+                                val currentY = previousDragY + dragAmount.y
+                                resolveItemBetweenList(listState.layoutInfo, previousDragY, currentY)
+                                    .forEach { id -> onDragSelectAt(id) }
+                                previousDragY = currentY
                             },
                             onDragEnd = { dragActive = false },
                             onDragCancel = { dragActive = false },
@@ -320,7 +343,6 @@ fun BookShelf(
             val vSpace = if (isCompact) 6.dp else 12.dp
             val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
             val gridState = rememberLazyGridState()
-            val padTop = with(LocalDensity.current) { 8.dp.toPx() }
             LazyVerticalGrid(
                 state = gridState,
                 columns = cells,
@@ -332,20 +354,19 @@ fun BookShelf(
                     .then(if (inSelection) Modifier.weight(1f) else Modifier)
                     // Mihon-style slide-to-select across grid cells.
                     .pointerInput(Unit) {
-                        var currentDragY = 0f
+                        var previousDragY = 0f
                         detectDragGesturesAfterLongPress(
                             onDragStart = { start: Offset ->
-                                currentDragY = start.y
-                                val pointerY = currentDragY - padTop
-                                val id = resolveItemAtGrid(gridState.layoutInfo, pointerY)
+                                previousDragY = start.y
+                                val id = resolveItemAtGrid(gridState.layoutInfo, start.y)
                                 if (id != null) startDragSelect(id)
                             },
                             onDrag = { change: PointerInputChange, dragAmount: Offset ->
                                 change.consume()
-                                currentDragY += dragAmount.y
-                                val pointerY = currentDragY - padTop
-                                val id = resolveItemAtGrid(gridState.layoutInfo, pointerY)
-                                if (id != null) onDragSelectAt(id)
+                                val currentY = previousDragY + dragAmount.y
+                                resolveItemBetweenGrid(gridState.layoutInfo, previousDragY, currentY)
+                                    .forEach { id -> onDragSelectAt(id) }
+                                previousDragY = currentY
                             },
                             onDragEnd = { dragActive = false },
                             onDragCancel = { dragActive = false },
