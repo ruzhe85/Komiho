@@ -110,6 +110,7 @@
     <string name="cd_toggle_grid">Switch to grid</string>
     <string name="cd_toggle_list">Switch to list</string>
     <string name="selected_count">%1$d selected</string>
+    <string name="select_all">Select all</string>
     <string name="mark_read">Mark read</string>
     <string name="mark_unread">Mark unread</string>
     <string name="add_to_readlist">Add to readlist</string>
@@ -135,5 +136,12 @@
     <string name="auto">Auto</string>
     <string name="columns_count">%1$d columns</string>
     <string name="done">Done</string>
+    <string name="add_to_collection">Add to collection</string>
+    <string name="add_to_collection_title">Add to collection</string>
+    <string name="search_or_create_collection">Search or create a collection</string>
+    <string name="no_collections">No collections yet</string>
+    <string name="added_to_collection">Added to collection</string>
+    <string name="marked_series_read">Series marked as read</string>
+    <string name="marked_series_unread">Series marked as unread</string>
 
 </resources>

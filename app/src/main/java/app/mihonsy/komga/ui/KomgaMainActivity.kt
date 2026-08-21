@@ -33,16 +33,23 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.ViewList
@@ -52,9 +59,14 @@ import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material.icons.outlined.Bookmark
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.RemoveDone
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import eu.kanade.presentation.components.TabbedDialog
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.SliderItem
@@ -817,6 +829,39 @@ private fun LibraryTab(
     var series by remember { mutableStateOf<List<SeriesDto>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // ── Mihon-style series multi-select ──
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showReadlistPicker by remember { mutableStateOf(false) }
+    var showCollectionPicker by remember { mutableStateOf(false) }
+    val inSelection = selectedIds.isNotEmpty()
+    val selectedSeries = remember(selectedIds, series) { series.filter { it.id in selectedIds } }
+
+    val toggleSeriesSelect: (String) -> Unit = { id ->
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    }
+    val exitSeriesSelection: () -> Unit = { selectedIds = emptySet() }
+
+    fun markSeriesBatch(completed: Boolean) {
+        val snapshot = selectedSeries.map { it.id }
+        scope.launch {
+            runCatching {
+                snapshot.forEach { sid ->
+                    if (completed) client.markSeriesRead(sid) else client.markSeriesUnread(sid)
+                }
+            }.onSuccess {
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(if (completed) R.string.marked_series_read else R.string.marked_series_unread),
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+                exitSeriesSelection()
+            }.onFailure {
+                android.widget.Toast.makeText(context, context.getString(R.string.operation_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     // sortMode / readFilter (filter) are owned by the top-level toolbar menu
     // (ShelfOptionsMenu); this tab just renders from them.
 
@@ -851,8 +896,37 @@ private fun LibraryTab(
     }
 
     Column(Modifier.fillMaxSize()) {
+        // ── Mihon-style selection top bar: 取消 / 已选 N 项 / 全选 ──
+        if (inSelection) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = exitSeriesSelection) {
+                        Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.cancel))
+                    }
+                    Text(
+                        composeStringResource(R.string.selected_count, selectedIds.size),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { selectedIds = series.map { it.id }.toSet() }) {
+                        Icon(Icons.Filled.SelectAll, contentDescription = composeStringResource(R.string.select_all))
+                    }
+                }
+            }
+        }
+
         // Search + filter/sort/display live in the toolbar (Tune button →
         // ShelfOptionsMenu); the shelf body just renders the results.
+        val shelfModifier = if (inSelection) Modifier.weight(1f) else Modifier.fillMaxSize()
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -870,17 +944,29 @@ private fun LibraryTab(
             else -> if (displayMode == LibraryDisplayMode.List) {
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = shelfModifier,
                 ) {
                     items(sortedSeries) { s ->
-                        LibrarySeriesListRow(client, s) { onSeriesClick(s.id) }
+                        LibrarySeriesListRow(
+                            client,
+                            s,
+                            onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
+                            selected = s.id in selectedIds,
+                            onLongClick = { toggleSeriesSelect(s.id) },
+                        )
                     }
                 }
             } else {
-                // M3.20: columns from the user setting (0 = auto → Adaptive).
-                // Comfortable grid uses a wider minimum so it renders fewer
-                // columns per row than the compact grid.
-                val adaptiveMin = if (displayMode == LibraryDisplayMode.ComfortableGrid) 168.dp else 108.dp
+                // M3.20: the display mode drives BOTH the auto column density
+                // (Adaptive min size) AND the grid spacing. This way 紧凑网格 /
+                // 舒适网格 always has a visible effect — even when the user pins
+                // a fixed column count via the slider (columns > 0, where the
+                // Adaptive min size is ignored and the two modes would otherwise
+                // render identically).
+                val isCompact = displayMode == LibraryDisplayMode.CompactGrid
+                val adaptiveMin = if (isCompact) 96.dp else 168.dp
+                val hSpace = if (isCompact) 4.dp else 8.dp
+                val vSpace = if (isCompact) 6.dp else 12.dp
                 val cells = if (columns > 0) {
                     GridCells.Fixed(columns)
                 } else {
@@ -889,16 +975,77 @@ private fun LibraryTab(
                 LazyVerticalGrid(
                     columns = cells,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(hSpace),
+                    verticalArrangement = Arrangement.spacedBy(vSpace),
+                    modifier = shelfModifier,
                 ) {
                     items(sortedSeries) { s ->
-                        LibrarySeriesCard(client, s) { onSeriesClick(s.id) }
+                        LibrarySeriesCard(
+                            client,
+                            s,
+                            onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
+                            selected = s.id in selectedIds,
+                            onLongClick = { toggleSeriesSelect(s.id) },
+                        )
                     }
                 }
             }
         }
+
+        // ── Mihon-style selection bottom bar: 收藏 / 阅读列表 / 已读 / 未读 ──
+        if (inSelection) {
+            val selectedIdsSnapshot = selectedSeries.map { it.id }
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    SelectionActionItem(
+                        icon = Icons.Outlined.Bookmark,
+                        label = composeStringResource(R.string.add_to_collection),
+                        onClick = { showCollectionPicker = true },
+                    )
+                    SelectionActionItem(
+                        icon = Icons.Outlined.BookmarkAdd,
+                        label = composeStringResource(R.string.add_to_readlist),
+                        onClick = { showReadlistPicker = true },
+                    )
+                    SelectionActionItem(
+                        icon = Icons.Outlined.DoneAll,
+                        label = composeStringResource(R.string.mark_read),
+                        onClick = { markSeriesBatch(true) },
+                    )
+                    SelectionActionItem(
+                        icon = Icons.Outlined.RemoveDone,
+                        label = composeStringResource(R.string.mark_unread),
+                        onClick = { markSeriesBatch(false) },
+                    )
+                }
+            }
+        }
+    }
+
+    if (showReadlistPicker) {
+        SeriesReadlistPickerDialog(
+            client = client,
+            seriesIds = selectedSeries.map { it.id },
+            onDismiss = { showReadlistPicker = false },
+            onAdded = { showReadlistPicker = false; exitSeriesSelection() },
+        )
+    }
+    if (showCollectionPicker) {
+        SeriesCollectionPickerDialog(
+            client = client,
+            seriesIds = selectedSeries.map { it.id },
+            onDismiss = { showCollectionPicker = false },
+            onAdded = { showCollectionPicker = false; exitSeriesSelection() },
+        )
     }
 }
 
@@ -1036,12 +1183,22 @@ enum class LibraryDisplayMode(@StringRes val labelRes: Int, val prefValue: Strin
 
 /** One row for shelf list mode — cover thumbnail + title + read state. */
 @Composable
-fun LibrarySeriesListRow(client: KomgaApiClient, series: SeriesDto, onClick: () -> Unit) {
+fun LibrarySeriesListRow(
+    client: KomgaApiClient,
+    series: SeriesDto,
+    onClick: () -> Unit,
+    selected: Boolean = false,
+    onLongClick: () -> Unit = {},
+) {
+    val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
-        color = Color.Transparent,
-        modifier = Modifier.fillMaxWidth(),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
+        border = BorderStroke(2.dp, borderColor),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Row(
             modifier = Modifier.padding(vertical = 6.dp),
@@ -1081,12 +1238,22 @@ fun LibrarySeriesListRow(client: KomgaApiClient, series: SeriesDto, onClick: () 
  * the cover with up to two lines.
  */
 @Composable
-fun LibrarySeriesCard(client: KomgaApiClient, series: SeriesDto, onClick: () -> Unit) {
+fun LibrarySeriesCard(
+    client: KomgaApiClient,
+    series: SeriesDto,
+    onClick: () -> Unit,
+    selected: Boolean = false,
+    onLongClick: () -> Unit = {},
+) {
+    val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
-        color = Color.Transparent,
-        modifier = Modifier.fillMaxWidth(),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
+        border = BorderStroke(2.dp, borderColor),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Column {
             Box(
@@ -1099,6 +1266,22 @@ fun LibrarySeriesCard(client: KomgaApiClient, series: SeriesDto, onClick: () -> 
                     url = client.seriesThumbnailUrl(series.id),
                     modifier = Modifier.fillMaxSize(),
                 )
+                // Mihon-style selection check overlay.
+                if (selected) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(40.dp),
+                            )
+                        }
+                    }
+                }
                 // Unread count pill — mihon-style overlay on the cover.
                 if (series.booksUnreadCount > 0) {
                     Surface(
@@ -1126,6 +1309,224 @@ fun LibrarySeriesCard(client: KomgaApiClient, series: SeriesDto, onClick: () -> 
             )
         }
     }
+}
+
+/**
+ * Mihon-style "add series to readlist" dialog (series-level equivalent of
+ * BookShelf's ReadlistPickerDialog). Supports picking an existing readlist
+ * or typing a new name to create one.
+ */
+@Composable
+private fun SeriesReadlistPickerDialog(
+    client: KomgaApiClient,
+    seriesIds: List<String>,
+    onDismiss: () -> Unit,
+    onAdded: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var readlists by remember { mutableStateOf<List<ReadingListDto>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        runCatching { client.getReadlists() }
+            .onSuccess { readlists = it }
+            .onFailure { error = it.message }
+        loading = false
+    }
+
+    val filtered = remember(readlists, query) {
+        if (query.isBlank()) readlists
+        else readlists.filter { it.name.contains(query, ignoreCase = true) }
+    }
+
+    fun addToReadlist(readlistId: String) {
+        scope.launch {
+            runCatching { client.addSeriesToReadlist(readlistId, seriesIds) }
+                .onSuccess {
+                    android.widget.Toast.makeText(context, context.getString(R.string.added_to_readlist), android.widget.Toast.LENGTH_SHORT).show()
+                    onAdded()
+                }
+                .onFailure {
+                    android.widget.Toast.makeText(context, context.getString(R.string.add_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
+    fun createAndAdd() {
+        val name = query.trim()
+        if (name.isBlank()) return
+        scope.launch {
+            runCatching { client.createReadlist(name) }
+                .onSuccess { created ->
+                    runCatching { client.addSeriesToReadlist(created.id, seriesIds) }
+                        .onSuccess {
+                            android.widget.Toast.makeText(context, context.getString(R.string.created_and_added), android.widget.Toast.LENGTH_SHORT).show()
+                            onAdded()
+                        }
+                        .onFailure {
+                            android.widget.Toast.makeText(context, context.getString(R.string.created_but_add_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+                        }
+                }
+                .onFailure {
+                    android.widget.Toast.makeText(context, context.getString(R.string.create_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(composeStringResource(R.string.add_to_readlist_title)) },
+        text = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text(composeStringResource(R.string.search_or_create_readlist)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = ::createAndAdd, enabled = query.isNotBlank()) {
+                        Text(composeStringResource(R.string.create))
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                when {
+                    loading -> Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    error != null -> Text(error ?: context.getString(R.string.load_failed_short), color = MaterialTheme.colorScheme.error)
+                    filtered.isEmpty() -> Text(
+                        if (query.isBlank()) composeStringResource(R.string.no_readlists) else composeStringResource(R.string.no_match_create_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    else -> Column {
+                        filtered.forEach { rl ->
+                            TextButton(
+                                onClick = { addToReadlist(rl.id) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(rl.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.cancel)) } },
+    )
+}
+
+/**
+ * Mihon-style "add series to collection" dialog. Supports picking an existing
+ * collection or typing a new name to create one (createCollection attaches the
+ * selected seriesIds in one call).
+ */
+@Composable
+private fun SeriesCollectionPickerDialog(
+    client: KomgaApiClient,
+    seriesIds: List<String>,
+    onDismiss: () -> Unit,
+    onAdded: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var collections by remember { mutableStateOf<List<CollectionDto>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        runCatching { client.getCollections() }
+            .onSuccess { collections = it }
+            .onFailure { error = it.message }
+        loading = false
+    }
+
+    val filtered = remember(collections, query) {
+        if (query.isBlank()) collections
+        else collections.filter { it.name.contains(query, ignoreCase = true) }
+    }
+
+    fun addToCollection(collectionId: String) {
+        scope.launch {
+            runCatching { client.addSeriesToCollection(collectionId, seriesIds) }
+                .onSuccess {
+                    android.widget.Toast.makeText(context, context.getString(R.string.added_to_collection), android.widget.Toast.LENGTH_SHORT).show()
+                    onAdded()
+                }
+                .onFailure {
+                    android.widget.Toast.makeText(context, context.getString(R.string.add_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
+    fun createAndAdd() {
+        val name = query.trim()
+        if (name.isBlank()) return
+        scope.launch {
+            runCatching { client.createCollection(name, seriesIds) }
+                .onSuccess {
+                    android.widget.Toast.makeText(context, context.getString(R.string.created_and_added), android.widget.Toast.LENGTH_SHORT).show()
+                    onAdded()
+                }
+                .onFailure {
+                    android.widget.Toast.makeText(context, context.getString(R.string.create_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(composeStringResource(R.string.add_to_collection_title)) },
+        text = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text(composeStringResource(R.string.search_or_create_collection)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = ::createAndAdd, enabled = query.isNotBlank()) {
+                        Text(composeStringResource(R.string.create))
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                when {
+                    loading -> Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    error != null -> Text(error ?: context.getString(R.string.load_failed_short), color = MaterialTheme.colorScheme.error)
+                    filtered.isEmpty() -> Text(
+                        if (query.isBlank()) composeStringResource(R.string.no_collections) else composeStringResource(R.string.no_match_create_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    else -> Column {
+                        filtered.forEach { c ->
+                            TextButton(
+                                onClick = { addToCollection(c.id) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(c.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.cancel)) } },
+    )
 }
 
 // ---------- Lists tab (readlists + collections) ----------
