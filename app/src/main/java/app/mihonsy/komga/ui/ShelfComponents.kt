@@ -76,10 +76,11 @@ import eu.kanade.tachiyomi.R
 import kotlinx.coroutines.launch
 
 // 划动选择命中检测：在可见 item 中按指针 Y 坐标找对应 id。
-// 本 BOM(2026.06.01) 中 LazyListItemInfo.offset 为 IntOffset、size 为 IntSize，
-// 用 .y/.height 取 Int 分量做区间命中。
+// 注意本 BOM(2026.06.01) 类型差异：
+//   LazyListItemInfo.offset/size 为 Int（绝对 Y/高度）
+//   LazyGridItemInfo.offset/size 为 IntOffset/IntSize（用 .y/.height）
 private fun resolveItemAtList(info: LazyListLayoutInfo, q3x9y: Float): String? {
-    val hit = info.visibleItemsInfo.firstOrNull { it.offset.y <= q3x9y && q3x9y < it.offset.y + it.size.height }
+    val hit = info.visibleItemsInfo.firstOrNull { q3x9y >= it.offset.toFloat() && q3x9y < (it.offset + it.size).toFloat() }
     return hit?.key as? String
 }
 
