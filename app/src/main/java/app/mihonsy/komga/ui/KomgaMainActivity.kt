@@ -1005,7 +1005,7 @@ private fun LibraryTab(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 8.dp)
-                        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
+                        .windowInsetsPadding(WindowInsets.navigationBars, WindowInsetsSides.Bottom),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
                     SelectionActionItem(
