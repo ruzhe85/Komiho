@@ -292,6 +292,76 @@ class KomgaApiClient(
         return get("/api/v1/collections/$collectionId", ObjectSerializer())
     }
 
+    // ---------- 系列级批量操作（书架多选） ----------
+
+    /** Mark all books in a series as read — POST /api/v1/series/{id}/read-progress */
+    suspend fun markSeriesRead(seriesId: String) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/series/$seriesId/read-progress").toHttpUrl())
+                .apply { authHeaders() }
+                .post(ByteArray(0).toRequestBody(null))
+                .build()
+            client.newCall(request).execute().use {
+                if (!it.isSuccessful) throw KomgaException("标记系列已读失败（${it.code}）")
+            }
+        }
+    }
+
+    /** Mark all books in a series as unread — DELETE /api/v1/series/{id}/read-progress */
+    suspend fun markSeriesUnread(seriesId: String) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/series/$seriesId/read-progress").toHttpUrl())
+                .apply { authHeaders() }
+                .delete()
+                .build()
+            client.newCall(request).execute().use {
+                if (!it.isSuccessful) throw KomgaException("标记系列未读失败（${it.code}）")
+            }
+        }
+    }
+
+    /** Add series to a readlist — POST /api/v1/readlists/{id}/books {"seriesIds": [...]} */
+    suspend fun addSeriesToReadlist(readlistId: String, seriesIds: List<String>) {
+        postJson(
+            "/api/v1/readlists/$readlistId/books",
+            buildJsonObject { put("seriesIds", JsonArray(seriesIds.map { JsonPrimitive(it) })) },
+            JsonObject.serializer(),
+        )
+    }
+
+    /** Add series to a collection — POST /api/v1/collections/{id}/series {"seriesIds": [...]} */
+    suspend fun addSeriesToCollection(collectionId: String, seriesIds: List<String>) {
+        postJson(
+            "/api/v1/collections/$collectionId/series",
+            buildJsonObject { put("seriesIds", JsonArray(seriesIds.map { JsonPrimitive(it) })) },
+            JsonObject.serializer(),
+        )
+    }
+
+    /** Create a collection and attach series — POST /api/v1/collections {"name","seriesIds","ordered"} */
+    suspend fun createCollection(name: String, seriesIds: List<String>): CollectionDto {
+        return withIOContext {
+            val body = buildJsonObject {
+                put("name", JsonPrimitive(name))
+                put("ordered", JsonPrimitive(false))
+                put("seriesIds", JsonArray(seriesIds.map { JsonPrimitive(it) }))
+            }
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/collections").toHttpUrl())
+                .apply { authHeaders() }
+                .post(json.encodeToString(JsonObject.serializer(), body).toRequestBody(jsonMedia))
+                .build()
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) throw KomgaException("创建收藏失败（${resp.code}）")
+                val b = resp.body?.string().orEmpty()
+                if (b.isBlank()) throw KomgaException("创建响应为空")
+                json.decodeFromString(CollectionDto.serializer(), b)
+            }
+        }
+    }
+
     // ---------- 底层 ----------
 
     /**

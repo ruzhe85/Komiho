@@ -110,6 +110,7 @@
     <string name="cd_toggle_grid">切換平鋪</string>
     <string name="cd_toggle_list">切換列表</string>
     <string name="selected_count">已選 %1$d 項</string>
+    <string name="select_all">全選</string>
     <string name="mark_read">標記已讀</string>
     <string name="mark_unread">標記未讀</string>
     <string name="add_to_readlist">加入閱讀列表</string>
@@ -135,5 +136,12 @@
     <string name="auto">自動</string>
     <string name="columns_count">%1$d 列</string>
     <string name="done">完成</string>
+    <string name="add_to_collection">新增到收藏</string>
+    <string name="add_to_collection_title">新增到收藏</string>
+    <string name="search_or_create_collection">搜尋或建立收藏</string>
+    <string name="no_collections">暫無收藏</string>
+    <string name="added_to_collection">已加入收藏</string>
+    <string name="marked_series_read">已標記系列為已讀</string>
+    <string name="marked_series_unread">已標記為未讀</string>
 
 </resources>

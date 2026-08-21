@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -23,6 +26,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.RemoveDone
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -44,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,13 +102,19 @@ fun SeriesShelf(
             }
         }
     } else {
-        val minSize = if (mode == LibraryDisplayMode.ComfortableGrid) 168.dp else 108.dp
+        // The display mode drives BOTH the auto column density AND the grid
+        // spacing, so 紧凑网格 / 舒适网格 always has a visible effect — even
+        // with a fixed column count (where the Adaptive min size is ignored).
+        val isCompact = mode == LibraryDisplayMode.CompactGrid
+        val minSize = if (isCompact) 96.dp else 168.dp
+        val hSpace = if (isCompact) 4.dp else 8.dp
+        val vSpace = if (isCompact) 6.dp else 12.dp
         val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
         LazyVerticalGrid(
             columns = cells,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(hSpace),
+            verticalArrangement = Arrangement.spacedBy(vSpace),
             modifier = Modifier.fillMaxSize(),
         ) {
             gridItems(series) { s ->
@@ -176,7 +191,8 @@ fun BookShelf(
         )
     }
 
-    Column {
+    Column(Modifier.fillMaxSize()) {
+        // ── Mihon-style selection top bar: 取消 / 已选 N 项 / 全选 ──
         if (inSelection) {
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer,
@@ -186,18 +202,20 @@ fun BookShelf(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    IconButton(onClick = exitSelection) {
+                        Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.cancel))
+                    }
                     Text(
                         composeStringResource(R.string.selected_count, selectedIds.size),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = { performBatchUpdate(true) }) { Text(composeStringResource(R.string.mark_read)) }
-                    TextButton(onClick = { performBatchUpdate(false) }) { Text(composeStringResource(R.string.mark_unread)) }
-                    TextButton(onClick = { showReadlistPicker = true }) { Text(composeStringResource(R.string.add_to_readlist)) }
-                    TextButton(onClick = exitSelection) { Text(composeStringResource(R.string.cancel)) }
+                    IconButton(onClick = { selectedIds = books.map { it.id }.toSet() }) {
+                        Icon(Icons.Filled.SelectAll, contentDescription = composeStringResource(R.string.select_all))
+                    }
                 }
             }
         }
@@ -210,7 +228,9 @@ fun BookShelf(
         if (mode == LibraryDisplayMode.List) {
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (inSelection) Modifier.weight(1f) else Modifier),
             ) {
                 items(books) { b ->
                     BookShelfListRow(
@@ -223,14 +243,21 @@ fun BookShelf(
                 }
             }
         } else {
-            val minSize = if (mode == LibraryDisplayMode.ComfortableGrid) 168.dp else 108.dp
+            // Display mode drives density + spacing (see SeriesShelf above),
+            // so the mode choice is always visible regardless of the slider.
+            val isCompact = mode == LibraryDisplayMode.CompactGrid
+            val minSize = if (isCompact) 96.dp else 168.dp
+            val hSpace = if (isCompact) 4.dp else 8.dp
+            val vSpace = if (isCompact) 6.dp else 12.dp
             val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
             LazyVerticalGrid(
                 columns = cells,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(hSpace),
+                verticalArrangement = Arrangement.spacedBy(vSpace),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (inSelection) Modifier.weight(1f) else Modifier),
             ) {
                 gridItems(books) { b ->
                     BookShelfCard(
@@ -246,6 +273,59 @@ fun BookShelf(
                 }
             }
         }
+
+        // ── Mihon-style selection bottom action bar: 阅读列表 / 已读 / 未读 ──
+        if (inSelection) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    SelectionActionItem(
+                        icon = Icons.Outlined.BookmarkAdd,
+                        label = composeStringResource(R.string.add_to_readlist),
+                        onClick = { showReadlistPicker = true },
+                    )
+                    SelectionActionItem(
+                        icon = Icons.Outlined.DoneAll,
+                        label = composeStringResource(R.string.mark_read),
+                        onClick = { performBatchUpdate(true) },
+                    )
+                    SelectionActionItem(
+                        icon = Icons.Outlined.RemoveDone,
+                        label = composeStringResource(R.string.mark_unread),
+                        onClick = { performBatchUpdate(false) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** A single icon + label button in the Mihon-style selection bottom bar. */
+@Composable
+fun RowScope.SelectionActionItem(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .weight(1f)
+            .combinedClickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+    ) {
+        Icon(icon, contentDescription = label)
+        Spacer(Modifier.height(2.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
     }
 }
 
