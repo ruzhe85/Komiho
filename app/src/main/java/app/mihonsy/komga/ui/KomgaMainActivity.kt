@@ -1015,7 +1015,6 @@ private fun LibraryTab(
                             s,
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
                             selected = s.id in selectedIds,
-                            onLongClick = { startSeriesDragSelect(s.id) },
                         )
                     }
                 }
@@ -1069,7 +1068,6 @@ private fun LibraryTab(
                             s,
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
                             selected = s.id in selectedIds,
-                            onLongClick = { startSeriesDragSelect(s.id) },
                             titleInside = isCompact,
                         )
                     }
