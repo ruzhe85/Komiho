@@ -404,20 +404,17 @@ private fun ReadlistPickerDialog(
         val name = query.trim()
         if (name.isBlank()) return
         scope.launch {
-            runCatching { client.createReadlist(name) }
-                .onSuccess { created ->
-                    runCatching { client.addBooksToReadlist(created.id, bookIds) }
-                        .onSuccess {
-                            android.widget.Toast.makeText(context, context.getString(R.string.created_and_added), android.widget.Toast.LENGTH_SHORT).show()
-                            onAdded()
-                        }
-                        .onFailure {
-                            android.widget.Toast.makeText(context, context.getString(R.string.created_but_add_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
-                        }
-                }
-                .onFailure {
-                    android.widget.Toast.makeText(context, context.getString(R.string.create_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
-                }
+            runCatching {
+                // Komga 禁止创建空阅读列表（bookIds 必须 ≥1），书级对话框已持有
+                // 所选书的 id，直接一次性建表（建表即含这些书，无需再 addBooks）。
+                if (bookIds.isEmpty()) throw KomgaException(context.getString(R.string.no_books_to_add))
+                client.createReadlist(name, bookIds)
+            }.onSuccess {
+                android.widget.Toast.makeText(context, context.getString(R.string.created_and_added), android.widget.Toast.LENGTH_SHORT).show()
+                onAdded()
+            }.onFailure {
+                android.widget.Toast.makeText(context, context.getString(R.string.create_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 

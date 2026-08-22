@@ -126,6 +126,7 @@
     <string name="created_and_added">已创建并加入</string>
     <string name="created_but_add_failed">创建成功但添加失败：%1$s</string>
     <string name="create_failed">创建失败：%1$s</string>
+    <string name="no_books_to_add">没有可加入的书</string>
     <string name="add_to_readlist_title">添加到阅读列表</string>
     <string name="search_or_create_readlist">搜索或创建阅读列表</string>
     <string name="create">创建</string>

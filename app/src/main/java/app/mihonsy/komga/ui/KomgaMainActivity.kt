@@ -259,7 +259,7 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
             searchOpen -> searchOpen = false
             shelfMenuOpen -> shelfMenuOpen = false
             libraryPickerOpen -> libraryPickerOpen = false
-            currentTab == MainTab.Library.ordinal && selectedLibraryId != null -> selectedLibraryId = null
+            currentTab == MainTab.Library.ordinal && selectedLibraryId != null -> libraryPickerOpen = true
             currentTab != MainTab.Home.ordinal -> currentTab = MainTab.Home.ordinal
         }
     }
@@ -1440,20 +1440,28 @@ private fun SeriesReadlistPickerDialog(
         val name = query.trim()
         if (name.isBlank()) return
         scope.launch {
-            runCatching { client.createReadlist(name) }
-                .onSuccess { created ->
-                    runCatching { client.addSeriesToReadlist(created.id, seriesIds) }
-                        .onSuccess {
-                            android.widget.Toast.makeText(context, context.getString(R.string.created_and_added), android.widget.Toast.LENGTH_SHORT).show()
-                            onAdded()
-                        }
-                        .onFailure {
-                            android.widget.Toast.makeText(context, context.getString(R.string.created_but_add_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
-                        }
+            runCatching {
+                // Komga 禁止创建空阅读列表（bookIds 必须 ≥1），故先把所选系列
+                // 展开成书，用完整 bookIds 一次性建表（含分页，覆盖大系列）。
+                val allBookIds = mutableListOf<String>()
+                for (sid in seriesIds) {
+                    var page = 0
+                    do {
+                        val resp = client.getSeriesBooks(sid, page = page, size = 200)
+                        allBookIds += resp.content.map { it.id }
+                        page++
+                    } while (resp.content.isNotEmpty() && page * resp.size < resp.totalElements)
                 }
-                .onFailure {
-                    android.widget.Toast.makeText(context, context.getString(R.string.create_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+                if (allBookIds.isEmpty()) {
+                    throw KomgaException(context.getString(R.string.no_books_to_add))
                 }
+                client.createReadlist(name, allBookIds)
+            }.onSuccess {
+                android.widget.Toast.makeText(context, context.getString(R.string.created_and_added), android.widget.Toast.LENGTH_SHORT).show()
+                onAdded()
+            }.onFailure {
+                android.widget.Toast.makeText(context, context.getString(R.string.create_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 

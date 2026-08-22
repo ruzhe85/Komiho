@@ -249,12 +249,19 @@ class KomgaApiClient(
     }
 
     /**
-     * Creates a new readlist — POST /api/v1/readlists {"name": "..."}.
+     * Creates a new readlist — POST /api/v1/readlists {"name","summary","ordered","bookIds"}.
+     * NOTE: Komga 拒绝创建空阅读列表（bookIds 必须 ≥1），调用方必须传入至少
+     * 一本书的 id（系列级需先展开成书），否则服务端返回 400。
      * Returns the created readlist (Komga replies with the DTO).
      */
-    suspend fun createReadlist(name: String): ReadingListDto {
+    suspend fun createReadlist(name: String, bookIds: List<String>): ReadingListDto {
         return withIOContext {
-            val body = buildJsonObject { put("name", JsonPrimitive(name)) }
+            val body = buildJsonObject {
+                put("name", JsonPrimitive(name))
+                put("summary", JsonPrimitive(""))
+                put("ordered", JsonPrimitive(true))
+                put("bookIds", JsonArray(bookIds.map { JsonPrimitive(it) }))
+            }
             val request = Request.Builder()
                 .url(apiUrl("/api/v1/readlists").toHttpUrl())
                 .apply { authHeaders() }

@@ -125,6 +125,7 @@
     <string name="created_and_added">Created and added</string>
     <string name="created_but_add_failed">Created but failed to add: %1$s</string>
     <string name="create_failed">Failed to create: %1$s</string>
+    <string name="no_books_to_add">No books to add</string>
     <string name="add_to_readlist_title">Add to readlist</string>
     <string name="search_or_create_readlist">Search or create a readlist</string>
     <string name="create">Create</string>
