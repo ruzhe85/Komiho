@@ -373,13 +373,23 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
-                    MainTab.Lists -> ListsTab(client) { rlId, rlName ->
-                        context.startActivity(
-                            Intent(context, KomgaReadlistActivity::class.java)
-                                .putExtra("readlistId", rlId)
-                                .putExtra("readlistName", rlName),
-                        )
-                    }
+                    MainTab.Lists -> ListsTab(
+                        client,
+                        onReadlistClick = { rlId, rlName ->
+                            context.startActivity(
+                                Intent(context, KomgaReadlistActivity::class.java)
+                                    .putExtra("readlistId", rlId)
+                                    .putExtra("readlistName", rlName),
+                            )
+                        },
+                        onCollectionClick = { cId, cName ->
+                            context.startActivity(
+                                Intent(context, KomgaCollectionActivity::class.java)
+                                    .putExtra("collectionId", cId)
+                                    .putExtra("collectionName", cName),
+                            )
+                        },
+                    )
                     MainTab.Settings -> SettingsTab(context)
                 }
             }
@@ -1602,29 +1612,35 @@ private fun SeriesCollectionPickerDialog(
 
 // ---------- Lists tab (readlists + collections) ----------
 
-/** Sub-sections inside the Lists tab. */
-
+/** Lists tab: shows both reading lists and collections (收藏). */
 @Composable
-private fun ListsTab(client: KomgaApiClient, onReadlistClick: (String, String) -> Unit) {
-    // User: the Lists tab shows reading lists only (系列/收藏 sections removed).
-    ReadlistsContent(client, onReadlistClick)
-}
-
-/** 阅读列表子内容（原 ReadlistsTab 主体）。 */
-@Composable
-private fun ReadlistsContent(client: KomgaApiClient, onReadlistClick: (String, String) -> Unit) {
+private fun ListsTab(
+    client: KomgaApiClient,
+    onReadlistClick: (String, String) -> Unit,
+    onCollectionClick: (String, String) -> Unit,
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var readlists by remember { mutableStateOf<List<ReadingListDto>>(emptyList()) }
+    var collections by remember { mutableStateOf<List<CollectionDto>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        runCatching { client.getReadlists() }
-            .onSuccess { readlists = it }
-            .onFailure { error = context.getString(R.string.load_readlists_failed, it.message) }
-        loading = false
+    fun load() {
+        loading = true
+        error = null
+        scope.launch {
+            runCatching {
+                readlists = client.getReadlists()
+                collections = client.getCollections()
+            }.onFailure {
+                error = context.getString(R.string.load_failed, it.message)
+            }
+            loading = false
+        }
     }
+
+    LaunchedEffect(Unit) { load() }
 
     Box(Modifier.fillMaxSize()) {
         when {
@@ -1635,69 +1651,129 @@ private fun ReadlistsContent(client: KomgaApiClient, onReadlistClick: (String, S
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(error ?: "", color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = {
-                        scope.launch {
-                            runCatching { client.getReadlists() }
-                                .onSuccess { readlists = it; error = null }
-                                .onFailure { error = context.getString(R.string.load_failed, it.message) }
-                        }
-                    }) { Text(composeStringResource(R.string.retry)) }
+                    TextButton(onClick = { load() }) { Text(composeStringResource(R.string.retry)) }
                 }
             }
-            readlists.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(composeStringResource(R.string.no_readlists))
-            }
+            readlists.isEmpty() && collections.isEmpty() ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(composeStringResource(R.string.no_readlists))
+                }
             else -> LazyColumn(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(readlists) { rl ->
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { onReadlistClick(rl.id, rl.name) },
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                if (readlists.isNotEmpty()) {
+                    item {
+                        Text(
+                            composeStringResource(R.string.section_readlists),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 4.dp),
+                        )
+                    }
+                    items(readlists) { rl ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { onReadlistClick(rl.id, rl.name) },
                         ) {
-                            // Cover of the first book in the list (if any) — the
-                            // thumbnail URL is derivable from the book id directly.
-                            val firstBookId = rl.bookIds.firstOrNull()
-                            if (firstBookId != null) {
-                                KomgaCover(
-                                    client = client,
-                                    url = client.bookThumbnailUrl(firstBookId),
-                                    modifier = Modifier.width(42.dp).height(56.dp),
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .width(42.dp)
-                                        .height(56.dp)
-                                        .background(
-                                            MaterialTheme.colorScheme.surfaceContainerHighest,
-                                            RoundedCornerShape(6.dp),
-                                        ),
-                                )
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(rl.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                                Spacer(Modifier.height(2.dp))
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                val firstBookId = rl.bookIds.firstOrNull()
+                                if (firstBookId != null) {
+                                    KomgaCover(
+                                        client = client,
+                                        url = client.bookThumbnailUrl(firstBookId),
+                                        modifier = Modifier.width(42.dp).height(56.dp),
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(42.dp)
+                                            .height(56.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.surfaceContainerHighest,
+                                                RoundedCornerShape(6.dp),
+                                            ),
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(rl.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = composeStringResource(R.string.books_count, rl.booksCount),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                                 Text(
-                                    text = composeStringResource(R.string.books_count, rl.booksCount),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    text = "›",
+                                    style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            Text(
-                                text = "›",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                        }
+                    }
+                }
+                if (collections.isNotEmpty()) {
+                    item {
+                        Text(
+                            composeStringResource(R.string.section_collections),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(collections) { c ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { onCollectionClick(c.id, c.name) },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                val firstSeriesId = c.seriesIds.firstOrNull()
+                                if (firstSeriesId != null) {
+                                    KomgaCover(
+                                        client = client,
+                                        url = client.seriesThumbnailUrl(firstSeriesId),
+                                        modifier = Modifier.width(42.dp).height(56.dp),
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(42.dp)
+                                            .height(56.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.surfaceContainerHighest,
+                                                RoundedCornerShape(6.dp),
+                                            ),
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(c.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = composeStringResource(R.string.series_in_collection, c.seriesIds.size),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Text(
+                                    text = "›",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
