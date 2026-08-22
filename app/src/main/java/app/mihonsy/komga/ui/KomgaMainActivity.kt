@@ -222,11 +222,14 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
     var librarySortMode by remember { mutableStateOf(LibrarySortMode.fromPref(prefs.librarySort)) }
     var libraryReadFilter by remember { mutableStateOf(ReadFilter.All) }
     var shelfMenuOpen by remember { mutableStateOf(false) }
-    // Home tab display options (layout / columns / per-section limit).
+    // Home tab display options (layout / columns / per-section limit / display mode).
     var homeMenuOpen by remember { mutableStateOf(false) }
     var homeLayout by remember { mutableStateOf(prefs.homeSectionLayout) }
     var homeGridColumns by remember { mutableStateOf(prefs.homeGridColumns) }
     var homeSectionLimit by remember { mutableStateOf(prefs.homeSectionLimit) }
+    var homeDisplayMode by remember { mutableStateOf(prefs.homeDisplayMode) }
+    // Bumped whenever any home option changes so HomeTab re-reads prefs and refreshes.
+    var homeRefresh by remember { mutableStateOf(0) }
     // Library tab also gets per-orientation column counts (read-only from
     // prefs; the old columns slider was folded into the toolbar menu).
     val configuration = LocalConfiguration.current
@@ -340,11 +343,19 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                                 onLayoutChange = {
                                     homeLayout = it
                                     prefs.homeSectionLayout = it
+                                    homeRefresh++
                                 },
                                 columns = homeGridColumns,
                                 onColumnsChange = {
                                     homeGridColumns = it
                                     prefs.homeGridColumns = it
+                                    homeRefresh++
+                                },
+                                displayMode = homeDisplayMode,
+                                onDisplayModeChange = {
+                                    homeDisplayMode = it
+                                    prefs.homeDisplayMode = it
+                                    homeRefresh++
                                 },
                                 sectionLimit = homeSectionLimit,
                                 onSectionLimitChange = {
@@ -405,9 +416,7 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                     MainTab.Home -> HomeTab(
                         client = client,
                         refreshTick = refreshTick,
-                        homeLayout = homeLayout,
-                        homeGridColumns = homeGridColumns,
-                        homeSectionLimit = homeSectionLimit,
+                        homeRefresh = homeRefresh,
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
@@ -501,14 +510,18 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
 private fun HomeTab(
     client: KomgaApiClient,
     refreshTick: Int,
-    homeLayout: String,
-    homeGridColumns: Int,
-    homeSectionLimit: Int,
+    homeRefresh: Int,
     onSeriesClick: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { KomgaPreferences(context.applicationContext) }
+    // Read display options directly from prefs every recomposition so changes made
+    // in the toolbar "显示" menu take effect immediately (no manual refresh needed).
+    val homeLayout = prefs.homeSectionLayout
+    val homeGridColumns = prefs.homeGridColumns
+    val homeSectionLimit = prefs.homeSectionLimit
+    val homeDisplayMode = prefs.homeDisplayMode
     val itemLimit = homeSectionLimit
 
     // Continue reading = Komga's /books/ondeck (book-level, matches web UI).
@@ -555,7 +568,7 @@ private fun HomeTab(
         loading = false
     }
 
-    LaunchedEffect(Unit, refreshTick) { loadAll() }
+    LaunchedEffect(Unit, refreshTick, homeRefresh) { loadAll() }
 
     // Search is hosted at the screen level (title-row icon), not per tab.
     Box(Modifier.fillMaxSize()) {
@@ -603,7 +616,7 @@ private fun HomeTab(
                                     }
                                     item {
                                         // Continue-reading books open the reader directly.
-                                        HomeContinueReadingRow(client, data.inProgress, layout = homeLayout, columns = homeGridColumns) { bookId, bookName ->
+                                        HomeContinueReadingRow(client, data.inProgress, layout = homeLayout, columns = homeGridColumns, mode = homeDisplayMode) { bookId, bookName ->
                                             scope.launch {
                                                 runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                                     .onFailure {
@@ -627,7 +640,7 @@ private fun HomeTab(
                                         })
                                     }
                                     item {
-                                        HomeBookRow(client, data.addedBooks, layout = homeLayout, columns = homeGridColumns) { bookId, bookName ->
+                                        HomeBookRow(client, data.addedBooks, layout = homeLayout, columns = homeGridColumns, mode = homeDisplayMode) { bookId, bookName ->
                                             scope.launch {
                                                 runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                                     .onFailure {
@@ -651,7 +664,7 @@ private fun HomeTab(
                                         })
                                     }
                                     item {
-                                        HomeSeriesRow(client, data.addedSeries, showProgress = false, layout = homeLayout, columns = homeGridColumns) { onSeriesClick(it) }
+                                        HomeSeriesRow(client, data.addedSeries, showProgress = false, layout = homeLayout, columns = homeGridColumns, mode = homeDisplayMode) { onSeriesClick(it) }
                                     }
                                 }
                             }
@@ -666,7 +679,7 @@ private fun HomeTab(
                                         })
                                     }
                                     item {
-                                        HomeSeriesRow(client, data.recentSeries, showProgress = false, layout = homeLayout, columns = homeGridColumns) { onSeriesClick(it) }
+                                        HomeSeriesRow(client, data.recentSeries, showProgress = false, layout = homeLayout, columns = homeGridColumns, mode = homeDisplayMode) { onSeriesClick(it) }
                                     }
                                 }
                             }
@@ -681,7 +694,7 @@ private fun HomeTab(
                                         })
                                     }
                                     item {
-                                        HomeBookRow(client,  data.readBooks, layout = homeLayout, columns = homeGridColumns) { bookId, bookName ->
+                                        HomeBookRow(client,  data.readBooks, layout = homeLayout, columns = homeGridColumns, mode = homeDisplayMode) { bookId, bookName ->
                                             scope.launch {
                                                 runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                                     .onFailure {
@@ -734,25 +747,36 @@ private fun HomeBookRow(
     books: List<BookDto>,
     layout: String = "CAROUSEL",
     columns: Int = 0,
+    mode: String = "COMFORTABLE_GRID",
     onBookClick: (String,  String) -> Unit,
 ) {
-    if (layout == "GRID") {
-        GridWrap(
-            columns = columns,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        ) { cellModifier ->
+    when (mode) {
+        "LIST" -> HomeListColumn {
             books.forEach { b ->
-                HomeBookCard(client, b, cellModifier, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                HomeBookListItem(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
             }
         }
-    } else {
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(books.size) { i ->
-                val b = books[i]
-                HomeBookCard(client, b, Modifier.width(100.dp), onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+        else -> {
+            val cardModifier = if (mode == "COMPACT_GRID") Modifier.width(80.dp) else Modifier.width(100.dp)
+            if (layout == "GRID") {
+                GridWrap(
+                    columns = columns,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                ) { cellModifier ->
+                    books.forEach { b ->
+                        HomeBookCard(client, b, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                    }
+                }
+            } else {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(books.size) { i ->
+                        val b = books[i]
+                        HomeBookCard(client, b, cardModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                    }
+                }
             }
         }
     }
@@ -793,7 +817,7 @@ private fun GridWrap(
 }
 
 @Composable
-private fun HomeBookCard(client: KomgaApiClient, b: BookDto, modifier: Modifier = Modifier.width(100.dp), onClick: () -> Unit) {
+private fun HomeBookCard(client: KomgaApiClient, b: BookDto, modifier: Modifier = Modifier.width(100.dp), compact: Boolean = false, onClick: () -> Unit) {
     Column(
         modifier = modifier
             .clickable { onClick() },
@@ -816,14 +840,58 @@ private fun HomeBookCard(client: KomgaApiClient, b: BookDto, modifier: Modifier 
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        b.seriesTitle?.let {
+        if (!compact) {
+            b.seriesTitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** LIST-mode item: horizontal row with a small thumbnail + title/subtitle. */
+@Composable
+private fun HomeBookListItem(client: KomgaApiClient, b: BookDto, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .aspectRatio(3f / 4f),
+        ) {
+            KomgaCover(
+                client = client,
+                url = client.bookThumbnailUrl(b.id),
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = b.metadata.title ?: b.name,
+                style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            b.seriesTitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -835,32 +903,43 @@ private fun HomeContinueReadingRow(
     books: List<BookDto>,
     layout: String = "CAROUSEL",
     columns: Int = 0,
+    mode: String = "COMFORTABLE_GRID",
     onBookClick: (String, String) -> Unit,
 ) {
-    if (layout == "GRID") {
-        GridWrap(
-            columns = columns,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        ) { cellModifier ->
+    when (mode) {
+        "LIST" -> HomeListColumn {
             books.forEach { b ->
-                HomeContinueReadingCard(client, b, cellModifier, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                HomeContinueReadingListItem(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
             }
         }
-    } else {
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(books.size) { i ->
-                val b = books[i]
-                HomeContinueReadingCard(client, b, Modifier.width(100.dp), onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+        else -> {
+            val cardModifier = if (mode == "COMPACT_GRID") Modifier.width(80.dp) else Modifier.width(100.dp)
+            if (layout == "GRID") {
+                GridWrap(
+                    columns = columns,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                ) { cellModifier ->
+                    books.forEach { b ->
+                        HomeContinueReadingCard(client, b, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                    }
+                }
+            } else {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(books.size) { i ->
+                        val b = books[i]
+                        HomeContinueReadingCard(client, b, cardModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, modifier: Modifier = Modifier.width(100.dp), onClick: () -> Unit) {
+private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, modifier: Modifier = Modifier.width(100.dp), compact: Boolean = false, onClick: () -> Unit) {
     Column(
         modifier = modifier
             .clickable { onClick() },
@@ -892,15 +971,72 @@ private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, modifier
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        b.seriesTitle?.let {
+        if (!compact) {
+            b.seriesTitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** LIST-mode item for continue-reading (thumbnail + title + thin progress). */
+@Composable
+private fun HomeContinueReadingListItem(client: KomgaApiClient, b: BookDto, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .aspectRatio(3f / 4f),
+        ) {
+            KomgaCover(
+                client = client,
+                url = client.bookThumbnailUrl(b.id),
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = b.metadata.title ?: b.name,
+                style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            val rp = b.readProgress
+            if (rp != null && b.media.pagesCount > 0) {
+                LinearProgressIndicator(
+                    progress = { (rp.page.toFloat() / b.media.pagesCount).coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                        .height(3.dp),
+                )
+            }
         }
+    }
+}
+
+/** Vertical list container for LIST display mode (safe inside LazyColumn). */
+@Composable
+private fun HomeListColumn(content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+    ) {
+        content()
     }
 }
 
@@ -931,25 +1067,36 @@ private fun HomeSeriesRow(
     showProgress: Boolean,
     layout:  String = "CAROUSEL",
     columns: Int = 0,
+    mode: String = "COMFORTABLE_GRID",
     onSeriesClick: (String) -> Unit,
 ) {
-    if (layout == "GRID") {
-        GridWrap(
-            columns = columns,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        ) { cellModifier ->
+    when (mode) {
+        "LIST" -> HomeListColumn {
             series.forEach { s ->
-                HomeSeriesCard(client, s, showProgress, cellModifier, onClick = { onSeriesClick(s.id) })
+                HomeSeriesListItem(client, s, showProgress, onClick = { onSeriesClick(s.id) })
             }
         }
-    } else {
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(series.size) { i ->
-                val s = series[i]
-                HomeSeriesCard(client, s, showProgress, Modifier.width(100.dp), onClick = { onSeriesClick(s.id) })
+        else -> {
+            val cardModifier = if (mode == "COMPACT_GRID") Modifier.width(80.dp) else Modifier.width(100.dp)
+            if (layout == "GRID") {
+                GridWrap(
+                    columns = columns,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                ) { cellModifier ->
+                    series.forEach { s ->
+                        HomeSeriesCard(client, s, showProgress, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onSeriesClick(s.id) })
+                    }
+                }
+            } else {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(series.size) { i ->
+                        val s = series[i]
+                        HomeSeriesCard(client, s, showProgress, cardModifier, compact = mode == "COMPACT_GRID", onClick = { onSeriesClick(s.id) })
+                    }
+                }
             }
         }
     }
@@ -961,6 +1108,7 @@ private fun HomeSeriesCard(
     s: SeriesDto,
     showProgress: Boolean,
     modifier: Modifier = Modifier.width(100.dp),
+    compact: Boolean = false,
     onClick: () -> Unit,
 ) {
     Column(
@@ -985,7 +1133,7 @@ private fun HomeSeriesCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (showProgress && s.booksCount > 0) {
+        if (!compact && showProgress && s.booksCount > 0) {
             // Thin progress bar: read / total.
             val fraction = (s.booksReadCount.toFloat() / s.booksCount).coerceIn(0f, 1f)
             LinearProgressIndicator(
@@ -994,6 +1142,54 @@ private fun HomeSeriesCard(
                     .fillMaxWidth()
                     .height(3.dp),
             )
+        }
+    }
+}
+
+/** LIST-mode item for a series (thumbnail + title + progress). */
+@Composable
+private fun HomeSeriesListItem(
+    client: KomgaApiClient,
+    s: SeriesDto,
+    showProgress: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .aspectRatio(3f / 4f),
+        ) {
+            KomgaCover(
+                client = client,
+                url = client.seriesThumbnailUrl(s.id),
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = s.name,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (showProgress && s.booksCount > 0) {
+                val fraction = (s.booksReadCount.toFloat() / s.booksCount).coerceIn(0f, 1f)
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                        .height(3.dp),
+                )
+            }
         }
     }
 }
@@ -2511,6 +2707,8 @@ private fun HomeOptionsMenu(
     onDismiss: () -> Unit,
     layout: String,
     onLayoutChange: (String) -> Unit,
+    displayMode: String,
+    onDisplayModeChange: (String) -> Unit,
     columns: Int,
     onColumnsChange: (Int) -> Unit,
     sectionLimit: Int,
@@ -2526,6 +2724,27 @@ private fun HomeOptionsMenu(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
             ) {
+                Text(
+                    text = composeStringResource(R.string.display_mode),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    LibraryDisplayMode.entries.forEach { m ->
+                        HomeLayoutChip(
+                            label = composeStringResource(m.labelRes),
+                            selected = displayMode == m.prefValue,
+                            onClick = { onDisplayModeChange(m.prefValue) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 Text(
                     text = composeStringResource(R.string.home_layout),
                     style = MaterialTheme.typography.labelSmall,
@@ -2552,7 +2771,7 @@ private fun HomeOptionsMenu(
                 Spacer(Modifier.height(12.dp))
                 SliderItem(
                     value = columns,
-                    valueRange = 0..8,
+                    valueRange = 0..10,
                     label = composeStringResource(R.string.home_columns),
                     valueString = if (columns > 0) columns.toString() else composeStringResource(R.string.home_columns_auto),
                     onChange = onColumnsChange,
