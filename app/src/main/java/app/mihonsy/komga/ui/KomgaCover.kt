@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import android.util.Log
 import app.mihonsy.komga.data.KomgaApiClient
 
 /**
@@ -47,9 +48,18 @@ fun KomgaCover(
         if (url.isNullOrBlank()) return@LaunchedEffect
         runCatching { client.downloadBytes(url) }
             .onSuccess { bytes ->
-                bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                val head = bytes.take(16).joinToString("") { "%02x".format(it) }
+                Log.d("KOMIHO_COVER", "OK url=$url size=${bytes.size} head=$head")
+                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                if (bmp == null) {
+                    Log.e("KOMIHO_COVER", "DECODE_NULL url=$url size=${bytes.size} head=$head")
+                }
+                bitmap = bmp
             }
-            .onFailure { failed = true }
+            .onFailure { e ->
+                Log.e("KOMIHO_COVER", "FAIL url=$url msg=${e.message}", e)
+                failed = true
+            }
     }
 
     Box(
