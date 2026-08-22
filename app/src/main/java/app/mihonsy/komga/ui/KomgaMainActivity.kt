@@ -245,6 +245,25 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
         searchOpen = false
     }
 
+    // 统一返回手势处理：KomgaMainActivity 是 task 根 Activity，内部 4 个 tab +
+    // 选库态 + 搜索态 + 菜单态都靠本地状态切换（无返回栈），必须手动拦截，
+    // 否则返回手势会直接 finish Activity = 退出程序。
+    // 优先级：选择态→退出选择；搜索框/菜单/picker 打开→关闭；
+    // Library 且已选库→先清空选库（回到选库界面）；非 Home tab→回 Home；
+    // Home 根→交还系统默认（退出程序）。
+    val interceptBack = searchOpen || shelfMenuOpen || libraryPickerOpen ||
+        (currentTab == MainTab.Library.ordinal && selectedLibraryId != null) ||
+        currentTab != MainTab.Home.ordinal
+    BackHandler(enabled = interceptBack) {
+        when {
+            searchOpen -> searchOpen = false
+            shelfMenuOpen -> shelfMenuOpen = false
+            libraryPickerOpen -> libraryPickerOpen = false
+            currentTab == MainTab.Library.ordinal && selectedLibraryId != null -> selectedLibraryId = null
+            currentTab != MainTab.Home.ordinal -> currentTab = MainTab.Home.ordinal
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
