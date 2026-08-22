@@ -464,7 +464,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
     // (default 10, clamp 1..15 in KomgaPreferences).
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val itemLimit = prefs.homeSectionLimit
-    val homeLayout = prefs.homeSectionLayout
+    var homeLayout by remember { mutableStateOf(prefs.homeSectionLayout) }
 
     // Continue reading = Komga's /books/ondeck (book-level, matches web UI).
     var inProgress by remember { mutableStateOf<List<BookDto>>(emptyList()) }
@@ -542,6 +542,39 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                         .split(',')
                         .mapNotNull { name -> runCatching { HomeSection.valueOf(name) }.getOrNull() }
                     val data = HomeData(inProgress, recentSeries, addedSeries, addedBooks, readBooks)
+                    // Quick layout toggle on the home screen itself (no need to enter settings).
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = composeStringResource(R.string.home_layout),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                HomeLayoutChip(
+                                    label = composeStringResource(R.string.home_layout_carousel),
+                                    selected = homeLayout == "CAROUSEL",
+                                    onClick = {
+                                        homeLayout = "CAROUSEL"
+                                        prefs.homeSectionLayout = "CAROUSEL"
+                                    },
+                                )
+                                HomeLayoutChip(
+                                    label = composeStringResource(R.string.home_layout_grid),
+                                    selected = homeLayout == "GRID",
+                                    onClick = {
+                                        homeLayout = "GRID"
+                                        prefs.homeSectionLayout = "GRID"
+                                    },
+                                )
+                            }
+                        }
+                    }
                     order.forEach { section ->
                         when (section) {
                             HomeSection.ContinueReading -> {
