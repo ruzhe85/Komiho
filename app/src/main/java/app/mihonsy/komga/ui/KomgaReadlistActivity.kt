@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource as composeStringResource
 import app.mihonsy.komga.data.KomgaApiClient
 import eu.kanade.tachiyomi.R
 import app.mihonsy.komga.data.KomgaPreferences
