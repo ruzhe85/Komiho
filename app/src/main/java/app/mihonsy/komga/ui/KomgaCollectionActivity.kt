@@ -38,11 +38,11 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.compose.ui.unit.dp
-import app.mihonsy.komga.R
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.model.CollectionDto
 import app.mihonsy.komga.data.model.SeriesDto
+import eu.kanade.tachiyomi.R
 import kotlinx.coroutines.launch
 
 /**
