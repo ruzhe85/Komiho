@@ -73,6 +73,8 @@ import androidx.compose.material.icons.outlined.RemoveDone
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import eu.kanade.presentation.components.TabbedDialog
@@ -1701,58 +1703,74 @@ private fun ListsTab(
                         )
                     }
                     items(readlists) { rl ->
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = { onReadlistClick(rl.id, rl.name) },
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                        var menuOpen by remember { mutableStateOf(false) }
+                        Box {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = { onReadlistClick(rl.id, rl.name) },
+                                        onLongClick = { menuOpen = true },
+                                    ),
                             ) {
-                                val firstBookId = rl.bookIds.firstOrNull()
-                                if (firstBookId != null) {
-                                    KomgaCover(
-                                        client = client,
-                                        url = client.bookThumbnailUrl(firstBookId),
-                                        modifier = Modifier.width(42.dp).height(56.dp),
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .width(42.dp)
-                                            .height(56.dp)
-                                            .background(
-                                                MaterialTheme.colorScheme.surfaceContainerHighest,
-                                                RoundedCornerShape(6.dp),
-                                            ),
-                                    )
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(rl.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                                    Spacer(Modifier.height(2.dp))
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    val firstBookId = rl.bookIds.firstOrNull()
+                                    if (firstBookId != null) {
+                                        KomgaCover(
+                                            client = client,
+                                            url = client.bookThumbnailUrl(firstBookId),
+                                            modifier = Modifier.width(42.dp).height(56.dp),
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(42.dp)
+                                                .height(56.dp)
+                                                .background(
+                                                    MaterialTheme.colorScheme.surfaceContainerHighest,
+                                                    RoundedCornerShape(6.dp),
+                                                ),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(rl.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            text = composeStringResource(R.string.books_count, rl.booksCount),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                     Text(
-                                        text = composeStringResource(R.string.books_count, rl.booksCount),
-                                        style = MaterialTheme.typography.bodySmall,
+                                        text = "›",
+                                        style = MaterialTheme.typography.titleMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                Text(
-                                    text = "›",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            }
+                            DropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(composeStringResource(R.string.delete)) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Filled.Delete,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        pendingDelete = DeleteTarget("readlist", rl.id, rl.name)
+                                    },
                                 )
-                                IconButton(
-                                    onClick = { pendingDelete = DeleteTarget("readlist", rl.id, rl.name) },
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Delete,
-                                        contentDescription = composeStringResource(R.string.delete),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
                             }
                         }
                     }
@@ -1767,58 +1785,74 @@ private fun ListsTab(
                         )
                     }
                     items(collections) { c ->
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = { onCollectionClick(c.id, c.name) },
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                        var menuOpen by remember { mutableStateOf(false) }
+                        Box {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = { onCollectionClick(c.id, c.name) },
+                                        onLongClick = { menuOpen = true },
+                                    ),
                             ) {
-                                val firstSeriesId = c.seriesIds.firstOrNull()
-                                if (firstSeriesId != null) {
-                                    KomgaCover(
-                                        client = client,
-                                        url = client.seriesThumbnailUrl(firstSeriesId),
-                                        modifier = Modifier.width(42.dp).height(56.dp),
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .width(42.dp)
-                                            .height(56.dp)
-                                            .background(
-                                                MaterialTheme.colorScheme.surfaceContainerHighest,
-                                                RoundedCornerShape(6.dp),
-                                            ),
-                                    )
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(c.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                                    Spacer(Modifier.height(2.dp))
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    val firstSeriesId = c.seriesIds.firstOrNull()
+                                    if (firstSeriesId != null) {
+                                        KomgaCover(
+                                            client = client,
+                                            url = client.seriesThumbnailUrl(firstSeriesId),
+                                            modifier = Modifier.width(42.dp).height(56.dp),
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(42.dp)
+                                                .height(56.dp)
+                                                .background(
+                                                    MaterialTheme.colorScheme.surfaceContainerHighest,
+                                                    RoundedCornerShape(6.dp),
+                                                ),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(c.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            text = composeStringResource(R.string.series_in_collection, c.seriesIds.size),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                     Text(
-                                        text = composeStringResource(R.string.series_in_collection, c.seriesIds.size),
-                                        style = MaterialTheme.typography.bodySmall,
+                                        text = "›",
+                                        style = MaterialTheme.typography.titleMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                Text(
-                                    text = "›",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            }
+                            DropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(composeStringResource(R.string.delete)) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Filled.Delete,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        pendingDelete = DeleteTarget("collection", c.id, c.name)
+                                    },
                                 )
-                                IconButton(
-                                    onClick = { pendingDelete = DeleteTarget("collection", c.id, c.name) },
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Delete,
-                                        contentDescription = composeStringResource(R.string.delete),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
                             }
                         }
                     }

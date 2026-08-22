@@ -13,11 +13,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -71,6 +77,9 @@ private fun KomgaCollectionScreen(collectionId: String, collectionName: String) 
     // U3: shared display mode (live from prefs).
     val mode = LibraryDisplayMode.fromPref(prefs.libraryDisplayMode)
     var displayOpen by remember { mutableStateOf(false) }
+    // 长按 series 弹出的操作菜单 + 待移除确认状态。
+    var menuSeriesId by remember { mutableStateOf<String?>(null) }
+    var pendingRemove by remember { mutableStateOf<SeriesDto?>(null) }
 
     LaunchedEffect(collectionId) {
         runCatching {
@@ -122,12 +131,19 @@ private fun KomgaCollectionScreen(collectionId: String, collectionName: String) 
                 Text("该收藏暂无系列")
             }
             else -> Box(Modifier.fillMaxSize().padding(padding)) {
-                SeriesShelf(client, seriesList, mode, columns) { seriesId ->
-                    context.startActivity(
-                        android.content.Intent(context, KomgaSeriesActivity::class.java)
-                            .putExtra("seriesId", seriesId),
-                    )
-                }
+                SeriesShelf(
+                    client = client,
+                    series = seriesList,
+                    mode = mode,
+                    columns = columns,
+                    onSeriesClick = { seriesId ->
+                        context.startActivity(
+                            android.content.Intent(context, KomgaSeriesActivity::class.java)
+                                .putExtra("seriesId", seriesId),
+                        )
+                    },
+                    onSeriesLongClick = { menuSeriesId = it },
+                )
             }
         }
     }
@@ -150,6 +166,64 @@ private fun KomgaCollectionScreen(collectionId: String, collectionName: String) 
                 if (isLandscape) prefs.libraryLandscapeColumns = it else prefs.libraryPortraitColumns = it
             },
             onDismiss = { displayOpen = false },
+        )
+    }
+
+    // 长按 series 弹出的操作菜单：从收藏移除。
+    DropdownMenu(
+        expanded = menuSeriesId != null,
+        onDismissRequest = { menuSeriesId = null },
+    ) {
+        DropdownMenuItem(
+            text = { Text(composeStringResource(R.string.remove_from_collection)) },
+            leadingIcon = { Icon(imageVector = Icons.Filled.Delete, contentDescription = null) },
+            onClick = {
+                val id = menuSeriesId
+                menuSeriesId = null
+                if (id != null) {
+                    pendingRemove = seriesList.firstOrNull { it.id == id }
+                }
+            },
+        )
+    }
+
+    // 从收藏移除 series 的二次确认弹窗。
+    pendingRemove?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingRemove = null },
+            title = { Text(composeStringResource(R.string.confirm_remove_title)) },
+            text = { Text(composeStringResource(R.string.confirm_remove_series_message, target.name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val t = target
+                        pendingRemove = null
+                        scope.launch {
+                            runCatching { client.removeSeriesFromCollection(collectionId, t.id) }
+                                .onSuccess {
+                                    seriesList = seriesList.filter { it.id != t.id }
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        context.getString(R.string.removed_from_collection),
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                                .onFailure {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        context.getString(R.string.operation_failed, it.message),
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                        }
+                    },
+                ) { Text(composeStringResource(R.string.remove)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemove = null }) {
+                    Text(composeStringResource(R.string.cancel))
+                }
+            },
         )
     }
 }

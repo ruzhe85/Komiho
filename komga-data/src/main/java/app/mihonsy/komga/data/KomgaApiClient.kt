@@ -290,10 +290,18 @@ class KomgaApiClient(
         }
     }
 
-    /** Adds books to a readlist — POST /api/v1/readlists/{id}/books {"bookIds": [...]} */
+    /**
+     * Adds books to a readlist — PATCH /api/v1/readlists/{id} {"bookIds": [...]}.
+     *
+     * Komiho fix: the previous `POST /api/v1/readlists/{id}/books` returned
+     * HTTP 405 (Method Not Allowed) — Komga only accepts `seriesIds` on that
+     * sub-path (`POST .../books` merges series, not books). To add books you
+     * must PATCH the readlist itself with `bookIds`, which merges them without
+     * disturbing the existing ordering.
+     */
     suspend fun addBooksToReadlist(readlistId: String, bookIds: List<String>) {
-        postJson(
-            "/api/v1/readlists/$readlistId/books",
+        patchJson(
+            "/api/v1/readlists/$readlistId",
             buildJsonObject { put("bookIds", JsonArray(bookIds.map { JsonPrimitive(it) })) },
             JsonObject.serializer(),
         )
@@ -311,6 +319,20 @@ class KomgaApiClient(
     /** GET /api/v1/collections/{id} — single collection detail. */
     suspend fun getCollection(collectionId: String): CollectionDto {
         return get("/api/v1/collections/$collectionId", ObjectSerializer())
+    }
+
+    /** Remove a single series from a collection — DELETE /api/v1/collections/{id}/series/{seriesId} */
+    suspend fun removeSeriesFromCollection(collectionId: String, seriesId: String) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/collections/$collectionId/series/$seriesId").toHttpUrl())
+                .apply { authHeaders() }
+                .delete()
+                .build()
+            client.newCall(request).execute().use {
+                if (!it.isSuccessful) throw KomgaException("从收藏移除系列失败（${it.code}）")
+            }
+        }
     }
 
     /** Delete a collection — DELETE /api/v1/collections/{id} */
