@@ -293,16 +293,32 @@ class KomgaApiClient(
     /**
      * Adds books to a readlist — PATCH /api/v1/readlists/{id} {"bookIds": [...]}.
      *
-     * Komiho fix: the previous `POST /api/v1/readlists/{id}/books` returned
-     * HTTP 405 (Method Not Allowed) — Komga only accepts `seriesIds` on that
-     * sub-path (`POST .../books` merges series, not books). To add books you
-     * must PATCH the readlist itself with `bookIds`, which merges them without
-     * disturbing the existing ordering.
+     * Komga's PATCH `bookIds` is REPLACE (not append), so we must first fetch
+     * the current `bookIds`, merge with the new ones (distinct), then PATCH the
+     * combined list back — exactly what Komelia's AddToReadListDialogViewModel
+     * does: `(readList.bookIds + books.map { it.id }).distinct()`.
      */
     suspend fun addBooksToReadlist(readlistId: String, bookIds: List<String>) {
+        val existing = getReadlist(readlistId).bookIds
+        val merged = (existing + bookIds).distinct()
         patchJson(
             "/api/v1/readlists/$readlistId",
-            buildJsonObject { put("bookIds", JsonArray(bookIds.map { JsonPrimitive(it) })) },
+            buildJsonObject { put("bookIds", JsonArray(merged.map { JsonPrimitive(it) })) },
+            JsonObject.serializer(),
+        )
+    }
+
+    /**
+     * Removes books from a readlist — PATCH /api/v1/readlists/{id} {"bookIds": [...]}
+     * with the remaining ids after dropping [bookIds]. Same REPLACE semantics as
+     * addBooksToReadlist; we fetch first, filter, then PATCH.
+     */
+    suspend fun removeBooksFromReadlist(readlistId: String, bookIds: List<String>) {
+        val existing = getReadlist(readlistId).bookIds
+        val remaining = existing.filter { it !in bookIds }
+        patchJson(
+            "/api/v1/readlists/$readlistId",
+            buildJsonObject { put("bookIds", JsonArray(remaining.map { JsonPrimitive(it) })) },
             JsonObject.serializer(),
         )
     }
@@ -365,13 +381,26 @@ class KomgaApiClient(
         }
     }
 
-    /** Add series to a readlist — POST /api/v1/readlists/{id}/books {"seriesIds": [...]} */
+    /**
+     * Add series to a readlist — a readlist only stores `bookIds`, so we expand
+     * each series into its books (paginated) and merge them with the existing
+     * bookIds, then PATCH the combined list (REPLACE semantics, like
+     * addBooksToReadlist). The previous `POST .../books` with `seriesIds` hit
+     * HTTP 405 — Komga has no such endpoint for readlists.
+     */
     suspend fun addSeriesToReadlist(readlistId: String, seriesIds: List<String>) {
-        postJson(
-            "/api/v1/readlists/$readlistId/books",
-            buildJsonObject { put("seriesIds", JsonArray(seriesIds.map { JsonPrimitive(it) })) },
-            JsonObject.serializer(),
-        )
+        val allBookIds = mutableListOf<String>()
+        for (sid in seriesIds) {
+            var page = 0
+            do {
+                val resp = getSeriesBooks(sid, page = page, size = 200)
+                allBookIds += resp.content.map { it.id }
+                page++
+            } while (resp.content.isNotEmpty() && page * resp.size < resp.totalElements)
+        }
+        if (allBookIds.isNotEmpty()) {
+            addBooksToReadlist(readlistId, allBookIds)
+        }
     }
 
     /**

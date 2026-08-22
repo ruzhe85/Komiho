@@ -164,6 +164,7 @@ fun BookShelf(
     mode: LibraryDisplayMode,
     columns: Int = 0,
     onBookClick: (String) -> Unit,
+    onBookLongClick: ((String) -> Unit)? = null,
     onDataChanged: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -273,7 +274,10 @@ fun BookShelf(
                         book = b,
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
-                        onLongClick = { selectionMode = true; toggleSelect(b.id) },
+                        onLongClick = {
+                            if (!inSelection && onBookLongClick != null) onBookLongClick.invoke(b.id)
+                            else { selectionMode = true; toggleSelect(b.id) }
+                        },
                     )
                 }
             }
@@ -305,7 +309,10 @@ fun BookShelf(
                         titleInside = mode == LibraryDisplayMode.CompactGrid,
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
-                        onLongClick = { selectionMode = true; toggleSelect(b.id) },
+                        onLongClick = {
+                            if (!inSelection && onBookLongClick != null) onBookLongClick.invoke(b.id)
+                            else { selectionMode = true; toggleSelect(b.id) }
+                        },
                     )
                 }
             }

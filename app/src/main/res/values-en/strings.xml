@@ -29,6 +29,9 @@
     <string name="confirm_remove_title">Remove from collection</string>
     <string name="confirm_remove_series_message">Remove "%1$s" from this collection?</string>
     <string name="removed_from_collection">Removed from collection</string>
+    <string name="confirm_remove_book_title">Remove from reading list</string>
+    <string name="confirm_remove_book_message">Remove "%1$s" from this reading list?</string>
+    <string name="removed_from_readlist">Removed from reading list</string>
 
     <!-- Common -->
     <string name="retry">Retry</string>
