@@ -92,6 +92,15 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             scale = options.scale,
         )
 
+        // DBG: 临时诊断增强 4s 根因——打印真实输入/目标尺寸与开关。
+        android.util.Log.d(
+            "KOMIHO_ENHANCE_DBG",
+            "src=${srcWidth}x${srcHeight} dst=${dstWidth}x${dstHeight} " +
+                "target=${targetW}x${targetH} inSample=$sampleSize " +
+                "tall=$isTallStrip enhanced=${options.enhanced} scale=${options.scale} " +
+                "mode=${runCatching { Injekt.get<ReaderPreferences>().enhancementMode.get() }.getOrDefault(-1)}",
+        )
+
         var bitmap = decoder.decode(sampleSize = sampleSize)
         decoder.recycle()
 
@@ -105,7 +114,13 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             try {
                 val preferences = Injekt.get<ReaderPreferences>()
                 if (preferences.enhancementMode.get() != 0) {
+                    val t0 = android.os.SystemClock.uptimeMillis()
                     val enhanced = MihonSyEnhancer.enhance(bitmap, preferences)
+                    android.util.Log.d(
+                        "KOMIHO_ENHANCE_DBG",
+                        "enhance done in ${android.os.SystemClock.uptimeMillis() - t0}ms " +
+                            "inW=${bitmap.width}x${bitmap.height} outW=${enhanced?.width ?: -1}x${enhanced?.height ?: -1}",
+                    )
                     if (enhanced != null && enhanced !== bitmap && !enhanced.isRecycled) {
                         bitmap.recycle()
                         bitmap = enhanced
