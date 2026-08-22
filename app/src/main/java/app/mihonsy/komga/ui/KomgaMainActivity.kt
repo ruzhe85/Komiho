@@ -690,10 +690,9 @@ private fun HomeBookRow(
 ) {
     if (layout == "GRID") {
         FlowRow(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         ) {
             books.forEach { b ->
                 HomeBookCard(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
@@ -759,10 +758,9 @@ private fun HomeContinueReadingRow(
 ) {
     if (layout == "GRID") {
         FlowRow(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         ) {
             books.forEach { b ->
                 HomeContinueReadingCard(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
@@ -857,10 +855,9 @@ private fun HomeSeriesRow(
 ) {
     if (layout == "GRID") {
         FlowRow(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         ) {
             series.forEach { s ->
                 HomeSeriesCard(client, s, showProgress, onClick = { onSeriesClick(s.id) })
