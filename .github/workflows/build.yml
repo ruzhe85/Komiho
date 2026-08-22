@@ -55,11 +55,22 @@ jobs:
           echo "${{ secrets.KOMIHO_DEBUG_KEYSTORE_BASE64 }}" | base64 -d > keystore/komiho-debug.jks
           ls -la keystore/
 
+      # Komiho V2: independent release keystore (PKCS12, alias komiho-release) —
+      # distinct from MihonSY's mihonmod key so the two apps can coexist.
+      - name: Decode release keystore
+        run: |
+          mkdir -p keystore
+          echo "${{ secrets.KOMIHO_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > keystore/komiho-release.jks
+          ls -la keystore/
+
       # Komiho V2: build Release (not Debug) so the bundled native LZ3 gets full
       # compiler optimization (-O2/-O3 + NDEBUG). Debug builds leave the C++ at -O0,
       # which made Lanczos3 ~30-40x slower than MihonSY's Release APK on the same
-      # device. Signed with the fixed debug keystore so it installs over the prior APK.
+      # device. Signed with the independent release keystore so it installs alongside
+      # MihonSY without needing to uninstall it.
       - name: Build release APK
+        env:
+          KOMIHO_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KOMIHO_RELEASE_KEYSTORE_PASSWORD }}
         run: ./gradlew assembleRelease -Pdisable-code-shrink --no-daemon --stacktrace
 
       # Per-build unique CI tag: ci-<YYYYMMDD>-<short-sha>. Every build keeps its
