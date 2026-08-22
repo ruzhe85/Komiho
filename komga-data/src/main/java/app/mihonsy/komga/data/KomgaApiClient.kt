@@ -388,12 +388,38 @@ class KomgaApiClient(
         )
     }
 
-    /** Add series to a collection — POST /api/v1/collections/{id}/series {"seriesIds": [...]} */
+    /**
+     * Add series to a collection — PUT /api/v1/collections/{id}/series [all seriesIds].
+     *
+     * Komga does NOT expose an "append" endpoint for collection series. The only
+     * way to add is to replace the entire ordered list (PUT). To keep existing
+     * ordering intact we merge the existing ids (fetched fresh) with the new ones
+     * and PUT the combined list back. The previous `POST .../series` returned 405
+     * (no such endpoint) and `PATCH /collections/{id}` rejects `seriesIds`.
+     */
     suspend fun addSeriesToCollection(collectionId: String, seriesIds: List<String>) {
-        postJson(
+        val existing = getCollection(collectionId).seriesIds
+        val merged = (existing + seriesIds).distinct()
+        putSeries(collectionId, merged)
+    }
+
+    /**
+     * Remove a single series from a collection — PUT /api/v1/collections/{id}/series
+     * with the remaining seriesIds (full replace). Mirrors Komga Web's "edit elements"
+     * behaviour; the DELETE sub-path variant is replaced here to avoid the 404 the
+     * old `DELETE .../series/{seriesId}` call produced.
+     */
+    suspend fun removeSeriesFromCollection(collectionId: String, seriesId: String) {
+        val remaining = getCollection(collectionId).seriesIds.filter { it != seriesId }
+        putSeries(collectionId, remaining)
+    }
+
+    /** PUT /api/v1/collections/{id}/series [seriesIds] — replace the whole ordered list. */
+    private suspend fun putSeries(collectionId: String, seriesIds: List<String>) {
+        putJson(
             "/api/v1/collections/$collectionId/series",
-            buildJsonObject { put("seriesIds", JsonArray(seriesIds.map { JsonPrimitive(it) })) },
-            JsonObject.serializer(),
+            JsonArray(seriesIds.map { JsonPrimitive(it) }),
+            JsonArray.serializer(),
         )
     }
 
@@ -515,6 +541,20 @@ class KomgaApiClient(
                 .url(apiUrl(path).toHttpUrl())
                 .apply { authHeaders() }
                 .post(json.encodeToString(serializer, body).toRequestBody(jsonMedia))
+                .build()
+            client.newCall(request).execute().use { resp ->
+                handleResponse(resp) { null }
+            }
+        }
+    }
+
+    /** Same as postJson but with the PUT verb (Komga collection series replace uses PUT). */
+    private suspend fun <T> putJson(path: String, body: T, serializer: kotlinx.serialization.KSerializer<T>) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl(path).toHttpUrl())
+                .apply { authHeaders() }
+                .put(json.encodeToString(serializer, body).toRequestBody(jsonMedia))
                 .build()
             client.newCall(request).execute().use { resp ->
                 handleResponse(resp) { null }
