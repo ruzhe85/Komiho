@@ -24,6 +24,11 @@
     <string name="confirm_delete_title">確認刪除</string>
     <string name="confirm_delete_message">確定要刪除%1$s「%2$s」嗎？此操作不可撤銷。</string>
     <string name="delete_failed">刪除失敗：%1$s</string>
+    <string name="remove">移除</string>
+    <string name="remove_from_collection">從收藏移除</string>
+    <string name="confirm_remove_title">從收藏移除</string>
+    <string name="confirm_remove_series_message">確定要將「%1$s」從收藏移除嗎？</string>
+    <string name="removed_from_collection">已從收藏移除</string>
 
     <!-- 通用 -->
     <string name="retry">重試</string>

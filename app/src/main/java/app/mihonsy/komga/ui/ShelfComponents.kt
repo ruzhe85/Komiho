@@ -102,6 +102,7 @@ fun SeriesShelf(
     mode: LibraryDisplayMode,
     columns: Int = 0,
     onSeriesClick: (String) -> Unit,
+    onSeriesLongClick: ((String) -> Unit)? = null,
 ) {
     if (mode == LibraryDisplayMode.List) {
         LazyColumn(
@@ -109,7 +110,12 @@ fun SeriesShelf(
             modifier = Modifier.fillMaxSize(),
         ) {
             items(series) { s ->
-                LibrarySeriesListRow(client, s, onClick = { onSeriesClick(s.id) })
+                LibrarySeriesListRow(
+                    client = client,
+                    series = s,
+                    onClick = { onSeriesClick(s.id) },
+                    onLongClick = onSeriesLongClick?.let { cb -> { cb(s.id) } } ?: {},
+                )
             }
         }
     } else {
@@ -129,7 +135,12 @@ fun SeriesShelf(
             modifier = Modifier.fillMaxSize(),
         ) {
             gridItems(series) { s ->
-                LibrarySeriesCard(client, s, onClick = { onSeriesClick(s.id) })
+                LibrarySeriesCard(
+                    client = client,
+                    series = s,
+                    onClick = { onSeriesClick(s.id) },
+                    onLongClick = onSeriesLongClick?.let { cb -> { cb(s.id) } } ?: {},
+                )
             }
         }
     }
