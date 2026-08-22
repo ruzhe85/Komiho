@@ -2420,7 +2420,7 @@ private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Conte
                 text = composeStringResource(R.string.settings_home_sections_summary),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(, 16.dp),
+                modifier = Modifier.padding(16.dp),
             )
         }
         items(orderedSections, key = { it.name }) { section ->
@@ -2567,7 +2567,7 @@ private fun HomeOptionsMenu(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.ok)) }
+            TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.done)) }
         },
     )
 }
