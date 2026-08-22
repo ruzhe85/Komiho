@@ -70,11 +70,20 @@ class KomgaPreferences(context: Context) {
 
     /**
      * Home tab: how many items per row in GRID layout.
-     * 0 = auto (FlowRow decides), otherwise a fixed column count (2..8).
+     * 0 = auto (FlowRow decides), otherwise a fixed column count (2..10).
      */
     var homeGridColumns: Int
-        get() = prefs.getInt(KEY_HOME_GRID_COLUMNS, 0).coerceIn(0, 8)
-        set(v) = prefs.edit().putInt(KEY_HOME_GRID_COLUMNS, v.coerceIn(0, 8)).apply()
+        get() = prefs.getInt(KEY_HOME_GRID_COLUMNS, 0).coerceIn(0, 10)
+        set(v) = prefs.edit().putInt(KEY_HOME_GRID_COLUMNS, v.coerceIn(0, 10)).apply()
+
+    /**
+     * Home tab: card density for every section.
+     * "COMPACT_GRID" = smaller covers, "COMFORTABLE_GRID" = cover + meta,
+     * "LIST" = horizontal row items (thumbnail + text). Mirrors LibraryDisplayMode.
+     */
+    var homeDisplayMode: String
+        get() = prefs.getString(KEY_HOME_DISPLAY_MODE, "COMFORTABLE_GRID").orEmpty()
+        set(v) = prefs.edit().putString(KEY_HOME_DISPLAY_MODE, v).apply()
 
     /**
      * Home tab: visible section order, comma-separated section names
@@ -163,6 +172,7 @@ class KomgaPreferences(context: Context) {
         const val KEY_LIBRARY_LANDSCAPE_COLUMNS = "library_landscape_columns"
         const val KEY_HOME_SECTION_LIMIT = "home_section_limit"
         const val KEY_HOME_GRID_COLUMNS = "home_grid_columns"
+        const val KEY_HOME_DISPLAY_MODE = "home_display_mode"
         const val KEY_HOME_SECTION_ORDER = "home_section_order"
         const val KEY_HOME_SECTION_LAYOUT = "home_section_layout"
         const val KEY_READER_DOUBLE_PAGE = "reader_double_page"
