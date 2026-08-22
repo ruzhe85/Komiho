@@ -321,20 +321,6 @@ class KomgaApiClient(
         return get("/api/v1/collections/$collectionId", ObjectSerializer())
     }
 
-    /** Remove a single series from a collection — DELETE /api/v1/collections/{id}/series/{seriesId} */
-    suspend fun removeSeriesFromCollection(collectionId: String, seriesId: String) {
-        withIOContext {
-            val request = Request.Builder()
-                .url(apiUrl("/api/v1/collections/$collectionId/series/$seriesId").toHttpUrl())
-                .apply { authHeaders() }
-                .delete()
-                .build()
-            client.newCall(request).execute().use {
-                if (!it.isSuccessful) throw KomgaException("从收藏移除系列失败（${it.code}）")
-            }
-        }
-    }
-
     /** Delete a collection — DELETE /api/v1/collections/{id} */
     suspend fun deleteCollection(collectionId: String) {
         withIOContext {
