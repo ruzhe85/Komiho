@@ -30,6 +30,9 @@
     <string name="confirm_remove_title">从收藏移除</string>
     <string name="confirm_remove_series_message">确定要将「%1$s」从收藏移除吗？</string>
     <string name="removed_from_collection">已从收藏移除</string>
+    <string name="confirm_remove_book_title">从阅读列表移除</string>
+    <string name="confirm_remove_book_message">确定要将「%1$s」从该阅读列表移除吗？</string>
+    <string name="removed_from_readlist">已从阅读列表移除</string>
 
     <!-- 通用 -->
     <string name="retry">重试</string>

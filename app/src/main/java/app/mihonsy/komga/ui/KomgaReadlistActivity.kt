@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -31,6 +32,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.KomgaApiClient
+import eu.kanade.tachiyomi.R
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.ReadingListDto
@@ -71,6 +73,8 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String) {
     // U3: book-level display mode (independent from the series shelf).
     val mode = LibraryDisplayMode.fromPref(prefs.bookDisplayMode)
     var displayOpen by remember { mutableStateOf(false) }
+    // 长按书 → 从阅读列表移除的二次确认弹窗目标（bookId）。
+    var pendingRemoveBook by remember { mutableStateOf<String?>(null) }
 
     fun reload() {
         scope.launch {
@@ -138,10 +142,51 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String) {
                                 }
                         }
                     },
+                    onBookLongClick = { bookId -> pendingRemoveBook = bookId },
                     onDataChanged = { reload() },
                 )
             }
         }
+    }
+
+    // 从阅读列表移除书的二次确认弹窗。
+    pendingRemoveBook?.let { bookId ->
+        val bookName = books.find { it.id == bookId }?.name ?: ""
+        AlertDialog(
+            onDismissRequest = { pendingRemoveBook = null },
+            title = { Text(composeStringResource(R.string.confirm_remove_book_title)) },
+            text = { Text(composeStringResource(R.string.confirm_remove_book_message, bookName)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingRemoveBook = null
+                        scope.launch {
+                            runCatching { client.removeBooksFromReadlist(readlistId, listOf(bookId)) }
+                                .onSuccess {
+                                    books = books.filter { it.id != bookId }
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        context.getString(R.string.removed_from_readlist),
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                                .onFailure {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        context.getString(R.string.operation_failed, it.message),
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                        }
+                    },
+                ) { Text(composeStringResource(R.string.remove)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemoveBook = null }) {
+                    Text(composeStringResource(R.string.cancel))
+                }
+            },
+        )
     }
 
     var dialogMode by remember { mutableStateOf(mode) }
