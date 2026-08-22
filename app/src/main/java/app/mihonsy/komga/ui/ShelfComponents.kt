@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.RemoveDone
+import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -158,7 +159,10 @@ fun BookShelf(
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showReadlistPicker by remember { mutableStateOf(false) }
 
-    val inSelection = selectedIds.isNotEmpty()
+    // 独立的选择模式状态：长按 item 进入选择时置 true，点取消(X)才置 false。
+    // 不再用 selectedIds.isNotEmpty() 推导，否则全选后反选=空集会误退选择栏。
+    var selectionMode by remember { mutableStateOf(false) }
+    val inSelection = selectionMode
     val selectedBooks = remember(selectedIds, books) { books.filter { it.id in selectedIds } }
 
     val setSelect: (String, Boolean) -> Unit = { id, value ->
@@ -167,7 +171,7 @@ fun BookShelf(
     val toggleSelect: (String) -> Unit = { id ->
         setSelect(id, id !in selectedIds)
     }
-    val exitSelection: () -> Unit = { selectedIds = emptySet() }
+    val exitSelection: () -> Unit = { selectionMode = false; selectedIds = emptySet() }
 
     fun performBatchUpdate(completed: Boolean) {
         val snapshot = selectedBooks
@@ -228,8 +232,8 @@ fun BookShelf(
                     IconButton(onClick = { selectedIds = books.map { it.id }.toSet() }) {
                         Icon(Icons.Filled.SelectAll, contentDescription = composeStringResource(R.string.select_all))
                     }
-                    TextButton(onClick = { selectedIds = books.map { it.id }.toSet() - selectedIds }) {
-                        Text(composeStringResource(R.string.select_inverse))
+                    IconButton(onClick = { selectedIds = books.map { it.id }.toSet() - selectedIds }) {
+                        Icon(Icons.Outlined.FlipToBack, contentDescription = composeStringResource(R.string.select_inverse))
                     }
                 }
             }
@@ -254,7 +258,7 @@ fun BookShelf(
                         book = b,
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
-                        onLongClick = { toggleSelect(b.id) },
+                        onLongClick = { selectionMode = true; toggleSelect(b.id) },
                     )
                 }
             }
@@ -286,7 +290,7 @@ fun BookShelf(
                         titleInside = mode == LibraryDisplayMode.CompactGrid,
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
-                        onLongClick = { toggleSelect(b.id) },
+                        onLongClick = { selectionMode = true; toggleSelect(b.id) },
                     )
                 }
             }
