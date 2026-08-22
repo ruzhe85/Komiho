@@ -9,11 +9,9 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-// Komiho V2 (R-3) -->
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.source.KomgaSource
-// Komiho V2 (R-3) <--
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.chapter.interactor.SetReadStatus
 import eu.kanade.domain.chapter.model.toDbChapter
@@ -655,9 +653,15 @@ class ReaderViewModel @JvmOverloads constructor(
      * [AUTO_WEBTOON_MIN_ASPECT_RATIO]) the manga is a webtoon and its reading mode is set
      * permanently. Only when all of them turn out normal-sized does the check give up.
      *
+     * Triggered from TWO places (MihonSY):
+     *  1. [onPageSelected] — fallback, fires on page turns.
+     *  2. [ReaderActivity.onPageLoaded] — a page's image finished decoding, so the
+     *     aspect-ratio check runs the moment a strip is Ready, without waiting for the
+     *     user to scroll to it.
+     *
      * Complements the tag/source based detection in [getMangaReadingMode].
      */
-    private fun maybeAutoWebtoonByAspectRatio(page: ReaderPage) {
+    internal fun maybeAutoWebtoonByAspectRatio(page: ReaderPage) {
         if (autoWebtoonAspectDone) return
         if (!readerPreferences.useAutoWebtoon.get()) return
         val manga = manga ?: return
@@ -856,7 +860,7 @@ class ReaderViewModel @JvmOverloads constructor(
             syncKomgaPageProgress(readerChapter, pageIndex)
 
             // Komiho V2 (R-3): direct book-level progress sync to Komga — the
-            // bookId comes straight from chapter.url, no track service involved.
+            // working sync path for pure Komga books (no Track entry required).
             syncKomgaBookProgress(readerChapter, pageIndex)
 
             // SY -->
