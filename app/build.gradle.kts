@@ -61,6 +61,20 @@ android {
                 keyPassword = System.getenv("KOMIHO_DEBUG_KEYSTORE_PASSWORD") ?: "komihodbg"
             }
         }
+        // Komiho V2: independent release signing (PKCS12), distinct from MihonSY's
+        // mihonmod keystore so the two apps can coexist without uninstalling.
+        // Restored in CI from Secret KOMIHO_RELEASE_KEYSTORE_BASE64; falls back to
+        // komihoDebug when the file is absent (local dev without the file).
+        create("komihoRelease") {
+            val ks = file("../keystore/komiho-release.jks")
+            if (ks.exists()) {
+                storeFile = ks
+                storeType = "PKCS12"
+                storePassword = System.getenv("KOMIHO_RELEASE_KEYSTORE_PASSWORD") ?: "komihorelease123"
+                keyAlias = "komiho-release"
+                keyPassword = System.getenv("KOMIHO_RELEASE_KEYSTORE_PASSWORD") ?: "komihorelease123"
+            }
+        }
     }
 
     // MihonSY: lightweight native enhancement (Anime4K GPU shaders + Lanczos3 CPU resampler)
@@ -90,10 +104,9 @@ android {
             isMinifyEnabled = shrink
             isShrinkResources = shrink
             isProfileable = true
-            // Komiho V2: CI builds with the fixed debug keystore so the APK is
-            // installable over the previous build (the MihonSY signing credentials
-            // are not available in CI). Local releases can still use `mihonsy`.
-            signingConfig = signingConfigs.getByName("komihoDebug")
+            // Komiho V2: independent release signing (PKCS12, alias komiho-release)
+            // so it can coexist with MihonSY (different key) without uninstalling.
+            signingConfig = signingConfigs.getByName("komihoRelease")
             setProguardFiles(listOf(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"))
 
             buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLatestCommitTime = true)}\"")
