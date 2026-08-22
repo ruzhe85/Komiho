@@ -38,7 +38,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
@@ -107,9 +106,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -144,85 +140,8 @@ import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
 
-// 划动选择命中检测：在可见 item 中按指针 Y 坐标找对应 id。
-// 注意本 BOM(2026.06.01) 类型差异：
-//   LazyListItemInfo.offset/size 为 Int（绝对 Y/高度）
-//   LazyGridItemInfo.offset/size 为 IntOffset/IntSize（用 .y/.height）
-// 以下两函数分别按各自真实类型做区间命中。
-private fun resolveSeriesAtList(
-    info: LazyListLayoutInfo,
-    y: Float,
-): String? {
-    val hit = info.visibleItemsInfo.firstOrNull {
-        val top = it.offset.toFloat()
-        val bottom = (it.offset + it.size).toFloat()
-        y >= top && y < bottom
-    }
+// 划动选择命中检测已移除（长按圈选废弃）。
 
-    return hit?.key as? String
-}
-
-/**
- * 返回一次 drag 从 fromY 到 toY 之间经过的所有 item。
- *
- * 这样即使一次 onDrag 的 dragAmount.y 很大，
- * 中间跨过多个 item，也不会漏选。
- */
-private fun resolveSeriesBetweenList(
-    info: LazyListLayoutInfo,
-    fromY: Float,
-    toY: Float,
-): List<String> {
-    val minY = minOf(fromY, toY)
-    val maxY = maxOf(fromY, toY)
-
-    return info.visibleItemsInfo
-        .filter { item ->
-            val itemTop = item.offset.toFloat()
-            val itemBottom = (item.offset + item.size).toFloat()
-
-            maxY >= itemTop && minY < itemBottom
-        }
-        .mapNotNull { it.key as? String }
-}
-
-private fun resolveSeriesAtGrid(
-    info: LazyGridLayoutInfo,
-    y: Float,
-): String? {
-    val hit = info.visibleItemsInfo.firstOrNull {
-        val top = it.offset.y.toFloat()
-        val bottom = (it.offset.y + it.size.height).toFloat()
-
-        y >= top && y < bottom
-    }
-
-    return hit?.key as? String
-}
-
-/**
- * 返回一次 drag 从 fromY 到 toY 之间经过的所有 Grid item。
- *
- * 注意：这一版仍然按照 Y 方向处理，
- * 与当前项目的原有命中逻辑保持一致。
- */
-private fun resolveSeriesBetweenGrid(
-    info: LazyGridLayoutInfo,
-    fromY: Float,
-    toY: Float,
-): List<String> {
-    val minY = minOf(fromY, toY)
-    val maxY = maxOf(fromY, toY)
-
-    return info.visibleItemsInfo
-        .filter { item ->
-            val itemTop = item.offset.y.toFloat()
-            val itemBottom = (item.offset.y + item.size.height).toFloat()
-
-            maxY >= itemTop && minY < itemBottom
-        }
-        .mapNotNull { it.key as? String }
-}
 
 /**
  * Komiho M3: main activity with bottom navigation.
@@ -926,26 +845,13 @@ private fun LibraryTab(
     var showReadlistPicker by remember { mutableStateOf(false) }
     var showCollectionPicker by remember { mutableStateOf(false) }
 
-    // ── Mihon-style drag-to-select (划动选择) ──
-    var dragActive by remember { mutableStateOf(false) }
-    var dragValue by remember { mutableStateOf(true) }
-
     val inSelection = selectedIds.isNotEmpty()
-    val selectedSeries = remember(selectedIds, series) { series.filter { it.id in selectedIds } }
+    val selectedSeries = remember(selectedIds,  series) { series.filter { it.id in selectedIds } }
 
     val setSeriesSelect: (String, Boolean) -> Unit = { id, value ->
         selectedIds = if (value) selectedIds + id else selectedIds - id
     }
     val toggleSeriesSelect: (String) -> Unit = { id -> setSeriesSelect(id, id !in selectedIds) }
-    val startSeriesDragSelect: (String) -> Unit = { id ->
-        val newValue = id !in selectedIds
-        setSeriesSelect(id, newValue)
-        dragActive = true
-        dragValue = newValue
-    }
-    val onSeriesDragSelectAt: (String) -> Unit = { id ->
-        if (dragActive) setSeriesSelect(id, dragValue)
-    }
     val exitSeriesSelection: () -> Unit = { selectedIds = emptySet() }
 
     fun markSeriesBatch(completed: Boolean) {
@@ -1026,6 +932,9 @@ private fun LibraryTab(
                     IconButton(onClick = { selectedIds = series.map { it.id }.toSet() }) {
                         Icon(Icons.Filled.SelectAll, contentDescription = composeStringResource(R.string.select_all))
                     }
+                    TextButton(onClick = { selectedIds = series.map { it.id }.toSet() - selectedIds }) {
+                        Text(composeStringResource(R.string.select_inverse))
+                    }
                 }
             }
         }
@@ -1053,36 +962,13 @@ private fun LibraryTab(
                     state = listState,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                     modifier = shelfModifier
-                        // Mihon-style slide-to-select: long-press starts the drag,
-                        // then every row the finger passes over gets selected.
-                        .pointerInput(Unit) {
-                            // 线段命中：onDragStart 记录起点，onDrag 用 previousDragY→currentY
-                            // 区间扫描所有经过的 item（解决快速滑动跨多 item 只命中终点的问题）。
-                            // 直接用 offset 坐标（Lazy 布局坐标），不再做 padTop 人工修正。
-                            var previousDragY = 0f
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = { start: Offset ->
-                                    previousDragY = start.y
-                                    val id = resolveSeriesAtList(listState.layoutInfo, start.y)
-                                    if (id != null) startSeriesDragSelect(id)
-                                },
-                                onDrag = { change: PointerInputChange, dragAmount: Offset ->
-                                    change.consume()
-                                    val currentY = previousDragY + dragAmount.y
-                                    resolveSeriesBetweenList(listState.layoutInfo, previousDragY, currentY)
-                                        .forEach { id -> onSeriesDragSelectAt(id) }
-                                    previousDragY = currentY
-                                },
-                                onDragEnd = { dragActive = false },
-                                onDragCancel = { dragActive = false },
-                            )
-                        },
                 ) {
                     items(sortedSeries, key = { it.id }) { s ->
                         LibrarySeriesListRow(
                             client,
                             s,
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
+                            onLongClick = { toggleSeriesSelect(s.id) },
                             selected = s.id in selectedIds,
                         )
                     }
@@ -1111,32 +997,13 @@ private fun LibraryTab(
                     horizontalArrangement = Arrangement.spacedBy(hSpace),
                     verticalArrangement = Arrangement.spacedBy(vSpace),
                     modifier = shelfModifier
-                        // Mihon-style slide-to-select across grid cells.
-                        .pointerInput(Unit) {
-                            var previousDragY = 0f
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = { start: Offset ->
-                                    previousDragY = start.y
-                                    val id = resolveSeriesAtGrid(gridState.layoutInfo, start.y)
-                                    if (id != null) startSeriesDragSelect(id)
-                                },
-                                onDrag = { change: PointerInputChange, dragAmount: Offset ->
-                                    change.consume()
-                                    val currentY = previousDragY + dragAmount.y
-                                    resolveSeriesBetweenGrid(gridState.layoutInfo, previousDragY, currentY)
-                                        .forEach { id -> onSeriesDragSelectAt(id) }
-                                    previousDragY = currentY
-                                },
-                                onDragEnd = { dragActive = false },
-                                onDragCancel = { dragActive = false },
-                            )
-                        },
                 ) {
                     items(sortedSeries, key = { it.id }) { s ->
                         LibrarySeriesCard(
                             client,
                             s,
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
+                            onLongClick = { toggleSeriesSelect(s.id) },
                             selected = s.id in selectedIds,
                             titleInside = isCompact,
                         )

@@ -111,6 +111,7 @@
     <string name="cd_toggle_list">Switch to list</string>
     <string name="selected_count">%1$d selected</string>
     <string name="select_all">Select all</string>
+    <string name="select_inverse">Invert selection</string>
     <string name="mark_read">Mark read</string>
     <string name="mark_unread">Mark unread</string>
     <string name="add_to_readlist">Add to readlist</string>

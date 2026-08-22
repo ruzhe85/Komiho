@@ -111,6 +111,7 @@
     <string name="cd_toggle_list">切換列表</string>
     <string name="selected_count">已選 %1$d 項</string>
     <string name="select_all">全選</string>
+    <string name="select_inverse">反向選擇</string>
     <string name="mark_read">標記已讀</string>
     <string name="mark_unread">標記未讀</string>
     <string name="add_to_readlist">加入閱讀列表</string>
