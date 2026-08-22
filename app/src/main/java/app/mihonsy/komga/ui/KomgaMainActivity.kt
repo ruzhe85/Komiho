@@ -1823,6 +1823,7 @@ private fun ListsTab(
                         }
                     }
                 }
+            }
         }
     }
     // 删除确认弹窗
