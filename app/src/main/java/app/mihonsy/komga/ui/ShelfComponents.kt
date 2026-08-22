@@ -2,7 +2,6 @@ package app.mihonsy.komga.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,9 +57,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -75,58 +71,7 @@ import app.mihonsy.komga.data.model.SeriesDto
 import eu.kanade.tachiyomi.R
 import kotlinx.coroutines.launch
 
-// 划动选择命中检测：在可见 item 中按指针 Y 坐标找对应 id。
-// 注意本 BOM(2026.06.01) 类型差异：
-//   LazyListItemInfo.offset/size 为 Int（绝对 Y/高度）
-//   LazyGridItemInfo.offset/size 为 IntOffset/IntSize（用 .y/.height）
-private fun resolveItemAtList(
-    info: LazyListLayoutInfo,
-    y: Float,
-): String? {
-    val hit = info.visibleItemsInfo.firstOrNull {
-        val top = it.offset.toFloat()
-        val bottom = (it.offset + it.size).toFloat()
-        y >= top && y < bottom
-    }
-    return hit?.key as? String
-}
-
-private fun resolveItemAtGrid(
-    info: LazyGridLayoutInfo,
-    y: Float,
-): String? {
-    val hit = info.visibleItemsInfo.firstOrNull {
-        val top = it.offset.y.toFloat()
-        val bottom = (it.offset.y + it.size.height).toFloat()
-        y >= top && y < bottom
-    }
-    return hit?.key as? String
-}
-
-// 线段命中：返回 fromY..toY 区间内所有相交 item 的 id（含起点与终点之间的所有项）。
-private fun resolveItemBetweenList(info: LazyListLayoutInfo, fromY: Float, toY: Float): List<String> {
-    val minY = minOf(fromY, toY)
-    val maxY = maxOf(fromY, toY)
-    return info.visibleItemsInfo
-        .filter { item ->
-            val itemTop = item.offset.toFloat()
-            val itemBottom = (item.offset + item.size).toFloat()
-            maxY >= itemTop && minY < itemBottom
-        }
-        .mapNotNull { it.key as? String }
-}
-
-private fun resolveItemBetweenGrid(info: LazyGridLayoutInfo, fromY: Float, toY: Float): List<String> {
-    val minY = minOf(fromY, toY)
-    val maxY = maxOf(fromY, toY)
-    return info.visibleItemsInfo
-        .filter { item ->
-            val itemTop = item.offset.y.toFloat()
-            val itemBottom = (item.offset.y + item.size.height).toFloat()
-            maxY >= itemTop && minY < itemBottom
-        }
-        .mapNotNull { it.key as? String }
-}
+// 划动选择命中检测已移除（长按圈选废弃）。
 
 /**
  * Shared shelf rendering for every page that lists series or books.
@@ -213,13 +158,6 @@ fun BookShelf(
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showReadlistPicker by remember { mutableStateOf(false) }
 
-    // ── Mihon-style drag-to-select (划动选择) ──
-    // Long-press enters selection mode AND starts a drag gesture: every item
-    // the finger slides over afterwards is flipped to `dragValue` (true=select).
-    // Releasing the finger ends the drag; tapping individual items still toggles.
-    var dragActive by remember { mutableStateOf(false) }
-    var dragValue by remember { mutableStateOf(true) }
-
     val inSelection = selectedIds.isNotEmpty()
     val selectedBooks = remember(selectedIds, books) { books.filter { it.id in selectedIds } }
 
@@ -230,17 +168,6 @@ fun BookShelf(
         setSelect(id, id !in selectedIds)
     }
     val exitSelection: () -> Unit = { selectedIds = emptySet() }
-
-    val startDragSelect: (String) -> Unit = { id ->
-        // Enter selection mode on long-press and begin drag-selecting this item.
-        val newValue = id !in selectedIds
-        setSelect(id, newValue)
-        dragActive = true
-        dragValue = newValue
-    }
-    val onDragSelectAt: (String) -> Unit = { id ->
-        if (dragActive) setSelect(id, dragValue)
-    }
 
     fun performBatchUpdate(completed: Boolean) {
         val snapshot = selectedBooks
@@ -301,6 +228,9 @@ fun BookShelf(
                     IconButton(onClick = { selectedIds = books.map { it.id }.toSet() }) {
                         Icon(Icons.Filled.SelectAll, contentDescription = composeStringResource(R.string.select_all))
                     }
+                    TextButton(onClick = { selectedIds = books.map { it.id }.toSet() - selectedIds }) {
+                        Text(composeStringResource(R.string.select_inverse))
+                    }
                 }
             }
         }
@@ -317,27 +247,6 @@ fun BookShelf(
                 modifier = Modifier
                     .fillMaxSize()
                     .then(if (inSelection) Modifier.weight(1f) else Modifier)
-                    // Mihon-style slide-to-select: long-press starts the drag,
-                    // then every row the finger passes over gets selected.
-                    .pointerInput(Unit) {
-                        var previousDragY = 0f
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { start: Offset ->
-                                previousDragY = start.y
-                                val id = resolveItemAtList(listState.layoutInfo, start.y)
-                                if (id != null) startDragSelect(id)
-                            },
-                            onDrag = { change: PointerInputChange, dragAmount: Offset ->
-                                change.consume()
-                                val currentY = previousDragY + dragAmount.y
-                                resolveItemBetweenList(listState.layoutInfo, previousDragY, currentY)
-                                    .forEach { id -> onDragSelectAt(id) }
-                                previousDragY = currentY
-                            },
-                            onDragEnd = { dragActive = false },
-                            onDragCancel = { dragActive = false },
-                        )
-                    },
             ) {
                 items(books, key = { it.id }) { b ->
                     BookShelfListRow(
@@ -345,6 +254,7 @@ fun BookShelf(
                         book = b,
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
+                        onLongClick = { toggleSelect(b.id) },
                     )
                 }
             }
@@ -366,26 +276,6 @@ fun BookShelf(
                 modifier = Modifier
                     .fillMaxSize()
                     .then(if (inSelection) Modifier.weight(1f) else Modifier)
-                    // Mihon-style slide-to-select across grid cells.
-                    .pointerInput(Unit) {
-                        var previousDragY = 0f
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { start: Offset ->
-                                previousDragY = start.y
-                                val id = resolveItemAtGrid(gridState.layoutInfo, start.y)
-                                if (id != null) startDragSelect(id)
-                            },
-                            onDrag = { change: PointerInputChange, dragAmount: Offset ->
-                                change.consume()
-                                val currentY = previousDragY + dragAmount.y
-                                resolveItemBetweenGrid(gridState.layoutInfo, previousDragY, currentY)
-                                    .forEach { id -> onDragSelectAt(id) }
-                                previousDragY = currentY
-                            },
-                            onDragEnd = { dragActive = false },
-                            onDragCancel = { dragActive = false },
-                        )
-                    },
             ) {
                 gridItems(books, key = { it.id }) { b ->
                     BookShelfCard(
@@ -396,6 +286,7 @@ fun BookShelf(
                         titleInside = mode == LibraryDisplayMode.CompactGrid,
                         selected = b.id in selectedIds,
                         onClick = { itemOnClick(b) },
+                        onLongClick = { toggleSelect(b.id) },
                     )
                 }
             }
