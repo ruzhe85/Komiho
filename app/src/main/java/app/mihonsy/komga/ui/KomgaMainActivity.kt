@@ -2256,9 +2256,13 @@ private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Conte
     val lazyListState = rememberLazyListState()
     val orderedSections = remember { visibleSections.toMutableStateList() }
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val item = orderedSections.removeAt(from.index)
-        orderedSections.add(to.index, item)
-        persistOrder(orderedSections.toList())
+        val fromIndex = orderedSections.indexOfFirst { it.name == from.key }
+        val toIndex = orderedSections.indexOfFirst { it.name == to.key }
+        if (fromIndex != -1 && toIndex != -1 && fromIndex != toIndex) {
+            val item = orderedSections.removeAt(fromIndex)
+            orderedSections.add(toIndex, item)
+            persistOrder(orderedSections.toList())
+        }
     }
     LaunchedEffect(sectionOrder) {
         if (!reorderableState.isAnyItemDragging) {

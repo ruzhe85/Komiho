@@ -26,7 +26,7 @@ android {
     namespace = "eu.kanade.tachiyomi"
 
     defaultConfig {
-        applicationId = "eu.kanade.mihonsy"
+        applicationId = "cn.ruzhe.komiho"
 
         versionCode = 7
         versionName = "1.0.6"
