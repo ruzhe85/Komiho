@@ -13,6 +13,8 @@ import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import coil3.request.bitmapConfig
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.MihonSyEnhancer
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import eu.kanade.tachiyomi.util.storage.CbzCrypto.getCoverStream
 import mihon.core.common.archive.archiveReader
@@ -22,6 +24,7 @@ import tachiyomi.decoder.ImageDecoder
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.BufferedInputStream
+import kotlin.math.min
 
 /**
  * A [Decoder] that uses built-in [ImageDecoder] to decode images that is not supported by the system.
@@ -59,15 +62,33 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         val dstWidth = options.size.widthPx(options.scale) { srcWidth }
         val dstHeight = options.size.heightPx(options.scale) { srcHeight }
 
-        // MihonSY: enhancement no longer runs inside the decoder. The reader shows the
-        // original immediately and runs Lanczos3 asynchronously (ReaderPageImageView),
-        // so the decoder is back to a plain decode at the requested view size. No 2x
-        // decode, no in-decoder enhancement — keeps decode fast and never blocks the UI.
+        // MihonSY: when enhancing, decode at up to 2x the view size (capped) so the
+        // enhancer has real source detail to work on. dstWidth may be Int.MAX_VALUE
+        // before the view lays out; clamp first to avoid overflow.
+        // Webtoon strips (extreme aspect ratio): the height must NOT limit sampling —
+        // sampling by height would crush the width (1080x8000 sampled to 2048-tall ->
+        // 270px wide). For strips the width is the display-critical dimension, so we
+        // keep the FULL source height (no height-based downsampling) and only sample
+        // by width. A4K (GPU) handles the full-height texture; Ultra's 2x output is
+        // then naturally rejected by the texture-size guard if it would exceed the
+        // GPU limit.
+        val isTallStrip = srcHeight > 0 && srcWidth > 0 &&
+            srcHeight.toFloat() / srcWidth.toFloat() > 2.5f
+        val (targetW, targetH) = if (options.enhanced) {
+            if (isTallStrip) {
+                enhanceTarget(dstWidth) to srcHeight
+            } else {
+                enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
+            }
+        } else {
+            dstWidth to dstHeight
+        }
+
         val sampleSize = DecodeUtils.calculateInSampleSize(
             srcWidth = srcWidth,
             srcHeight = srcHeight,
-            dstWidth = dstWidth,
-            dstHeight = dstHeight,
+            dstWidth = targetW,
+            dstHeight = targetH,
             scale = options.scale,
         )
 
@@ -75,6 +96,27 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         decoder.recycle()
 
         check(bitmap != null) { "Failed to decode image" }
+
+        // MihonSY: run Lanczos3 enhancement synchronously on the decoded bitmap. The
+        // decoder is called on Coil's background thread, so this never blocks the UI.
+        // Any failure leaves the original bitmap — a black frame can never appear.
+        // Applies to every image size (strips included, sampled by width only).
+        if (options.enhanced) {
+            try {
+                val preferences = Injekt.get<ReaderPreferences>()
+                if (preferences.enhancementMode.get() != 0) {
+                    val enhanced = MihonSyEnhancer.enhance(bitmap, preferences)
+                    if (enhanced != null && enhanced !== bitmap && !enhanced.isRecycled) {
+                        bitmap.recycle()
+                        bitmap = enhanced
+                    }
+                }
+            } catch (e: Throwable) {
+                // Fall back to the original on ANY failure (incl. OutOfMemoryError,
+                // which Exception does not catch — an OOM here used to crash the
+                // whole reader on large downloaded pages).
+            }
+        }
 
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
@@ -101,10 +143,9 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
     class Factory : Decoder.Factory {
 
         override fun create(result: SourceFetchResult, options: Options, imageLoader: ImageLoader): Decoder? {
-            // MihonSY: this decoder handles system-unsupported formats (AVIF/JXL/HEIF)
-            // and CBZ cover archives. Standard JPEG/PNG/WebP pages are decoded by the
-            // system/SSIV path; enhancement runs asynchronously in ReaderPageImageView.
-            return if (options.customDecoder || isApplicable(result.source.source())) {
+            // MihonSY: when enhancement is enabled this decoder handles ALL formats so
+            // JPG/PNG pages also get enhanced; otherwise only the system-unsupported ones.
+            return if (options.enhanced || options.customDecoder || isApplicable(result.source.source())) {
                 TachiyomiImageDecoder(result.source, options)
             } else {
                 null
@@ -134,5 +175,21 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
 
     companion object {
         var displayProfile: ByteArray? = null
+
+        /**
+         * MihonSY: enhanced-decode target for one dimension. The view size is clamped
+         * (it can be Int.MAX_VALUE before layout) and used as-is — NO extra 2x here,
+         * because Lanczos3 itself already scales the image up (1.5x/2x/3x). Decoding
+         * at 2x AND scaling by Lanczos would multiply the output to 3-6x the view,
+         * most of which gets scaled back down for display: a huge waste of CPU.
+         * Keeping the decode at view size means the final enhanced image is exactly
+         * the configured scale (e.g. 1.5x) — supersampled for display, ~4x faster.
+         */
+        private fun enhanceTarget(viewDimension: Int): Int {
+            if (viewDimension <= 0 || viewDimension == Int.MAX_VALUE) return MAX_ENHANCE_SOURCE_DIMENSION
+            return min(viewDimension, MAX_ENHANCE_SOURCE_DIMENSION)
+        }
+
+        const val MAX_ENHANCE_SOURCE_DIMENSION = 2048
     }
 }
