@@ -55,11 +55,12 @@ jobs:
           echo "${{ secrets.KOMIHO_DEBUG_KEYSTORE_BASE64 }}" | base64 -d > keystore/komiho-debug.jks
           ls -la keystore/
 
-      # Komiho M1: compile-verify only (no signing/release yet — M5 adds the
-      # release pipeline with keystore secrets). Debug APK is enough to validate
-      # compilation of the Komga data layer + UI.
-      - name: Build debug APK
-        run: ./gradlew assembleDebug -Pdisable-code-shrink --no-daemon --stacktrace
+      # Komiho V2: build Release (not Debug) so the bundled native LZ3 gets full
+      # compiler optimization (-O2/-O3 + NDEBUG). Debug builds leave the C++ at -O0,
+      # which made Lanczos3 ~30-40x slower than MihonSY's Release APK on the same
+      # device. Signed with the fixed debug keystore so it installs over the prior APK.
+      - name: Build release APK
+        run: ./gradlew assembleRelease -Pdisable-code-shrink --no-daemon --stacktrace
 
       # Per-build unique CI tag: ci-<YYYYMMDD>-<short-sha>. Every build keeps its
       # own tag (never overwritten) so any old version is downloadable from GitHub
@@ -81,7 +82,7 @@ jobs:
           fi
           TITLE="Komiho V2 CI #${RUN_NO} · ${SHORT_SHA} · ${BUILD_DATE}"
           NOTES="Auto build #${RUN_NO} · ${{ github.sha }} · ${BUILD_DATE}T$(date -u +%H:%M:%SZ)"
-          gh release create "$TAG" app/build/outputs/apk/debug/*.apk \
+          gh release create "$TAG" app/build/outputs/apk/release/*.apk \
             --repo "${{ github.repository }}" \
             --title "$TITLE" \
             --notes "$NOTES" \
