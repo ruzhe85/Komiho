@@ -104,6 +104,10 @@
     <string name="home_layout">显示方式</string>
     <string name="home_layout_carousel">划动</string>
     <string name="home_layout_grid">平铺</string>
+    <string name="home_display_options">主页显示选项</string>
+    <string name="home_columns">每行数目（平铺模式）</string>
+    <string name="home_columns_auto">自动</string>
+    <string name="home_section_limit_title">每区块显示数量</string>
 
     <!-- 设置：外观 -->
     <string name="settings_appearance">外观</string>

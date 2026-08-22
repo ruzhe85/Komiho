@@ -103,6 +103,10 @@
     <string name="home_layout">Layout</string>
     <string name="home_layout_carousel">Carousel</string>
     <string name="home_layout_grid">Grid</string>
+    <string name="home_display_options">Home display options</string>
+    <string name="home_columns">Items per row (Grid)</string>
+    <string name="home_columns_auto">Auto</string>
+    <string name="home_section_limit_title">Items per section</string>
 
     <!-- Settings: appearance -->
     <string name="settings_appearance">Appearance</string>
