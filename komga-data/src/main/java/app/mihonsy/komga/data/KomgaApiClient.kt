@@ -402,11 +402,21 @@ class KomgaApiClient(
 
     /** PUT /api/v1/collections/{id}/series [seriesIds] — replace the whole ordered list. */
     private suspend fun putSeries(collectionId: String, seriesIds: List<String>) {
-        putJson(
-            "/api/v1/collections/$collectionId/series",
-            JsonArray(seriesIds.map { JsonPrimitive(it) }),
-            JsonArray.serializer(),
-        )
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/collections/$collectionId/series").toHttpUrl())
+                .apply { authHeaders() }
+                .put(
+                    json.encodeToString(
+                        JsonArray.serializer(),
+                        JsonArray(seriesIds.map { JsonPrimitive(it) }),
+                    ).toRequestBody(jsonMedia),
+                )
+                .build()
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) throw KomgaException("更新收藏系列失败（${resp.code}）")
+            }
+        }
     }
 
     /** Create a collection and attach series — POST /api/v1/collections {"name","seriesIds","ordered"} */
