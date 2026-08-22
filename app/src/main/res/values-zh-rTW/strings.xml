@@ -59,6 +59,9 @@
     <string name="load_readlists_failed">載入閱讀列表失敗：%1$s</string>
     <string name="no_readlists">暫無閱讀列表</string>
     <string name="books_count">%1$d 本</string>
+    <string name="section_readlists">閱讀列表</string>
+    <string name="section_collections">收藏</string>
+    <string name="series_in_collection">%1$d 個系列</string>
 
     <!-- 閱讀狀態篩選 -->
     <string name="filter_all">全部</string>

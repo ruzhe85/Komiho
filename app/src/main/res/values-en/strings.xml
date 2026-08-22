@@ -59,6 +59,9 @@
     <string name="load_readlists_failed">Failed to load reading lists: %1$s</string>
     <string name="no_readlists">No reading lists</string>
     <string name="books_count">%1$d books</string>
+    <string name="section_readlists">Reading lists</string>
+    <string name="section_collections">Collections</string>
+    <string name="series_in_collection">%1$d series</string>
 
     <!-- Read-status filter -->
     <string name="filter_all">All</string>
