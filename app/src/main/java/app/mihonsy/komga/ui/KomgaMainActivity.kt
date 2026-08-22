@@ -68,6 +68,7 @@ import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.RemoveDone
+import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -845,14 +846,17 @@ private fun LibraryTab(
     var showReadlistPicker by remember { mutableStateOf(false) }
     var showCollectionPicker by remember { mutableStateOf(false) }
 
-    val inSelection = selectedIds.isNotEmpty()
+    // 独立的选择模式状态：长按 item 进入选择时置 true，点取消(X)才置 false。
+    // 不再用 selectedIds.isNotEmpty() 推导，否则全选后反选=空集会误退选择栏。
+    var selectionMode by remember { mutableStateOf(false) }
+    val inSelection = selectionMode
     val selectedSeries = remember(selectedIds,  series) { series.filter { it.id in selectedIds } }
 
     val setSeriesSelect: (String, Boolean) -> Unit = { id, value ->
         selectedIds = if (value) selectedIds + id else selectedIds - id
     }
     val toggleSeriesSelect: (String) -> Unit = { id -> setSeriesSelect(id, id !in selectedIds) }
-    val exitSeriesSelection: () -> Unit = { selectedIds = emptySet() }
+    val exitSeriesSelection: () -> Unit = { selectionMode = false; selectedIds = emptySet() }
 
     fun markSeriesBatch(completed: Boolean) {
         val snapshot = selectedSeries.map { it.id }
@@ -932,8 +936,8 @@ private fun LibraryTab(
                     IconButton(onClick = { selectedIds = series.map { it.id }.toSet() }) {
                         Icon(Icons.Filled.SelectAll, contentDescription = composeStringResource(R.string.select_all))
                     }
-                    TextButton(onClick = { selectedIds = series.map { it.id }.toSet() - selectedIds }) {
-                        Text(composeStringResource(R.string.select_inverse))
+                    IconButton(onClick = { selectedIds = series.map { it.id }.toSet() - selectedIds }) {
+                        Icon(Icons.Outlined.FlipToBack, contentDescription = composeStringResource(R.string.select_inverse))
                     }
                 }
             }
@@ -968,7 +972,7 @@ private fun LibraryTab(
                             client,
                             s,
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
-                            onLongClick = { toggleSeriesSelect(s.id) },
+                            onLongClick = { selectionMode = true; toggleSeriesSelect(s.id) },
                             selected = s.id in selectedIds,
                         )
                     }
@@ -1003,7 +1007,7 @@ private fun LibraryTab(
                             client,
                             s,
                             onClick = { if (inSelection) toggleSeriesSelect(s.id) else onSeriesClick(s.id) },
-                            onLongClick = { toggleSeriesSelect(s.id) },
+                            onLongClick = { selectionMode = true; toggleSeriesSelect(s.id) },
                             selected = s.id in selectedIds,
                             titleInside = isCompact,
                         )
