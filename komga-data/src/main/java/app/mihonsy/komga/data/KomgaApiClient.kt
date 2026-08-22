@@ -240,6 +240,20 @@ class KomgaApiClient(
         return get("/api/v1/readlists/$id", ObjectSerializer())
     }
 
+    /** Delete a readlist — DELETE /api/v1/readlists/{id} */
+    suspend fun deleteReadlist(readlistId: String) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/readlists/$readlistId").toHttpUrl())
+                .apply { authHeaders() }
+                .delete()
+                .build()
+            client.newCall(request).execute().use {
+                if (!it.isSuccessful) throw KomgaException("删除阅读列表失败（${it.code}）")
+            }
+        }
+    }
+
     /** Books inside a readlist — GET /api/v1/readlists/{id}/books?unpaged=true */
     suspend fun getReadlistBooks(readlistId: String): List<BookDto> {
         // Explicit type so the reified PageableSerializer<T> can infer T=BookDto.
@@ -297,6 +311,20 @@ class KomgaApiClient(
     /** GET /api/v1/collections/{id} — single collection detail. */
     suspend fun getCollection(collectionId: String): CollectionDto {
         return get("/api/v1/collections/$collectionId", ObjectSerializer())
+    }
+
+    /** Delete a collection — DELETE /api/v1/collections/{id} */
+    suspend fun deleteCollection(collectionId: String) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/collections/$collectionId").toHttpUrl())
+                .apply { authHeaders() }
+                .delete()
+                .build()
+            client.newCall(request).execute().use {
+                if (!it.isSuccessful) throw KomgaException("删除收藏失败（${it.code}）")
+            }
+        }
     }
 
     // ---------- 系列级批量操作（书架多选） ----------
