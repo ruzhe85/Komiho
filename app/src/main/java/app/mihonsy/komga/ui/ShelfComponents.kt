@@ -1,5 +1,6 @@
 package app.mihonsy.komga.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -172,6 +173,9 @@ fun BookShelf(
         setSelect(id, id !in selectedIds)
     }
     val exitSelection: () -> Unit = { selectionMode = false; selectedIds = emptySet() }
+
+    // 选择状态下拦截系统返回手势：退出选择而不是退出程序
+    BackHandler(inSelection) { exitSelection() }
 
     fun performBatchUpdate(completed: Boolean) {
         val snapshot = selectedBooks
