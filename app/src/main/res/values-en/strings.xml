@@ -100,6 +100,9 @@
     <string name="settings_hide">Hide</string>
     <string name="settings_hidden">Hidden</string>
     <string name="settings_show">Show</string>
+    <string name="home_layout">Layout</string>
+    <string name="home_layout_carousel">Carousel</string>
+    <string name="home_layout_grid">Grid</string>
 
     <!-- Settings: appearance -->
     <string name="settings_appearance">Appearance</string>

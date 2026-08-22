@@ -80,6 +80,14 @@ class KomgaPreferences(context: Context) {
         ).orEmpty()
         set(v) = prefs.edit().putString(KEY_HOME_SECTION_ORDER, v).apply()
 
+    /**
+     * Home tab: how each section's items are laid out.
+     * "CAROUSEL" = horizontal swipe row (default); "GRID" = flat wrapped grid.
+     */
+    var homeSectionLayout: String
+        get() = prefs.getString(KEY_HOME_SECTION_LAYOUT, "CAROUSEL").orEmpty()
+        set(v) = prefs.edit().putString(KEY_HOME_SECTION_LAYOUT, v).apply()
+
     /** Reader: double-page spread mode (Comics-style side-by-side pages). */
     var readerDoublePage: Boolean
         get() = prefs.getBoolean(KEY_READER_DOUBLE_PAGE, false)
@@ -147,6 +155,7 @@ class KomgaPreferences(context: Context) {
         const val KEY_LIBRARY_LANDSCAPE_COLUMNS = "library_landscape_columns"
         const val KEY_HOME_SECTION_LIMIT = "home_section_limit"
         const val KEY_HOME_SECTION_ORDER = "home_section_order"
+        const val KEY_HOME_SECTION_LAYOUT = "home_section_layout"
         const val KEY_READER_DOUBLE_PAGE = "reader_double_page"
         const val KEY_READER_MODE = "reader_mode"
         const val KEY_THEME_MODE = "theme_mode"
