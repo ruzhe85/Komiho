@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -688,15 +689,13 @@ private fun HomeBookRow(
     onBookClick: (String, String) -> Unit,
 ) {
     if (layout == "GRID") {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 100.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         ) {
-            items(books.size) { i ->
-                val b = books[i]
+            books.forEach { b ->
                 HomeBookCard(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
             }
         }
@@ -759,15 +758,13 @@ private fun HomeContinueReadingRow(
     onBookClick: (String, String) -> Unit,
 ) {
     if (layout == "GRID") {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 100.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         ) {
-            items(books.size) { i ->
-                val b = books[i]
+            books.forEach { b ->
                 HomeContinueReadingCard(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
             }
         }
@@ -859,15 +856,13 @@ private fun HomeSeriesRow(
     onSeriesClick: (String) -> Unit,
 ) {
     if (layout == "GRID") {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 100.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         ) {
-            items(series.size) { i ->
-                val s = series[i]
+            series.forEach { s ->
                 HomeSeriesCard(client, s, showProgress, onClick = { onSeriesClick(s.id) })
             }
         }
