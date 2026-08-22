@@ -5,6 +5,7 @@ import android.content.res.Configuration
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -857,6 +858,9 @@ private fun LibraryTab(
     }
     val toggleSeriesSelect: (String) -> Unit = { id -> setSeriesSelect(id, id !in selectedIds) }
     val exitSeriesSelection: () -> Unit = { selectionMode = false; selectedIds = emptySet() }
+
+    // 选择状态下拦截系统返回手势：退出选择而不是退出程序
+    BackHandler(inSelection) { exitSeriesSelection() }
 
     fun markSeriesBatch(completed: Boolean) {
         val snapshot = selectedSeries.map { it.id }
