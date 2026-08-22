@@ -90,7 +90,10 @@ android {
             isMinifyEnabled = shrink
             isShrinkResources = shrink
             isProfileable = true
-            signingConfig = signingConfigs.getByName("mihonsy")
+            // Komiho V2: CI builds with the fixed debug keystore so the APK is
+            // installable over the previous build (the MihonSY signing credentials
+            // are not available in CI). Local releases can still use `mihonsy`.
+            signingConfig = signingConfigs.getByName("komihoDebug")
             setProguardFiles(listOf(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"))
 
             buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLatestCommitTime = true)}\"")
