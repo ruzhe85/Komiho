@@ -375,48 +375,54 @@ class KomgaApiClient(
     }
 
     /**
-     * Add series to a collection — PUT /api/v1/collections/{id}/series [all seriesIds].
+     * Add series to a collection — PATCH /api/v1/collections/{id}
+     * {"name","ordered","seriesIds"}.
      *
-     * Komga does NOT expose an "append" endpoint for collection series. The only
-     * way to add is to replace the entire ordered list (PUT). To keep existing
-     * ordering intact we merge the existing ids (fetched fresh) with the new ones
-     * and PUT the combined list back. The previous `POST .../series` returned 405
-     * (no such endpoint) and `PATCH /collections/{id}` rejects `seriesIds`.
+     * Komga does NOT expose an "append" endpoint for collection series. Following
+     * Komelia's implementation, we PATCH the collection with the merged list of
+     * existing + new seriesIds. The previous `POST .../series` and `PUT .../series`
+     * calls both returned 405 on this server.
      */
     suspend fun addSeriesToCollection(collectionId: String, seriesIds: List<String>) {
-        val existing = getCollection(collectionId).seriesIds
-        val merged = (existing + seriesIds).distinct()
-        putSeries(collectionId, merged)
+        val current = getCollection(collectionId)
+        patchCollection(
+            collectionId,
+            name = current.name,
+            ordered = current.ordered,
+            seriesIds = (current.seriesIds + seriesIds).distinct(),
+        )
     }
 
     /**
-     * Remove a single series from a collection — PUT /api/v1/collections/{id}/series
-     * with the remaining seriesIds (full replace). Mirrors Komga Web's "edit elements"
-     * behaviour; the DELETE sub-path variant is replaced here to avoid the 404 the
-     * old `DELETE .../series/{seriesId}` call produced.
+     * Remove a single series from a collection — PATCH /api/v1/collections/{id}
+     * {"name","ordered","seriesIds"} with the series filtered out.
      */
     suspend fun removeSeriesFromCollection(collectionId: String, seriesId: String) {
-        val remaining = getCollection(collectionId).seriesIds.filter { it != seriesId }
-        putSeries(collectionId, remaining)
+        val current = getCollection(collectionId)
+        patchCollection(
+            collectionId,
+            name = current.name,
+            ordered = current.ordered,
+            seriesIds = current.seriesIds.filter { it != seriesId },
+        )
     }
 
-    /** PUT /api/v1/collections/{id}/series [seriesIds] — replace the whole ordered list. */
-    private suspend fun putSeries(collectionId: String, seriesIds: List<String>) {
-        withIOContext {
-            val request = Request.Builder()
-                .url(apiUrl("/api/v1/collections/$collectionId/series").toHttpUrl())
-                .apply { authHeaders() }
-                .put(
-                    json.encodeToString(
-                        JsonArray.serializer(),
-                        JsonArray(seriesIds.map { JsonPrimitive(it) }),
-                    ).toRequestBody(jsonMedia),
-                )
-                .build()
-            client.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) throw KomgaException("更新收藏系列失败（${resp.code}）")
-            }
-        }
+    /** PATCH /api/v1/collections/{id} with the full CollectionUpdateDto body. */
+    private suspend fun patchCollection(
+        collectionId: String,
+        name: String,
+        ordered: Boolean,
+        seriesIds: List<String>,
+    ) {
+        patchJson(
+            "/api/v1/collections/$collectionId",
+            buildJsonObject {
+                put("name", JsonPrimitive(name))
+                put("ordered", JsonPrimitive(ordered))
+                put("seriesIds", JsonArray(seriesIds.map { JsonPrimitive(it) }))
+            },
+            JsonObject.serializer(),
+        )
     }
 
     /** Create a collection and attach series — POST /api/v1/collections {"name","seriesIds","ordered"} */
@@ -465,7 +471,7 @@ class KomgaApiClient(
 
     private fun apiUrl(path: String): String {
         val base = connection.baseUrl.trimEnd('/')
-        return if (path.startsWith("http")) path else "$base$path"
+        return if (path.startsWith("http", ignoreCase = true)) path else "$base$path"
     }
 
     private fun HttpUrl.Builder.addParams(params: Map<String, String>): HttpUrl.Builder {
