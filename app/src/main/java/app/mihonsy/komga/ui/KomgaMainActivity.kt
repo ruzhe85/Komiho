@@ -684,8 +684,8 @@ enum class HomeSection(@StringRes val labelRes: Int, val isSeries: Boolean) {
 private fun HomeBookRow(
     client: KomgaApiClient,
     books: List<BookDto>,
-    onBookClick: (String, String) -> Unit,
     layout: String = "CAROUSEL",
+    onBookClick: (String, String) -> Unit,
 ) {
     if (layout == "GRID") {
         LazyVerticalGrid(
@@ -755,8 +755,8 @@ private fun HomeBookCard(client: KomgaApiClient, b: BookDto, onClick: () -> Unit
 private fun HomeContinueReadingRow(
     client: KomgaApiClient,
     books: List<BookDto>,
-    onBookClick: (String, String) -> Unit,
     layout: String = "CAROUSEL",
+    onBookClick: (String, String) -> Unit,
 ) {
     if (layout == "GRID") {
         LazyVerticalGrid(
@@ -855,8 +855,8 @@ private fun HomeSeriesRow(
     client: KomgaApiClient,
     series: List<SeriesDto>,
     showProgress: Boolean,
+    layout:  String = "CAROUSEL",
     onSeriesClick: (String) -> Unit,
-    layout: String = "CAROUSEL",
 ) {
     if (layout == "GRID") {
         LazyVerticalGrid(
