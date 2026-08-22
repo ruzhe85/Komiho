@@ -101,8 +101,8 @@ fun SeriesShelf(
     series: List<SeriesDto>,
     mode: LibraryDisplayMode,
     columns: Int = 0,
-    onSeriesClick: (String) -> Unit,
     onSeriesLongClick: ((String) -> Unit)? = null,
+    onSeriesClick: (String) -> Unit,
 ) {
     if (mode == LibraryDisplayMode.List) {
         LazyColumn(
