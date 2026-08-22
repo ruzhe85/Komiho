@@ -20,6 +20,10 @@
     <string name="select_library">Select library</string>
     <string name="no_libraries">No libraries</string>
     <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
+    <string name="confirm_delete_title">Confirm delete</string>
+    <string name="confirm_delete_message">Delete the %1$s "%2$s"? This cannot be undone.</string>
+    <string name="delete_failed">Delete failed: %1$s</string>
 
     <!-- Common -->
     <string name="retry">Retry</string>

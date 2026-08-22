@@ -20,6 +20,10 @@
     <string name="select_library">選擇庫</string>
     <string name="no_libraries">暫無庫</string>
     <string name="cancel">取消</string>
+    <string name="delete">刪除</string>
+    <string name="confirm_delete_title">確認刪除</string>
+    <string name="confirm_delete_message">確定要刪除%1$s「%2$s」嗎？此操作不可撤銷。</string>
+    <string name="delete_failed">刪除失敗：%1$s</string>
 
     <!-- 通用 -->
     <string name="retry">重試</string>

@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
@@ -1620,6 +1621,13 @@ private fun SeriesCollectionPickerDialog(
 
 // ---------- Lists tab (readlists + collections) ----------
 
+/** 待删除项的描述，用于确认弹窗。 */
+private data class DeleteTarget(
+    val kind: String, // "readlist" 或 "collection"
+    val id: String,
+    val name: String,
+)
+
 /** Lists tab: shows both reading lists and collections (收藏). */
 @Composable
 private fun ListsTab(
@@ -1633,14 +1641,26 @@ private fun ListsTab(
     var collections by remember { mutableStateOf<List<CollectionDto>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    // 删除确认弹窗状态：待删除项的类型与 id/名称
+    var pendingDelete by remember { mutableStateOf<DeleteTarget?>(null) }
 
     fun load() {
         loading = true
         error = null
         scope.launch {
             runCatching {
-                readlists = client.getReadlists()
-                collections = client.getCollections()
+                // 列表端点通常不返回 booksCount（computed 字段被省略），逐条用详情覆盖。
+                readlists = client.getReadlists().map { list ->
+                    runCatching { client.getReadlist(list.id) }.getOrNull()?.let { detail ->
+                        list.copy(booksCount = detail.booksCount, bookIds = detail.bookIds)
+                    } ?: list
+                }
+                // 收藏统计用 seriesIds.size；列表端点已返回，但同样用详情兜底保证准确。
+                collections = client.getCollections().map { col ->
+                    runCatching { client.getCollection(col.id) }.getOrNull()?.let { detail ->
+                        if (detail.seriesIds.isNotEmpty()) col.copy(seriesIds = detail.seriesIds) else col
+                    } ?: col
+                }
             }.onFailure {
                 error = context.getString(R.string.load_failed, it.message)
             }
@@ -1724,6 +1744,15 @@ private fun ListsTab(
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                IconButton(
+                                    onClick = { pendingDelete = DeleteTarget("readlist", rl.id, rl.name) },
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Delete,
+                                        contentDescription = composeStringResource(R.string.delete),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
@@ -1781,12 +1810,62 @@ private fun ListsTab(
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                IconButton(
+                                    onClick = { pendingDelete = DeleteTarget("collection", c.id, c.name) },
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Delete,
+                                        contentDescription = composeStringResource(R.string.delete),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
         }
+    }
+    // 删除确认弹窗
+    pendingDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(composeStringResource(R.string.confirm_delete_title)) },
+            text = {
+                Text(
+                    composeStringResource(
+                        R.string.confirm_delete_message,
+                        if (target.kind == "readlist") {
+                            composeStringResource(R.string.section_readlists)
+                        } else {
+                            composeStringResource(R.string.section_collections)
+                        },
+                        target.name,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val t = target
+                        pendingDelete = null
+                        scope.launch {
+                            runCatching {
+                                if (t.kind == "readlist") client.deleteReadlist(t.id)
+                                else client.deleteCollection(t.id)
+                            }.onFailure {
+                                error = context.getString(R.string.delete_failed, it.message)
+                            }
+                            load()
+                        }
+                    },
+                ) { Text(composeStringResource(R.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(composeStringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 
