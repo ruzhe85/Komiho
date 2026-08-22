@@ -101,6 +101,9 @@
     <string name="settings_hide">隐藏</string>
     <string name="settings_hidden">已隐藏</string>
     <string name="settings_show">显示</string>
+    <string name="home_layout">显示方式</string>
+    <string name="home_layout_carousel">划动</string>
+    <string name="home_layout_grid">平铺</string>
 
     <!-- 设置：外观 -->
     <string name="settings_appearance">外观</string>
