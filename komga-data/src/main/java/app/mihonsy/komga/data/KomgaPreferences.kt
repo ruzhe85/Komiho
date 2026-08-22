@@ -63,10 +63,18 @@ class KomgaPreferences(context: Context) {
         get() = prefs.getString(KEY_LIBRARY_SORT, "title,asc").orEmpty()
         set(v) = prefs.edit().putString(KEY_LIBRARY_SORT, v).apply()
 
-    /** Home tab: how many series/books each section shows. Default 10, max 15. */
+    /** Home tab: how many series/books each section shows. Default 10, max 50. */
     var homeSectionLimit: Int
-        get() = prefs.getInt(KEY_HOME_SECTION_LIMIT, 10).coerceIn(1, 15)
-        set(v) = prefs.edit().putInt(KEY_HOME_SECTION_LIMIT, v.coerceIn(1, 15)).apply()
+        get() = prefs.getInt(KEY_HOME_SECTION_LIMIT, 10).coerceIn(1, 50)
+        set(v) = prefs.edit().putInt(KEY_HOME_SECTION_LIMIT, v.coerceIn(1, 50)).apply()
+
+    /**
+     * Home tab: how many items per row in GRID layout.
+     * 0 = auto (FlowRow decides), otherwise a fixed column count (2..8).
+     */
+    var homeGridColumns: Int
+        get() = prefs.getInt(KEY_HOME_GRID_COLUMNS, 0).coerceIn(0, 8)
+        set(v) = prefs.edit().putInt(KEY_HOME_GRID_COLUMNS, v.coerceIn(0, 8)).apply()
 
     /**
      * Home tab: visible section order, comma-separated section names
@@ -154,6 +162,7 @@ class KomgaPreferences(context: Context) {
         const val KEY_LIBRARY_PORTRAIT_COLUMNS = "library_portrait_columns"
         const val KEY_LIBRARY_LANDSCAPE_COLUMNS = "library_landscape_columns"
         const val KEY_HOME_SECTION_LIMIT = "home_section_limit"
+        const val KEY_HOME_GRID_COLUMNS = "home_grid_columns"
         const val KEY_HOME_SECTION_ORDER = "home_section_order"
         const val KEY_HOME_SECTION_LAYOUT = "home_section_layout"
         const val KEY_READER_DOUBLE_PAGE = "reader_double_page"

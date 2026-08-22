@@ -103,6 +103,10 @@
     <string name="home_layout">顯示方式</string>
     <string name="home_layout_carousel">滑動</string>
     <string name="home_layout_grid">平鋪</string>
+    <string name="home_display_options">主頁顯示選項</string>
+    <string name="home_columns">每行數目（平鋪模式）</string>
+    <string name="home_columns_auto">自動</string>
+    <string name="home_section_limit_title">每區塊顯示數量</string>
 
     <!-- 設定：外觀 -->
     <string name="settings_appearance">外觀</string>

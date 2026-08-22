@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -221,6 +222,11 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
     var librarySortMode by remember { mutableStateOf(LibrarySortMode.fromPref(prefs.librarySort)) }
     var libraryReadFilter by remember { mutableStateOf(ReadFilter.All) }
     var shelfMenuOpen by remember { mutableStateOf(false) }
+    // Home tab display options (layout / columns / per-section limit).
+    var homeMenuOpen by remember { mutableStateOf(false) }
+    var homeLayout by remember { mutableStateOf(prefs.homeSectionLayout) }
+    var homeGridColumns by remember { mutableStateOf(prefs.homeGridColumns) }
+    var homeSectionLimit by remember { mutableStateOf(prefs.homeSectionLimit) }
     // Library tab also gets per-orientation column counts (read-only from
     // prefs; the old columns slider was folded into the toolbar menu).
     val configuration = LocalConfiguration.current
@@ -319,6 +325,35 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                             )
                         }
                     }
+                    if (currentTabEnum == MainTab.Home) {
+                        Box {
+                            IconButton(onClick = { homeMenuOpen = true }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Tune,
+                                    contentDescription = composeStringResource(R.string.home_display_options),
+                                )
+                            }
+                            HomeOptionsMenu(
+                                expanded = homeMenuOpen,
+                                onDismiss = { homeMenuOpen = false },
+                                layout = homeLayout,
+                                onLayoutChange = {
+                                    homeLayout = it
+                                    prefs.homeSectionLayout = it
+                                },
+                                columns = homeGridColumns,
+                                onColumnsChange = {
+                                    homeGridColumns = it
+                                    prefs.homeGridColumns = it
+                                },
+                                sectionLimit = homeSectionLimit,
+                                onSectionLimitChange = {
+                                    homeSectionLimit = it
+                                    prefs.homeSectionLimit = it
+                                },
+                            )
+                        }
+                    }
                     if (currentTabEnum != MainTab.Settings) {
                         androidx.compose.material3.IconButton(onClick = { searchOpen = !searchOpen }) {
                             Icon(
@@ -367,7 +402,13 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
             }
             Box(Modifier.fillMaxSize()) {
                 when (MainTab.entries[currentTab]) {
-                    MainTab.Home -> HomeTab(client = client, refreshTick = refreshTick) { seriesId ->
+                    MainTab.Home -> HomeTab(
+                        client = client,
+                        refreshTick = refreshTick,
+                        homeLayout = homeLayout,
+                        homeGridColumns = homeGridColumns,
+                        homeSectionLimit = homeSectionLimit,
+                    ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
                     MainTab.Library -> LibraryTab(
@@ -457,14 +498,18 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
 // ---------- Home tab ----------
 
 @Composable
-private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (String) -> Unit) {
+private fun HomeTab(
+    client: KomgaApiClient,
+    refreshTick: Int,
+    homeLayout: String,
+    homeGridColumns: Int,
+    homeSectionLimit: Int,
+    onSeriesClick: (String) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // M3.17: per-section item count is user-configurable in Settings
-    // (default 10, clamp 1..15 in KomgaPreferences).
     val prefs = remember { KomgaPreferences(context.applicationContext) }
-    val itemLimit = prefs.homeSectionLimit
-    var homeLayout by remember { mutableStateOf(prefs.homeSectionLayout) }
+    val itemLimit = homeSectionLimit
 
     // Continue reading = Komga's /books/ondeck (book-level, matches web UI).
     var inProgress by remember { mutableStateOf<List<BookDto>>(emptyList()) }
@@ -542,39 +587,8 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                         .split(',')
                         .mapNotNull { name -> runCatching { HomeSection.valueOf(name) }.getOrNull() }
                     val data = HomeData(inProgress, recentSeries, addedSeries, addedBooks, readBooks)
-                    // Quick layout toggle on the home screen itself (no need to enter settings).
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = composeStringResource(R.string.home_layout),
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                HomeLayoutChip(
-                                    label = composeStringResource(R.string.home_layout_carousel),
-                                    selected = homeLayout == "CAROUSEL",
-                                    onClick = {
-                                        homeLayout = "CAROUSEL"
-                                        prefs.homeSectionLayout = "CAROUSEL"
-                                    },
-                                )
-                                HomeLayoutChip(
-                                    label = composeStringResource(R.string.home_layout_grid),
-                                    selected = homeLayout == "GRID",
-                                    onClick = {
-                                        homeLayout = "GRID"
-                                        prefs.homeSectionLayout = "GRID"
-                                    },
-                                )
-                            }
-                        }
-                    }
+
+                    // Quick layout toggle removed from body — now lives in the toolbar options menu.
                     order.forEach { section ->
                         when (section) {
                             HomeSection.ContinueReading -> {
@@ -589,7 +603,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                                     }
                                     item {
                                         // Continue-reading books open the reader directly.
-                                        HomeContinueReadingRow(client, data.inProgress, layout = homeLayout) { bookId, bookName ->
+                                        HomeContinueReadingRow(client, data.inProgress, layout = homeLayout, columns = homeGridColumns) { bookId, bookName ->
                                             scope.launch {
                                                 runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                                     .onFailure {
@@ -613,7 +627,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                                         })
                                     }
                                     item {
-                                        HomeBookRow(client, data.addedBooks, layout = homeLayout) { bookId, bookName ->
+                                        HomeBookRow(client, data.addedBooks, layout = homeLayout, columns = homeGridColumns) { bookId, bookName ->
                                             scope.launch {
                                                 runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                                     .onFailure {
@@ -637,7 +651,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                                         })
                                     }
                                     item {
-                                        HomeSeriesRow(client, data.addedSeries, showProgress = false, layout = homeLayout) { onSeriesClick(it) }
+                                        HomeSeriesRow(client, data.addedSeries, showProgress = false, layout = homeLayout, columns = homeGridColumns) { onSeriesClick(it) }
                                     }
                                 }
                             }
@@ -652,7 +666,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                                         })
                                     }
                                     item {
-                                        HomeSeriesRow(client, data.recentSeries, showProgress = false, layout = homeLayout) { onSeriesClick(it) }
+                                        HomeSeriesRow(client, data.recentSeries, showProgress = false, layout = homeLayout, columns = homeGridColumns) { onSeriesClick(it) }
                                     }
                                 }
                             }
@@ -667,7 +681,7 @@ private fun HomeTab(client: KomgaApiClient, refreshTick: Int, onSeriesClick: (St
                                         })
                                     }
                                     item {
-                                        HomeBookRow(client,  data.readBooks, layout = homeLayout) { bookId, bookName ->
+                                        HomeBookRow(client,  data.readBooks, layout = homeLayout, columns = homeGridColumns) { bookId, bookName ->
                                             scope.launch {
                                                 runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                                     .onFailure {
@@ -719,16 +733,16 @@ private fun HomeBookRow(
     client: KomgaApiClient,
     books: List<BookDto>,
     layout: String = "CAROUSEL",
-    onBookClick: (String, String) -> Unit,
+    columns: Int = 0,
+    onBookClick: (String,  String) -> Unit,
 ) {
     if (layout == "GRID") {
-        FlowRow(
+        GridWrap(
+            columns = columns,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        ) { cellModifier ->
             books.forEach { b ->
-                HomeBookCard(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                HomeBookCard(client, b, cellModifier, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
             }
         }
     } else {
@@ -738,17 +752,50 @@ private fun HomeBookRow(
         ) {
             items(books.size) { i ->
                 val b = books[i]
-                HomeBookCard(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                HomeBookCard(client, b, Modifier.width(100.dp), onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+            }
+        }
+    }
+}
+
+/**
+ * Flexible grid wrapper for Home sections. When [columns] <= 0 it falls back to
+ * a FlowRow (auto-wrap). Otherwise it lays items into a fixed number of equal
+ * columns using the available width (no nested scrolling, safe inside LazyColumn).
+ */
+@Composable
+private fun GridWrap(
+    columns: Int,
+    modifier: Modifier = Modifier,
+    content: @Composable (cellModifier: Modifier) -> Unit,
+) {
+    if (columns <= 0) {
+        FlowRow(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            content(Modifier)
+        }
+    } else {
+        val gap = 12.dp
+        BoxWithConstraints(modifier = modifier) {
+            val cellWidth = (maxWidth - gap * (columns - 1)) / columns
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(gap),
+                verticalArrangement = Arrangement.spacedBy(gap),
+            ) {
+                content(Modifier.width(cellWidth))
             }
         }
     }
 }
 
 @Composable
-private fun HomeBookCard(client: KomgaApiClient, b: BookDto, onClick: () -> Unit) {
+private fun HomeBookCard(client: KomgaApiClient, b: BookDto, modifier: Modifier = Modifier.width(100.dp), onClick: () -> Unit) {
     Column(
-        modifier = Modifier
-            .width(100.dp)
+        modifier = modifier
             .clickable { onClick() },
     ) {
         Box(
@@ -787,16 +834,16 @@ private fun HomeContinueReadingRow(
     client: KomgaApiClient,
     books: List<BookDto>,
     layout: String = "CAROUSEL",
+    columns: Int = 0,
     onBookClick: (String, String) -> Unit,
 ) {
     if (layout == "GRID") {
-        FlowRow(
+        GridWrap(
+            columns = columns,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        ) { cellModifier ->
             books.forEach { b ->
-                HomeContinueReadingCard(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                HomeContinueReadingCard(client, b, cellModifier, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
             }
         }
     } else {
@@ -806,17 +853,16 @@ private fun HomeContinueReadingRow(
         ) {
             items(books.size) { i ->
                 val b = books[i]
-                HomeContinueReadingCard(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                HomeContinueReadingCard(client, b, Modifier.width(100.dp), onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
             }
         }
     }
 }
 
 @Composable
-private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, onClick: () -> Unit) {
+private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, modifier: Modifier = Modifier.width(100.dp), onClick: () -> Unit) {
     Column(
-        modifier = Modifier
-            .width(100.dp)
+        modifier = modifier
             .clickable { onClick() },
     ) {
         Box(
@@ -884,16 +930,16 @@ private fun HomeSeriesRow(
     series: List<SeriesDto>,
     showProgress: Boolean,
     layout:  String = "CAROUSEL",
+    columns: Int = 0,
     onSeriesClick: (String) -> Unit,
 ) {
     if (layout == "GRID") {
-        FlowRow(
+        GridWrap(
+            columns = columns,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        ) { cellModifier ->
             series.forEach { s ->
-                HomeSeriesCard(client, s, showProgress, onClick = { onSeriesClick(s.id) })
+                HomeSeriesCard(client, s, showProgress, cellModifier, onClick = { onSeriesClick(s.id) })
             }
         }
     } else {
@@ -903,7 +949,7 @@ private fun HomeSeriesRow(
         ) {
             items(series.size) { i ->
                 val s = series[i]
-                HomeSeriesCard(client, s, showProgress, onClick = { onSeriesClick(s.id) })
+                HomeSeriesCard(client, s, showProgress, Modifier.width(100.dp), onClick = { onSeriesClick(s.id) })
             }
         }
     }
@@ -914,11 +960,11 @@ private fun HomeSeriesCard(
     client: KomgaApiClient,
     s: SeriesDto,
     showProgress: Boolean,
+    modifier: Modifier = Modifier.width(100.dp),
     onClick: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .width(100.dp)
+        modifier = modifier
             .clickable { onClick() },
     ) {
         Box(
@@ -2331,9 +2377,7 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
 @Composable
 private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Context) {
     val prefs = remember { KomgaPreferences(context.applicationContext) }
-    var sectionLimit by remember { mutableStateOf(prefs.homeSectionLimit) }
     var sectionOrder by remember { mutableStateOf(prefs.homeSectionOrder) }
-    var sectionLayout by remember { mutableStateOf(prefs.homeSectionLayout) }
 
     fun persistOrder(order: List<HomeSection>) {
         sectionOrder = order.joinToString(",") { it.name }
@@ -2372,78 +2416,12 @@ private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Conte
     ) {
         item { PreferenceGroupHeader(composeStringResource(R.string.settings_home)) }
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = composeStringResource(R.string.settings_section_limit),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(
-                    onClick = {
-                        sectionLimit = (sectionLimit - 1).coerceAtLeast(1)
-                        prefs.homeSectionLimit = sectionLimit
-                    },
-                    enabled = sectionLimit > 1,
-                ) { Text("-", style = MaterialTheme.typography.titleLarge) }
-                Text(
-                    text = "$sectionLimit",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.width(36.dp),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
-                IconButton(
-                    onClick = {
-                        sectionLimit = (sectionLimit + 1).coerceAtMost(15)
-                        prefs.homeSectionLimit = sectionLimit
-                    },
-                    enabled = sectionLimit < 15,
-                ) { Text("+", style = MaterialTheme.typography.titleLarge) }
-            }
-        }
-        item {
             Text(
                 text = composeStringResource(R.string.settings_home_sections_summary),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(, 16.dp),
             )
-        }
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = composeStringResource(R.string.home_layout),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HomeLayoutChip(
-                        label = composeStringResource(R.string.home_layout_carousel),
-                        selected = sectionLayout == "CAROUSEL",
-                        onClick = {
-                            sectionLayout = "CAROUSEL"
-                            prefs.homeSectionLayout = "CAROUSEL"
-                        },
-                    )
-                    HomeLayoutChip(
-                        label = composeStringResource(R.string.home_layout_grid),
-                        selected = sectionLayout == "GRID",
-                        onClick = {
-                            sectionLayout = "GRID"
-                            prefs.homeSectionLayout = "GRID"
-                        },
-                    )
-                }
-            }
         }
         items(orderedSections, key = { it.name }) { section ->
             ReorderableItem(reorderableState, section.name) {
@@ -2521,6 +2499,77 @@ private fun HomeLayoutChip(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
         )
     }
+}
+
+/**
+ * Home tab display options menu (toolbar). Controls layout (CAROUSEL/GRID),
+ * the number of items per row in GRID mode, and the per-section item cap.
+ */
+@Composable
+private fun HomeOptionsMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    layout: String,
+    onLayoutChange: (String) -> Unit,
+    columns: Int,
+    onColumnsChange: (Int) -> Unit,
+    sectionLimit: Int,
+    onSectionLimitChange: (Int) -> Unit,
+) {
+    if (!expanded) return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(composeStringResource(R.string.home_display_options)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text = composeStringResource(R.string.home_layout),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    HomeLayoutChip(
+                        label = composeStringResource(R.string.home_layout_carousel),
+                        selected = layout == "CAROUSEL",
+                        onClick = { onLayoutChange("CAROUSEL") },
+                    )
+                    HomeLayoutChip(
+                        label = composeStringResource(R.string.home_layout_grid),
+                        selected = layout == "GRID",
+                        onClick = { onLayoutChange("GRID") },
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                SliderItem(
+                    value = columns,
+                    valueRange = 0..8,
+                    label = composeStringResource(R.string.home_columns),
+                    valueString = if (columns > 0) columns.toString() else composeStringResource(R.string.home_columns_auto),
+                    onChange = onColumnsChange,
+                )
+                SliderItem(
+                    value = sectionLimit,
+                    valueRange = 1..50,
+                    label = composeStringResource(R.string.home_section_limit_title),
+                    valueString = sectionLimit.toString(),
+                    onChange = onSectionLimitChange,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.ok)) }
+        },
+    )
 }
 
 @Composable
