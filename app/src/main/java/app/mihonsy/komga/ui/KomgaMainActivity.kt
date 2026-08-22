@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
 import androidx.compose.foundation.rememberScrollState
@@ -71,6 +72,7 @@ import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.RemoveDone
 import androidx.compose.material.icons.outlined.FlipToBack
+import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -100,6 +102,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -121,6 +124,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.model.BookDto
@@ -2247,18 +2252,18 @@ private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Conte
         HomeSection.entries.filter { it !in visibleSections }
     }
 
-    fun move(section: HomeSection, delta: Int) {
-        val cur = visibleSections.indexOf(section)
-        val target = cur + delta
-        if (cur >= 0 && target in 0 until visibleSections.size) {
-            val list = visibleSections.toMutableList()
-            list[cur] = list[target]
-            list[target] = section
-            persistOrder(list)
-        }
+    val lazyListState = rememberLazyListState()
+    val orderedSections = remember(sectionOrder) { visibleSections.toMutableStateList() }
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val item = orderedSections.removeAt(from.index)
+        orderedSections.add(to.index, item)
+        persistOrder(orderedSections.toList())
     }
 
-    LazyColumn(modifier.fillMaxSize()) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        state = lazyListState,
+    ) {
         item { PreferenceGroupHeader(composeStringResource(R.string.settings_home)) }
         item {
             Row(
@@ -2302,26 +2307,32 @@ private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Conte
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        items(visibleSections) { section ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(
-                    onClick = { move(section, -1) },
-                    enabled = visibleSections.indexOf(section) > 0,
-                ) { Text("↑", style = MaterialTheme.typography.titleMedium) }
-                Text(
-                    text = section.labelText(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(
-                    onClick = { move(section, +1) },
-                    enabled = visibleSections.indexOf(section) < visibleSections.size - 1,
-                ) { Text("↓", style = MaterialTheme.typography.titleMedium) }
-                TextButton(onClick = { persistOrder(visibleSections.filter { it != section }) }) {
-                    Text(composeStringResource(R.string.settings_hide))
+        items(orderedSections, key = { it.name }) { section ->
+            ReorderableItem(reorderableState, section.name) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.DragHandle,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(horizontal = 4.dp)
+                            .draggableHandle(),
+                    )
+                    Text(
+                        text = section.labelText(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        val remaining = orderedSections.filter { it != section }
+                        orderedSections.clear()
+                        orderedSections.addAll(remaining)
+                        persistOrder(remaining)
+                    }) {
+                        Text(composeStringResource(R.string.settings_hide))
+                    }
                 }
             }
         }
