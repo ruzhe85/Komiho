@@ -548,20 +548,6 @@ class KomgaApiClient(
         }
     }
 
-    /** Same as postJson but with the PUT verb (Komga collection series replace uses PUT). */
-    private suspend fun <T> putJson(path: String, body: T, serializer: kotlinx.serialization.KSerializer<T>) {
-        withIOContext {
-            val request = Request.Builder()
-                .url(apiUrl(path).toHttpUrl())
-                .apply { authHeaders() }
-                .put(json.encodeToString(serializer, body).toRequestBody(jsonMedia))
-                .build()
-            client.newCall(request).execute().use { resp ->
-                handleResponse(resp) { null }
-            }
-        }
-    }
-
     /** Same as postJson but with the PATCH verb (Komga read-progress uses PATCH). */
     private suspend fun <T> patchJson(path: String, body: T, serializer: kotlinx.serialization.KSerializer<T>) {
         withIOContext {
