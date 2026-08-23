@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
@@ -104,6 +105,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -129,6 +131,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -137,6 +142,8 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.data.download.KomgaDownloadStore
+import app.mihonsy.komga.source.KomgaSource
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.CollectionDto
 import app.mihonsy.komga.data.model.LibraryDto
@@ -158,6 +165,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
+import tachiyomi.domain.chapter.repository.ChapterRepository
+import tachiyomi.domain.manga.interactor.GetManga
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 // 划动选择命中检测已移除（长按圈选废弃）。
 
@@ -211,6 +222,7 @@ private enum class MainTab(@StringRes val labelRes: Int, val icon: ImageVector) 
     Home(R.string.tab_home, Icons.Filled.Home),
     Library(R.string.tab_library, Icons.Filled.Book),
     Lists(R.string.tab_lists, Icons.AutoMirrored.Filled.List),
+    Downloads(R.string.tab_downloads, Icons.Filled.Download),
     Settings(R.string.tab_settings, Icons.Filled.Settings),
     ;
 
@@ -407,7 +419,7 @@ private fun KomgaMainScreen(
                             )
                         }
                     }
-                    if (currentTabEnum != MainTab.Settings) {
+                    if (currentTabEnum != MainTab.Settings && currentTabEnum != MainTab.Downloads) {
                         androidx.compose.material3.IconButton(onClick = { searchOpen = !searchOpen }) {
                             Icon(
                                 imageVector = if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
@@ -493,6 +505,17 @@ private fun KomgaMainScreen(
                                     .putExtra("collectionId", cId)
                                     .putExtra("collectionName", cName),
                             )
+                        },
+                    )
+                    MainTab.Downloads -> DownloadsTab(
+                        client = client,
+                        onBookClick = { bookId ->
+                            runCatching { KomgaReaderLauncher.open(context, client, bookId) }
+                                .onFailure {
+                                    android.widget.Toast.makeText(
+                                        context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
                         },
                     )
                     MainTab.Settings -> SettingsTab(context)
@@ -3134,6 +3157,157 @@ private fun KomgaServerSettings(modifier: Modifier, context: android.content.Con
                     )
                 },
             )
+        }
+    }
+}
+
+
+// ---------- Downloads (offline) tab ----------
+
+/**
+ * Komiho V2: 离线下载书架。
+ *
+ * 纯本地、不联网：从 [KomgaDownloadStore] 读已下载 bookId 列表，经本地 DB
+ * 反查 chapter（book 名 + mangaId）→ manga（series 名），列出已下载书。
+ * 断网时此 tab 照常可用——点书走 KomgaReaderLauncher.open() 的离线优先逻辑。
+ *
+ * 封面用占位图标（离线无本地缓存封面；CBZ 内页缩略图留待后续）。
+ */
+private data class DownloadedItem(
+    val bookId: String,
+    val bookName: String,
+    val seriesName: String,
+)
+
+@Composable
+private fun DownloadsTab(
+    client: KomgaApiClient,
+    onBookClick: suspend (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf<List<DownloadedItem>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+
+    fun load() {
+        loading = true
+        scope.launch {
+            val store = KomgaDownloadStore(context)
+            val chapterRepository: ChapterRepository = Injekt.get()
+            val getManga: GetManga = Injekt.get()
+            val result = store.allDownloaded().mapNotNull { (bookId, _) ->
+                val chapter = chapterRepository.getChapterByUrl(KomgaSource.BOOK_URL_PREFIX + bookId)
+                    .firstOrNull() ?: return@mapNotNull null
+                val manga = getManga.await(chapter.mangaId) ?: return@mapNotNull null
+                DownloadedItem(
+                    bookId = bookId,
+                    bookName = chapter.name,
+                    seriesName = manga.ogTitle,
+                )
+            }
+            items = result
+            loading = false
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    // 从阅读器返回（可能删了下载）或重进 tab 时刷新。
+    val lifecycleContext = LocalContext.current
+    DisposableEffect(lifecycleContext) {
+        val owner = lifecycleContext as? LifecycleOwner
+        if (owner == null) {
+            onDispose { }
+        } else {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) load()
+            }
+            owner.lifecycle.addObserver(observer)
+            onDispose { owner.lifecycle.removeObserver(observer) }
+        }
+    }
+
+    when {
+        loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = Icons.Filled.Download,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "还没有下载的书",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "在系列页点下载徽标即可离线保存",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        else -> {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 8.dp),
+            ) {
+                items(items.size) { i ->
+                    val it = items[i]
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { scope.launch { onBookClick(it.bookId) } }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Filled.Book,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = it.bookName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = it.seriesName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.Filled.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
+            }
         }
     }
 }
