@@ -100,7 +100,10 @@ class KomgaApiClient(
             readStatus?.let { put("read_status", it) }
             genre?.let { put("genre", it) }
             tag?.let { put("tag", it) }
-            author?.let { put("author", it) }
+            // Komga GET /api/v1/series (1.24) author filter param is "authors"
+            // (plural), value format "name,role". The singular "author" is not
+            // recognized and gets silently dropped → returns all series.
+            author?.let { put("authors", it) }
             put("page", page.toString())
             put("size", size.toString())
             sort?.let { put("sort", it) }
