@@ -104,7 +104,9 @@
     <string name="settings_cache_limit_hint">快取為 0 即時重新整理封面（最高 500M，預設 100M）</string>
     <string name="settings_section_limit">每區塊顯示數量</string>
     <string name="settings_home_sections">主頁區塊</string>
-    <string name="settings_hidden">已隱藏（拖回上方恢復）</string>
+    <string name="settings_block_adjust">區塊調整</string>
+    <string name="settings_cache_title">快取</string>
+    <string name="settings_hidden">隱藏區</string>
     <string name="settings_show">顯示</string>
     <string name="home_layout">顯示方式</string>
     <string name="home_layout_carousel">滑動</string>

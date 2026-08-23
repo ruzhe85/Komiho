@@ -5,6 +5,8 @@ import android.content.res.Configuration
 import coil3.ImageLoader
 import android.os.Bundle
 import android.widget.Toast
+import kotlin.math.max
+import kotlin.math.roundToInt
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -129,6 +131,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -766,6 +769,7 @@ private fun HomeBookRow(
                 GridWrap(
                     columns = columns,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    minCellWidth = if (mode == "COMPACT_GRID") 80.dp else 100.dp,
                 ) { cellModifier ->
                     books.forEach { b ->
                         HomeBookCard(client, b, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
@@ -787,35 +791,42 @@ private fun HomeBookRow(
 }
 
 /**
- * Flexible grid wrapper for Home sections. When [columns] <= 0 it falls back to
- * a FlowRow (auto-wrap). Otherwise it lays items into a fixed number of equal
- * columns using the available width (no nested scrolling, safe inside LazyColumn).
+ * Flexible grid wrapper for Home sections.
+ * - [columns] >= 1: fixed number of equal-width columns computed from available width.
+ * - [columns] <= 0 (auto): adaptive column count derived from [minCellWidth]
+ *   (equivalent to GridCells.Adaptive), so phones land at a sensible ~3-4 columns
+ *   instead of collapsing to a single full-width column.
+ * No nested scrolling — safe inside a LazyColumn.
  */
 @Composable
 private fun GridWrap(
     columns: Int,
     modifier: Modifier = Modifier,
+    minCellWidth: Dp = 100.dp,
     content: @Composable (cellModifier: Modifier) -> Unit,
 ) {
-    if (columns <= 0) {
-        FlowRow(
-            modifier = modifier,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            content(Modifier)
+    val gap = 12.dp
+    BoxWithConstraints(modifier = modifier) {
+        val resolvedColumns = if (columns <= 0) {
+            max(1, ((maxWidth + gap) / (minCellWidth + gap)).toInt())
+        } else {
+            columns
         }
-    } else {
-        val gap = 12.dp
-        BoxWithConstraints(modifier = modifier) {
-            val cellWidth = (maxWidth - gap * (columns - 1)) / columns
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(gap),
-                verticalArrangement = Arrangement.spacedBy(gap),
-            ) {
-                content(Modifier.width(cellWidth))
-            }
+        // 用整数像素精确划分，避免浮点 cellWidth 在大列数宽屏下累积误差
+        // 导致每行右侧留空。roundToPx/toDp 在部分 Compose 版本不是
+        // BoxWithConstraintsScope 的可用扩展，这里改用 Density 比例手工换算
+        // （Dp.value / Dp(Float) / LocalDensity.density 均为稳定公开 API）。
+        val density = LocalDensity.current.density
+        val gapPx = (gap.value * density).roundToInt()
+        val cellPx = ((maxWidth.value * density).roundToInt() - gapPx * (resolvedColumns - 1)) / resolvedColumns
+        val cellWidth = Dp(cellPx / density)
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(gap),
+            verticalArrangement = Arrangement.spacedBy(gap),
+            maxItemsInEachRow = resolvedColumns,
+        ) {
+            content(Modifier.width(cellWidth))
         }
     }
 }
@@ -957,6 +968,7 @@ private fun HomeContinueReadingRow(
                 GridWrap(
                     columns = columns,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    minCellWidth = if (mode == "COMPACT_GRID") 80.dp else 100.dp,
                 ) { cellModifier ->
                     books.forEach { b ->
                         HomeContinueReadingCard(client, b, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
@@ -1165,6 +1177,7 @@ private fun HomeSeriesRow(
                 GridWrap(
                     columns = columns,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    minCellWidth = if (mode == "COMPACT_GRID") 80.dp else 100.dp,
                 ) { cellModifier ->
                     series.forEach { s ->
                         HomeSeriesCard(client, s, showProgress, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onSeriesClick(s.id) })
@@ -2764,6 +2777,14 @@ private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.conte
         modifier = modifier.fillMaxSize(),
         state = lazyListState,
     ) {
+        item {
+            Text(
+                text = composeStringResource(R.string.settings_block_adjust),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
         items(orderedAll, key = { it }) { key ->
             if (key == HOME_SECTION_DIVIDER) {
                 // 隐藏分界线（不可拖拽）。
@@ -2785,19 +2806,19 @@ private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.conte
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DragHandle,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .padding(horizontal = 4.dp)
-                                .draggableHandle(),
-                        )
                         Text(
                             text = section.labelText(),
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (isHidden) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                             textDecoration = if (isHidden) TextDecoration.LineThrough else null,
                             modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.DragHandle,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .padding(horizontal = 4.dp)
+                                .draggableHandle(),
                         )
                     }
                 }
@@ -2824,6 +2845,14 @@ private fun KomgaPreviewSettings(modifier: Modifier, context: android.content.Co
     var cacheUsedMb by remember { mutableStateOf(diskCacheSizeMb()) }
 
     LazyColumn(modifier.fillMaxSize()) {
+        item {
+            Text(
+                text = composeStringResource(R.string.settings_cache_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text(
