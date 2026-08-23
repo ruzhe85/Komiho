@@ -524,6 +524,37 @@ class KomgaApiClient(
         }
     }
 
+    /**
+     * 【Komga 专用系列下载接口 · 记录用，当前未接通 UI】
+     *
+     * `GET /api/v1/series/{seriesId}/file` —— Komga WebUI「下载系列」按钮背后的接口。
+     * 返回**整个系列的 zip 压缩包**（store 方式、不二次压缩，直接打包所有书的原始文件）。
+     *
+     * 实测要点（gotson/komga · SeriesController.downloadSeriesAsZip）：
+     * 1. 返回 `application/zip`，`Content-Disposition: attachment; filename="<系列标题>.zip"`。
+     * 2. zip 内部每个条目 = 书的**原始文件名**，**不带序号前缀**，顺序也不保证按 number。
+     *    → 解包后不能靠文件名排序，必须另用 [getSeriesBooks] 拿 number/name 元数据来对应。
+     * 3. 无分页 / 大小限制（setUseZip64(Always)），任意大小系列均可一次拉取。
+     * 4. 需 FILE_DOWNLOAD 角色 + 认证（同 [getBookFile]）。
+     *
+     * 注意：本方法目前仅作接口记录保留，系列下载功能未实现（下载 tab 仍按单本聚合）。
+     * 若日后要接「整系列打包下载」，调用方需自行：请求此接口 → 落盘 zip →
+     * 用 getSeriesBooks 的 number 元数据把每本映射到正确顺序。
+     */
+    suspend fun getSeriesFile(seriesId: String, onResponse: suspend (Response) -> Unit) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/series/$seriesId/file"))
+                .apply { authHeaders() }
+                .get()
+                .build()
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) throw KomgaException("系列下载失败（${resp.code}）")
+                onResponse(resp)
+            }
+        }
+    }
+
     private fun apiUrl(path: String): String {
         // 规范化 scheme 为小写：用户输入 HTTP:// / Https:// 等大写形式时，
         // 拼出的绝对 URL 仍带大写 scheme，OkHttp/Coil 在部分环境会拒绝解析
