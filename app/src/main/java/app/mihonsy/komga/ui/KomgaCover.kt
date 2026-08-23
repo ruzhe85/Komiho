@@ -53,6 +53,7 @@ fun KomgaCover(
         }
 
         val prefs = KomgaPreferences(context.applicationContext)
+
         val imageRequest = ImageRequest.Builder(context).data(url)
         // Cache limit 0 = live mode: disable memory + disk caching so the
         // cover is always re-fetched from the server.

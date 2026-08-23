@@ -499,7 +499,10 @@ class KomgaApiClient(
     }
 
     private fun apiUrl(path: String): String {
-        val base = connection.baseUrl.trimEnd('/')
+        // 规范化 scheme 为小写：用户输入 HTTP:// / Https:// 等大写形式时，
+        // 拼出的绝对 URL 仍带大写 scheme，OkHttp/Coil 在部分环境会拒绝解析
+        // 导致封面（及数据请求）失败。统一小写后彻底兼容。
+        val base = connection.baseUrl.trimEnd('/').replace(Regex("^([Hh][Tt][Tt][Pp][Ss]?):"), "http:")
         return if (path.startsWith("http", ignoreCase = true)) path else "$base$path"
     }
 

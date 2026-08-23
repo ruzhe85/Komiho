@@ -104,7 +104,9 @@
     <string name="settings_cache_limit_hint">Cache 0 = live refresh (max 500M, default 100M)</string>
     <string name="settings_section_limit">Items per section</string>
     <string name="settings_home_sections">Home sections</string>
-    <string name="settings_hidden">Hidden (drag up to restore)</string>
+    <string name="settings_block_adjust">Section layout</string>
+    <string name="settings_cache_title">Cache</string>
+    <string name="settings_hidden">Hidden zone</string>
     <string name="settings_show">Show</string>
     <string name="home_layout">Layout</string>
     <string name="home_layout_carousel">Carousel</string>
