@@ -16,8 +16,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Warning
+import app.mihonsy.komga.data.download.DownloadUiState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -213,6 +219,9 @@ fun BookShelfCard(
     selected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
+    showDownload: Boolean = false,
+    downloadState: DownloadUiState = DownloadUiState.NONE,
+    onDownloadClick: () -> Unit = {},
 ) {
     val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
@@ -260,6 +269,13 @@ fun BookShelfCard(
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                         )
                     }
+                }
+                if (showDownload) {
+                    DownloadBadge(
+                        state = downloadState,
+                        onDownloadClick = onDownloadClick,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(28.dp),
+                    )
                 }
                 if (titleInside) {
                     // Title overlaid on the cover bottom with a dark scrim.

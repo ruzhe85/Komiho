@@ -1458,6 +1458,8 @@ private fun LibraryTab(
         // ── Active tag/author filter chip (from Series detail page tap) ──
         if (!filterType.isNullOrBlank() && !filterValue.isNullOrBlank()) {
             val labelRes = if (filterType == "author") R.string.filter_author_active else R.string.filter_tag_active
+            // author filter value is "name,role"; show only the name in the chip.
+            val displayValue = if (filterType == "author") filterValue.substringBefore(",") else filterValue
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -1470,7 +1472,7 @@ private fun LibraryTab(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = composeStringResource(labelRes, filterValue),
+                        text = composeStringResource(labelRes, displayValue),
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.weight(1f),
                     )

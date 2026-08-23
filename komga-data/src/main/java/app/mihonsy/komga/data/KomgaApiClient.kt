@@ -503,6 +503,27 @@ class KomgaApiClient(
         }
     }
 
+    /**
+     * 下载整本书文件（原始 CBZ 流）。
+     * GET /api/v1/books/{bookId}/file（需 FILE_DOWNLOAD 角色 + 认证）。
+     * 复用 downloadBytes 的认证模式，但返回原始 [okhttp3.Response] 让调用方
+     * 流式读取 body（整本 CBZ 可能很大，不能 bytes() 整体读）。
+     * 在 [onResponse] 作用域内 body 可读，离开即关闭。
+     */
+    suspend fun getBookFile(bookId: String, onResponse: suspend (Response) -> Unit) {
+        withIOContext {
+            val request = Request.Builder()
+                .url(apiUrl("/api/v1/books/$bookId/file"))
+                .apply { authHeaders() }
+                .get()
+                .build()
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) throw KomgaException("下载失败（${resp.code}）")
+                onResponse(resp)
+            }
+        }
+    }
+
     private fun apiUrl(path: String): String {
         // 规范化 scheme 为小写：用户输入 HTTP:// / Https:// 等大写形式时，
         // 拼出的绝对 URL 仍带大写 scheme，OkHttp/Coil 在部分环境会拒绝解析
