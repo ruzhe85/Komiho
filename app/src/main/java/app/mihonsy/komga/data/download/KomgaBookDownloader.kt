@@ -2,8 +2,9 @@ package app.mihonsy.komga.data.download
 
 import android.content.Context
 import app.mihonsy.komga.data.KomgaApiClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.callbackFlow
 import okio.Buffer
 import okio.sink
 import java.io.File
@@ -15,15 +16,19 @@ import java.io.File
  * KomihoV2 联网为主，下载 = 预缓存整本 CBZ 以便离线阅读。
  *
  * 下载单元 = Book（本）；下载方式 = GET /books/{id}/file 整本 CBZ 流式落盘。
+ *
+ * 用 callbackFlow 而非 flow{}：进度 emit 发生在 getBookFile 的 Dispatchers.IO 内部，
+ * 若用 flow{} 直接 emit 会触发 "Flow invariant is violated"（emit 与 collect 上下文不一致）。
+ * callbackFlow 的 send 跨上下文安全，由 channel 负责上下文切换。
  */
 class KomgaBookDownloader(
     private val context: Context,
     private val client: KomgaApiClient,
     private val store: KomgaDownloadStore,
 ) {
-    fun downloadBook(bookId: String, seriesName: String): Flow<KomgaDownloadEvent> = flow {
-        emit(KomgaDownloadEvent.Queued(bookId))
+    fun downloadBook(bookId: String, seriesName: String): Flow<KomgaDownloadEvent> = callbackFlow {
         store.markQueued(bookId)
+        send(KomgaDownloadEvent.Queued(bookId))
 
         val safeSeries = sanitize(seriesName)
         val dir = File(context.getExternalFilesDir(null), "komga/$safeSeries")
@@ -32,7 +37,7 @@ class KomgaBookDownloader(
 
         try {
             client.getBookFile(bookId) { resp ->
-                val total = resp.headers["Content-Length"]?.toLongOrNull() ?: 0L
+                val total = resp.body?.contentLength()?.takeIf { it > 0 } ?: 0L
                 target.sink().use { sink ->
                     val src = resp.body?.source() ?: return@getBookFile
                     val buf = Buffer()
@@ -41,22 +46,25 @@ class KomgaBookDownloader(
                     while (true) {
                         val r = src.read(buf, 64 * 1024L)
                         if (r == -1L) break
-                        sink.write(buf, buf.size)
+                        sink.write(buf, r)
                         done += r
                         if (done - lastEmit >= 512 * 1024L || (total > 0L && done >= total)) {
-                            emit(KomgaDownloadEvent.Progress(bookId, total, done))
+                            send(KomgaDownloadEvent.Progress(bookId, total, done))
                             lastEmit = done
                         }
                     }
                 }
                 store.markCompleted(bookId, target.absolutePath)
-                emit(KomgaDownloadEvent.Completed(bookId, target.absolutePath))
+                send(KomgaDownloadEvent.Completed(bookId, target.absolutePath))
             }
         } catch (e: Exception) {
+            // 取消不应被当作下载失败（否则会误删残文件 + 报 Error）
+            if (e is CancellationException) throw e
             if (target.exists()) target.delete()
             store.remove(bookId)
-            emit(KomgaDownloadEvent.Error(bookId, e.message ?: e.toString()))
+            send(KomgaDownloadEvent.Error(bookId, e.message ?: e.toString()))
         }
+        close()
     }
 
     private fun sanitize(name: String): String =
