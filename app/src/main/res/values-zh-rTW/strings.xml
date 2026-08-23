@@ -59,10 +59,11 @@
     <string name="cd_display_options">顯示選項</string>
     <string name="pref_library_columns">每行數量</string>
     <string name="label_auto">自動</string>
-    <string name="sort_title">標題</string>
-    <string name="sort_last_modified">最近更新</string>
-    <string name="sort_last_read">最近閱讀</string>
-    <string name="sort_date_added">新增日期</string>
+    <string name="sort_name">名稱</string>
+    <string name="sort_date_added">新增時間</string>
+    <string name="sort_date_updated">更新時間</string>
+    <string name="sort_date_read">閱讀日期</string>
+    <string name="sort_release_date">發布日期</string>
     <string name="display_compact_grid">緊湊網格</string>
     <string name="display_comfortable_grid">舒適網格</string>
     <string name="display_list">列表</string>

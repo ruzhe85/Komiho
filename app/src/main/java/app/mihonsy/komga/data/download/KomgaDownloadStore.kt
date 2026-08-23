@@ -35,9 +35,9 @@ data class KomgaSeriesMeta(
  * 下载进度（Progress）不写 SP，避免高频 IO。
  * MVP 用 SharedPreferences（与 Mihon DownloadStore 一致）。
  */
-class KomgaDownloadStore(context: Context) {
+class KomgaDownloadStore(private val appContext: Context) {
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("komga_downloads", Context.MODE_PRIVATE)
+        appContext.getSharedPreferences("komga_downloads", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
 
     fun getStatus(bookId: String): KomgaDownloadEntry? {
@@ -108,17 +108,34 @@ class KomgaDownloadStore(context: Context) {
                     }
             }
         }
-        getSeriesMeta(seriesId)?.coverPath?.let { runCatching { File(it).delete() } }
+        val meta = getSeriesMeta(seriesId)
+        meta?.coverPath?.let { runCatching { File(it).delete() } }
+        runCatching { File(appContext.getExternalFilesDir(null), "komga/${sanitizeSeries(meta?.seriesName ?: seriesId)}").deleteRecursively() }
+        runCatching { File(appContext.getExternalFilesDir(null), "komga/_covers/$seriesId.jpg").delete() }
         prefs.edit { remove("series_meta:$seriesId") }
     }
 
-    /** 删 SP 索引 + 本地 CBZ 文件。返回是否成功删除文件。 */
+    /** 删 SP 索引 + 本地 CBZ 文件。若该 seriesId 下已无其他已下载书，连带清理系列目录与封面。返回是否成功删除文件。 */
     fun deleteWithFile(bookId: String): Boolean {
         val entry = getStatus(bookId)
         val fileDeleted = entry?.path?.let { p -> runCatching { File(p).delete() }.getOrDefault(false) } ?: true
         remove(bookId)
+        // 若系列已无其它已下载书，清理系列目录与共享封面（封面是系列级，不能在有其它书时删）。
+        val sid = entry?.seriesId
+        if (!sid.isNullOrBlank()) {
+            val remaining = allDownloaded().values.any { it.seriesId == sid }
+            if (!remaining) {
+                val safeSeries = sanitizeSeries(entry.seriesName)
+                runCatching { File(appContext.getExternalFilesDir(null), "komga/$safeSeries").deleteRecursively() }
+                runCatching { File(appContext.getExternalFilesDir(null), "komga/_covers/$sid.jpg").delete() }
+                prefs.edit { remove("series_meta:$sid") }
+            }
+        }
         return fileDeleted
     }
+
+    private fun sanitizeSeries(name: String): String =
+        name.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifBlank { "series" }
 
     private fun put(bookId: String, entry: KomgaDownloadEntry) {
         prefs.edit { putString(bookId, json.encodeToString(entry)) }

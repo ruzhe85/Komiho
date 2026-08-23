@@ -59,10 +59,11 @@
     <string name="cd_display_options">Display options</string>
     <string name="pref_library_columns">Items per row</string>
     <string name="label_auto">Auto</string>
-    <string name="sort_title">Title</string>
-    <string name="sort_last_modified">Last modified</string>
-    <string name="sort_last_read">Last read</string>
+    <string name="sort_name">Name</string>
     <string name="sort_date_added">Date added</string>
+    <string name="sort_date_updated">Date updated</string>
+    <string name="sort_date_read">Date read</string>
+    <string name="sort_release_date">Release date</string>
     <string name="display_compact_grid">Compact grid</string>
     <string name="display_comfortable_grid">Comfortable grid</string>
     <string name="display_list">List</string>
@@ -148,6 +149,9 @@
     <string name="download">Download</string>
     <string name="download_selected">Download %1$d selected</string>
     <string name="download_started">Started downloading %1$d books</string>
+    <string name="download_started_single">Started downloading: %1$s</string>
+    <string name="download_complete">Download complete</string>
+    <string name="download_failed">Download failed: %1$s</string>
     <string name="select">Select</string>
     <string name="add_to_readlist">Add to readlist</string>
     <string name="batch_marked">Marked %1$d books</string>

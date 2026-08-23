@@ -115,6 +115,7 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.download.KomgaBookDownloader
 import app.mihonsy.komga.data.download.KomgaDownloadStore
+import app.mihonsy.komga.data.download.KomgaDownloadEvent
 import app.mihonsy.komga.source.KomgaSource
 import logcat.LogPriority
 import tachiyomi.core.common.Constants
@@ -428,13 +429,35 @@ class ReaderActivity : BaseActivity() {
                             KomgaDownloadStore(this@ReaderActivity),
                         )
                         lifecycleScope.launch {
+                            android.widget.Toast.makeText(
+                                this@ReaderActivity,
+                                getString(R.string.download_started_single, chapter.name),
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
                             downloader.downloadBook(
                                 bookId = bookId,
                                 seriesName = seriesName,
                                 seriesId = seriesId,
                                 bookName = chapter.name,
                                 number = 0,
-                            ).collect { /* Komga 下载状态在章节列表里以 isDownloaded 反映，无需逐事件处理 */ }
+                                coverUrl = client.seriesThumbnailUrl(seriesId),
+                            ).collect { ev ->
+                                when (ev) {
+                                    is KomgaDownloadEvent.Completed ->
+                                        android.widget.Toast.makeText(
+                                            this@ReaderActivity,
+                                            getString(R.string.download_complete),
+                                            android.widget.Toast.LENGTH_SHORT,
+                                        ).show()
+                                    is KomgaDownloadEvent.Error ->
+                                        android.widget.Toast.makeText(
+                                            this@ReaderActivity,
+                                            getString(R.string.download_failed, ev.message),
+                                            android.widget.Toast.LENGTH_LONG,
+                                        ).show()
+                                    else -> {}
+                                }
+                            }
                         }
                     },
                     state.dateRelativeTime,
