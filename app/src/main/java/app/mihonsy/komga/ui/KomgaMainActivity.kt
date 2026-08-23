@@ -43,6 +43,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import coil3.compose.SubcomposeAsyncImage
+import coil3.request.ImageRequest
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.WindowInsets
@@ -59,6 +61,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
@@ -138,12 +142,13 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.ContentScale
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.download.KomgaDownloadStore
-import app.mihonsy.komga.source.KomgaSource
+import java.io.File
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.CollectionDto
 import app.mihonsy.komga.data.model.LibraryDto
@@ -165,9 +170,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
-import tachiyomi.domain.chapter.repository.ChapterRepository
-import tachiyomi.domain.manga.interactor.GetManga
-import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 // 划动选择命中检测已移除（长按圈选废弃）。
@@ -3173,10 +3175,18 @@ private fun KomgaServerSettings(modifier: Modifier, context: android.content.Con
  *
  * 封面用占位图标（离线无本地缓存封面；CBZ 内页缩略图留待后续）。
  */
-private data class DownloadedItem(
+private data class DownloadedChapter(
     val bookId: String,
     val bookName: String,
+    val sourceOrder: Long, // Komga 系列内 book 顺序，用于组内排序
+)
+
+private data class DownloadedSeries(
+    val seriesId: String,
     val seriesName: String,
+    val coverPath: String = "",
+    val totalBooks: Int = 0,
+    val chapters: List<DownloadedChapter>,
 )
 
 @Composable
@@ -3186,26 +3196,50 @@ private fun DownloadsTab(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var items by remember { mutableStateOf<List<DownloadedItem>>(emptyList()) }
+    var seriesList by remember { mutableStateOf<List<DownloadedSeries>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    // 默认全部展开（已下载的书一般不多）。
+    var expanded by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var pendingDeleteSeries by remember { mutableStateOf<DownloadedSeries?>(null) }
 
     fun load() {
         loading = true
         scope.launch {
             val store = KomgaDownloadStore(context)
-            val chapterRepository: ChapterRepository = Injekt.get()
-            val getManga: GetManga = Injekt.get()
-            val result = store.allDownloaded().mapNotNull { (bookId, _) ->
-                val chapter = chapterRepository.getChapterByUrl(KomgaSource.BOOK_URL_PREFIX + bookId)
-                    .firstOrNull() ?: return@mapNotNull null
-                val manga = getManga.await(chapter.mangaId) ?: return@mapNotNull null
-                DownloadedItem(
-                    bookId = bookId,
-                    bookName = chapter.name,
-                    seriesName = manga.ogTitle,
+            // 纯本地聚合：entry 已带 seriesId/seriesName/bookName/number，离线不依赖 DB 反查。
+            val grouped = store.allDownloaded().values.groupBy { it.seriesId.takeIf { id -> id.isNotBlank() } ?: it.seriesName }
+            val result = grouped.mapNotNull { (_, entries) ->
+                val first = entries.first()
+                val seriesId = first.seriesId
+                val seriesName = first.seriesName.ifBlank { "未知系列" }
+                // 单本下载可能没 series meta（旧数据），用章节数兜底；新下载单本也会存封面。
+                val meta = seriesId.takeIf { it.isNotBlank() }?.let { store.getSeriesMeta(it) }
+                // 封面来源：系列 meta 优先；单本下载没写 meta 但已存 _covers/<seriesId>.jpg，兜底读之。
+                val coverPath = meta?.coverPath?.takeIf { it.isNotBlank() && File(it).exists() }
+                    ?: seriesId.takeIf { it.isNotBlank() }?.let {
+                        val f = File(context.getExternalFilesDir(null), "komga/_covers/$it.jpg")
+                        if (f.exists()) f.absolutePath else ""
+                    } ?: ""
+                val chapters = entries.map { e ->
+                    val bid = e.path.substringAfterLast("/").substringBefore(".cbz").let { p ->
+                        // 新文件名 001_<bookId>.cbz，旧文件名 <bookId>.cbz
+                        if (p.contains("_")) p.substringAfter("_") else p
+                    }
+                    DownloadedChapter(
+                        bookId = bid,
+                        bookName = e.bookName.ifBlank { seriesName },
+                        sourceOrder = e.number.toLong(),
+                    )
+                }.sortedBy { it.sourceOrder }
+                DownloadedSeries(
+                    seriesId = seriesId,
+                    seriesName = seriesName,
+                    coverPath = coverPath,
+                    totalBooks = meta?.totalBooks ?: chapters.size,
+                    chapters = chapters,
                 )
-            }
-            items = result
+            }.sortedBy { it.seriesName }
+            seriesList = result
             loading = false
         }
     }
@@ -3227,11 +3261,32 @@ private fun DownloadsTab(
         }
     }
 
+    // 系列级删除确认框。
+    pendingDeleteSeries?.let { s ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteSeries = null },
+            title = { Text("删除整个系列？") },
+            text = { Text("将删除「${s.seriesName}」全部 ${s.chapters.size} 本已下载内容，且无法恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val sId = s.seriesId
+                    scope.launch {
+                        if (sId.isNotBlank()) KomgaDownloadStore(context).deleteSeries(sId)
+                        else s.chapters.forEach { KomgaDownloadStore(context).deleteWithFile(it.bookId) }
+                        pendingDeleteSeries = null
+                        load()
+                    }
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingDeleteSeries = null }) { Text("取消") } },
+        )
+    }
+
     when {
         loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        seriesList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
                     imageVector = Icons.Filled.Download,
@@ -3247,7 +3302,7 @@ private fun DownloadsTab(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "在系列页点下载徽标即可离线保存",
+                    text = "在系列页点「下载整个系列」即可离线保存",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -3258,54 +3313,85 @@ private fun DownloadsTab(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
-                items(items.size) { i ->
-                    val it = items[i]
+                items(seriesList.size) { si ->
+                    val series = seriesList[si]
+                    val isExp = expanded.contains(series.seriesId.takeIf { it.isNotBlank() } ?: series.seriesName)
+                    // 系列卡片头
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { scope.launch { onBookClick(it.bookId) } }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                            .clickable { expanded = if (isExp) expanded - (series.seriesId.takeIf { it.isNotBlank() } ?: series.seriesName) else expanded + (series.seriesId.takeIf { it.isNotBlank() } ?: series.seriesName) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // 本地封面（离线可用）。
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.size(44.dp),
+                            modifier = Modifier.size(44.dp, 58.dp),
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Filled.Book,
+                            if (series.coverPath.isNotBlank()) {
+                                SubcomposeAsyncImage(
+                                    model = ImageRequest.Builder(context).data(File(series.coverPath)).build(),
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
                                 )
+                            } else {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Filled.Book, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(
-                                text = it.bookName,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Text(series.seriesName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                text = it.seriesName,
+                                "已下载 ${series.chapters.size} / ${series.totalBooks}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                         Spacer(Modifier.width(8.dp))
+                        IconButton(onClick = { pendingDeleteSeries = series }) {
+                            Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                        }
                         Icon(
-                            imageVector = Icons.Filled.CheckCircle,
+                            imageVector = if (isExp) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    // 展开后章节列表
+                    if (isExp) {
+                        series.chapters.forEach { ch ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { scope.launch { onBookClick(ch.bookId) } }
+                                    .padding(horizontal = 32.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(ch.bookName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            KomgaDownloadStore(context).deleteWithFile(ch.bookId)
+                                            load()
+                                        }
+                                    },
+                                ) {
+                                    Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        }
+                    }
                 }
             }
         }

@@ -158,9 +158,20 @@ private fun KomgaSeriesScreen(seriesId: String) {
                     val downloadStore = remember { KomgaDownloadStore(context) }
                     val downloader = remember { KomgaBookDownloader(context, client, downloadStore) }
                     val downloadStates = remember { mutableStateOf<Map<String, DownloadUiState>>(emptyMap()) }
+                    var seriesDownloading by remember { mutableStateOf(false) }
+                    var seriesDone by remember { mutableStateOf(0) }
+                    var seriesTotal by remember { mutableStateOf(0) }
                     fun startDownload(bookId: String) {
+                        val book = books.firstOrNull { it.id == bookId }
                         loadScope.launch {
-                            downloader.downloadBook(bookId, s.name).collect { ev ->
+                            downloader.downloadBook(
+                                bookId,
+                                s.name,
+                                s.id,
+                                bookName = book?.name ?: "",
+                                number = book?.number ?: 0,
+                                coverUrl = client.seriesThumbnailUrl(s.id),
+                            ).collect { ev ->
                                 val cur = downloadStates.value.toMutableMap()
                                 when (ev) {
                                     is KomgaDownloadEvent.Queued -> cur[ev.bookId] = DownloadUiState.QUEUED
@@ -168,8 +179,28 @@ private fun KomgaSeriesScreen(seriesId: String) {
                                     is KomgaDownloadEvent.Completed -> cur[ev.bookId] = DownloadUiState.DOWNLOADED
                                     is KomgaDownloadEvent.Error -> cur[ev.bookId] = DownloadUiState.ERROR
                                     is KomgaDownloadEvent.Canceled -> cur.remove(ev.bookId)
+                                    else -> { /* 系列级事件忽略 */ }
                                 }
                                 downloadStates.value = cur
+                            }
+                        }
+                    }
+                    fun startSeriesDownload() {
+                        seriesDownloading = true
+                        loadScope.launch {
+                            downloader.downloadSeries(s.id, s.name, client.seriesThumbnailUrl(s.id), books).collect { ev ->
+                                when (ev) {
+                                    is KomgaDownloadEvent.SeriesProgress -> {
+                                        seriesDone = ev.done
+                                        seriesTotal = ev.total
+                                    }
+                                    is KomgaDownloadEvent.SeriesDone -> {
+                                        seriesDone = ev.done
+                                        seriesTotal = ev.total
+                                        seriesDownloading = false
+                                    }
+                                    else -> { /* 单本事件忽略，book 级状态已由 downloadStates 反映 */ }
+                                }
                             }
                         }
                     }
@@ -216,6 +247,28 @@ private fun KomgaSeriesScreen(seriesId: String) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp),
                         )
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    // 下载整个系列（按系列内顺序串行下载全部书）。
+                    if (seriesDownloading) {
+                        OutlinedButton(
+                            onClick = { },
+                            enabled = false,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                        ) {
+                            Text("下载中 $seriesDone / $seriesTotal")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { startSeriesDownload() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                        ) {
+                            Text("下载整个系列（${books.size} 本）")
+                        }
                     }
                     Spacer(Modifier.height(16.dp))
                     Text(
