@@ -5,6 +5,8 @@ import android.app.Application
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
+import java.io.File
+import okio.Path.Companion.toOkioPath
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
@@ -19,6 +21,7 @@ import androidx.work.Configuration
 import androidx.work.WorkManager
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
+import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.allowRgb565
@@ -255,6 +258,17 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             memoryCache(
                 MemoryCache.Builder()
                     .maxSizePercent(context)
+                    .build(),
+            )
+
+            // SY: Komga cover disk cache. Decoded thumbnails persist across
+            // screen changes and app restarts (LRU, 300 MiB). HTTP-level
+            // revalidation (etag/304) is handled by NetworkHelper's OkHttp
+            // cache, so a changed server cover is picked up automatically.
+            diskCache(
+                DiskCache.Builder()
+                    .directory(File(context.cacheDir, "komga_covers").toOkioPath())
+                    .maxSizeBytes(300L * 1024 * 1024) // 300 MiB
                     .build(),
             )
 
