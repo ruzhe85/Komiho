@@ -179,14 +179,16 @@ class KomgaMainActivity : KomgaBaseActivity() {
     // Incremented on every onResume so the tabs reload data when returning
     // from the reader (read progress / unread counts change while reading).
     private val refreshSignal = MutableStateFlow(0)
-    // Tag filter passed from the Series detail page (tap a tag → jump here and
-    // filter the Library by that tag, Komga WebUI parity).
-    private var pendingFilterTag: String? = null
+    // Filter passed from the Series detail page (tap a tag/author → jump here
+    // and filter the Library by it, Komga WebUI parity).
+    private var pendingFilterType: String? = null
+    private var pendingFilterValue: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pendingFilterTag = intent?.getStringExtra("filterTag")
-        setContent { KomihoTheme { KomgaMainScreen(refreshSignal, pendingFilterTag) } }
+        pendingFilterType = intent?.getStringExtra("filterType")
+        pendingFilterValue = intent?.getStringExtra("filterValue")
+        setContent { KomihoTheme { KomgaMainScreen(refreshSignal, pendingFilterType, pendingFilterValue) } }
     }
 
     override fun onResume() {
@@ -207,14 +209,19 @@ private enum class MainTab(@StringRes val labelRes: Int, val icon: ImageVector) 
 }
 
 @Composable
-private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>, initialFilterTag: String? = null) {
+private fun KomgaMainScreen(
+    refreshSignal: MutableStateFlow<Int>,
+    initialFilterType: String? = null,
+    initialFilterValue: String? = null,
+) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
 
-    // Tag filter coming from the Series detail page (tap tag → filter Library).
-    // Null = no active tag filter. Survives recomposition; cleared by the chip ✕.
-    var libraryFilterTag by remember { mutableStateOf(initialFilterTag) }
+    // Filter coming from the Series detail page (tap tag/author → filter Library).
+    // Null = no active filter. Survives recomposition; cleared by the chip ✕.
+    var libraryFilterType by remember { mutableStateOf(initialFilterType) }
+    var libraryFilterValue by remember { mutableStateOf(initialFilterValue) }
 
     // Tab state is preserved across configuration changes by the Activity's
     // configChanges flag (orientation). rememberSaveable additionally keeps
@@ -273,9 +280,9 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>, initialFilterT
                 }
         }
     }
-    // A tag handed in from the Series detail page means "open Library filtered".
-    LaunchedEffect(initialFilterTag) {
-        if (!initialFilterTag.isNullOrBlank()) {
+    // A filter handed in from the Series detail page means "open Library filtered".
+    LaunchedEffect(initialFilterType, initialFilterValue) {
+        if (!initialFilterType.isNullOrBlank() && !initialFilterValue.isNullOrBlank()) {
             currentTab = MainTab.Library.ordinal
         }
     }
@@ -451,8 +458,9 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>, initialFilterT
                         onSortModeChange = { librarySortMode = it },
                         readFilter = libraryReadFilter,
                         onReadFilterChange = { libraryReadFilter = it },
-                        filterTag = libraryFilterTag,
-                        onFilterTagClear = { libraryFilterTag = null },
+                        filterType = libraryFilterType,
+                        filterValue = libraryFilterValue,
+                        onFilterClear = { libraryFilterType = null; libraryFilterValue = null },
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
@@ -1345,8 +1353,9 @@ private fun LibraryTab(
     onSortModeChange: (LibrarySortMode) -> Unit,
     readFilter: ReadFilter,
     onReadFilterChange: (ReadFilter) -> Unit,
-    filterTag: String? = null,
-    onFilterTagClear: () -> Unit = {},
+    filterType: String? = null,
+    filterValue: String? = null,
+    onFilterClear: () -> Unit = {},
     onSeriesClick: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -1406,7 +1415,8 @@ private fun LibraryTab(
                 client.getSeries(
                     libraryId = selectedLibraryId,
                     readStatus = readFilter.komgaValue,
-                    tag = filterTag,
+                    tag = if (filterType == "tag") filterValue else null,
+                    author = if (filterType == "author") filterValue else null,
                     sort = sortMode.komgaSort,
                     size = 200,
                 ).content
@@ -1417,7 +1427,7 @@ private fun LibraryTab(
         }
     }
 
-    LaunchedEffect(selectedLibraryId, readFilter, sortMode, refreshTick, filterTag) { reload() }
+    LaunchedEffect(selectedLibraryId, readFilter, sortMode, refreshTick, filterType, filterValue) { reload() }
 
     // Client-side sort for "最近阅读" (Komga has no read-progress sort field).
     val sortedSeries = remember(series, sortMode) {
@@ -1431,8 +1441,9 @@ private fun LibraryTab(
     }
 
     Column(Modifier.fillMaxSize()) {
-        // ── Active tag filter chip (from Series detail page tap) ──
-        if (!filterTag.isNullOrBlank()) {
+        // ── Active tag/author filter chip (from Series detail page tap) ──
+        if (!filterType.isNullOrBlank() && !filterValue.isNullOrBlank()) {
+            val labelRes = if (filterType == "author") R.string.filter_author_active else R.string.filter_tag_active
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -1445,11 +1456,11 @@ private fun LibraryTab(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = composeStringResource(R.string.filter_tag_active, filterTag),
+                        text = composeStringResource(labelRes, filterValue),
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(onClick = onFilterTagClear, modifier = Modifier.size(24.dp)) {
+                    IconButton(onClick = onFilterClear, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.clear))
                     }
                 }

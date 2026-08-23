@@ -53,6 +53,7 @@
     <string name="load_series_failed">加载系列失败：%1$s</string>
     <string name="no_series_in_library">该库暂无系列</string>
     <string name="filter_tag_active">按标签筛选：%1$s</string>
+    <string name="filter_author_active">按作者筛选：%1$s</string>
     <string name="clear">清除</string>
     <string name="cd_filter_sort">筛选/排序</string>
     <string name="read_status_header">阅读状态</string>
