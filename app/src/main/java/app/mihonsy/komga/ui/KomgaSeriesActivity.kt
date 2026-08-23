@@ -10,17 +10,20 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
@@ -148,7 +151,19 @@ private fun KomgaSeriesScreen(seriesId: String) {
                 val s = series!!
                 Column(Modifier.fillMaxSize().padding(padding)) {
                     // Fixed header: metadata + resume button + section title.
-                    SeriesHeader(client, s, books)
+                    SeriesHeader(
+                        client = client,
+                        series = s,
+                        books = books,
+                        onTagClick = { tag ->
+                            // Komga WebUI parity: tap a tag → Library filtered by it.
+                            val intent = android.content.Intent(context, KomgaMainActivity::class.java)
+                                .putExtra("filterTag", tag)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                            context.startActivity(intent)
+                            (context as? android.app.Activity)?.finish()
+                        },
+                    )
                     val nextBook = books.firstOrNull { it.readProgress?.completed != true }
                     if (nextBook != null) {
                         Spacer(Modifier.height(12.dp))
@@ -233,7 +248,12 @@ private fun KomgaSeriesScreen(seriesId: String) {
 }
 
 @Composable
-private fun SeriesHeader(client: KomgaApiClient, series: SeriesDto, books: List<BookDto>) {
+private fun SeriesHeader(
+    client: KomgaApiClient,
+    series: SeriesDto,
+    books: List<BookDto>,
+    onTagClick: (String) -> Unit = {},
+) {
     // Authors come from the first book's metadata (Komga series endpoint doesn't
     // include authors), so we fall back to book metadata.
     val authors = series.metadata.authors.ifEmpty {
@@ -269,14 +289,32 @@ private fun SeriesHeader(client: KomgaApiClient, series: SeriesDto, books: List<
                 }
             }
         }
+        // Tag chips — tapping one jumps to the Library filtered by that tag
+        // (matches Komga WebUI behaviour). Genres + tags are merged and shown
+        // as individual clickable chips.
         val tags = series.metadata.genres + series.metadata.tags
         if (tags.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            Text(
-                text = tags.take(8).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                tags.take(12).forEach { tag ->
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable { onTagClick(tag) },
+                    ) {
+                        Text(
+                            text = tag,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        )
+                    }
+                }
+            }
         }
         val summary = series.metadata.summary
         if (summary?.isNotBlank() == true) {
