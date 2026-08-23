@@ -2767,16 +2767,16 @@ private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.conte
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         state = lazyListState,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
             Text(
                 text = composeStringResource(R.string.settings_block_adjust),
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                    .padding(vertical = 20.dp),
             )
         }
         items(orderedAll, key = { it }) { key ->
@@ -2784,16 +2784,17 @@ private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.conte
                 // 分隔线本身也用 ReorderableItem 包裹，保证拖拽落点连续；
                 // 无拖拽手柄，仅作视觉分界与“隐藏区”标识。
                 ReorderableItem(reorderableState, key) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
-                    Text(
-                        text = composeStringResource(R.string.settings_hidden),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
+                    Column(Modifier.fillMaxWidth()) {
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                        )
+                        Text(
+                            text = composeStringResource(R.string.settings_hidden),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        )
+                    }
                 }
             } else {
                 val section = HomeSection.valueOf(key)
@@ -2802,12 +2803,12 @@ private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.conte
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 12.dp),
+                            .padding(vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = section.labelText(),
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             color = if (isHidden) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                             textDecoration = if (isHidden) TextDecoration.LineThrough else null,
                             modifier = Modifier.weight(1f),
@@ -2815,9 +2816,8 @@ private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.conte
                         Icon(
                             imageVector = Icons.Outlined.DragHandle,
                             contentDescription = null,
-                            modifier = Modifier
-                                .padding(horizontal = 4.dp)
-                                .draggableHandle(),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.draggableHandle(),
                         )
                     }
                 }
