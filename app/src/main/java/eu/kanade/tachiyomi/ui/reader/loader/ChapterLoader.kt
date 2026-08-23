@@ -1,8 +1,12 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
 import android.content.Context
+import java.io.File
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
+import app.mihonsy.komga.data.download.KomgaDownloadStore
+import app.mihonsy.komga.source.KomgaSource
+import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
@@ -150,6 +154,22 @@ class ChapterLoader(
                     is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
                 }
             }
+            // SY --> KomihoV2: 整本 CBZ 已下载时本地优先
+            // Komga 下载以整本 CBZ 落盘（非 Mihon 的按章目录），因此
+            // downloadManager.isChapterDownloaded 检测不到。此处显式查
+            // KomgaDownloadStore：有本地 CBZ 则走 ArchivePageLoader 直接读
+            // 本地 zip（复用既有的互斥锁解码管线），否则回退远程 HttpPageLoader。
+            // 必须放在 HttpSource 分支之前，因为 KomgaSource 继承自 HttpSource。
+            source is KomgaSource -> {
+                val bookId = dbChapter.url.removePrefix(KomgaSource.BOOK_URL_PREFIX)
+                val cbzPath = KomgaDownloadStore(context).getPath(bookId)
+                if (cbzPath != null && File(cbzPath).exists()) {
+                    ArchivePageLoader(UniFile.fromFile(File(cbzPath))!!.archiveReader(context.applicationContext))
+                } else {
+                    HttpPageLoader(chapter, source)
+                }
+            }
+            // SY <--
             source is HttpSource -> HttpPageLoader(chapter, source)
             source is StubSource -> error(context.stringResource(MR.strings.source_not_installed, source.toString()))
             else -> error(context.stringResource(MR.strings.loader_not_implemented_error))

@@ -41,6 +41,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
+import app.mihonsy.komga.data.download.KomgaBookDownloader
+import app.mihonsy.komga.data.download.KomgaDownloadStore
+import app.mihonsy.komga.data.download.DownloadUiState
+import app.mihonsy.komga.data.download.KomgaDownloadEvent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -150,6 +155,24 @@ private fun KomgaSeriesScreen(seriesId: String) {
             series != null -> {
                 val s = series!!
                 Column(Modifier.fillMaxSize().padding(padding)) {
+                    val downloadStore = remember { KomgaDownloadStore(context) }
+                    val downloader = remember { KomgaBookDownloader(context, client, downloadStore) }
+                    val downloadStates = remember { mutableStateOf<Map<String, DownloadUiState>>(emptyMap()) }
+                    fun startDownload(bookId: String) {
+                        loadScope.launch {
+                            downloader.downloadBook(bookId, s.name).collect { ev ->
+                                val cur = downloadStates.value.toMutableMap()
+                                when (ev) {
+                                    is KomgaDownloadEvent.Queued -> cur[ev.bookId] = DownloadUiState.QUEUED
+                                    is KomgaDownloadEvent.Progress -> cur[ev.bookId] = DownloadUiState.DOWNLOADING
+                                    is KomgaDownloadEvent.Completed -> cur[ev.bookId] = DownloadUiState.DOWNLOADED
+                                    is KomgaDownloadEvent.Error -> cur[ev.bookId] = DownloadUiState.ERROR
+                                    is KomgaDownloadEvent.Canceled -> cur.remove(ev.bookId)
+                                }
+                                downloadStates.value = cur
+                            }
+                        }
+                    }
                     // Fixed header: metadata + resume button + section title.
                     SeriesHeader(
                         client = client,
@@ -219,6 +242,12 @@ private fun KomgaSeriesScreen(seriesId: String) {
                                 }
                             },
                             onDataChanged = { load() },
+                            showDownload = true,
+                            downloadState = { bookId ->
+                                downloadStates.value[bookId]
+                                    ?: if (downloadStore.isDownloaded(bookId)) DownloadUiState.DOWNLOADED else DownloadUiState.NONE
+                            },
+                            onDownloadClick = { startDownload(it) },
                         )
                     }
                 }
@@ -277,7 +306,11 @@ private fun SeriesHeader(
                 )
                 Spacer(Modifier.height(4.dp))
                 if (authors.isNotEmpty()) {
-                    AuthorChips(authors) { name -> onChipClick("author", name) }
+                    AuthorChips(authors) { name, role ->
+                        // Komga author filter expects "name,role" format.
+                        val value = if (role.isNullOrBlank()) name else "$name,$role"
+                        onChipClick("author", value)
+                    }
                 }
                 val status = series.metadata.status
                 if (!status.isNullOrBlank()) {
@@ -379,7 +412,7 @@ private fun ExpandableSummary(
 @Composable
 private fun AuthorChips(
     authors: List<AuthorDto>,
-    onAuthorClick: (String) -> Unit,
+    onAuthorClick: (String, String?) -> Unit,
 ) {
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
@@ -392,7 +425,7 @@ private fun AuthorChips(
                 shape = MaterialTheme.shapes.small,
                 color = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.clickable { onAuthorClick(author.name) },
+                modifier = Modifier.clickable { onAuthorClick(author.name, author.role) },
             ) {
                 Text(
                     text = "$role${author.name}",

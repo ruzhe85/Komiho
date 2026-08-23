@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
@@ -38,6 +39,11 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.RemoveDone
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.CircularProgressIndicator
+import app.mihonsy.komga.data.download.DownloadUiState
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -166,6 +172,9 @@ fun BookShelf(
     onBookClick: (String) -> Unit,
     onBookLongClick: ((String) -> Unit)? = null,
     onDataChanged: () -> Unit = {},
+    showDownload: Boolean = false,
+    downloadState: (String) -> DownloadUiState = { DownloadUiState.NONE },
+    onDownloadClick: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -278,6 +287,9 @@ fun BookShelf(
                             if (!inSelection && onBookLongClick != null) onBookLongClick.invoke(b.id)
                             else { selectionMode = true; toggleSelect(b.id) }
                         },
+                        showDownload = showDownload,
+                        downloadState = downloadState,
+                        onDownloadClick = { onDownloadClick(b.id) },
                     )
                 }
             }
@@ -313,6 +325,9 @@ fun BookShelf(
                             if (!inSelection && onBookLongClick != null) onBookLongClick.invoke(b.id)
                             else { selectionMode = true; toggleSelect(b.id) }
                         },
+                        showDownload = showDownload,
+                        downloadState = downloadState(b.id),
+                        onDownloadClick = { onDownloadClick(b.id) },
                     )
                 }
             }
@@ -492,6 +507,9 @@ fun BookShelfListRow(
     selected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
+    showDownload: Boolean = false,
+    downloadState: (String) -> DownloadUiState = { DownloadUiState.NONE },
+    onDownloadClick: () -> Unit = {},
 ) {
     val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Surface(
@@ -543,6 +561,41 @@ fun BookShelfListRow(
                 style = MaterialTheme.typography.labelMedium,
                 color = if (rp?.completed == true) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
             )
+            if (showDownload) {
+                Spacer(Modifier.width(8.dp))
+                DownloadBadge(
+                    state = downloadState(book.id),
+                    onDownloadClick = onDownloadClick,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+    }
+}
+
+/** 书籍下载状态徽标：未下载=↓，下载中=进度圈，已下载=✓，失败=⚠可重试。 */
+@Composable
+fun DownloadBadge(
+    state: DownloadUiState,
+    onDownloadClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    when (state) {
+        DownloadUiState.NONE -> IconButton(onClick = onDownloadClick, modifier = modifier) {
+            Icon(Icons.Filled.Download, contentDescription = "下载", tint = MaterialTheme.colorScheme.onSurface)
+        }
+        DownloadUiState.QUEUED, DownloadUiState.DOWNLOADING -> CircularProgressIndicator(
+            modifier = modifier,
+            strokeWidth = 2.dp,
+        )
+        DownloadUiState.DOWNLOADED -> Icon(
+            Icons.Filled.Done,
+            contentDescription = "已下载",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = modifier,
+        )
+        DownloadUiState.ERROR -> IconButton(onClick = onDownloadClick, modifier = modifier) {
+            Icon(Icons.Filled.Warning, contentDescription = "重试", tint = MaterialTheme.colorScheme.error)
         }
     }
 }
