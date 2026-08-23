@@ -2735,80 +2735,79 @@ private const val HOME_SECTION_DIVIDER = "__HOME_SECTION_DIVIDER__"
 @Composable
 private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.content.Context) {
     val prefs = remember { KomgaPreferences(context.applicationContext) }
-    var sectionOrder by remember { mutableStateOf(prefs.homeSectionOrder) }
 
-    val visibleNames = remember(sectionOrder) {
-        sectionOrder.split(',')
-            .mapNotNull { name -> runCatching { HomeSection.valueOf(name) }.getOrNull()?.name }
-    }
-    val hiddenNames = remember(sectionOrder) {
-        HomeSection.entries.filter { it.name !in visibleNames }.map { it.name }
-    }
-
-    // 全序列表（String）：活动区 + 分隔线 + 隐藏区。分隔线位置即活动区项数。
+    // 全序列表（String）：活动区 + 分隔线 + 隐藏区。分隔线位置即活动区/隐藏区分界。
+    // orderedAll 是唯一真相来源，初始化一次；拖拽只改它，再回写 prefs。
     val orderedAll = remember {
-        (visibleNames + listOf(HOME_SECTION_DIVIDER) + hiddenNames).toMutableStateList()
-    }
-    LaunchedEffect(sectionOrder) {
-        val vis = sectionOrder.split(',')
+        val vis = prefs.homeSectionOrder.split(',')
             .mapNotNull { name -> runCatching { HomeSection.valueOf(name) }.getOrNull()?.name }
         val hid = HomeSection.entries.filter { it.name !in vis }.map { it.name }
-        orderedAll.clear()
-        orderedAll.addAll(vis + listOf(HOME_SECTION_DIVIDER) + hid)
+        (vis + listOf(HOME_SECTION_DIVIDER) + hid).toMutableStateList()
     }
 
     val lazyListState = rememberLazyListState()
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val fromKey = from.key.toString()
+        val toKey = to.key.toString()
         if (fromKey == HOME_SECTION_DIVIDER) return@rememberReorderableLazyListState
         val fromIndex = orderedAll.indexOf(fromKey)
-        val toIndex = orderedAll.indexOf(to.key.toString())
+        var toIndex = orderedAll.indexOf(toKey)
         if (fromIndex == -1 || toIndex == -1) return@rememberReorderableLazyListState
+        // 落点在分隔线本身：拖到分界线视作进入隐藏区开头。
+        if (toKey == HOME_SECTION_DIVIDER) toIndex += 1
         val moved = orderedAll.removeAt(fromIndex)
-        orderedAll.add(toIndex, moved)
+        val insertAt = if (toIndex > fromIndex) toIndex - 1 else toIndex
+        orderedAll.add(insertAt, moved)
         // 分隔线之前的项视作活动区，持久化为 homeSectionOrder。
         val dividerIdx = orderedAll.indexOf(HOME_SECTION_DIVIDER)
         val active = orderedAll.subList(0, dividerIdx).filter { it != HOME_SECTION_DIVIDER }
-        sectionOrder = active.joinToString(",")
-        prefs.homeSectionOrder = sectionOrder
+        prefs.homeSectionOrder = active.joinToString(",")
     }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         state = lazyListState,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         item {
             Text(
                 text = composeStringResource(R.string.settings_block_adjust),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
             )
         }
         items(orderedAll, key = { it }) { key ->
             if (key == HOME_SECTION_DIVIDER) {
-                // 隐藏分界线（不可拖拽）。
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                )
-                Text(
-                    text = composeStringResource(R.string.settings_hidden),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                )
+                // 分隔线本身也用 ReorderableItem 包裹，保证拖拽落点连续；
+                // 无拖拽手柄，仅作视觉分界与“隐藏区”标识。
+                ReorderableItem(reorderableState, key) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                    Text(
+                        text = composeStringResource(R.string.settings_hidden),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                }
             } else {
                 val section = HomeSection.valueOf(key)
                 val isHidden = orderedAll.indexOf(key) > orderedAll.indexOf(HOME_SECTION_DIVIDER)
                 ReorderableItem(reorderableState, key) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = section.labelText(),
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyLarge,
                             color = if (isHidden) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                             textDecoration = if (isHidden) TextDecoration.LineThrough else null,
                             modifier = Modifier.weight(1f),
