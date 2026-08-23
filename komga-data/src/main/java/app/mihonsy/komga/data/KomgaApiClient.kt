@@ -89,6 +89,7 @@ class KomgaApiClient(
         readStatus: String? = null,
         genre: String? = null,
         tag: String? = null,
+        author: String? = null,
         page: Int = 0,
         size: Int = 60,
         sort: String? = null,
@@ -99,6 +100,7 @@ class KomgaApiClient(
             readStatus?.let { put("read_status", it) }
             genre?.let { put("genre", it) }
             tag?.let { put("tag", it) }
+            author?.let { put("author", it) }
             put("page", page.toString())
             put("size", size.toString())
             sort?.let { put("sort", it) }

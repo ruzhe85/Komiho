@@ -155,10 +155,11 @@ private fun KomgaSeriesScreen(seriesId: String) {
                         client = client,
                         series = s,
                         books = books,
-                        onTagClick = { tag ->
-                            // Komga WebUI parity: tap a tag → Library filtered by it.
+                        onChipClick = { type, value ->
+                            // Komga WebUI parity: tap a tag/author → Library filtered by it.
                             val intent = android.content.Intent(context, KomgaMainActivity::class.java)
-                                .putExtra("filterTag", tag)
+                                .putExtra("filterType", type)
+                                .putExtra("filterValue", value)
                                 .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
                             context.startActivity(intent)
                             (context as? android.app.Activity)?.finish()
@@ -252,7 +253,7 @@ private fun SeriesHeader(
     client: KomgaApiClient,
     series: SeriesDto,
     books: List<BookDto>,
-    onTagClick: (String) -> Unit = {},
+    onChipClick: (String, String) -> Unit = { _, _ -> },
 ) {
     // Authors come from the first book's metadata (Komga series endpoint doesn't
     // include authors), so we fall back to book metadata.
@@ -276,7 +277,7 @@ private fun SeriesHeader(
                 )
                 Spacer(Modifier.height(4.dp))
                 if (authors.isNotEmpty()) {
-                    AuthorLine(authors)
+                    AuthorChips(authors) { name -> onChipClick("author", name) }
                 }
                 val status = series.metadata.status
                 if (!status.isNullOrBlank()) {
@@ -305,7 +306,7 @@ private fun SeriesHeader(
                         shape = MaterialTheme.shapes.small,
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { onTagClick(tag) },
+                        modifier = Modifier.clickable { onChipClick("tag", tag) },
                     ) {
                         Text(
                             text = tag,
@@ -376,14 +377,29 @@ private fun ExpandableSummary(
 }
 
 @Composable
-private fun AuthorLine(authors: List<AuthorDto>) {
-    val parts = authors.take(4).map { author ->
-        val role = author.role?.takeIf { it.isNotBlank() }?.let { "$it: " } ?: ""
-        "$role${author.name}"
+private fun AuthorChips(
+    authors: List<AuthorDto>,
+    onAuthorClick: (String) -> Unit,
+) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        authors.take(6).forEach { author ->
+            val role = author.role?.takeIf { it.isNotBlank() }?.let { "$it: " } ?: ""
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.clickable { onAuthorClick(author.name) },
+            ) {
+                Text(
+                    text = "$role${author.name}",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+            }
+        }
     }
-    Text(
-        text = parts.joinToString("、"),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
