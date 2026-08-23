@@ -361,6 +361,7 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                                 onSectionLimitChange = {
                                     homeSectionLimit = it
                                     prefs.homeSectionLimit = it
+                                    homeRefresh++
                                 },
                             )
                         }
@@ -832,15 +833,50 @@ private fun HomeBookCard(client: KomgaApiClient, b: BookDto, modifier: Modifier 
                 url = client.bookThumbnailUrl(b.id),
                 modifier = Modifier.fillMaxSize(),
             )
+            // Compact grid: overlay 书名 + 章节名 inside the cover.
+            if (compact) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)),
+                                startY = 0f,
+                                endY = 48f,
+                            ),
+                        )
+                        .padding(horizontal = 5.dp, vertical = 4.dp),
+                ) {
+                    Column {
+                        b.seriesTitle?.let {
+                            Text(
+                                text = it,
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text(
+                            text = b.metadata.title ?: b.name,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = b.metadata.title ?: b.name,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
         if (!compact) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = b.metadata.title ?: b.name,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             b.seriesTitle?.let {
                 Text(
                     text = it,
@@ -954,6 +990,41 @@ private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, modifier
                 url = client.bookThumbnailUrl(b.id),
                 modifier = Modifier.fillMaxSize(),
             )
+            // Compact grid: overlay 书名 + 章节名 inside the cover.
+            if (compact) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)),
+                                startY = 0f,
+                                endY = 48f,
+                            ),
+                        )
+                        .padding(horizontal = 5.dp, vertical = 4.dp),
+                ) {
+                    Column {
+                        b.seriesTitle?.let {
+                            Text(
+                                text = it,
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text(
+                            text = b.metadata.title ?: b.name,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
         }
         val rp = b.readProgress
         if (rp != null && b.media.pagesCount > 0) {
@@ -965,13 +1036,13 @@ private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, modifier
                     .height(3.dp),
             )
         }
-        Text(
-            text = b.metadata.title ?: b.name,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
         if (!compact) {
+            Text(
+                text = b.metadata.title ?: b.name,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             b.seriesTitle?.let {
                 Text(
                     text = it,
@@ -1008,6 +1079,15 @@ private fun HomeContinueReadingListItem(client: KomgaApiClient, b: BookDto, onCl
         }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
+            b.seriesTitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
                 text = b.metadata.title ?: b.name,
                 style = MaterialTheme.typography.bodyMedium,
@@ -1125,23 +1205,49 @@ private fun HomeSeriesCard(
                 url = client.seriesThumbnailUrl(s.id),
                 modifier = Modifier.fillMaxSize(),
             )
+            // Compact grid: overlay 书名 inside the cover.
+            if (compact) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)),
+                                startY = 0f,
+                                endY = 48f,
+                            ),
+                        )
+                        .padding(horizontal = 5.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = s.name,
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = s.name,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (!compact && showProgress && s.booksCount > 0) {
-            // Thin progress bar: read / total.
-            val fraction = (s.booksReadCount.toFloat() / s.booksCount).coerceIn(0f, 1f)
-            LinearProgressIndicator(
-                progress = { fraction },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp),
+        if (!compact) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = s.name,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            if (showProgress && s.booksCount > 0) {
+                // Thin progress bar: read / total.
+                val fraction = (s.booksReadCount.toFloat() / s.booksCount).coerceIn(0f, 1f)
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp),
+                )
+            }
         }
     }
 }
