@@ -361,6 +361,20 @@ fun BookShelf(
                         label = composeStringResource(R.string.mark_unread),
                         onClick = { performBatchUpdate(false) },
                     )
+                    val downloadStartedText = composeStringResource(R.string.download_started, selectedIds.size)
+                    SelectionActionItem(
+                        icon = Icons.Filled.Download,
+                        label = composeStringResource(R.string.download_selected, selectedIds.size),
+                        onClick = {
+                            selectedIds.forEach { onDownloadClick(it) }
+                            android.widget.Toast.makeText(
+                                context,
+                                downloadStartedText,
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                            exitSelection()
+                        },
+                    )
                 }
             }
         }
