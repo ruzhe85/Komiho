@@ -180,15 +180,25 @@ class KomgaMainActivity : KomgaBaseActivity() {
     // from the reader (read progress / unread counts change while reading).
     private val refreshSignal = MutableStateFlow(0)
     // Filter passed from the Series detail page (tap a tag/author → jump here
-    // and filter the Library by it, Komga WebUI parity).
-    private var pendingFilterType: String? = null
-    private var pendingFilterValue: String? = null
+    // and filter the Library by it, Komga WebUI parity). Emitted both on the
+    // initial onCreate and on subsequent onNewIntent (CLEAR_TOP+SINGLE_TOP
+    // reuses this instance, so onCreate won't run again).
+    private val filterSignal = MutableStateFlow<Pair<String, String>?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pendingFilterType = intent?.getStringExtra("filterType")
-        pendingFilterValue = intent?.getStringExtra("filterValue")
-        setContent { KomihoTheme { KomgaMainScreen(refreshSignal, pendingFilterType, pendingFilterValue) } }
+        val t = intent?.getStringExtra("filterType")
+        val v = intent?.getStringExtra("filterValue")
+        if (!t.isNullOrBlank() && !v.isNullOrBlank()) filterSignal.value = t to v
+        setContent { KomihoTheme { KomgaMainScreen(refreshSignal, filterSignal) } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        this.intent = intent
+        val t = intent.getStringExtra("filterType")
+        val v = intent.getStringExtra("filterValue")
+        if (!t.isNullOrBlank() && !v.isNullOrBlank()) filterSignal.value = t to v
     }
 
     override fun onResume() {
@@ -211,8 +221,7 @@ private enum class MainTab(@StringRes val labelRes: Int, val icon: ImageVector) 
 @Composable
 private fun KomgaMainScreen(
     refreshSignal: MutableStateFlow<Int>,
-    initialFilterType: String? = null,
-    initialFilterValue: String? = null,
+    filterSignal: MutableStateFlow<Pair<String, String>?>,
 ) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
@@ -220,8 +229,8 @@ private fun KomgaMainScreen(
 
     // Filter coming from the Series detail page (tap tag/author → filter Library).
     // Null = no active filter. Survives recomposition; cleared by the chip ✕.
-    var libraryFilterType by remember { mutableStateOf(initialFilterType) }
-    var libraryFilterValue by remember { mutableStateOf(initialFilterValue) }
+    var libraryFilterType by remember { mutableStateOf(filterSignal.value?.first) }
+    var libraryFilterValue by remember { mutableStateOf(filterSignal.value?.second) }
 
     // Tab state is preserved across configuration changes by the Activity's
     // configChanges flag (orientation). rememberSaveable additionally keeps
@@ -281,8 +290,13 @@ private fun KomgaMainScreen(
         }
     }
     // A filter handed in from the Series detail page means "open Library filtered".
-    LaunchedEffect(initialFilterType, initialFilterValue) {
-        if (!initialFilterType.isNullOrBlank() && !initialFilterValue.isNullOrBlank()) {
+    // Driven by filterSignal so both the initial onCreate and subsequent
+    // onNewIntent (CLEAR_TOP+SINGLE_TOP reuses this instance) are covered.
+    val filterPair by filterSignal.collectAsState()
+    LaunchedEffect(filterPair) {
+        if (!filterPair?.first.isNullOrBlank() && !filterPair?.second.isNullOrBlank()) {
+            libraryFilterType = filterPair!!.first
+            libraryFilterValue = filterPair!!.second
             currentTab = MainTab.Library.ordinal
         }
     }
