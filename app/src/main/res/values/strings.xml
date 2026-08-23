@@ -92,9 +92,16 @@
     <string name="auth_api_key">API Key</string>
     <string name="auth_username_password">账号密码</string>
 
-    <!-- 设置：主页 -->
-    <string name="settings_home">主页设置</string>
-    <string name="settings_home_summary">主页区块数量与排序</string>
+    <!-- 设置：书库（原“主页设置”，更名并扩预览图/缓存） -->
+    <string name="settings_home">书库</string>
+    <string name="settings_home_summary">主页、预览图与缓存</string>
+    <string name="settings_preview_images">预览图</string>
+    <string name="settings_preview_images_summary">预览图的实时刷新与缓存管理（上限设为 0 即每次刷新重新获取）</string>
+    <string name="settings_clear_cover_cache">清空预览图缓存</string>
+    <string name="settings_clear_cover_cache_summary">点击后清除缓存，方便重建</string>
+    <string name="settings_cover_cache_cleared">预览图缓存已清空</string>
+    <string name="settings_cache_limit">缓存上限</string>
+    <string name="settings_cache_limit_summary">预览图磁盘缓存上限（0 = 不缓存/实时，最高 500M，默认 100M）</string>
     <string name="settings_section_limit">每区块显示数量</string>
     <string name="settings_home_sections">主页区块</string>
     <string name="settings_home_sections_summary">显示/隐藏区块，上下调整顺序（主页从上到下显示）</string>
