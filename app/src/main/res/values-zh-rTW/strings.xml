@@ -145,6 +145,10 @@
     <string name="select_inverse">反向選擇</string>
     <string name="mark_read">標記已讀</string>
     <string name="mark_unread">標記未讀</string>
+    <string name="download">下載</string>
+    <string name="download_selected">下載已選 %1$d 本</string>
+    <string name="download_started">已開始下載 %1$d 本</string>
+    <string name="select">選擇</string>
     <string name="add_to_readlist">加入閱讀列表</string>
     <string name="batch_marked">已批量標記%1$d本</string>
     <string name="operation_failed">操作失敗：%1$s</string>

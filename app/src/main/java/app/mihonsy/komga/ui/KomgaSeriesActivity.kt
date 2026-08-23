@@ -250,7 +250,7 @@ private fun KomgaSeriesScreen(seriesId: String) {
                                 }
                             },
                             onDataChanged = { load() },
-                            showDownload = true,
+                            showDownload = false,
                             downloadState = { bookId ->
                                 downloadStates.value[bookId]
                                     ?: if (downloadStore.isDownloaded(bookId)) DownloadUiState.DOWNLOADED else DownloadUiState.NONE

@@ -111,6 +111,11 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
+import app.mihonsy.komga.data.KomgaApiClient
+import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.data.download.KomgaBookDownloader
+import app.mihonsy.komga.data.download.KomgaDownloadStore
+import app.mihonsy.komga.source.KomgaSource
 import logcat.LogPriority
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.i18n.pluralStringResource
@@ -408,6 +413,28 @@ class ReaderActivity : BaseActivity() {
                             } else {
                                 it
                             }
+                        }
+                    },
+                    onDownloadClick = label@{ chapter ->
+                        val manga = viewModel.manga ?: return@label
+                        if (manga.source != KomgaSource.ID) return@label
+                        val bookId = chapter.url.removePrefix(KomgaSource.BOOK_URL_PREFIX)
+                        val seriesId = manga.url.removePrefix(KomgaSource.SERIES_URL_PREFIX)
+                        val seriesName = manga.title
+                        val client = KomgaApiClient(KomgaPreferences(this@ReaderActivity).connection())
+                        val downloader = KomgaBookDownloader(
+                            this@ReaderActivity,
+                            client,
+                            KomgaDownloadStore(this@ReaderActivity),
+                        )
+                        lifecycleScope.launch {
+                            downloader.downloadBook(
+                                bookId = bookId,
+                                seriesName = seriesName,
+                                seriesId = seriesId,
+                                bookName = chapter.name,
+                                number = 0,
+                            ).collect { /* Komga 下载状态在章节列表里以 isDownloaded 反映，无需逐事件处理 */ }
                         }
                     },
                     state.dateRelativeTime,

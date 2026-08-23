@@ -28,6 +28,8 @@ import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.source.local.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import app.mihonsy.komga.data.download.KomgaDownloadStore
+import app.mihonsy.komga.source.KomgaSource
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -40,6 +42,7 @@ fun ChapterListDialog(
     chapters: List<ReaderChapterItem>,
     onClickChapter: (Chapter) -> Unit,
     onBookmark: (Chapter) -> Unit,
+    onDownloadClick: (Chapter) -> Unit,
     dateRelativeTime: Boolean,
 ) {
     val manga by screenModel.mangaFlow.collectAsState()
@@ -67,8 +70,13 @@ fun ChapterListDialog(
                         .map { it.progress }
                         .collectAsState(0).value
                 } ?: 0
+                // Komga 源的下载状态走本地 KomgaDownloadStore（与 Mihon DownloadManager 无关）。
+                val isKomga = chapterItem.manga.source == KomgaSource.ID
                 val downloaded = if (chapterItem.manga.isLocal()) {
                     true
+                } else if (isKomga) {
+                    val bookId = chapterItem.chapter.url.removePrefix(KomgaSource.BOOK_URL_PREFIX)
+                    KomgaDownloadStore(context).isDownloaded(bookId)
                 } else {
                     downloadManager.isChapterDownloaded(
                         chapterItem.chapter.name,
@@ -106,14 +114,14 @@ fun ChapterListDialog(
                     read = chapterItem.chapter.read,
                     bookmark = chapterItem.chapter.bookmark,
                     selected = false,
-                    downloadIndicatorEnabled = false,
+                    downloadIndicatorEnabled = isKomga,
                     downloadStateProvider = { downloadState },
                     downloadProgressProvider = { progress },
                     chapterSwipeStartAction = LibraryPreferences.ChapterSwipeAction.ToggleBookmark,
                     chapterSwipeEndAction = LibraryPreferences.ChapterSwipeAction.ToggleBookmark,
                     onLongClick = { /*TODO*/ },
                     onClick = { onClickChapter(chapterItem.chapter) },
-                    onDownloadClick = null,
+                    onDownloadClick = { onDownloadClick(chapterItem.chapter) },
                     onChapterSwipe = {
                         onBookmark(chapterItem.chapter)
                     },

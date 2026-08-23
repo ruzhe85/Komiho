@@ -145,6 +145,10 @@
     <string name="select_inverse">Invert selection</string>
     <string name="mark_read">Mark read</string>
     <string name="mark_unread">Mark unread</string>
+    <string name="download">Download</string>
+    <string name="download_selected">Download %1$d selected</string>
+    <string name="download_started">Started downloading %1$d books</string>
+    <string name="select">Select</string>
     <string name="add_to_readlist">Add to readlist</string>
     <string name="batch_marked">Marked %1$d books</string>
     <string name="operation_failed">Operation failed: %1$s</string>
