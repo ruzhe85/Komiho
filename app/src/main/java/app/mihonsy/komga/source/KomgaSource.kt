@@ -94,4 +94,13 @@ class KomgaSource(private val context: Context) : HttpSource() {
     // Page.imageUrl is already the final Komga image URL — never resolve via network.
     override fun fetchImageUrl(page: Page): Observable<String> =
         Observable.just(page.imageUrl ?: page.url)
+
+    // Komga 的 manga/chapter url 使用内部 scheme `komga://series|book/{id}`，并非真实
+    // 网页 URL。Mihon 的默认 getChapterUrl()/getMangaUrl() 会做 `baseUrl + url`，拼出
+    // `http://host:portkomga://...` 这种非法 URL，在 HttpUrl 解析端口时抛
+    // IllegalArgumentException（Invalid URL port: "10007komga:"）。
+    // 这两个方法仅用于「在浏览器打开」类的辅助功能，对 Komga 无意义，直接返回
+    // 原始 scheme url（或 null 让调用方安全降级），避免崩溃。
+    override fun getChapterUrl(chapter: SChapter): String = chapter.url
+    override fun getMangaUrl(manga: SManga): String = manga.url
 }
