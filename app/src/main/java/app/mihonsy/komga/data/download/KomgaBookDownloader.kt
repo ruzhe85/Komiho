@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaDbBridge
-import app.mihonsy.komga.data.model.BookDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -127,58 +126,6 @@ class KomgaBookDownloader(
             KomgaDbBridge.ensureChapters(client, seriesId, manga.id)
         }.onFailure { Log.w("KomgaDL", "series 同步 DB 失败：${it.message}") }
     }
-
-    /**
-     * 下载整个系列：先存系列封面到本地，再按顺序逐本下载（串行）。
-     * 汇总进度通过 [KomgaDownloadEvent.SeriesProgress] 上报。
-     * [books] 必须已按系列内顺序排好（调用方负责）。
-     */
-    fun downloadSeries(
-        seriesId: String,
-        seriesName: String,
-        coverUrl: String,
-        books: List<BookDto>,
-    ): Flow<KomgaDownloadEvent> = callbackFlow {
-        val safeSeries = sanitize(seriesName)
-        val coverDir = File(context.getExternalFilesDir(null), "komga/_covers")
-        coverDir.mkdirs()
-        val coverFile = File(coverDir, "$seriesId.jpg")
-        // 下载并缓存系列封面（失败不影响书本下载）。
-        runCatching {
-            val bytes = client.downloadBytes(coverUrl)
-            if (bytes.isNotEmpty()) coverFile.writeBytes(bytes)
-        }.onFailure { Log.w("KomgaDL", "封面下载失败：${it.message}") }
-        store.putSeriesMeta(
-            KomgaSeriesMeta(
-                seriesId = seriesId,
-                seriesName = seriesName,
-                coverPath = if (coverFile.exists()) coverFile.absolutePath else "",
-                totalBooks = books.size,
-            ),
-        )
-        var done = 0
-        books.forEach { book ->
-            downloadBook(
-                book.id,
-                seriesName,
-                seriesId,
-                bookName = book.name,
-                number = book.number ?: 0,
-                coverUrl = coverUrl,
-            ).collect { ev ->
-                when (ev) {
-                    is KomgaDownloadEvent.Completed -> {
-                        done++
-                        send(KomgaDownloadEvent.SeriesProgress(seriesId, done, books.size))
-                    }
-                    is KomgaDownloadEvent.Error -> send(KomgaDownloadEvent.SeriesProgress(seriesId, done, books.size, lastError = ev.message))
-                    else -> send(ev) // Queued / Progress 透传
-                }
-            }
-        }
-        send(KomgaDownloadEvent.SeriesDone(seriesId, done, books.size))
-        close()
-    }
 }
 
 sealed interface KomgaDownloadEvent {
@@ -189,22 +136,6 @@ sealed interface KomgaDownloadEvent {
     data class Completed(override val bookId: String, val path: String = "") : KomgaDownloadEvent
     data class Error(override val bookId: String, val message: String) : KomgaDownloadEvent
     data class Canceled(override val bookId: String) : KomgaDownloadEvent
-    // 系列级汇总进度
-    data class SeriesProgress(
-        val seriesId: String,
-        val done: Int,
-        val total: Int,
-        val lastError: String? = null,
-    ) : KomgaDownloadEvent {
-        override val bookId: String get() = seriesId
-    }
-    data class SeriesDone(
-        val seriesId: String,
-        val done: Int,
-        val total: Int,
-    ) : KomgaDownloadEvent {
-        override val bookId: String get() = seriesId
-    }
 }
 
 /** UI 层使用的下载状态（由 downloadBook Flow + KomgaDownloadStore 推算）。 */
