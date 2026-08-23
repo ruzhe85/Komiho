@@ -6,6 +6,7 @@
     <string name="tab_home">主頁</string>
     <string name="tab_library">庫</string>
     <string name="tab_lists">列表</string>
+    <string name="tab_downloads">下載</string>
     <string name="tab_settings">設定</string>
 
     <!-- 搜尋 -->
