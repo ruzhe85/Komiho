@@ -42,23 +42,26 @@ class KomgaBookDownloader(
                     send(KomgaDownloadEvent.Error(bookId, "响应体为空(code=${resp.code})"))
                     return@getBookFile
                 }
-                // 注意：本项目 OkHttp 配置下 resp.body.source() 会返回空流（见 KomgaApiClient.downloadBytes 的同款修复），
-                // 必须用 byteStream()（即 bytes() 的流式版本）读取，否则循环立刻 EOF → 秒"完成"但 0 字节。
-                val total = body.contentLength().takeIf { it > 0 } ?: 0L
+                // 注意：本项目 OkHttp 配置下 resp.body.source()/byteStream() 会返回空流
+                // （见 KomgaApiClient.downloadBytes 的同款修复注释：source()?.buffer()?.readByteArray()
+                // 会返回空，必须用 bytes()）。此前的 byteStream() 底层仍是 source()，等同于空流 →
+                // 循环立刻 EOF → 秒"完成"但 0 字节。这里改用 body.bytes()（downloadBytes 验证可用），
+                // 拿到完整字节数组后分块写入文件并回传进度。
+                val data = body.bytes()
+                val total = data.size.toLong()
                 var done = 0L
                 target.outputStream().use { out ->
-                    body.byteStream().use { input ->
-                        val buf = ByteArray(64 * 1024)
-                        var lastEmit = 0L
-                        while (true) {
-                            val r = input.read(buf)
-                            if (r == -1) break
-                            out.write(buf, 0, r)
-                            done += r
-                            if (done - lastEmit >= 512 * 1024L || (total > 0L && done >= total)) {
-                                send(KomgaDownloadEvent.Progress(bookId, total, done))
-                                lastEmit = done
-                            }
+                    val bufSize = 64 * 1024
+                    var offset = 0
+                    var lastEmit = 0L
+                    while (offset < data.size) {
+                        val n = minOf(bufSize, data.size - offset)
+                        out.write(data, offset, n)
+                        offset += n
+                        done = offset.toLong()
+                        if (done - lastEmit >= 512 * 1024L || done >= total) {
+                            send(KomgaDownloadEvent.Progress(bookId, total, done))
+                            lastEmit = done
                         }
                     }
                 }
