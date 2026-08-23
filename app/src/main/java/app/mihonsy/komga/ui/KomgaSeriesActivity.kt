@@ -1,5 +1,6 @@
 package app.mihonsy.komga.ui
 
+import eu.kanade.tachiyomi.R
 import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -173,8 +174,22 @@ private fun KomgaSeriesScreen(seriesId: String) {
                                 when (ev) {
                                     is KomgaDownloadEvent.Queued -> cur[ev.bookId] = DownloadUiState.QUEUED
                                     is KomgaDownloadEvent.Progress -> cur[ev.bookId] = DownloadUiState.DOWNLOADING
-                                    is KomgaDownloadEvent.Completed -> cur[ev.bookId] = DownloadUiState.DOWNLOADED
-                                    is KomgaDownloadEvent.Error -> cur[ev.bookId] = DownloadUiState.ERROR
+                                    is KomgaDownloadEvent.Completed -> {
+                                        cur[ev.bookId] = DownloadUiState.DOWNLOADED
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            context.getString(R.string.download_complete),
+                                            android.widget.Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                    is KomgaDownloadEvent.Error -> {
+                                        cur[ev.bookId] = DownloadUiState.ERROR
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            context.getString(R.string.download_failed, ev.message),
+                                            android.widget.Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
                                     is KomgaDownloadEvent.Canceled -> cur.remove(ev.bookId)
                                 }
                                 downloadStates.value = cur

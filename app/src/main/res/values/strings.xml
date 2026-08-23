@@ -63,10 +63,11 @@
     <string name="cd_display_options">显示选项</string>
     <string name="pref_library_columns">每行数量</string>
     <string name="label_auto">自动</string>
-    <string name="sort_title">标题</string>
-    <string name="sort_last_modified">最近更新</string>
-    <string name="sort_last_read">最近阅读</string>
-    <string name="sort_date_added">添加日期</string>
+    <string name="sort_name">名称</string>
+    <string name="sort_date_added">添加时间</string>
+    <string name="sort_date_updated">更新时间</string>
+    <string name="sort_date_read">阅读日期</string>
+    <string name="sort_release_date">发布日期</string>
     <string name="display_compact_grid">紧凑网格</string>
     <string name="display_comfortable_grid">舒适网格</string>
     <string name="display_list">列表</string>
@@ -152,6 +153,9 @@
     <string name="download">下载</string>
     <string name="download_selected">下载已选 %1$d 本</string>
     <string name="download_started">已开始下载 %1$d 本</string>
+    <string name="download_started_single">开始下载：%1$s</string>
+    <string name="download_complete">下载完成</string>
+    <string name="download_failed">下载失败：%1$s</string>
     <string name="select">选择</string>
     <string name="add_to_readlist">加入阅读列表</string>
     <string name="batch_marked">已批量标记%1$d本</string>

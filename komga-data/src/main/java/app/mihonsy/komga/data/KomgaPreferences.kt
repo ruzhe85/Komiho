@@ -58,9 +58,9 @@ class KomgaPreferences(context: Context) {
         get() = prefs.getInt(KEY_LIBRARY_LANDSCAPE_COLUMNS, 0).coerceIn(0, 10)
         set(v) = prefs.edit().putInt(KEY_LIBRARY_LANDSCAPE_COLUMNS, v.coerceIn(0, 10)).apply()
 
-    /** One of "title"/"lastModified"/"lastRead"/"dateAdded", plus ",asc"/",desc". */
+    /** One of "name"/"dateAdded"/"dateUpdated"/"dateRead"/"releaseDate", plus ",asc"/",desc". */
     var librarySort: String
-        get() = prefs.getString(KEY_LIBRARY_SORT, "title,asc").orEmpty()
+        get() = prefs.getString(KEY_LIBRARY_SORT, "name,asc").orEmpty()
         set(v) = prefs.edit().putString(KEY_LIBRARY_SORT, v).apply()
 
     /** Home tab: how many series/books each section shows. Default 10, max 50. */

@@ -112,6 +112,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -263,7 +264,7 @@ private fun KomgaMainScreen(
     var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.libraryDisplayMode)) }
     // Library shelf sort + read-status filter lifted here so the single
     // toolbar "display options" button can drive them in one composite menu.
-    var librarySortMode by remember { mutableStateOf(LibrarySortMode.fromPref(prefs.librarySort)) }
+    var librarySortMode by remember { mutableStateOf(LibrarySort.fromPref(prefs.librarySort)) }
     var libraryReadFilter by remember { mutableStateOf(ReadFilter.All) }
     var shelfMenuOpen by remember { mutableStateOf(false) }
     // Home tab display options (layout / columns / per-section limit / display mode).
@@ -373,10 +374,10 @@ private fun KomgaMainScreen(
                                         prefs.libraryPortraitColumns = newColumns
                                     }
                                 },
-                                sortMode = librarySortMode,
+                                sort = librarySortMode,
                                 onSortModeChange = {
                                     librarySortMode = it
-                                    prefs.librarySort = it.prefValue
+                                    prefs.librarySort = it.toPref()
                                 },
                                 readFilter = libraryReadFilter,
                                 onReadFilterChange = { libraryReadFilter = it },
@@ -482,7 +483,7 @@ private fun KomgaMainScreen(
                         displayMode = displayMode,
                         columns = columns,
                         refreshTick = refreshTick,
-                        sortMode = librarySortMode,
+                        sort = librarySortMode,
                         onSortModeChange = { librarySortMode = it },
                         readFilter = libraryReadFilter,
                         onReadFilterChange = { libraryReadFilter = it },
@@ -1388,8 +1389,8 @@ private fun LibraryTab(
     displayMode: LibraryDisplayMode,
     columns: Int,
     refreshTick: Int,
-    sortMode: LibrarySortMode,
-    onSortModeChange: (LibrarySortMode) -> Unit,
+    sort: LibrarySort,
+    onSortModeChange: (LibrarySort) -> Unit,
     readFilter: ReadFilter,
     onReadFilterChange: (ReadFilter) -> Unit,
     filterType: String? = null,
@@ -1456,7 +1457,7 @@ private fun LibraryTab(
                     readStatus = readFilter.komgaValue,
                     tag = if (filterType == "tag") filterValue else null,
                     author = if (filterType == "author") filterValue else null,
-                    sort = sortMode.komgaSort,
+                    sort = sort.komgaSort,
                     size = 200,
                 ).content
             }
@@ -1466,18 +1467,10 @@ private fun LibraryTab(
         }
     }
 
-    LaunchedEffect(selectedLibraryId, readFilter, sortMode, refreshTick, filterType, filterValue) { reload() }
+    LaunchedEffect(selectedLibraryId, readFilter, sort, refreshTick, filterType, filterValue) { reload() }
 
-    // Client-side sort for "最近阅读" (Komga has no read-progress sort field).
-    val sortedSeries = remember(series, sortMode) {
-        if (sortMode == LibrarySortMode.LastRead) {
-            series.sortedByDescending { s ->
-                s.booksInProgressCount + (if (s.booksUnreadCount == 0) 1 else 0)
-            }
-        } else {
-            series
-        }
-    }
+    // Date read now uses server-side sort (readProgress.readDate), so no client-side fallback is needed.
+    val sortedSeries = series
 
     Column(Modifier.fillMaxSize()) {
         // ── Active tag/author filter chip (from Series detail page tap) ──
@@ -1681,8 +1674,8 @@ private fun ShelfOptionsMenu(
     onDisplayModeChange: (LibraryDisplayMode) -> Unit,
     columns: Int,
     onColumnChange: (Int) -> Unit,
-    sortMode: LibrarySortMode,
-    onSortModeChange: (LibrarySortMode) -> Unit,
+    sort: LibrarySort,
+    onSortModeChange: (LibrarySort) -> Unit,
     readFilter: ReadFilter,
     onReadFilterChange: (ReadFilter) -> Unit,
 ) {
@@ -1714,11 +1707,19 @@ private fun ShelfOptionsMenu(
                     }
                 }
                 1 -> {
-                    LibrarySortMode.entries.forEach { m ->
+                    LibrarySortBy.entries.forEach { m ->
                         SortItem(
                             label = m.labelText(),
-                            sortDescending = if (sortMode == m) true else null,
-                            onClick = { onSortModeChange(m) },
+                            sortDescending = if (sort.sortBy == m) sort.descending else null,
+                            onClick = {
+                                onSortModeChange(
+                                    if (sort.sortBy == m) {
+                                        sort.copy(descending = !sort.descending)
+                                    } else {
+                                        LibrarySort(m, m.defaultDescending)
+                                    },
+                                )
+                            },
                         )
                     }
                 }
@@ -1762,19 +1763,49 @@ private fun ShelfOptionsMenu(
     }
 }
 
-/** Shelf display modes (mihon libraryDisplayMode analog). */
-private enum class LibrarySortMode(@StringRes val labelRes: Int, val komgaSort: String?, val prefValue: String) {
-    Title(R.string.sort_title, "name,asc", "title,asc"),
-    LastModified(R.string.sort_last_modified, "dateModified,desc", "lastModified,desc"),
-    LastRead(R.string.sort_last_read, null, "lastRead,desc"),
-    DateAdded(R.string.sort_date_added, "createdDate,desc", "dateAdded,desc");
+/** Sortable fields on the library shelf, aligned with Komga WebUI. */
+private enum class LibrarySortBy(
+    @StringRes val labelRes: Int,
+    val prefKey: String,
+    val komgaField: String?,
+    val defaultDescending: Boolean,
+) {
+    Name(R.string.sort_name, "name", "name", false),
+    DateAdded(R.string.sort_date_added, "dateAdded", "createdDate", true),
+    DateUpdated(R.string.sort_date_updated, "dateUpdated", "lastModifiedDate", true),
+    DateRead(R.string.sort_date_read, "dateRead", "readProgress.readDate", true),
+    ReleaseDate(R.string.sort_release_date, "releaseDate", "metadata.releaseDate", true);
 
     @Composable
     fun labelText(): String = composeStringResource(labelRes)
+}
+
+/** Current sort selection: field + direction. */
+@Immutable
+private data class LibrarySort(
+    val sortBy: LibrarySortBy,
+    val descending: Boolean,
+) {
+    val komgaSort: String?
+        get() = sortBy.komgaField?.let { "$it,${if (descending) "desc" else "asc"}" }
+
+    fun toPref(): String = "${sortBy.prefKey},${if (descending) "desc" else "asc"}"
 
     companion object {
-        fun fromPref(v: String): LibrarySortMode =
-            entries.find { it.prefValue == v } ?: Title
+        fun fromPref(v: String): LibrarySort {
+            val parts = v.split(",")
+            val key = parts.getOrNull(0).orEmpty()
+            val dir = parts.getOrNull(1).orEmpty()
+            val descending = dir.equals("desc", ignoreCase = true)
+            // Backward compatibility with old pref values.
+            val by = when (key.lowercase()) {
+                "title" -> LibrarySortBy.Name
+                "lastmodified" -> LibrarySortBy.DateUpdated
+                "lastread" -> LibrarySortBy.DateRead
+                else -> LibrarySortBy.entries.find { it.prefKey == key } ?: LibrarySortBy.Name
+            }
+            return LibrarySort(by, descending)
+        }
     }
 }
 
