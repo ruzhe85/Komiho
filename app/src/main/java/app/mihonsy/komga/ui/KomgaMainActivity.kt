@@ -2767,24 +2767,25 @@ private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.conte
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         state = lazyListState,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         item {
+            // 顶标题：标准设置页标题字号（titleMedium），与顶部标题同一格，左缩 16dp。
             Text(
                 text = composeStringResource(R.string.settings_block_adjust),
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 20.dp),
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
             )
         }
         items(orderedAll, key = { it }) { key ->
             if (key == HOME_SECTION_DIVIDER) {
                 // 分隔线本身也用 ReorderableItem 包裹，保证拖拽落点连续；
-                // 无拖拽手柄，仅作视觉分界与“隐藏区”标识。
+                // 无拖拽手柄，仅作视觉分界与“隐藏区”标识。左缩比标题再 2 格（48dp）。
                 ReorderableItem(reorderableState, key) {
-                    Column(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 48.dp)) {
                         HorizontalDivider(
                             color = MaterialTheme.colorScheme.outlineVariant,
                         )
@@ -2803,14 +2804,14 @@ private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.conte
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 16.dp),
+                            .padding(horizontal = 48.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = section.labelText(),
                             style = MaterialTheme.typography.titleMedium,
                             color = if (isHidden) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                            textDecoration = if (isHidden) TextDecoration.LineThrough else null,
+                            textDecoration = null,
                             modifier = Modifier.weight(1f),
                         )
                         Icon(
