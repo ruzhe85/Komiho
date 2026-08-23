@@ -179,10 +179,14 @@ class KomgaMainActivity : KomgaBaseActivity() {
     // Incremented on every onResume so the tabs reload data when returning
     // from the reader (read progress / unread counts change while reading).
     private val refreshSignal = MutableStateFlow(0)
+    // Tag filter passed from the Series detail page (tap a tag → jump here and
+    // filter the Library by that tag, Komga WebUI parity).
+    private var pendingFilterTag: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { KomihoTheme { KomgaMainScreen(refreshSignal) } }
+        pendingFilterTag = intent?.getStringExtra("filterTag")
+        setContent { KomihoTheme { KomgaMainScreen(refreshSignal, pendingFilterTag) } }
     }
 
     override fun onResume() {
@@ -203,10 +207,14 @@ private enum class MainTab(@StringRes val labelRes: Int, val icon: ImageVector) 
 }
 
 @Composable
-private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
+private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>, initialFilterTag: String? = null) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
+
+    // Tag filter coming from the Series detail page (tap tag → filter Library).
+    // Null = no active tag filter. Survives recomposition; cleared by the chip ✕.
+    var libraryFilterTag by remember { mutableStateOf(initialFilterTag) }
 
     // Tab state is preserved across configuration changes by the Activity's
     // configChanges flag (orientation). rememberSaveable additionally keeps
@@ -263,6 +271,12 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                         selectedLibraryId = libs.firstOrNull()?.id
                     }
                 }
+        }
+    }
+    // A tag handed in from the Series detail page means "open Library filtered".
+    LaunchedEffect(initialFilterTag) {
+        if (!initialFilterTag.isNullOrBlank()) {
+            currentTab = MainTab.Library.ordinal
         }
     }
     // Close the search field when switching tabs (it is not shown on Settings).
@@ -437,6 +451,8 @@ private fun KomgaMainScreen(refreshSignal: MutableStateFlow<Int>) {
                         onSortModeChange = { librarySortMode = it },
                         readFilter = libraryReadFilter,
                         onReadFilterChange = { libraryReadFilter = it },
+                        filterTag = libraryFilterTag,
+                        onFilterTagClear = { libraryFilterTag = null },
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
@@ -1329,6 +1345,8 @@ private fun LibraryTab(
     onSortModeChange: (LibrarySortMode) -> Unit,
     readFilter: ReadFilter,
     onReadFilterChange: (ReadFilter) -> Unit,
+    filterTag: String? = null,
+    onFilterTagClear: () -> Unit = {},
     onSeriesClick: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -1388,6 +1406,7 @@ private fun LibraryTab(
                 client.getSeries(
                     libraryId = selectedLibraryId,
                     readStatus = readFilter.komgaValue,
+                    tag = filterTag,
                     sort = sortMode.komgaSort,
                     size = 200,
                 ).content
@@ -1398,7 +1417,7 @@ private fun LibraryTab(
         }
     }
 
-    LaunchedEffect(selectedLibraryId, readFilter, sortMode, refreshTick) { reload() }
+    LaunchedEffect(selectedLibraryId, readFilter, sortMode, refreshTick, filterTag) { reload() }
 
     // Client-side sort for "最近阅读" (Komga has no read-progress sort field).
     val sortedSeries = remember(series, sortMode) {
@@ -1412,6 +1431,30 @@ private fun LibraryTab(
     }
 
     Column(Modifier.fillMaxSize()) {
+        // ── Active tag filter chip (from Series detail page tap) ──
+        if (!filterTag.isNullOrBlank()) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = composeStringResource(R.string.filter_tag_active, filterTag),
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = onFilterTagClear, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.clear))
+                    }
+                }
+            }
+        }
         // ── Mihon-style selection top bar: 取消 / 已选 N 项 / 全选 ──
         if (inSelection) {
             Surface(
