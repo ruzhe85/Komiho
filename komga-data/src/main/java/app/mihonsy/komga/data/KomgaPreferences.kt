@@ -105,6 +105,16 @@ class KomgaPreferences(context: Context) {
         get() = prefs.getString(KEY_HOME_SECTION_LAYOUT, "CAROUSEL").orEmpty()
         set(v) = prefs.edit().putString(KEY_HOME_SECTION_LAYOUT, v).apply()
 
+    // ---- 预览图 / 封面缓存（书库设置分项）----
+    /**
+     * 预览图磁盘缓存上限（字节）。范围 0..500M，默认 100M。
+     * App.kt 构造 Coil DiskCache 时读取此值（覆盖原硬编码 300M）。
+     * 设 0 = 不使用磁盘缓存（等效"实时预览图"，每次刷新重新获取）。
+     */
+    var coverCacheLimitBytes: Long
+        get() = prefs.getLong(KEY_COVER_CACHE_LIMIT, 100L * 1024 * 1024).coerceIn(0L, 500L * 1024 * 1024)
+        set(v) = prefs.edit().putLong(KEY_COVER_CACHE_LIMIT, v.coerceIn(0L, 500L * 1024 * 1024)).apply()
+
     /** Reader: double-page spread mode (Comics-style side-by-side pages). */
     var readerDoublePage: Boolean
         get() = prefs.getBoolean(KEY_READER_DOUBLE_PAGE, false)
@@ -175,6 +185,7 @@ class KomgaPreferences(context: Context) {
         const val KEY_HOME_DISPLAY_MODE = "home_display_mode"
         const val KEY_HOME_SECTION_ORDER = "home_section_order"
         const val KEY_HOME_SECTION_LAYOUT = "home_section_layout"
+        const val KEY_COVER_CACHE_LIMIT = "cover_cache_limit"
         const val KEY_READER_DOUBLE_PAGE = "reader_double_page"
         const val KEY_READER_MODE = "reader_mode"
         const val KEY_THEME_MODE = "theme_mode"

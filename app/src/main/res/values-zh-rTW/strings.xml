@@ -91,9 +91,16 @@
     <string name="auth_api_key">API Key</string>
     <string name="auth_username_password">帳號密碼</string>
 
-    <!-- 設定：主頁 -->
-    <string name="settings_home">主頁設定</string>
-    <string name="settings_home_summary">主頁區塊數量與排序</string>
+    <!-- 設定：書庫（原「主頁設定」） -->
+    <string name="settings_home">書庫</string>
+    <string name="settings_home_summary">主頁、預覽圖與快取</string>
+    <string name="settings_preview_images">預覽圖</string>
+    <string name="settings_preview_images_summary">預覽圖的即時重新整理與快取管理（上限設為 0 即每次重新整理重新獲取）</string>
+    <string name="settings_clear_cover_cache">清空預覽圖快取</string>
+    <string name="settings_clear_cover_cache_summary">點擊後清除快取，方便重建</string>
+    <string name="settings_cover_cache_cleared">預覽圖快取已清空</string>
+    <string name="settings_cache_limit">快取上限</string>
+    <string name="settings_cache_limit_summary">預覽圖磁碟快取上限（0 = 不快取/即時，最高 500M，預設 100M）</string>
     <string name="settings_section_limit">每區塊顯示數量</string>
     <string name="settings_home_sections">主頁區塊</string>
     <string name="settings_home_sections_summary">顯示/隱藏區塊，用上下按鈕調整順序（主頁由上到下顯示）</string>

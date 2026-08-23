@@ -2,6 +2,7 @@ package app.mihonsy.komga.ui
 
 import android.content.Intent
 import android.content.res.Configuration
+import coil3.ImageLoader
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -2681,6 +2682,16 @@ private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Conte
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     var sectionOrder by remember { mutableStateOf(prefs.homeSectionOrder) }
 
+    // 预览图分项：缓存上限（M，0 = 不缓存）+ 清空缓存。
+    var cacheLimitMb by remember { mutableStateOf((prefs.coverCacheLimitBytes / (1024 * 1024)).toInt()) }
+    // 磁盘缓存大小（bytes），用于展示当前占用。
+    val diskCacheDir = java.io.File(context.cacheDir, "komga_covers")
+    fun diskCacheSizeMb(): Long {
+        if (!diskCacheDir.exists()) return 0L
+        return diskCacheDir.walkTopDown().filter { it.isFile }.map { it.length() }.sum() / (1024 * 1024)
+    }
+    var cacheUsedMb by remember { mutableStateOf(diskCacheSizeMb()) }
+
     fun persistOrder(order: List<HomeSection>) {
         sectionOrder = order.joinToString(",") { it.name }
         prefs.homeSectionOrder = sectionOrder
@@ -2778,6 +2789,57 @@ private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Conte
                         Text(composeStringResource(R.string.settings_show))
                     }
                 }
+            }
+
+            // ---------- 预览图分项 ----------
+            item { PreferenceGroupHeader(composeStringResource(R.string.settings_preview_images)) }
+            item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text(
+                        text = composeStringResource(R.string.settings_cache_limit_summary),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Slider(
+                        value = cacheLimitMb.toFloat(),
+                        onValueChange = {
+                            val mb = it.toInt().coerceIn(0, 500)
+                            cacheLimitMb = mb
+                            prefs.coverCacheLimitBytes = mb * 1024L * 1024L
+                        },
+                        valueRange = 0f..500f,
+                        steps = 9, // 0,50,100,...,500
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = if (cacheLimitMb == 0) "0 M（不缓存 / 实时预览）"
+                        else "$cacheLimitMb M（当前占用约 ${cacheUsedMb}M）",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            item {
+                TextPreferenceWidget(
+                    title = composeStringResource(R.string.settings_clear_cover_cache),
+                    subtitle = composeStringResource(R.string.settings_clear_cover_cache_summary),
+                    icon = Icons.Filled.Delete,
+                    onPreferenceClick = {
+                        // 清空 Coil 磁盘缓存（komga_covers）。设置变更下次重建时生效，
+                        // 这里直接清现有目录，立即释放空间。
+                        runCatching {
+                            coil3.ImageLoader(context.applicationContext).diskCache?.clear()
+                            diskCacheDir.deleteRecursively()
+                        }
+                        cacheUsedMb = 0L
+                        Toast.makeText(
+                            context.applicationContext,
+                            context.getString(R.string.settings_cover_cache_cleared),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                )
             }
         }
     }

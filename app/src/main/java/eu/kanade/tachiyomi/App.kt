@@ -262,13 +262,17 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             )
 
             // SY: Komga cover disk cache. Decoded thumbnails persist across
-            // screen changes and app restarts (LRU, 300 MiB). HTTP-level
-            // revalidation (etag/304) is handled by NetworkHelper's OkHttp
-            // cache, so a changed server cover is picked up automatically.
+            // screen changes and app restarts (LRU). Size comes from the
+            // user's "cache limit" preference (default 100 MiB, max 500 MiB),
+            // set under 书库 → 预览图. HTTP-level revalidation (etag/304) is
+            // handled by NetworkHelper's OkHttp cache, so a changed server
+            // cover is picked up automatically.
+            val coverCacheLimit = app.mihonsy.komga.data.KomgaPreferences(context.applicationContext)
+                .coverCacheLimitBytes
             diskCache(
                 DiskCache.Builder()
                     .directory(File(context.cacheDir, "komga_covers").toOkioPath())
-                    .maxSizeBytes(300L * 1024 * 1024) // 300 MiB
+                    .maxSizeBytes(coverCacheLimit)
                     .build(),
             )
 
