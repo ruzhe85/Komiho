@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
@@ -126,6 +127,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import sh.calvin.reorderable.ReorderableItem
@@ -2456,6 +2458,8 @@ private fun SettingsTab(context: android.content.Context) {
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     var showAppearance by remember { mutableStateOf(false) }
     var showHome by remember { mutableStateOf(false) }
+    var showHomePage by remember { mutableStateOf(false) }
+    var showPreview by remember { mutableStateOf(false) }
     var showServer by remember { mutableStateOf(false) }
     var showReaderSettings by remember { mutableStateOf(false) }
 
@@ -2501,7 +2505,38 @@ private fun SettingsTab(context: android.content.Context) {
         SettingsCategoryDialog(
             onDismiss = { showHome = false },
             title = composeStringResource(R.string.settings_home),
-        ) { padding -> KomgaHomeSettings(Modifier.padding(padding), context) }
+        ) { padding ->
+            LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+                item {
+                    TextPreferenceWidget(
+                        title = composeStringResource(R.string.settings_home_page),
+                        subtitle = composeStringResource(R.string.settings_home_page_summary),
+                        icon = Icons.Filled.Home,
+                        onPreferenceClick = { showHomePage = true },
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
+                        title = composeStringResource(R.string.settings_preview_images),
+                        subtitle = composeStringResource(R.string.settings_preview_images_summary),
+                        icon = Icons.Filled.Image,
+                        onPreferenceClick = { showPreview = true },
+                    )
+                }
+            }
+        }
+    }
+    if (showHomePage) {
+        SettingsCategoryDialog(
+            onDismiss = { showHomePage = false },
+            title = composeStringResource(R.string.settings_home_page),
+        ) { padding -> KomgaHomeSectionsSettings(Modifier.padding(padding), context) }
+    }
+    if (showPreview) {
+        SettingsCategoryDialog(
+            onDismiss = { showPreview = false },
+            title = composeStringResource(R.string.settings_preview_images),
+        ) { padding -> KomgaPreviewSettings(Modifier.padding(padding), context) }
     }
     if (showServer) {
         SettingsCategoryDialog(
@@ -2677,13 +2712,109 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
     }
 }
 
+private const val HOME_SECTION_DIVIDER = "__HOME_SECTION_DIVIDER__"
+
+/**
+ * 书库 → 主页 → 区块调整。
+ * 单列表：活动区块在上方，隐藏分界线以下为已隐藏（划线置灰）。
+ * 拖拽跨过分界线即切换显示/隐藏；活动区内、隐藏区内可各自排序。
+ */
 @Composable
-private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Context) {
+private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.content.Context) {
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     var sectionOrder by remember { mutableStateOf(prefs.homeSectionOrder) }
 
-    // 预览图分项：缓存上限（M，0 = 不缓存）+ 清空缓存。
+    val visibleNames = remember(sectionOrder) {
+        sectionOrder.split(',')
+            .mapNotNull { name -> runCatching { HomeSection.valueOf(name) }.getOrNull()?.name }
+    }
+    val hiddenNames = remember(sectionOrder) {
+        HomeSection.entries.filter { it.name !in visibleNames }.map { it.name }
+    }
+
+    // 全序列表（String）：活动区 + 分隔线 + 隐藏区。分隔线位置即活动区项数。
+    val orderedAll = remember {
+        (visibleNames + listOf(HOME_SECTION_DIVIDER) + hiddenNames).toMutableStateList()
+    }
+    LaunchedEffect(sectionOrder) {
+        val vis = sectionOrder.split(',')
+            .mapNotNull { name -> runCatching { HomeSection.valueOf(name) }.getOrNull()?.name }
+        val hid = HomeSection.entries.filter { it.name !in vis }.map { it.name }
+        orderedAll.clear()
+        orderedAll.addAll(vis + listOf(HOME_SECTION_DIVIDER) + hid)
+    }
+
+    val lazyListState = rememberLazyListState()
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val fromKey = from.key.toString()
+        if (fromKey == HOME_SECTION_DIVIDER) return@rememberReorderableLazyListState
+        val fromIndex = orderedAll.indexOf(fromKey)
+        val toIndex = orderedAll.indexOf(to.key.toString())
+        if (fromIndex == -1 || toIndex == -1) return@rememberReorderableLazyListState
+        val moved = orderedAll.removeAt(fromIndex)
+        orderedAll.add(toIndex, moved)
+        // 分隔线之前的项视作活动区，持久化为 homeSectionOrder。
+        val dividerIdx = orderedAll.indexOf(HOME_SECTION_DIVIDER)
+        val active = orderedAll.subList(0, dividerIdx).filter { it != HOME_SECTION_DIVIDER }
+        sectionOrder = active.joinToString(",")
+        prefs.homeSectionOrder = sectionOrder
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        state = lazyListState,
+    ) {
+        items(orderedAll, key = { it }) { key ->
+            if (key == HOME_SECTION_DIVIDER) {
+                // 隐藏分界线（不可拖拽）。
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+                Text(
+                    text = composeStringResource(R.string.settings_hidden),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            } else {
+                val section = HomeSection.valueOf(key)
+                val isHidden = orderedAll.indexOf(key) > orderedAll.indexOf(HOME_SECTION_DIVIDER)
+                ReorderableItem(reorderableState, key) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.DragHandle,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .padding(horizontal = 4.dp)
+                                .draggableHandle(),
+                        )
+                        Text(
+                            text = section.labelText(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isHidden) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                            textDecoration = if (isHidden) TextDecoration.LineThrough else null,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 书库 → 预览图 → 缓存设置。
+ * 缓存上限滑块（0 = 不缓存/实时，最高 500M，默认 100M）+ 清空预览图缓存按钮。
+ */
+@Composable
+private fun KomgaPreviewSettings(modifier: Modifier, context: android.content.Context) {
+    val prefs = remember { KomgaPreferences(context.applicationContext) }
     var cacheLimitMb by remember { mutableStateOf((prefs.coverCacheLimitBytes / (1024 * 1024)).toInt()) }
+
     // 磁盘缓存大小（bytes），用于展示当前占用。
     val diskCacheDir = java.io.File(context.cacheDir, "komga_covers")
     fun diskCacheSizeMb(): Long {
@@ -2692,155 +2823,53 @@ private fun KomgaHomeSettings(modifier: Modifier, context: android.content.Conte
     }
     var cacheUsedMb by remember { mutableStateOf(diskCacheSizeMb()) }
 
-    fun persistOrder(order: List<HomeSection>) {
-        sectionOrder = order.joinToString(",") { it.name }
-        prefs.homeSectionOrder = sectionOrder
-    }
-
-    val visibleSections = remember(sectionOrder) {
-        sectionOrder.split(',')
-            .mapNotNull { name -> runCatching { HomeSection.valueOf(name) }.getOrNull() }
-    }
-    val hiddenSections = remember(sectionOrder) {
-        HomeSection.entries.filter { it !in visibleSections }
-    }
-
-    val lazyListState = rememberLazyListState()
-    val orderedSections = remember { visibleSections.toMutableStateList() }
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val fromIndex = orderedSections.indexOfFirst { it.name == from.key }
-        val toIndex = orderedSections.indexOfFirst { it.name == to.key }
-        if (fromIndex != -1 && toIndex != -1 && fromIndex != toIndex) {
-            val item = orderedSections.removeAt(fromIndex)
-            orderedSections.add(toIndex, item)
-            persistOrder(orderedSections.toList())
-        }
-    }
-    LaunchedEffect(sectionOrder) {
-        if (!reorderableState.isAnyItemDragging) {
-            orderedSections.clear()
-            orderedSections.addAll(visibleSections)
-        }
-    }
-
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        state = lazyListState,
-    ) {
-        item { PreferenceGroupHeader(composeStringResource(R.string.settings_home)) }
+    LazyColumn(modifier.fillMaxSize()) {
         item {
-            Text(
-                text = composeStringResource(R.string.settings_home_sections_summary),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(16.dp),
-            )
-        }
-        items(orderedSections, key = { it.name }) { section ->
-            ReorderableItem(reorderableState, section.name) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.DragHandle,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .draggableHandle(),
-                    )
-                    Text(
-                        text = section.labelText(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = {
-                        val remaining = orderedSections.filter { it != section }
-                        orderedSections.clear()
-                        orderedSections.addAll(remaining)
-                        persistOrder(remaining)
-                    }) {
-                        Text(composeStringResource(R.string.settings_hide))
-                    }
-                }
-            }
-        }
-        if (hiddenSections.isNotEmpty()) {
-            item {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text(
-                    text = composeStringResource(R.string.settings_hidden),
+                    text = composeStringResource(R.string.settings_cache_limit_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Slider(
+                    value = cacheLimitMb.toFloat(),
+                    onValueChange = {
+                        val mb = it.toInt().coerceIn(0, 500)
+                        cacheLimitMb = mb
+                        prefs.coverCacheLimitBytes = mb * 1024L * 1024L
+                    },
+                    valueRange = 0f..500f,
+                    steps = 9, // 0,50,100,...,500
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = if (cacheLimitMb == 0) "0 M（不缓存 / 实时预览）"
+                    else "$cacheLimitMb M（当前占用约 ${cacheUsedMb}M）",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
-            items(hiddenSections) { section ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = section.labelText(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { persistOrder(visibleSections + section) }) {
-                        Text(composeStringResource(R.string.settings_show))
+        }
+        item {
+            TextPreferenceWidget(
+                title = composeStringResource(R.string.settings_clear_cover_cache),
+                icon = Icons.Filled.Delete,
+                onPreferenceClick = {
+                    // 清空 Coil 磁盘缓存（komga_covers）。设置变更下次重建时生效，
+                    // 这里直接清现有目录，立即释放空间。
+                    runCatching {
+                        coil3.ImageLoader(context.applicationContext).diskCache?.clear()
+                        diskCacheDir.deleteRecursively()
                     }
-                }
-            }
-
-            // ---------- 预览图分项 ----------
-            item { PreferenceGroupHeader(composeStringResource(R.string.settings_preview_images)) }
-            item {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Text(
-                        text = composeStringResource(R.string.settings_cache_limit_summary),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Slider(
-                        value = cacheLimitMb.toFloat(),
-                        onValueChange = {
-                            val mb = it.toInt().coerceIn(0, 500)
-                            cacheLimitMb = mb
-                            prefs.coverCacheLimitBytes = mb * 1024L * 1024L
-                        },
-                        valueRange = 0f..500f,
-                        steps = 9, // 0,50,100,...,500
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = if (cacheLimitMb == 0) "0 M（不缓存 / 实时预览）"
-                        else "$cacheLimitMb M（当前占用约 ${cacheUsedMb}M）",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            item {
-                TextPreferenceWidget(
-                    title = composeStringResource(R.string.settings_clear_cover_cache),
-                    subtitle = composeStringResource(R.string.settings_clear_cover_cache_summary),
-                    icon = Icons.Filled.Delete,
-                    onPreferenceClick = {
-                        // 清空 Coil 磁盘缓存（komga_covers）。设置变更下次重建时生效，
-                        // 这里直接清现有目录，立即释放空间。
-                        runCatching {
-                            coil3.ImageLoader(context.applicationContext).diskCache?.clear()
-                            diskCacheDir.deleteRecursively()
-                        }
-                        cacheUsedMb = 0L
-                        Toast.makeText(
-                            context.applicationContext,
-                            context.getString(R.string.settings_cover_cache_cleared),
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    },
-                )
-            }
+                    cacheUsedMb = 0L
+                    Toast.makeText(
+                        context.applicationContext,
+                        context.getString(R.string.settings_cover_cache_cleared),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
+            )
         }
     }
 }

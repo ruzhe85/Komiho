@@ -94,18 +94,17 @@
     <!-- Settings: library (was "home settings") -->
     <string name="settings_home">Library</string>
     <string name="settings_home_summary">Home, preview images &amp; cache</string>
+    <string name="settings_home_page">Home</string>
+    <string name="settings_home_page_summary">Section layout &amp; display</string>
     <string name="settings_preview_images">Preview images</string>
-    <string name="settings_preview_images_summary">Live refresh and cache management (set limit to 0 to re-fetch every refresh)</string>
+    <string name="settings_preview_images_summary">Cache settings</string>
     <string name="settings_clear_cover_cache">Clear preview image cache</string>
-    <string name="settings_clear_cover_cache_summary">Tap to clear the cache so it can be rebuilt</string>
     <string name="settings_cover_cache_cleared">Preview image cache cleared</string>
     <string name="settings_cache_limit">Cache limit</string>
-    <string name="settings_cache_limit_summary">Disk cache cap for preview images (0 = no cache/live, max 500M, default 100M)</string>
+    <string name="settings_cache_limit_hint">Cache 0 = live refresh (max 500M, default 100M)</string>
     <string name="settings_section_limit">Items per section</string>
     <string name="settings_home_sections">Home sections</string>
-    <string name="settings_home_sections_summary">Show/hide sections, reorder with the up/down buttons (top to bottom on Home)</string>
-    <string name="settings_hide">Hide</string>
-    <string name="settings_hidden">Hidden</string>
+    <string name="settings_hidden">Hidden (drag up to restore)</string>
     <string name="settings_show">Show</string>
     <string name="home_layout">Layout</string>
     <string name="home_layout_carousel">Carousel</string>
