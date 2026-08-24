@@ -100,10 +100,10 @@ class KomgaApiClient(
             readStatus?.let { put("read_status", it) }
             genre?.let { put("genre", it) }
             tag?.let { put("tag", it) }
-            // Komga GET /api/v1/series (1.24) author filter param is "authors"
-            // (plural), value format "name,role". The singular "author" is not
-            // recognized and gets silently dropped → returns all series.
-            author?.let { put("authors", it) }
+            // Komga GET /api/v1/series author filter param is "author" (singular),
+            // value format "name,role". Using the plural "authors" is silently
+            // ignored by Komga → returns all series (filter appears to do nothing).
+            author?.let { put("author", it) }
             put("page", page.toString())
             put("size", size.toString())
             sort?.let { put("sort", it) }
