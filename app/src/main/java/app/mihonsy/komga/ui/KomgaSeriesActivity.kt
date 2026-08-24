@@ -2,6 +2,7 @@ package app.mihonsy.komga.ui
 
 import eu.kanade.tachiyomi.R
 import android.content.res.Configuration
+import androidx.compose.ui.res.stringResource as composeStringResource
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -346,32 +347,29 @@ private fun SeriesHeader(
                 }
             }
         }
-        // Tag chips — tapping one jumps to the Library filtered by that tag
-        // (matches Komga WebUI behaviour). Genres + tags are merged and shown
-        // as individual clickable chips.
-        val tags = series.metadata.genres + series.metadata.tags
-        if (tags.isNotEmpty()) {
+        // Genre + tag chips. Komga exposes genres and tags as SEPARATE filter
+        // facets (genre / tag query params), so we emit them with distinct types
+        // — tapping a genre filters by genre, a tag by tag. Both jump to the
+        // Library filtered cross-library (Komga WebUI / Komelia parity).
+        if (series.metadata.genres.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                tags.take(12).forEach { tag ->
-                    Surface(
-                        shape = MaterialTheme.shapes.small,
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { onChipClick("tag", tag) },
-                    ) {
-                        Text(
-                            text = tag,
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        )
-                    }
-                }
-            }
+            Text(
+                text = composeStringResource(R.string.detail_genres_label),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            FilterChipRow(series.metadata.genres.take(12)) { onChipClick("genre", it) }
+        }
+        if (series.metadata.tags.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = composeStringResource(R.string.detail_tags_label),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            FilterChipRow(series.metadata.tags.take(12)) { onChipClick("tag", it) }
         }
         val summary = series.metadata.summary
         if (summary?.isNotBlank() == true) {
@@ -452,6 +450,34 @@ private fun AuthorChips(
             ) {
                 Text(
                     text = "$role${author.name}",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Reusable row of clickable filter chips (genres / tags) used on the series detail page. */
+@Composable
+private fun FilterChipRow(
+    items: List<String>,
+    onChipClick: (String) -> Unit,
+) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        items.forEach { item ->
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable { onChipClick(item) },
+            ) {
+                Text(
+                    text = item,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                 )

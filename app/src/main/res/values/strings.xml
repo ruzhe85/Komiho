@@ -54,7 +54,10 @@
     <string name="load_series_failed">加载系列失败：%1$s</string>
     <string name="no_series_in_library">该库暂无系列</string>
     <string name="filter_tag_active">按标签筛选：%1$s</string>
+    <string name="filter_genre_active">按类型筛选：%1$s</string>
     <string name="filter_author_active">按作者筛选：%1$s</string>
+    <string name="detail_genres_label">类型</string>
+    <string name="detail_tags_label">标签</string>
     <string name="clear">清除</string>
     <string name="cd_filter_sort">筛选/排序</string>
     <string name="read_status_header">阅读状态</string>
@@ -67,7 +70,6 @@
     <string name="sort_date_added">添加时间</string>
     <string name="sort_date_updated">更新时间</string>
     <string name="sort_date_read">阅读日期</string>
-    <string name="sort_release_date">发布日期</string>
     <string name="display_compact_grid">紧凑网格</string>
     <string name="display_comfortable_grid">舒适网格</string>
     <string name="display_list">列表</string>

@@ -242,10 +242,13 @@ private fun KomgaMainScreen(
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
 
-    // Filter coming from the Series detail page (tap tag/author → filter Library).
-    // Null = no active filter. Survives recomposition; cleared by the chip ✕.
-    var libraryFilterType by remember { mutableStateOf(filterSignal.value?.first) }
-    var libraryFilterValue by remember { mutableStateOf(filterSignal.value?.second) }
+    // Filter coming from the Series detail page (tap tag/genre/author → filter Library).
+    // Driven reactively by filterSignal so taps arriving via onNewIntent (when this
+    // Activity instance is reused) actually apply. (Previously captured once with
+    // remember{} and never updated → opening a tag/author showed the whole library.)
+    val activeLibraryFilter by filterSignal.collectAsState()
+    val libraryFilterType = activeLibraryFilter?.first
+    val libraryFilterValue = activeLibraryFilter?.second
 
     // Tab state is preserved across configuration changes by the Activity's
     // configChanges flag (orientation). rememberSaveable additionally keeps
@@ -306,12 +309,12 @@ private fun KomgaMainScreen(
     }
     // A filter handed in from the Series detail page means "open Library filtered".
     // Driven by filterSignal so both the initial onCreate and subsequent
-    // onNewIntent (CLEAR_TOP+SINGLE_TOP reuses this instance) are covered.
+    // onNewIntent (CLEAR_TOP+SINGLE_TOP reuses this instance) are covered. The
+    // actual filter values are already derived reactively from filterSignal above;
+    // here we just jump to the Library tab when a filter arrives.
     val filterPair by filterSignal.collectAsState()
     LaunchedEffect(filterPair) {
         if (!filterPair?.first.isNullOrBlank() && !filterPair?.second.isNullOrBlank()) {
-            libraryFilterType = filterPair!!.first
-            libraryFilterValue = filterPair!!.second
             currentTab = MainTab.Library.ordinal
         }
     }
@@ -489,7 +492,7 @@ private fun KomgaMainScreen(
                         onReadFilterChange = { libraryReadFilter = it },
                         filterType = libraryFilterType,
                         filterValue = libraryFilterValue,
-                        onFilterClear = { libraryFilterType = null; libraryFilterValue = null },
+                        onFilterClear = { filterSignal.value = null },
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
@@ -1449,13 +1452,18 @@ private fun LibraryTab(
     // (ShelfOptionsMenu); this tab just renders from them.
 
     suspend fun reload() {
-        if (selectedLibraryId != null) {
+        // A tag/genre/author filter is cross-library: we intentionally omit library_id
+        // so Komga searches across ALL libraries (Komga WebUI / Komelia parity). When no
+        // filter is active we scope to the selected library as before.
+        val isCrossLibraryFilter = !filterType.isNullOrBlank()
+        if (selectedLibraryId != null || isCrossLibraryFilter) {
             loading = true
             runCatching {
                 client.getSeries(
-                    libraryId = selectedLibraryId,
+                    libraryId = if (isCrossLibraryFilter) null else selectedLibraryId,
                     readStatus = readFilter.komgaValue,
                     tag = if (filterType == "tag") filterValue else null,
+                    genre = if (filterType == "genre") filterValue else null,
                     author = if (filterType == "author") filterValue else null,
                     sort = sort.komgaSort,
                     size = 200,
@@ -1469,13 +1477,18 @@ private fun LibraryTab(
 
     LaunchedEffect(selectedLibraryId, readFilter, sort, refreshTick, filterType, filterValue) { reload() }
 
-    // Date read now uses server-side sort (readProgress.readDate), so no client-side fallback is needed.
+    // Series-level date-read sort uses the Komga series property `readDate` (not the book-level
+    // `readProgress.readDate`, which the series endpoint does not recognise and silently ignores).
     val sortedSeries = series
 
     Column(Modifier.fillMaxSize()) {
-        // ── Active tag/author filter chip (from Series detail page tap) ──
+        // ── Active tag/genre/author filter chip (from Series detail page tap) ──
         if (!filterType.isNullOrBlank() && !filterValue.isNullOrBlank()) {
-            val labelRes = if (filterType == "author") R.string.filter_author_active else R.string.filter_tag_active
+            val labelRes = when (filterType) {
+                "author" -> R.string.filter_author_active
+                "genre" -> R.string.filter_genre_active
+                else -> R.string.filter_tag_active
+            }
             // author filter value is "name,role"; show only the name in the chip.
             val displayValue = if (filterType == "author") filterValue.substringBefore(",") else filterValue
             Surface(
@@ -1773,8 +1786,7 @@ private enum class LibrarySortBy(
     Name(R.string.sort_name, "name", "name", false),
     DateAdded(R.string.sort_date_added, "dateAdded", "createdDate", true),
     DateUpdated(R.string.sort_date_updated, "dateUpdated", "lastModifiedDate", true),
-    DateRead(R.string.sort_date_read, "dateRead", "readProgress.readDate", true),
-    ReleaseDate(R.string.sort_release_date, "releaseDate", "metadata.releaseDate", true);
+    DateRead(R.string.sort_date_read, "lastread", "readDate", true);
 
     @Composable
     fun labelText(): String = composeStringResource(labelRes)
@@ -1801,7 +1813,7 @@ private data class LibrarySort(
             val by = when (key.lowercase()) {
                 "title" -> LibrarySortBy.Name
                 "lastmodified" -> LibrarySortBy.DateUpdated
-                "lastread" -> LibrarySortBy.DateRead
+                "lastread", "dateread" -> LibrarySortBy.DateRead
                 else -> LibrarySortBy.entries.find { it.prefKey == key } ?: LibrarySortBy.Name
             }
             return LibrarySort(by, descending)

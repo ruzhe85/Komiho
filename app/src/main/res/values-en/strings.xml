@@ -52,6 +52,11 @@
     <!-- Library -->
     <string name="load_series_failed">Failed to load series: %1$s</string>
     <string name="no_series_in_library">No series in this library</string>
+    <string name="filter_tag_active">Filtered by tag: %1$s</string>
+    <string name="filter_genre_active">Filtered by genre: %1$s</string>
+    <string name="filter_author_active">Filtered by author: %1$s</string>
+    <string name="detail_genres_label">Genres</string>
+    <string name="detail_tags_label">Tags</string>
     <string name="cd_filter_sort">Filter/sort</string>
     <string name="read_status_header">Read status</string>
     <string name="sort_header">Sort</string>
@@ -63,7 +68,6 @@
     <string name="sort_date_added">Date added</string>
     <string name="sort_date_updated">Date updated</string>
     <string name="sort_date_read">Date read</string>
-    <string name="sort_release_date">Release date</string>
     <string name="display_compact_grid">Compact grid</string>
     <string name="display_comfortable_grid">Comfortable grid</string>
     <string name="display_list">List</string>
