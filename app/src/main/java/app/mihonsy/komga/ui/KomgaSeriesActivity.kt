@@ -203,13 +203,15 @@ private fun KomgaSeriesScreen(seriesId: String) {
                         series = s,
                         books = books,
                         onChipClick = { type, value ->
-                            // Komga WebUI parity: tap a tag/author → Library filtered by it.
+                            // Komga WebUI parity: tap a tag/author → open the Library
+                            // filtered by it. DO NOT finish() this SeriesActivity and DO
+                            // NOT use CLEAR_TOP: we must keep the series page underneath in
+                            // the back stack so the back gesture returns to it. (Back =
+                            // previous series page; the chip ✕ = clear filter and stay.)
                             val intent = android.content.Intent(context, KomgaMainActivity::class.java)
                                 .putExtra("filterType", type)
                                 .putExtra("filterValue", value)
-                                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
                             context.startActivity(intent)
-                            (context as? android.app.Activity)?.finish()
                         },
                     )
                     val nextBook = books.firstOrNull { it.readProgress?.completed != true }
