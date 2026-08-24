@@ -323,15 +323,19 @@ private fun KomgaMainScreen(
         searchOpen = false
     }
 
-    // 统一返回手势处理：KomgaMainActivity 是 task 根 Activity，内部 4 个 tab +
-    // 选库态 + 搜索态 + 菜单态都靠本地状态切换（无返回栈），必须手动拦截，
-    // 否则返回手势会直接 finish Activity = 退出程序。
-    // 优先级：选择态→退出选择；搜索框/菜单/picker 打开→关闭；
+    // 统一返回手势处理：KomgaMainActivity 通常是 task 根 Activity，内部 4 个 tab +
+    // 选库态 + 搜索态 + 菜单态都靠本地状态切换（无返回栈），必须拦截返回手势
+    // 避免退出程序。但当本实例是被 Series 详情页调起（点 tag/作者 → 过滤库）时，
+    // 它不是 task 根——Series 页在它下面，此时绝不能拦截 tab/选库返回，只拦截
+    // 本地 UI 态（搜索/菜单/选库对话框），其余交还系统 → 返回手势回 Series 页。
+    // 优先级（仅根实例）：选择态→退出选择；搜索框/菜单/picker 打开→关闭；
     // Library 且已选库→先清空选库（回到选库界面）；非 Home tab→回 Home；
     // Home 根→交还系统默认（退出程序）。
+    val isRootActivity = (context as? android.app.Activity)?.isTaskRoot ?: true
     val interceptBack = searchOpen || shelfMenuOpen || libraryPickerOpen ||
-        (currentTab == MainTab.Library.ordinal && selectedLibraryId != null) ||
-        currentTab != MainTab.Home.ordinal
+        (isRootActivity &&
+            ((currentTab == MainTab.Library.ordinal && selectedLibraryId != null) ||
+             currentTab != MainTab.Home.ordinal))
     BackHandler(enabled = interceptBack) {
         when {
             searchOpen -> searchOpen = false
