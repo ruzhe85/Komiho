@@ -7,32 +7,15 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
-    <!-- Storage -->
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        tools:ignore="ScopedStorage" />
-
-    <!-- For background jobs -->
+    <!-- Foreground-service permissions kept because WorkManager's
+         SystemForegroundService (dataSync type) is merged into the manifest
+         and requires them on Android 14+. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- For managing extensions -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
-    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
-    <!-- To view extension packages in API 30+ -->
-    <uses-permission
-        android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
-
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission
-        android:name="android.permission.READ_APP_SPECIFIC_LOCALES"
-        tools:ignore="ProtectedPermissions" />
-
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- The following were inherited from the MihonSY fork and are not used
+         by a LAN-only Komga client (storage / extension management / boot /
+         query packages / notifications / locale). -->
 
     <!-- Remove unnecessary permissions from Firebase dependency -->
     <uses-permission
@@ -244,59 +227,13 @@
             android:configChanges="uiMode|orientation|screenSize"
             android:exported="false" />
 
-        <activity
-            android:name=".extension.util.ExtensionInstallActivity"
-            android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-        <activity
-            android:name=".ui.setting.track.TrackLoginActivity"
-            android:exported="true"
-            android:label="@string/track_activity_name">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
 
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="mihon" />
-
-                <data android:host="anilist-auth" />
-                <data android:host="bangumi-auth" />
-                <data android:host="mangabaka-auth" />
-                <data android:host="myanimelist-auth" />
-                <data android:host="shikimori-auth" />
-                <data android:host="hikka-auth" />
-            </intent-filter>
-        </activity>
-        <activity
-            android:name=".ui.setting.track.GoogleDriveLoginActivity"
-            android:label="GoogleDrive"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:scheme="eu.kanade.google.oauth" />
-            </intent-filter>
-        </activity>
-
-        <activity
-            android:name="exh.ui.login.EhLoginActivity"
-            android:label="EHentaiLogin"
-            android:exported="false"/>
 
         <receiver
             android:name=".data.notification.NotificationReceiver"
             android:exported="false" />
 
-        <service
-            android:name=".extension.util.ExtensionInstallService"
-            android:exported="false"
-            android:foregroundServiceType="shortService" />
 
         <service
             android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
@@ -322,13 +259,6 @@
                 android:resource="@xml/provider_paths" />
         </provider>
 
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:enabled="true"
-            android:exported="true"
-            android:multiprocess="false"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <meta-data
             android:name="android.webkit.WebView.EnableSafeBrowsing"
@@ -350,142 +280,7 @@
             android:name="google_analytics_adid_collection_enabled"
             android:value="false" />
 
-        <!-- EH -->
-        <activity
-            android:name="exh.ui.intercept.InterceptActivity"
-            android:label="@string/app_name"
-            android:theme="@style/Theme.Tachiyomi"
-            android:exported="true">
-            <!-- E-Hentai -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
 
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="https" />
-                <data android:scheme="http" />
-
-                <data android:host="e-hentai.org" />
-                <data android:host="www.e-hentai.org" />
-                <data android:host="g.e-hentai.org" />
-
-                <data android:pathPattern="/g/..*" />
-            </intent-filter>
-            <!-- ExHentai -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="https" />
-                <data android:scheme="http" />
-
-                <data android:host="exhentai.org" />
-                <data android:host="www.exhentai.org" />
-
-                <data android:pathPattern="/g/..*" />
-            </intent-filter>
-            <!-- NHentai -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="https" />
-                <data android:scheme="http" />
-
-                <data android:host="nhentai.net" />
-                <data android:host="www.nhentai.net" />
-
-                <data android:pathPattern="/g/..*" />
-            </intent-filter>
-            <!-- Tsumino -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="https" />
-                <data android:scheme="http" />
-
-                <data android:host="tsumino.com" />
-                <data android:host="www.tsumino.com" />
-
-                <data android:pathPattern="/Read/View/..*" />
-                <data android:pathPattern="/Book/Info/..*" />
-            </intent-filter>
-            <!-- Pururin -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="https" />
-                <data android:scheme="http" />
-
-                <data android:host="pururin.me" />
-
-                <data android:pathPattern="/gallery/..*" />
-            </intent-filter>
-            <!-- HBrowse -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="https" />
-                <data android:scheme="http" />
-
-                <data android:host="hbrowse.com" />
-                <data android:host="www.hbrowse.com" />
-
-                <!--<data android:pathPattern="/gallery/..*" />-->
-            </intent-filter>
-            <!-- Mangadex -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="https" />
-
-                <data android:host="mangadex.org" />
-                <data android:host="mangadex.cc" />
-                <data android:host="www.mangadex.org" />
-                <data android:host="www.mangadex.cc" />
-
-                <data android:pathPattern="/manga/..*" />
-                <data android:pathPattern="/title/..*" />
-                <data android:pathPattern="/chapter/..*" />
-            </intent-filter>
-        </activity>
-
-        <activity
-            android:name="exh.md.MangaDexLoginActivity"
-            android:label="MangaDexLogin"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="mangadex-auth"
-                    android:scheme="tachiyomisy" />
-            </intent-filter>
-        </activity>
-
-        <activity
-            android:name="com.journeyapps.barcodescanner.CaptureActivity"
-            tools:remove="screenOrientation" />
     </application>
 
     <uses-sdk tools:overrideLibrary="rikka.shizuku.api"
