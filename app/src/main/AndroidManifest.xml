@@ -81,6 +81,7 @@
         <activity
             android:name="app.mihonsy.komga.ui.KomgaMainActivity"
             android:exported="false"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
         </activity>
 
