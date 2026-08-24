@@ -52,6 +52,11 @@
     <!-- 庫 -->
     <string name="load_series_failed">載入系列失敗：%1$s</string>
     <string name="no_series_in_library">此庫暫無系列</string>
+    <string name="filter_tag_active">依標籤篩選：%1$s</string>
+    <string name="filter_genre_active">依類型篩選：%1$s</string>
+    <string name="filter_author_active">依作者篩選：%1$s</string>
+    <string name="detail_genres_label">類型</string>
+    <string name="detail_tags_label">標籤</string>
     <string name="cd_filter_sort">篩選/排序</string>
     <string name="read_status_header">閱讀狀態</string>
     <string name="sort_header">排序</string>
@@ -63,7 +68,6 @@
     <string name="sort_date_added">新增時間</string>
     <string name="sort_date_updated">更新時間</string>
     <string name="sort_date_read">閱讀日期</string>
-    <string name="sort_release_date">發布日期</string>
     <string name="display_compact_grid">緊湊網格</string>
     <string name="display_comfortable_grid">舒適網格</string>
     <string name="display_list">列表</string>
