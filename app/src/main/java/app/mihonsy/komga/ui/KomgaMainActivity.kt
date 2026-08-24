@@ -496,7 +496,16 @@ private fun KomgaMainScreen(
                         onReadFilterChange = { libraryReadFilter = it },
                         filterType = libraryFilterType,
                         filterValue = libraryFilterValue,
-                        onFilterClear = { filterSignal.value = null },
+                        onFilterClear = {
+                            // 根实例（正常库页）：清除筛选、停留库页。
+                            // 非根实例（被 Series 详情页调起的过滤层）：✕ 等同关闭该层，回到系列页。
+                            val act = context as? android.app.Activity
+                            if (act != null && !act.isTaskRoot) {
+                                act.finish()
+                            } else {
+                                filterSignal.value = null
+                            }
+                        },
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
