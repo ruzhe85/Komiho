@@ -488,6 +488,7 @@ private fun KomgaMainScreen(
                     client,
                     displayMode = displayMode,
                     columns = columns,
+                    libraryScope = if (currentTab == MainTab.Library.ordinal) selectedLibraryId else null,
                 ) { seriesId ->
                     context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                 }
@@ -2571,6 +2572,7 @@ private fun EmbeddedSearch(
     modifier: Modifier = Modifier,
     displayMode: LibraryDisplayMode,
     columns: Int,
+    libraryScope: String? = null,
     onSeriesClick: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -2580,15 +2582,12 @@ private fun EmbeddedSearch(
     var searching by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // ── Komelia-style filter panel state ──
+    // ── Komelia-style filter panel state (Tags / Authors) ──
     var selTags by remember { mutableStateOf<List<String>>(emptyList()) }
-    var selGenres by remember { mutableStateOf<List<String>>(emptyList()) }
     var selAuthors by remember { mutableStateOf<List<AuthorDto>>(emptyList()) }
     var allTags by remember { mutableStateOf<List<String>>(emptyList()) }
-    var allGenres by remember { mutableStateOf<List<String>>(emptyList()) }
     var allAuthors by remember { mutableStateOf<List<AuthorDto>>(emptyList()) }
     var tagsOpen by remember { mutableStateOf(false) }
-    var genresOpen by remember { mutableStateOf(false) }
     var authorsOpen by remember { mutableStateOf(false) }
 
     fun authorValue(a: AuthorDto): String = if (a.role.isNullOrBlank()) a.name else "${a.name},${a.role}"
@@ -2600,7 +2599,6 @@ private fun EmbeddedSearch(
             client.getSeries(
                 search = q.ifBlank { null },
                 tag = selTags.ifEmpty { null },
-                genre = selGenres.ifEmpty { null },
                 author = selAuthors.map { authorValue(it) }.ifEmpty { null },
                 size = 100,
             ).content
@@ -2610,10 +2608,10 @@ private fun EmbeddedSearch(
         searching = false
     }
 
-    val hasFilter = selTags.isNotEmpty() || selGenres.isNotEmpty() || selAuthors.isNotEmpty()
+    val hasFilter = selTags.isNotEmpty() || selAuthors.isNotEmpty()
 
     // Re-run search when the query or any filter selection changes (debounced 300 ms).
-    LaunchedEffect(query, selTags, selGenres, selAuthors) {
+    LaunchedEffect(query, selTags, selAuthors) {
         if (query.isBlank() && !hasFilter) {
             results = emptyList()
             searching = false
@@ -2622,6 +2620,14 @@ private fun EmbeddedSearch(
             kotlinx.coroutines.delay(300)
             if (query.isNotBlank() || hasFilter) runSearch(query)
         }
+    }
+
+    // Dropdown caches must follow the active library scope: when the user switches
+    // between Home (all libraries) and a selected library tab, re-fetch the tag/author
+    // lists so they reflect the correct scope.
+    LaunchedEffect(libraryScope) {
+        allTags = emptyList()
+        allAuthors = emptyList()
     }
 
     Column(modifier.fillMaxWidth()) {
@@ -2659,7 +2665,7 @@ private fun EmbeddedSearch(
                     onClick = {
                         tagsOpen = true
                         if (allTags.isEmpty()) {
-                            scope.launch { allTags = runCatching { client.getSeriesTags() }.getOrDefault(emptyList()) }
+                            scope.launch { allTags = runCatching { client.getSeriesTags(libraryScope) }.getOrDefault(emptyList()) }
                         }
                     },
                     label = { Text(composeStringResource(R.string.filter_tags) + if (selTags.isNotEmpty()) " (${selTags.size})" else "") },
@@ -2682,38 +2688,11 @@ private fun EmbeddedSearch(
 
             Box {
                 FilterChip(
-                    selected = genresOpen,
-                    onClick = {
-                        genresOpen = true
-                        if (allGenres.isEmpty()) {
-                            scope.launch { allGenres = runCatching { client.getSeriesGenres() }.getOrDefault(emptyList()) }
-                        }
-                    },
-                    label = { Text(composeStringResource(R.string.filter_genres) + if (selGenres.isNotEmpty()) " (${selGenres.size})" else "") },
-                    trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
-                )
-                DropdownMenu(expanded = genresOpen, onDismissRequest = { genresOpen = false }) {
-                    if (allGenres.isEmpty()) {
-                        DropdownMenuItem(text = { Text(composeStringResource(R.string.no_match_results)) }, onClick = { genresOpen = false })
-                    }
-                    allGenres.forEach { g ->
-                        val checked = selGenres.contains(g)
-                        DropdownMenuItem(
-                            text = { Text(g) },
-                            trailingIcon = { if (checked) Icon(Icons.Filled.Check, contentDescription = null) },
-                            onClick = { selGenres = if (checked) selGenres - g else selGenres + g },
-                        )
-                    }
-                }
-            }
-
-            Box {
-                FilterChip(
                     selected = authorsOpen,
                     onClick = {
                         authorsOpen = true
                         if (allAuthors.isEmpty()) {
-                            scope.launch { allAuthors = runCatching { client.getSeriesAuthors() }.getOrDefault(emptyList()) }
+                            scope.launch { allAuthors = runCatching { client.getSeriesAuthors(libraryScope) }.getOrDefault(emptyList()) }
                         }
                     },
                     label = { Text(composeStringResource(R.string.filter_authors) + if (selAuthors.isNotEmpty()) " (${selAuthors.size})" else "") },
@@ -2752,14 +2731,6 @@ private fun EmbeddedSearch(
                         trailingIcon = { Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.clear)) },
                     )
                 }
-                selGenres.forEach { g ->
-                    FilterChip(
-                        selected = true,
-                        onClick = { selGenres = selGenres - g },
-                        label = { Text(g) },
-                        trailingIcon = { Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.clear)) },
-                    )
-                }
                 selAuthors.forEach { a ->
                     FilterChip(
                         selected = true,
@@ -2769,7 +2740,7 @@ private fun EmbeddedSearch(
                     )
                 }
                 TextButton(onClick = {
-                    selTags = emptyList(); selGenres = emptyList(); selAuthors = emptyList()
+                    selTags = emptyList(); selAuthors = emptyList()
                 }) { Text(composeStringResource(R.string.filter_clear)) }
             }
         }
