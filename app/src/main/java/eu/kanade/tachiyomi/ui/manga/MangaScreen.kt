@@ -42,6 +42,7 @@ import eu.kanade.presentation.util.isTabletUi
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.isLocalOrStub
 import eu.kanade.tachiyomi.source.online.HttpSource
+import app.mihonsy.komga.source.KomgaSource
 import eu.kanade.tachiyomi.ui.browse.source.SourcesScreen
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
 import eu.kanade.tachiyomi.ui.browse.source.feed.SourceFeedScreen
@@ -120,7 +121,8 @@ class MangaScreen(
         }
 
         val successState = state as MangaScreenModel.State.Success
-        val isHttpSource = remember { successState.source is HttpSource }
+        // SY: Komga 内部 scheme 源无真实网页地址，隐藏 WebView/浏览器/分享 辅助按钮
+        val isHttpSource = remember { successState.source is HttpSource && successState.source.id != KomgaSource.ID }
 
         LaunchedEffect(successState.manga, screenModel.source) {
             if (isHttpSource) {
