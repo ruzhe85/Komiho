@@ -290,11 +290,11 @@ private fun KomgaMainScreen(
     var landscapeColumns by remember { mutableStateOf(prefs.libraryLandscapeColumns) }
     val columns = if (isLandscape) landscapeColumns else portraitColumns
 
-    // Library picker — owned at the top level so the bottom-bar icon can
-    // pop a dialog listing all libraries; picking one enters that library.
+    // Library selection — owned at the top level. The Library tab's top bar
+    // shows a dropdown (LibrarySelector) listing all libraries; picking one
+    // switches the active library in place (no dialog, no extra screen).
     var libraries by remember { mutableStateOf<List<LibraryDto>>(emptyList()) }
     var selectedLibraryId by remember { mutableStateOf<String?>(null) }
-    var libraryPickerOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         if (!prefs.hasConnection()) {
@@ -326,34 +326,44 @@ private fun KomgaMainScreen(
     }
 
     // 统一返回手势处理：KomgaMainActivity 通常是 task 根 Activity，内部 4 个 tab +
-    // 选库态 + 搜索态 + 菜单态都靠本地状态切换（无返回栈），必须拦截返回手势
+    // 选库/搜索/菜单态都靠本地状态切换（无返回栈），必须拦截返回手势
     // 避免退出程序。但当本实例是被 Series 详情页调起（点 tag/作者 → 过滤库）时，
-    // 它不是 task 根——Series 页在它下面，此时绝不能拦截 tab/选库返回，只拦截
-    // 本地 UI 态（搜索/菜单/选库对话框），其余交还系统 → 返回手势回 Series 页。
-    // 优先级（仅根实例）：选择态→退出选择；搜索框/菜单/picker 打开→关闭；
-    // Library 且已选库→先清空选库（回到选库界面）；非 Home tab→回 Home；
+    // 它不是 task 根——Series 页在它下面，此时绝不能拦截本地 UI 态以外的返回，
+    // 只拦截搜索框/菜单等本地 UI 态，其余交还系统 → 返回手势回 Series 页。
+    // 选库现已改为顶栏下拉（LibrarySelector），不再有「选库对话框」态，
+    // 因此 Library tab 上按返回直接回 Home（与 Lists/Downloads 一致）。
+    // 优先级（仅根实例）：搜索框/菜单打开→关闭；非 Home tab→回 Home；
     // Home 根→交还系统默认（退出程序）。
     val isRootActivity = (context as? android.app.Activity)?.isTaskRoot ?: true
-    val interceptBack = searchOpen || shelfMenuOpen || libraryPickerOpen ||
-        (isRootActivity &&
-            ((currentTab == MainTab.Library.ordinal && selectedLibraryId != null) ||
-             currentTab != MainTab.Home.ordinal))
+    // Library selection now lives in the top-bar dropdown, so the only
+    // "back" affordance needed is: close search/menu, or (root only) drop a
+    // non-Home tab back to Home. A selected library no longer traps back.
+    val interceptBack = searchOpen || shelfMenuOpen ||
+        (isRootActivity && currentTab != MainTab.Home.ordinal)
     BackHandler(enabled = interceptBack) {
         when {
             searchOpen -> searchOpen = false
             shelfMenuOpen -> shelfMenuOpen = false
-            libraryPickerOpen -> libraryPickerOpen = false
-            currentTab == MainTab.Library.ordinal && selectedLibraryId != null -> libraryPickerOpen = true
             currentTab != MainTab.Home.ordinal -> currentTab = MainTab.Home.ordinal
         }
     }
 
     Scaffold(
         topBar = {
+            val currentTabEnum = MainTab.entries[currentTab]
             TopAppBar(
-                title = { Text(MainTab.entries[currentTab].labelText()) },
+                title = {
+                    if (currentTabEnum == MainTab.Library) {
+                        LibrarySelector(
+                            libraries = libraries,
+                            selectedLibraryId = selectedLibraryId,
+                            onSelect = { selectedLibraryId = it },
+                        )
+                    } else {
+                        Text(MainTab.entries[currentTab].labelText())
+                    }
+                },
                 actions = {
-                    val currentTabEnum = MainTab.entries[currentTab]
                     // Single "display options" button on the Library shelf:
                     // opens one composite menu (display mode · sort · filter),
                     // replacing the old separate filter funnel + display dialog.
@@ -450,11 +460,12 @@ private fun KomgaMainScreen(
                     NavigationBarItem(
                         selected = currentTab == index,
                         onClick = {
-                            if (tab == MainTab.Library) {
-                                // User flow: tap the library icon → picker
-                                // dialog → pick a library → enter it.
-                                libraryPickerOpen = true
-                            } else {
+                        if (tab == MainTab.Library) {
+                            // Library selection is now in the top-bar dropdown;
+                            // tapping the icon just focuses the Library tab
+                            // (refresh if already there, like the other tabs).
+                            if (currentTab == index) refreshSignal.update { it + 1 } else currentTab = index
+                        } else {
                                 // 点击 tab（含重复点击当前 tab）触发刷新。
                                 if (currentTab == index) refreshSignal.update { it + 1 } else currentTab = index
                             }
@@ -545,52 +556,9 @@ private fun KomgaMainScreen(
         }
     }
 
-    if (libraryPickerOpen) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { libraryPickerOpen = false },
-            title = { Text(composeStringResource(R.string.select_library)) },
-            text = {
-                Column {
-                    if (libraries.isEmpty()) {
-                        Text(
-                            text = composeStringResource(R.string.no_libraries),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    libraries.forEach { lib ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selectedLibraryId = lib.id
-                                    currentTab = MainTab.Library.ordinal
-                                    libraryPickerOpen = false
-                                }
-                                .padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = lib.name,
-                                style = MaterialTheme.typography.bodyLarge,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (lib.id == selectedLibraryId) {
-                                Icon(
-                                    imageVector = Icons.Filled.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { libraryPickerOpen = false }) { Text(composeStringResource(R.string.cancel)) }
-            },
-        )
-    }
+    // 选库已改为顶栏 LibrarySelector 下拉（见下方 LibrarySelector 组合函数），
+    // 不再使用 AlertDialog，返回键也不再被困在「选库」态。
+
 }
 
 // ---------- Home tab ----------
@@ -1401,6 +1369,59 @@ private fun HomeSeriesListItem(
 // ---------- Library tab ----------
 
 @Composable
+/**
+ * Top-bar library picker (replaces the old AlertDialog). Shows the current
+ * library name with a caret; tapping opens a dropdown of all libraries.
+ * Selecting one switches the active library in place — no dialog, no extra
+ * screen, and back no longer gets trapped in a "pick a library" state.
+ */
+private fun LibrarySelector(
+    libraries: List<LibraryDto>,
+    selectedLibraryId: String?,
+    onSelect: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val current = libraries.firstOrNull { it.id == selectedLibraryId }
+    Box {
+        Row(
+            modifier = Modifier
+                .clickable { expanded = true }
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = current?.name ?: composeStringResource(R.string.select_library),
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+            )
+            Icon(
+                imageVector = Icons.Filled.ArrowDropDown,
+                contentDescription = composeStringResource(R.string.select_library),
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (libraries.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text(composeStringResource(R.string.no_libraries)) },
+                    onClick = { expanded = false },
+                    enabled = false,
+                )
+            }
+            libraries.forEach { lib ->
+                DropdownMenuItem(
+                    text = { Text(lib.name) },
+                    trailingIcon = { if (lib.id == selectedLibraryId) Icon(Icons.Filled.Check, contentDescription = null) },
+                    onClick = {
+                        onSelect(lib.id)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun LibraryTab(
     client: KomgaApiClient,
     selectedLibraryId: String?,
@@ -1471,23 +1492,27 @@ private fun LibraryTab(
         // so Komga searches across ALL libraries (Komga WebUI / Komelia parity). When no
         // filter is active we scope to the selected library as before.
         val isCrossLibraryFilter = !filterType.isNullOrBlank()
-        if (selectedLibraryId != null || isCrossLibraryFilter) {
-            loading = true
-            runCatching {
-                client.getSeries(
-                    libraryId = if (isCrossLibraryFilter) null else selectedLibraryId,
-                    readStatus = readFilter.komgaValue,
-                    tag = if (filterType == "tag") listOf(filterValue ?: "") else null,
-                    genre = if (filterType == "genre") listOf(filterValue ?: "") else null,
-                    author = if (filterType == "author") listOf(filterValue ?: "") else null,
-                    sort = sort.komgaSort,
-                    size = 200,
-                ).content
-            }
-                .onSuccess { series = it; error = null }
-                .onFailure { error = context.getString(R.string.load_series_failed, it.message) }
+        if (selectedLibraryId == null && !isCrossLibraryFilter) {
+            // No library chosen yet — the top-bar dropdown is the picker now.
             loading = false
+            series = emptyList()
+            return
         }
+        loading = true
+        runCatching {
+            client.getSeries(
+                libraryId = if (isCrossLibraryFilter) null else selectedLibraryId,
+                readStatus = readFilter.komgaValue,
+                tag = if (filterType == "tag") listOf(filterValue ?: "") else null,
+                genre = if (filterType == "genre") listOf(filterValue ?: "") else null,
+                author = if (filterType == "author") listOf(filterValue ?: "") else null,
+                sort = sort.komgaSort,
+                size = 200,
+            ).content
+        }
+            .onSuccess { series = it; error = null }
+            .onFailure { error = context.getString(R.string.load_series_failed, it.message) }
+        loading = false
     }
 
     LaunchedEffect(selectedLibraryId, readFilter, sort, refreshTick, filterType, filterValue) { reload() }
@@ -1572,6 +1597,9 @@ private fun LibraryTab(
                     Spacer(Modifier.height(12.dp))
                     TextButton(onClick = { scope.launch { reload() } }) { Text(composeStringResource(R.string.retry)) }
                 }
+            }
+            selectedLibraryId == null && filterType.isNullOrBlank() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(composeStringResource(R.string.select_library_hint))
             }
             series.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(composeStringResource(R.string.no_series_in_library))
