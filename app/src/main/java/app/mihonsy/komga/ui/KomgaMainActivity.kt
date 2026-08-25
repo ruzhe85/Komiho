@@ -85,6 +85,8 @@ import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.RemoveDone
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.DragHandle
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -101,6 +103,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -148,6 +153,7 @@ import androidx.compose.ui.layout.ContentScale
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import app.mihonsy.komga.data.KomgaApiClient
+import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import java.io.File
@@ -2841,7 +2847,7 @@ private fun SettingsTab(context: android.content.Context) {
         )
         TextPreferenceWidget(
             title = composeStringResource(R.string.settings_server),
-            subtitle = prefs.baseUrl,
+            subtitle = runCatching { prefs.connection().baseUrl }.getOrDefault(""),
             icon = Icons.Outlined.Cloud,
             onPreferenceClick = { showServer = true },
         )
@@ -2894,7 +2900,7 @@ private fun SettingsTab(context: android.content.Context) {
         SettingsCategoryDialog(
             onDismiss = { showServer = false },
             title = composeStringResource(R.string.settings_server),
-        ) { padding -> KomgaServerSettings(Modifier.padding(padding), context) }
+        ) { padding -> KomgaServerSettings(Modifier.padding(padding), context, onDismiss = { showServer = false }) }
     }
     if (showReaderSettings) {
         Dialog(
@@ -3356,54 +3362,156 @@ private fun HomeOptionsMenu(
     )
 }
 
+/** 从服务器地址里取 host 作为连接默认名（与 KomgaConnectActivity 同逻辑）。 */
+private fun hostOf(url: String): String {
+    return runCatching {
+        val u = java.net.URI(url)
+        u.host.takeIf { it.isNotBlank() } ?: url
+    }.getOrDefault(url)
+}
+
 @Composable
-private fun KomgaServerSettings(modifier: Modifier, context: android.content.Context) {
+private fun KomgaServerSettings(
+    modifier: Modifier,
+    context: android.content.Context,
+    onDismiss: () -> Unit,
+) {
     val prefs = remember { KomgaPreferences(context.applicationContext) }
+    var connections by remember { mutableStateOf(prefs.connections()) }
+    val activeId = remember(connections) { prefs.activeConnectionId }
+    var pendingDelete by remember { mutableStateOf<KomgaConnection?>(null) }
+
+    fun refresh() {
+        connections = prefs.connections()
+    }
+
+    fun switchTo(id: String) {
+        prefs.setActiveConnection(id)
+        // 重启主界面，使所有 composable 用新连接重拉数据
+        context.startActivity(
+            android.content.Intent(context, KomgaMainActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK),
+        )
+    }
+
     LazyColumn(modifier.fillMaxSize()) {
         item { PreferenceGroupHeader(composeStringResource(R.string.settings_server)) }
-        item {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Text(
-                    text = composeStringResource(R.string.settings_address_fmt, prefs.baseUrl),
-                    style = MaterialTheme.typography.bodyMedium,
+        items(connections) { conn ->
+            val isActive = conn.id == activeId
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { if (!isActive) switchTo(conn.id) }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(
+                    selected = isActive,
+                    onClick = { if (!isActive) switchTo(conn.id) },
                 )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = composeStringResource(
-                        R.string.settings_auth_fmt,
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .padding(start = 8.dp),
+                ) {
+                    Text(
+                        conn.name.ifBlank { hostOf(conn.baseUrl) },
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Text(
+                        composeStringResource(R.string.settings_address_fmt, conn.baseUrl),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
                         composeStringResource(
-                            if (prefs.authType.name == "API_KEY") {
-                                R.string.auth_api_key
-                            } else {
-                                R.string.auth_username_password
-                            },
+                            R.string.settings_auth_fmt,
+                            composeStringResource(
+                                if (conn.authType.name == "API_KEY") {
+                                    R.string.auth_api_key
+                                } else {
+                                    R.string.auth_username_password
+                                },
+                            ),
                         ),
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (isActive) {
+                        Text(
+                            composeStringResource(R.string.server_current),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = {
+                        // 编辑：打开连接页（编辑模式），关掉本设置页避免返回时状态陈旧
+                        context.startActivity(
+                            android.content.Intent(context, KomgaConnectActivity::class.java)
+                                .putExtra(KomgaConnectActivity.EXTRA_CONNECTION_ID, conn.id),
+                        )
+                        onDismiss()
+                    },
+                ) {
+                    Icon(
+                        Icons.Outlined.Edit,
+                        contentDescription = composeStringResource(R.string.server_edit),
+                    )
+                }
+                IconButton(onClick = { pendingDelete = conn }) {
+                    Icon(
+                        Icons.Outlined.Delete,
+                        contentDescription = composeStringResource(R.string.delete),
+                    )
+                }
             }
         }
         item {
-            TextPreferenceWidget(
-                title = composeStringResource(R.string.settings_reconfigure),
-                onPreferenceClick = {
-                    context.startActivity(Intent(context, KomgaConnectActivity::class.java))
+            OutlinedButton(
+                onClick = {
+                    context.startActivity(android.content.Intent(context, KomgaConnectActivity::class.java))
+                    onDismiss()
                 },
-            )
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            ) {
+                Text(composeStringResource(R.string.server_add))
+            }
         }
-        item {
-            TextPreferenceWidget(
-                title = composeStringResource(R.string.settings_clear_login),
-                onPreferenceClick = {
-                    prefs.clear()
-                    Toast.makeText(context, context.getString(R.string.connection_cleared), Toast.LENGTH_SHORT).show()
-                    context.startActivity(
-                        Intent(context, KomgaConnectActivity::class.java)
-                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                    )
-                },
-            )
-        }
+    }
+
+    if (pendingDelete != null) {
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(composeStringResource(R.string.delete)) },
+            text = { Text(composeStringResource(R.string.server_delete_confirm)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val conn = pendingDelete!!
+                        val wasActive = conn.id == activeId
+                        prefs.deleteConnection(conn.id)
+                        pendingDelete = null
+                        // 删的是激活项 → deleteConnection 已自动回退，重启主界面重拉；
+                        // 否则原地刷新列表
+                        if (wasActive) {
+                            context.startActivity(
+                                android.content.Intent(context, KomgaMainActivity::class.java)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK),
+                            )
+                        } else {
+                            refresh()
+                        }
+                    },
+                ) { Text(composeStringResource(R.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(composeStringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 

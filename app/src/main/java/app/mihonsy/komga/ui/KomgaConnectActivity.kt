@@ -1,8 +1,9 @@
 package app.mihonsy.komga.ui
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,8 +15,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -41,44 +46,50 @@ import kotlinx.coroutines.launch
 
 /**
  * Komga 服务器连接设置页（M1）。
- * 支持 API Key / 账号密码两种认证；连接成功后进入主界面。
+ * 支持 API Key / 账号密码两种认证；新增或编辑一条连接后进入/返回主界面。
+ *
+ * 通过 [EXTRA_CONNECTION_ID] 区分：
+ *  - 不传 → 新增模式（空白表单）
+ *  - 传入已存连接 id → 编辑模式（预填，且不再因"已有连接"而自动跳回主页——
+ *    这正是此前「重新配置连接」点了重进 home 的根因）
  */
 class KomgaConnectActivity : KomgaBaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val prefs = KomgaPreferences(applicationContext)
-        // Komiho: if a connection was already saved, skip the setup screen and
-        // go straight to the main tabs (user reported the app always showing
-        // the connect screen on relaunch).
-        if (prefs.hasConnection() && savedInstanceState == null) {
-            startActivity(
-                android.content.Intent(this, KomgaMainActivity::class.java)
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK),
-            )
-            finish()
-            return
-        }
-        setContent { KomihoTheme { KomgaConnectScreen() } }
+        val editId = intent.getStringExtra(EXTRA_CONNECTION_ID)
+        setContent { KomihoTheme { KomgaConnectScreen(editId = editId) } }
+    }
+
+    companion object {
+        const val EXTRA_CONNECTION_ID = "app.mihonsy.komga.ui.ConnectActivity.editId"
     }
 }
 
 @Composable
-private fun KomgaConnectScreen() {
+private fun KomgaConnectScreen(editId: String? = null) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
+    // 编辑模式下的原始连接（新增模式为 null）
+    val editConn = remember(editId) { editId?.let { prefs.getConnection(it) } }
 
-    var baseUrl by remember { mutableStateOf(prefs.baseUrl) }
-    var authType by remember { mutableStateOf(prefs.authType) }
-    var apiKey by remember { mutableStateOf(prefs.apiKey) }
-    var username by remember { mutableStateOf(prefs.username) }
-    var password by remember { mutableStateOf(prefs.password) }
+    var name by remember { mutableStateOf(editConn?.name.orEmpty()) }
+    var baseUrl by remember { mutableStateOf(editConn?.baseUrl ?: "") }
+    var authType by remember { mutableStateOf(editConn?.authType ?: prefs.authType) }
+    var apiKey by remember { mutableStateOf(editConn?.apiKey ?: "") }
+    var username by remember { mutableStateOf(editConn?.username ?: "") }
+    var password by remember { mutableStateOf(editConn?.password ?: "") }
 
     var testing by remember { mutableStateOf(false) }
     var connecting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    // 编辑已有连接、或已存在其他连接时允许返回；纯首次配置（无任何连接）不强制返回
+    val canGoBack = editId != null || prefs.hasConnection()
+
     fun doConnect(testOnly: Boolean) {
         val conn = KomgaConnection(
+            id = editId ?: java.util.UUID.randomUUID().toString(),
+            name = name.trim().ifBlank { hostOf(baseUrl.trim()) },
             baseUrl = baseUrl.trim(),
             authType = authType,
             apiKey = apiKey.trim(),
@@ -96,16 +107,18 @@ private fun KomgaConnectScreen() {
             val ok = result.isSuccess
             if (ok) {
                 if (!testOnly) {
-                    prefs.baseUrl = conn.baseUrl
-                    prefs.authType = authType
-                    prefs.apiKey = apiKey
-                    prefs.username = username
-                    prefs.password = password
-                    Toast.makeText(context, "连接成功", Toast.LENGTH_SHORT).show()
-                    context.startActivity(
-                        android.content.Intent(context, KomgaMainActivity::class.java)
-                            .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                    )
+                    prefs.saveConnection(conn)
+                    // 新增 → 设为激活并重启主界面用新连接重拉数据；
+                    // 编辑的是当前激活服务器 → 重启主界面；
+                    // 编辑非激活服务器 → 直接返回（上层设置页）
+                    if (editId == null) {
+                        prefs.setActiveConnection(conn.id)
+                        restartMain(context)
+                    } else if (prefs.activeConnectionId == conn.id) {
+                        restartMain(context)
+                    } else {
+                        (context as? Activity)?.finish()
+                    }
                 } else {
                     Toast.makeText(context, "连接正常", Toast.LENGTH_SHORT).show()
                 }
@@ -120,7 +133,18 @@ private fun KomgaConnectScreen() {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("连接 Komga 服务器") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text(if (editId != null) "编辑服务器" else "连接 Komga 服务器") },
+                navigationIcon = {
+                    if (canGoBack) {
+                        IconButton(onClick = { (context as? Activity)?.finish() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    }
+                },
+            )
+        },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -129,6 +153,17 @@ private fun KomgaConnectScreen() {
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp),
         ) {
+            Text("名称（可选）", style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                placeholder = { Text("默认用服务器地址，如 192.168.1.10:25600") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(20.dp))
+
             Text("服务器地址", style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.height(6.dp))
             OutlinedTextField(
@@ -213,6 +248,22 @@ private fun KomgaConnectScreen() {
             }
         }
     }
+}
+
+private fun hostOf(url: String): String {
+    return runCatching {
+        val u = java.net.URI(url)
+        u.host.takeIf { it.isNotBlank() } ?: url
+    }.getOrDefault(url)
+}
+
+/** 重启主界面，使所有 composable 用新的激活连接重新拉取数据。 */
+private fun restartMain(context: android.content.Context) {
+    context.startActivity(
+        Intent(context, KomgaMainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
+    )
+    (context as? Activity)?.finish()
 }
 
 // File-private helper for surfacing connection errors. Extracted from the

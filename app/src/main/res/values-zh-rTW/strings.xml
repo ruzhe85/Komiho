@@ -101,6 +101,12 @@
     <string name="settings_auth_fmt">認證：%1$s</string>
     <string name="auth_api_key">API Key</string>
     <string name="auth_username_password">帳號密碼</string>
+    <string name="server_add">新增伺服器</string>
+    <string name="server_edit">編輯</string>
+    <string name="server_current">目前</string>
+    <string name="server_name">名稱</string>
+    <string name="server_name_hint">選填，預設用伺服器位址</string>
+    <string name="server_delete_confirm">確定刪除該伺服器連線？</string>
 
     <!-- 設定：書庫（原「主頁設定」） -->
     <string name="settings_home">書庫</string>
