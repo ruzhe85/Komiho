@@ -103,6 +103,12 @@
     <string name="settings_auth_fmt">认证：%1$s</string>
     <string name="auth_api_key">API Key</string>
     <string name="auth_username_password">账号密码</string>
+    <string name="server_add">添加服务器</string>
+    <string name="server_edit">编辑</string>
+    <string name="server_current">当前</string>
+    <string name="server_name">名称</string>
+    <string name="server_name_hint">可选，默认用服务器地址</string>
+    <string name="server_delete_confirm">确定删除该服务器连接？</string>
 
     <!-- 设置：书库（原“主页设置”，更名并扩预览图/缓存） -->
     <string name="settings_home">书库</string>

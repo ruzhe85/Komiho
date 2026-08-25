@@ -2,6 +2,7 @@ package app.mihonsy.komga.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.serialization.json.Json
 
 /**
  * Komga 服务器连接配置持久化。
@@ -155,15 +156,106 @@ class KomgaPreferences(context: Context) {
         set(v) = prefs.edit().putString(KEY_APP_LANGUAGE, v).apply()
 
 
-    fun hasConnection(): Boolean = baseUrl.isNotBlank()
+    // ---- 多服务器连接（JSON 列表 + 激活 id）----
+    // 兼容旧版：首次访问时若没有连接列表、但存在旧的 flat 单连接字段，
+    // 自动迁移成单条连接（无感升级，旧用户不丢配置）。
+    private val json = Json { ignoreUnknownKeys = true }
 
-    fun connection(): KomgaConnection = KomgaConnection(
-        baseUrl = baseUrl,
-        authType = authType,
-        apiKey = apiKey,
-        username = username,
-        password = password,
-    )
+    private var migrated = false
+
+    fun hasConnection(): Boolean = connections().isNotEmpty()
+
+    fun connections(): List<KomgaConnection> {
+        ensureMigrated()
+        val raw = prefs.getString(KEY_CONNECTIONS, null)
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching { json.decodeFromString<List<KomgaConnection>>(raw) }
+            .getOrDefault(emptyList())
+    }
+
+    var activeConnectionId: String
+        get() = prefs.getString(KEY_ACTIVE_CONNECTION_ID, "").orEmpty()
+        set(v) = prefs.edit().putString(KEY_ACTIVE_CONNECTION_ID, v).apply()
+
+    /** 当前激活的连接（无则取列表第一条，都没有返回空默认）。 */
+    fun connection(): KomgaConnection {
+        val list = connections()
+        if (list.isEmpty()) return KomgaConnection(baseUrl = "")
+        return list.firstOrNull { it.id == activeConnectionId } ?: list.first()
+    }
+
+    fun getConnection(id: String): KomgaConnection? =
+        connections().firstOrNull { it.id == id }
+
+    /** 新增或更新一条连接（按 id 匹配）。若无激活连接则自动设为激活。 */
+    fun saveConnection(conn: KomgaConnection) {
+        val list = connections().toMutableList()
+        val idx = list.indexOfFirst { it.id == conn.id }
+        if (idx >= 0) list[idx] = conn else list.add(conn)
+        if (activeConnectionId.isEmpty() && list.isNotEmpty()) {
+            activeConnectionId = if (idx >= 0) conn.id else list.last().id
+        }
+        persist(list)
+    }
+
+    /** 切换激活服务器。 */
+    fun setActiveConnection(id: String) {
+        activeConnectionId = id
+    }
+
+    /** 删除一条连接；若删的是激活项，自动回退到列表中第一条（无则清空）。 */
+    fun deleteConnection(id: String) {
+        val list = connections().toMutableList()
+        list.removeAll { it.id == id }
+        persist(list)
+        if (activeConnectionId == id) {
+            activeConnectionId = list.firstOrNull()?.id.orEmpty()
+        }
+    }
+
+    /** 仅清除连接数据，保留显示/主题/语言等其他偏好（修旧 clear() 误清全部的 bug）。 */
+    fun clearConnections() {
+        prefs.edit()
+            .remove(KEY_CONNECTIONS)
+            .remove(KEY_ACTIVE_CONNECTION_ID)
+            .remove(KEY_BASE_URL)
+            .remove(KEY_AUTH_TYPE)
+            .remove(KEY_API_KEY)
+            .remove(KEY_USERNAME)
+            .remove(KEY_PASSWORD)
+            .apply()
+    }
+
+    private fun persist(list: List<KomgaConnection>) {
+        prefs.edit().putString(KEY_CONNECTIONS, json.encodeToString(list)).apply()
+    }
+
+    private fun ensureMigrated() {
+        if (migrated) return
+        migrated = true
+        if (prefs.contains(KEY_CONNECTIONS)) return
+        val bu = prefs.getString(KEY_BASE_URL, "").orEmpty()
+        if (bu.isNotBlank()) {
+            val conn = KomgaConnection(
+                id = java.util.UUID.randomUUID().toString(),
+                name = hostOf(bu),
+                baseUrl = bu,
+                authType = authType,
+                apiKey = apiKey,
+                username = username,
+                password = password,
+            )
+            persist(listOf(conn))
+            activeConnectionId = conn.id
+        }
+    }
+
+    private fun hostOf(url: String): String {
+        return runCatching {
+            val u = java.net.URI(url)
+            u.host.takeIf { it.isNotBlank() } ?: url
+        }.getOrDefault(url)
+    }
 
     fun clear() {
         prefs.edit().clear().apply()
@@ -171,6 +263,8 @@ class KomgaPreferences(context: Context) {
 
     private companion object {
         const val KEY_BASE_URL = "base_url"
+        const val KEY_CONNECTIONS = "connections"
+        const val KEY_ACTIVE_CONNECTION_ID = "active_connection_id"
         const val KEY_AUTH_TYPE = "auth_type"
         const val KEY_API_KEY = "api_key"
         const val KEY_USERNAME = "username"

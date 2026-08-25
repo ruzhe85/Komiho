@@ -101,6 +101,12 @@
     <string name="settings_auth_fmt">Auth: %1$s</string>
     <string name="auth_api_key">API Key</string>
     <string name="auth_username_password">Username &amp; password</string>
+    <string name="server_add">Add server</string>
+    <string name="server_edit">Edit</string>
+    <string name="server_current">Current</string>
+    <string name="server_name">Name</string>
+    <string name="server_name_hint">Optional, defaults to server address</string>
+    <string name="server_delete_confirm">Delete this server connection?</string>
 
     <!-- Settings: library (was "home settings") -->
     <string name="settings_home">Library</string>
