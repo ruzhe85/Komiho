@@ -108,6 +108,15 @@
     <string name="server_name_hint">選填，預設用伺服器位址</string>
     <string name="server_delete_confirm">確定刪除該伺服器連線？</string>
 
+    <!-- 設定：關於 -->
+    <string name="settings_about">關於</string>
+    <string name="about">關於 Komiho</string>
+    <string name="about_version">版本 %1$s</string>
+    <string name="about_check_update">檢查更新</string>
+    <string name="about_open_source">原始碼 (GitHub)</string>
+    <string name="about_up_to_date">已是最新版本</string>
+    <string name="about_os_too_old">目前系統版本過低，無法接收更新</string>
+
     <!-- 設定：書庫（原「主頁設定」） -->
     <string name="settings_home">書庫</string>
     <string name="settings_home_summary">主頁、預覽圖與快取</string>

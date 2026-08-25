@@ -108,6 +108,15 @@
     <string name="server_name_hint">Optional, defaults to server address</string>
     <string name="server_delete_confirm">Delete this server connection?</string>
 
+    <!-- Settings: About -->
+    <string name="settings_about">About</string>
+    <string name="about">About Komiho</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_check_update">Check for updates</string>
+    <string name="about_open_source">Source code (GitHub)</string>
+    <string name="about_up_to_date">You are on the latest version</string>
+    <string name="about_os_too_old">Your Android version is too old for updates</string>
+
     <!-- Settings: library (was "home settings") -->
     <string name="settings_home">Library</string>
     <string name="settings_home_summary">Home, preview images &amp; cache</string>
