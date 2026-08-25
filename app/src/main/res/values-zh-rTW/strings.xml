@@ -55,6 +55,10 @@
     <string name="filter_tag_active">依標籤篩選：%1$s</string>
     <string name="filter_genre_active">依類型篩選：%1$s</string>
     <string name="filter_author_active">依作者篩選：%1$s</string>
+    <string name="filter_tags">標籤</string>
+    <string name="filter_genres">類型</string>
+    <string name="filter_authors">作者</string>
+    <string name="filter_clear">清除篩選</string>
     <string name="detail_genres_label">類型</string>
     <string name="detail_tags_label">標籤</string>
     <string name="cd_filter_sort">篩選/排序</string>

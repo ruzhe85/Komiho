@@ -9,6 +9,7 @@ import app.mihonsy.komga.data.model.ReadProgressDto
 import app.mihonsy.komga.data.model.ReadProgressUpdateDto
 import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
+import app.mihonsy.komga.data.model.AuthorDto
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -87,14 +88,14 @@ class KomgaApiClient(
         libraryId: String? = null,
         search: String? = null,
         readStatus: String? = null,
-        genre: String? = null,
-        tag: String? = null,
-        author: String? = null,
+        genre: List<String>? = null,
+        tag: List<String>? = null,
+        author: List<String>? = null,
         page: Int = 0,
         size: Int = 60,
         sort: String? = null,
     ): PageableDto<SeriesDto> {
-        val params = buildMap {
+        val params = buildMap<String, Any> {
             libraryId?.let { put("library_id", it) }
             search?.let { put("search", it) }
             readStatus?.let { put("read_status", it) }
@@ -109,6 +110,24 @@ class KomgaApiClient(
             sort?.let { put("sort", it) }
         }
         return get("/api/v1/series", PageableSerializer(), params)
+    }
+
+    /** Aggregate tag names across all libraries — backs the Komelia-style filter panel. */
+    suspend fun getSeriesTags(libraryId: String? = null): List<String> {
+        val params = buildMap { libraryId?.let { put("library_id", it) } }
+        return get("/api/v1/tags/series", ListSerializer(), params)
+    }
+
+    /** Aggregate genre names across all libraries. */
+    suspend fun getSeriesGenres(libraryId: String? = null): List<String> {
+        val params = buildMap { libraryId?.let { put("library_id", it) } }
+        return get("/api/v1/genres/series", ListSerializer(), params)
+    }
+
+    /** Aggregate authors (name+role) across all libraries. */
+    suspend fun getSeriesAuthors(libraryId: String? = null): List<AuthorDto> {
+        val params = buildMap { libraryId?.let { put("library_id", it) } }
+        return get("/api/v1/authors/series", ListSerializer<AuthorDto>(), params)
     }
 
     /** Recently updated series — GET /api/v1/series/updated (official endpoint, mirrors the web UI). */
@@ -566,8 +585,14 @@ class KomgaApiClient(
         return if (path.startsWith("http", ignoreCase = true)) path else "$base$path"
     }
 
-    private fun HttpUrl.Builder.addParams(params: Map<String, String>): HttpUrl.Builder {
-        params.forEach { (k, v) -> addQueryParameter(k, v) }
+    private fun HttpUrl.Builder.addParams(params: Map<String, *>): HttpUrl.Builder {
+        params.forEach { (k, v) ->
+            when (v) {
+                is List<*> -> v.forEach { addQueryParameter(k, it.toString()) }
+                null -> {}
+                else -> addQueryParameter(k, v.toString())
+            }
+        }
         return this
     }
 
@@ -612,7 +637,7 @@ class KomgaApiClient(
     private suspend fun <T> get(
         path: String,
         serializer: kotlinx.serialization.KSerializer<T>,
-        params: Map<String, String> = emptyMap(),
+        params: Map<String, *> = emptyMap<String, Any>(),
     ): T {
         return withIOContext {
             val urlBuilder = apiUrl(path).toHttpUrl().newBuilder().apply { addParams(params) }
