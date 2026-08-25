@@ -110,6 +110,15 @@
     <string name="server_name_hint">可选，默认用服务器地址</string>
     <string name="server_delete_confirm">确定删除该服务器连接？</string>
 
+    <!-- 设置：关于 -->
+    <string name="settings_about">关于</string>
+    <string name="about">关于 Komiho</string>
+    <string name="about_version">版本 %1$s</string>
+    <string name="about_check_update">检查更新</string>
+    <string name="about_open_source">源代码 (GitHub)</string>
+    <string name="about_up_to_date">已是最新版本</string>
+    <string name="about_os_too_old">当前系统版本过低，无法接收更新</string>
+
     <!-- 设置：书库（原“主页设置”，更名并扩预览图/缓存） -->
     <string name="settings_home">书库</string>
     <string name="settings_home_summary">主页、预览图与缓存</string>

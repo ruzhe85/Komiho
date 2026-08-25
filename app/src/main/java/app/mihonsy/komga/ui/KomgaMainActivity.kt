@@ -180,6 +180,11 @@ import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
 import uy.kohesive.injekt.api.get
+import androidx.compose.material.icons.outlined.Info
+import eu.kanade.tachiyomi.BuildConfig
+import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
+import eu.kanade.tachiyomi.util.system.openInBrowser
+import tachiyomi.domain.release.interactor.GetApplicationRelease
 
 // 划动选择命中检测已移除（长按圈选废弃）。
 
@@ -2820,6 +2825,7 @@ private fun SettingsTab(context: android.content.Context) {
     var showPreview by remember { mutableStateOf(false) }
     var showServer by remember { mutableStateOf(false) }
     var showReaderSettings by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
 
     // MihonSY 风格：分类行列表，点击进入子页面（不再平铺展开全部选项）。
     Column(
@@ -2850,6 +2856,11 @@ private fun SettingsTab(context: android.content.Context) {
             subtitle = runCatching { prefs.connection().baseUrl }.getOrDefault(""),
             icon = Icons.Outlined.Cloud,
             onPreferenceClick = { showServer = true },
+        )
+        TextPreferenceWidget(
+            title = composeStringResource(R.string.settings_about),
+            icon = Icons.Outlined.Info,
+            onPreferenceClick = { showAbout = true },
         )
     }
 
@@ -2901,6 +2912,12 @@ private fun SettingsTab(context: android.content.Context) {
             onDismiss = { showServer = false },
             title = composeStringResource(R.string.settings_server),
         ) { padding -> KomgaServerSettings(Modifier.padding(padding), context, onDismiss = { showServer = false }) }
+    }
+    if (showAbout) {
+        SettingsCategoryDialog(
+            onDismiss = { showAbout = false },
+            title = composeStringResource(R.string.about),
+        ) { padding -> KomgaAbout(Modifier.padding(padding), context) }
     }
     if (showReaderSettings) {
         Dialog(
@@ -3515,6 +3532,70 @@ private fun KomgaServerSettings(
     }
 }
 
+@Composable
+private fun KomgaAbout(modifier: Modifier, context: android.content.Context) {
+    val scope = rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    val versionText = composeStringResource(R.string.about_version, BuildConfig.VERSION_NAME)
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        Text("Komiho", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "$versionText · build ${BuildConfig.VERSION_CODE}",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(24.dp))
+        Button(
+            onClick = {
+                checking = true
+                scope.launch {
+                    checkForKomihoUpdate(context) { checking = false }
+                }
+            },
+            enabled = !checking,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (checking) {
+                CircularProgressIndicator(Modifier.size(20.dp))
+            } else {
+                Text(composeStringResource(R.string.about_check_update))
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = { context.openInBrowser("https://github.com/ruzhe85/Komiho") },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(composeStringResource(R.string.about_open_source))
+        }
+    }
+}
+
+private suspend fun checkForKomihoUpdate(context: android.content.Context, onFinish: () -> Unit) {
+    val checker = AppUpdateChecker()
+    try {
+        when (val result = checker.checkForUpdate(context, forceCheck = true)) {
+            is GetApplicationRelease.Result.NewUpdate -> {
+                // AppUpdateChecker 内部已通过 AppUpdateNotifier 弹出更新通知
+            }
+            is GetApplicationRelease.Result.NoNewUpdate -> {
+                Toast.makeText(context, context.getString(R.string.about_up_to_date), Toast.LENGTH_SHORT).show()
+            }
+            is GetApplicationRelease.Result.OsTooOld -> {
+                Toast.makeText(context, context.getString(R.string.about_os_too_old), Toast.LENGTH_SHORT).show()
+            }
+        }
+    } catch (e: Exception) {
+        Toast.makeText(context, e.message ?: "更新检查失败", Toast.LENGTH_SHORT).show()
+    } finally {
+        onFinish()
+    }
+}
 
 // ---------- Downloads (offline) tab ----------
 
