@@ -55,6 +55,10 @@
     <string name="filter_tag_active">Filtered by tag: %1$s</string>
     <string name="filter_genre_active">Filtered by genre: %1$s</string>
     <string name="filter_author_active">Filtered by author: %1$s</string>
+    <string name="filter_tags">Tags</string>
+    <string name="filter_genres">Genres</string>
+    <string name="filter_authors">Authors</string>
+    <string name="filter_clear">Clear filters</string>
     <string name="detail_genres_label">Genres</string>
     <string name="detail_tags_label">Tags</string>
     <string name="cd_filter_sort">Filter/sort</string>

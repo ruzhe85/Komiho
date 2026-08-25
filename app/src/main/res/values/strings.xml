@@ -56,6 +56,10 @@
     <string name="filter_tag_active">按标签筛选：%1$s</string>
     <string name="filter_genre_active">按类型筛选：%1$s</string>
     <string name="filter_author_active">按作者筛选：%1$s</string>
+    <string name="filter_tags">标签</string>
+    <string name="filter_genres">类型</string>
+    <string name="filter_authors">作者</string>
+    <string name="filter_clear">清除筛选</string>
     <string name="detail_genres_label">类型</string>
     <string name="detail_tags_label">标签</string>
     <string name="clear">清除</string>

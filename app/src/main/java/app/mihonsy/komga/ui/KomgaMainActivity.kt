@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -155,6 +156,7 @@ import app.mihonsy.komga.data.model.CollectionDto
 import app.mihonsy.komga.data.model.LibraryDto
 import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
+import app.mihonsy.komga.data.model.AuthorDto
 import cafe.adriel.voyager.navigator.Navigator
 import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
 import eu.kanade.tachiyomi.R
@@ -1475,9 +1477,9 @@ private fun LibraryTab(
                 client.getSeries(
                     libraryId = if (isCrossLibraryFilter) null else selectedLibraryId,
                     readStatus = readFilter.komgaValue,
-                    tag = if (filterType == "tag") filterValue else null,
-                    genre = if (filterType == "genre") filterValue else null,
-                    author = if (filterType == "author") filterValue else null,
+                    tag = if (filterType == "tag") listOf(filterValue ?: "") else null,
+                    genre = if (filterType == "genre") listOf(filterValue ?: "") else null,
+                    author = if (filterType == "author") listOf(filterValue ?: "") else null,
                     sort = sort.komgaSort,
                     size = 200,
                 ).content
@@ -2544,25 +2546,47 @@ private fun EmbeddedSearch(
     var searching by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    // ── Komelia-style filter panel state ──
+    var selTags by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selGenres by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selAuthors by remember { mutableStateOf<List<AuthorDto>>(emptyList()) }
+    var allTags by remember { mutableStateOf<List<String>>(emptyList()) }
+    var allGenres by remember { mutableStateOf<List<String>>(emptyList()) }
+    var allAuthors by remember { mutableStateOf<List<AuthorDto>>(emptyList()) }
+    var tagsOpen by remember { mutableStateOf(false) }
+    var genresOpen by remember { mutableStateOf(false) }
+    var authorsOpen by remember { mutableStateOf(false) }
+
+    fun authorValue(a: AuthorDto): String = if (a.role.isNullOrBlank()) a.name else "${a.name},${a.role}"
+
     suspend fun runSearch(q: String) {
         searching = true
         error = null
-        runCatching { client.getSeries(search = q, size = 100).content }
+        runCatching {
+            client.getSeries(
+                search = q.ifBlank { null },
+                tag = selTags.ifEmpty { null },
+                genre = selGenres.ifEmpty { null },
+                author = selAuthors.map { authorValue(it) }.ifEmpty { null },
+                size = 100,
+            ).content
+        }
             .onSuccess { results = it }
             .onFailure { error = context.getString(R.string.search_failed, it.message) }
         searching = false
     }
 
-    // Auto-search when the query becomes non-empty, debounced 300 ms.
-    LaunchedEffect(query) {
-        if (query.isBlank()) {
+    val hasFilter = selTags.isNotEmpty() || selGenres.isNotEmpty() || selAuthors.isNotEmpty()
+
+    // Re-run search when the query or any filter selection changes (debounced 300 ms).
+    LaunchedEffect(query, selTags, selGenres, selAuthors) {
+        if (query.isBlank() && !hasFilter) {
             results = emptyList()
             searching = false
             error = null
         } else {
             kotlinx.coroutines.delay(300)
-            // The user may have cleared the box during the delay.
-            if (query.isNotBlank()) runSearch(query)
+            if (query.isNotBlank() || hasFilter) runSearch(query)
         }
     }
 
@@ -2582,9 +2606,138 @@ private fun EmbeddedSearch(
                 modifier = Modifier.weight(1f),
             )
             TextButton(
-                onClick = { scope.launch { if (query.isNotBlank()) runSearch(query) } },
-                enabled = query.isNotBlank() && !searching,
+                onClick = { scope.launch { if (query.isNotBlank() || hasFilter) runSearch(query) } },
+                enabled = (query.isNotBlank() || hasFilter) && !searching,
             ) { Text(composeStringResource(R.string.search_action)) }
+        }
+
+        // ── Filter buttons row (Komelia parity): Tags / Genres / Authors ──
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box {
+                FilterChip(
+                    selected = tagsOpen,
+                    onClick = {
+                        tagsOpen = true
+                        if (allTags.isEmpty()) {
+                            scope.launch { allTags = runCatching { client.getSeriesTags() }.getOrDefault(emptyList()) }
+                        }
+                    },
+                    label = { Text(composeStringResource(R.string.filter_tags) + if (selTags.isNotEmpty()) " (${selTags.size})" else "") },
+                    trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
+                )
+                DropdownMenu(expanded = tagsOpen, onDismissRequest = { tagsOpen = false }) {
+                    if (allTags.isEmpty()) {
+                        DropdownMenuItem(text = { Text(composeStringResource(R.string.no_match_results)) }, onClick = { tagsOpen = false })
+                    }
+                    allTags.forEach { t ->
+                        val checked = selTags.contains(t)
+                        DropdownMenuItem(
+                            text = { Text(t) },
+                            trailingIcon = { if (checked) Icon(Icons.Filled.Check, contentDescription = null) },
+                            onClick = { selTags = if (checked) selTags - t else selTags + t },
+                        )
+                    }
+                }
+            }
+
+            Box {
+                FilterChip(
+                    selected = genresOpen,
+                    onClick = {
+                        genresOpen = true
+                        if (allGenres.isEmpty()) {
+                            scope.launch { allGenres = runCatching { client.getSeriesGenres() }.getOrDefault(emptyList()) }
+                        }
+                    },
+                    label = { Text(composeStringResource(R.string.filter_genres) + if (selGenres.isNotEmpty()) " (${selGenres.size})" else "") },
+                    trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
+                )
+                DropdownMenu(expanded = genresOpen, onDismissRequest = { genresOpen = false }) {
+                    if (allGenres.isEmpty()) {
+                        DropdownMenuItem(text = { Text(composeStringResource(R.string.no_match_results)) }, onClick = { genresOpen = false })
+                    }
+                    allGenres.forEach { g ->
+                        val checked = selGenres.contains(g)
+                        DropdownMenuItem(
+                            text = { Text(g) },
+                            trailingIcon = { if (checked) Icon(Icons.Filled.Check, contentDescription = null) },
+                            onClick = { selGenres = if (checked) selGenres - g else selGenres + g },
+                        )
+                    }
+                }
+            }
+
+            Box {
+                FilterChip(
+                    selected = authorsOpen,
+                    onClick = {
+                        authorsOpen = true
+                        if (allAuthors.isEmpty()) {
+                            scope.launch { allAuthors = runCatching { client.getSeriesAuthors() }.getOrDefault(emptyList()) }
+                        }
+                    },
+                    label = { Text(composeStringResource(R.string.filter_authors) + if (selAuthors.isNotEmpty()) " (${selAuthors.size})" else "") },
+                    trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
+                )
+                DropdownMenu(expanded = authorsOpen, onDismissRequest = { authorsOpen = false }) {
+                    if (allAuthors.isEmpty()) {
+                        DropdownMenuItem(text = { Text(composeStringResource(R.string.no_match_results)) }, onClick = { authorsOpen = false })
+                    }
+                    allAuthors.forEach { a ->
+                        val checked = selAuthors.contains(a)
+                        DropdownMenuItem(
+                            text = { Text(if (a.role.isNullOrBlank()) a.name else "${a.name} (${a.role})") },
+                            trailingIcon = { if (checked) Icon(Icons.Filled.Check, contentDescription = null) },
+                            onClick = { selAuthors = if (checked) selAuthors - a else selAuthors + a },
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Selected filter chips (removable) ──
+        if (hasFilter) {
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                selTags.forEach { t ->
+                    FilterChip(
+                        selected = true,
+                        onClick = { selTags = selTags - t },
+                        label = { Text(t) },
+                        trailingIcon = { Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.clear)) },
+                    )
+                }
+                selGenres.forEach { g ->
+                    FilterChip(
+                        selected = true,
+                        onClick = { selGenres = selGenres - g },
+                        label = { Text(g) },
+                        trailingIcon = { Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.clear)) },
+                    )
+                }
+                selAuthors.forEach { a ->
+                    FilterChip(
+                        selected = true,
+                        onClick = { selAuthors = selAuthors - a },
+                        label = { Text(if (a.role.isNullOrBlank()) a.name else "${a.name} (${a.role})") },
+                        trailingIcon = { Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.clear)) },
+                    )
+                }
+                TextButton(onClick = {
+                    selTags = emptyList(); selGenres = emptyList(); selAuthors = emptyList()
+                }) { Text(composeStringResource(R.string.filter_clear)) }
+            }
         }
 
         when {
@@ -2594,13 +2747,13 @@ private fun EmbeddedSearch(
             error != null -> Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
                 Text(error ?: "", color = MaterialTheme.colorScheme.error)
             }
-            query.isNotBlank() && results.isEmpty() -> Box(
+            (query.isNotBlank() || hasFilter) && results.isEmpty() -> Box(
                 Modifier.fillMaxWidth().height(120.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(composeStringResource(R.string.no_match_results), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            query.isNotBlank() -> LazyVerticalGrid(
+            query.isNotBlank() || hasFilter -> LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 contentPadding = PaddingValues(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
