@@ -636,6 +636,7 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(SYMR.strings.reader_bottom_buttons),
                     subtitle = stringResource(SYMR.strings.reader_bottom_buttons_summary),
                     entries = ReaderBottomButton.entries
+                        .filter { it !in setOf(ReaderBottomButton.WebView, ReaderBottomButton.Browser, ReaderBottomButton.Share) }
                         .associate { it.value to stringResource(it.stringRes) },
                 ),
                 Preference.PreferenceItem.ListPreference(
