@@ -23,3 +23,6 @@ google-services.json
 # MihonSY: signing keystore must never be committed (stored in GitHub Secrets)
 /keystore/
 app/.cxx/
+
+# Local AI code-memory notes (never commit; keep as local-only reference)
+*_代码记忆.md
