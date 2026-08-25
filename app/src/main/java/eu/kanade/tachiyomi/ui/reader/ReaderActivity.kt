@@ -620,7 +620,9 @@ class ReaderActivity : BaseActivity() {
             return
         }
 
-        val isHttpSource = viewModel.getSource() is HttpSource
+        // SY: Komga 内部 scheme 源无真实网页地址，隐藏 WebView/浏览器/分享 三类辅助按钮
+        val readerSource = viewModel.getSource()
+        val isHttpSource = readerSource is HttpSource && readerSource.id != KomgaSource.ID
 
         val cropBorderPaged by readerPreferences.cropBorders.collectAsState()
         val cropBorderWebtoon by readerPreferences.cropBordersWebtoon.collectAsState()
