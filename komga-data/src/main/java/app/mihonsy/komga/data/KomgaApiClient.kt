@@ -10,6 +10,7 @@ import app.mihonsy.komga.data.model.ReadProgressUpdateDto
 import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
 import app.mihonsy.komga.data.model.AuthorDto
+import app.mihonsy.komga.data.model.GenreDto
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -121,13 +122,13 @@ class KomgaApiClient(
     /** Aggregate genre names across all libraries. */
     suspend fun getSeriesGenres(libraryId: String? = null): List<String> {
         val params = buildMap { libraryId?.let { put("library_id", it) } }
-        return get("/api/v1/genres/series", ListSerializer(), params)
+        return get("/api/v1/genres", ListSerializer<GenreDto>(), params).map { it.name }
     }
 
     /** Aggregate authors (name+role) across all libraries. */
     suspend fun getSeriesAuthors(libraryId: String? = null): List<AuthorDto> {
         val params = buildMap { libraryId?.let { put("library_id", it) } }
-        return get("/api/v1/authors/series", ListSerializer<AuthorDto>(), params)
+        return get("/api/v1/authors", ListSerializer<AuthorDto>(), params)
     }
 
     /** Recently updated series — GET /api/v1/series/updated (official endpoint, mirrors the web UI). */

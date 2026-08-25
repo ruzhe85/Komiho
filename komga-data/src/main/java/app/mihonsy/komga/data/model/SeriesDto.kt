@@ -39,3 +39,9 @@ data class AuthorDto(
     val name: String = "",
     val role: String? = null,
 )
+
+@Serializable
+data class GenreDto(
+    val name: String = "",
+    val id: String = "",
+)

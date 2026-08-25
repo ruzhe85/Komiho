@@ -484,7 +484,11 @@ private fun KomgaMainScreen(
         ) {
             // Search field expands below the title row when the icon is tapped.
             if (searchOpen) {
-                EmbeddedSearch(client) { seriesId ->
+                EmbeddedSearch(
+                    client,
+                    displayMode = displayMode,
+                    columns = columns,
+                ) { seriesId ->
                     context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                 }
             }
@@ -2565,6 +2569,8 @@ private fun ListsTab(
 private fun EmbeddedSearch(
     client: KomgaApiClient,
     modifier: Modifier = Modifier,
+    displayMode: LibraryDisplayMode,
+    columns: Int,
     onSeriesClick: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -2781,15 +2787,45 @@ private fun EmbeddedSearch(
             ) {
                 Text(composeStringResource(R.string.no_match_results), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            query.isNotBlank() || hasFilter -> LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(results) { s ->
-                    SeriesCard(client, s) { onSeriesClick(s.id) }
+            query.isNotBlank() || hasFilter -> if (displayMode == LibraryDisplayMode.List) {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(results, key = { it.id }) { s ->
+                        LibrarySeriesListRow(
+                            client,
+                            s,
+                            onClick = { onSeriesClick(s.id) },
+                        )
+                    }
+                }
+            } else {
+                // 与库 tab 完全一致的显示模式：compact/comfortable 间距 + 自适应或固定列数
+                val isCompact = displayMode == LibraryDisplayMode.CompactGrid
+                val adaptiveMin = if (isCompact) 96.dp else 168.dp
+                val hSpace = if (isCompact) 4.dp else 8.dp
+                val vSpace = if (isCompact) 6.dp else 12.dp
+                val cells = if (columns > 0) {
+                    GridCells.Fixed(columns)
+                } else {
+                    GridCells.Adaptive(minSize = adaptiveMin)
+                }
+                LazyVerticalGrid(
+                    columns = cells,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(hSpace),
+                    verticalArrangement = Arrangement.spacedBy(vSpace),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(results, key = { it.id }) { s ->
+                        LibrarySeriesCard(
+                            client,
+                            s,
+                            onClick = { onSeriesClick(s.id) },
+                            titleInside = isCompact,
+                        )
+                    }
                 }
             }
         }
