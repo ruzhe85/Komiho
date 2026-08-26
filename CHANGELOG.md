@@ -1,10 +1,5 @@
 # Komiho 更新公告 / Changelog
 
-> Komiho 是基于 [MihonSY](https://github.com/jobobby04/TachiyomiSY) / [Tachiyomi](https://github.com/mihonapp/mihon) 改造的 **Komga 专用漫画阅读器**（砍掉多源 / 插件 / 追踪体系，Komga 为唯一数据源）。
-> 版本号沿用改造基线 1.0.6；以下内容为 Komiho 自身的功能记录。
-
-[中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
-
 ## v1.0.6 (Komiho)
 
 首个对外发布的 Komiho 版本，包含以下能力：
