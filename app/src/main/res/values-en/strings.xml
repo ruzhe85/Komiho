@@ -116,6 +116,12 @@
     <string name="about_open_source">Source code (GitHub)</string>
     <string name="about_up_to_date">You are on the latest version</string>
     <string name="about_os_too_old">Your Android version is too old for updates</string>
+    <string name="about_description">A dedicated Komga comic reader, built on the MihonSY reader core.</string>
+    <string name="about_license">Open source license: Apache License 2.0</string>
+    <string name="about_copyright_title">Copyright &amp; License</string>
+    <string name="about_copyright_body">Komiho © 2026 Ruzhe</string>
+    <string name="about_based_on">Derived from MihonSY / Mihon (formerly Tachiyomi), released under the Apache License 2.0.</string>
+    <string name="about_third_party">Komga is developed by Gotson; this app interacts with it via the Komga API. Other third-party components are copyrighted by their respective owners.</string>
 
     <!-- Settings: library (was "home settings") -->
     <string name="settings_home">Library</string>

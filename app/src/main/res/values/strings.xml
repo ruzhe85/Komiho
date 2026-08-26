@@ -118,6 +118,12 @@
     <string name="about_open_source">源代码 (GitHub)</string>
     <string name="about_up_to_date">已是最新版本</string>
     <string name="about_os_too_old">当前系统版本过低，无法接收更新</string>
+    <string name="about_description">纯 Komga 漫画阅读客户端，基于 MihonSY 阅读器内核构建。</string>
+    <string name="about_license">开源协议 Apache License 2.0</string>
+    <string name="about_copyright_title">版权与许可</string>
+    <string name="about_copyright_body">Komiho © 2026 Ruzhe</string>
+    <string name="about_based_on">基于 MihonSY / Mihon（原 Tachiyomi）衍生开发，以 Apache License 2.0 开源发布。</string>
+    <string name="about_third_party">Komga 由 Gotson 开发，本应用通过 Komga API 与之交互；其余第三方组件版权归各自所有者所有。</string>
 
     <!-- 设置：书库（原“主页设置”，更名并扩预览图/缓存） -->
     <string name="settings_home">书库</string>

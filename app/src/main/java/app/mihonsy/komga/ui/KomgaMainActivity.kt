@@ -3549,6 +3549,13 @@ private fun KomgaAbout(modifier: Modifier, context: android.content.Context) {
             text = "$versionText · build ${BuildConfig.VERSION_CODE}",
             style = MaterialTheme.typography.bodyMedium,
         )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = composeStringResource(R.string.about_description),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
         Spacer(Modifier.height(24.dp))
         Button(
             onClick = {
@@ -3573,6 +3580,37 @@ private fun KomgaAbout(modifier: Modifier, context: android.content.Context) {
         ) {
             Text(composeStringResource(R.string.about_open_source))
         }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { context.openInBrowser("https://www.apache.org/licenses/LICENSE-2.0") },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(composeStringResource(R.string.about_license))
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+        Text(
+            text = composeStringResource(R.string.about_copyright_title),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = composeStringResource(R.string.about_copyright_body),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = composeStringResource(R.string.about_based_on),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = composeStringResource(R.string.about_third_party),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
