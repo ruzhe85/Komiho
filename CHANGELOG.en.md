@@ -1,10 +1,5 @@
 # Komiho Changelog
 
-> Komiho is a **Komga-only manga reader** rebuilt from [MihonSY](https://github.com/jobobby04/TachiyomiSY) / [Tachiyomi](https://github.com/mihonapp/mihon) (the multi-source / extension / tracker stack is removed; Komga is the single data source).
-> Versioning continues from the rework baseline at 1.0.6; the notes below are Komiho's own feature record.
-
-[中文](./CHANGELOG.md) | [English](./CHANGELOG.en.md)
-
 ## v1.0.6 (Komiho)
 
 The first publicly released Komiho version, with the following capabilities:
