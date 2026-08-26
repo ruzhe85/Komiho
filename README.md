@@ -4,7 +4,7 @@
 
 ![Komiho](.github/readme-images/app-icon.png)
 
-**纯 [Komga](https://github.com/gotson/komga) 漫画阅读客户端**
+**纯 [Komga](https://github.com/gotson/komga) 安卓漫画阅读客户端**
 
 包名 `cn.ruzhe.komiho` ｜ 版本 1.0.6 (7) ｜ Android 8.0+
 
@@ -16,7 +16,7 @@
 
 ## 简介
 
-Komiho 是基于 [MihonSY](https://github.com/jobobby04/TachiyomiSY) / [Tachiyomi](https://github.com/mihonapp/mihon) 改造的 **Komga 专用漫画阅读器**。它砍掉了上游的多源 / 插件 / 追踪体系，**以 Komga 服务器作为唯一数据源**，把 MihonSY 成熟的阅读器能力直接对接 Komga API（v1.26.3）。
+Komiho 是基于 [MihonSY](https://github.com/ruzhe85/MihonSY) 改造的 **Komga 专用漫画阅读器**。它砍掉了上游的多源 / 插件 / 追踪体系，**以 Komga 服务器作为唯一数据源**，把 MihonSY 成熟的阅读器能力直接对接 Komga API（v1.26.3）。
 
 - 连接自托管的 Komga 服务器（URL + API-Key），支持多服务器切换
 - 浏览库 / 系列 / 书，阅读进度实时回写 Komga
