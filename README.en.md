@@ -16,7 +16,7 @@ Package `cn.ruzhe.komiho` ｜ Version 1.0.6 (7) ｜ Android 8.0+
 
 ## About
 
-Komiho is a **Komga-only manga reader** rebuilt from [MihonSY](https://github.com/jobobby04/TachiyomiSY) / [Tachiyomi](https://github.com/mihonapp/mihon). It removes the upstream multi-source / extension / tracker stack and uses a **Komga server as the single data source**, wiring MihonSY's mature reader directly to the Komga API (v1.26.3).
+Komiho is a **Komga-only manga reader** rebuilt from [MihonSY](https://github.com/ruzhe85/MihonSY). It removes the upstream multi-source / extension / tracker stack and uses a **Komga server as the single data source**, wiring MihonSY's mature reader directly to the Komga API (v1.26.3).
 
 - Connect to a self-hosted Komga server (URL + API-Key), with multi-server switching
 - Browse libraries / series / books, with reading progress written back to Komga in real time
