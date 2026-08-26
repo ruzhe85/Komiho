@@ -32,7 +32,6 @@ Komiho is a **Komga-only manga reader** rebuilt from [MihonSY](https://github.co
 
 - **Connection management**: connect to a self-hosted Komga server via URL + API-Key (`X-API-Key`), validated before saving.
 - **Multiple servers**: add several Komga servers and switch the active one in settings; each can be edited / deleted.
-- **Seamless migration**: an old single-connection config is auto-migrated to a single entry on first launch — nothing is lost.
 
 ### 2. Library Browsing
 
@@ -68,30 +67,6 @@ Komiho is a **Komga-only manga reader** rebuilt from [MihonSY](https://github.co
 - Appearance (theme / language), Reader, Server connections (multi-server manager).
 - **About** page: show version, check for updates (targeting `ruzhe85/Komiho`), and a GitHub source link.
 
----
-
-## 📦 Build
-
-### GitHub Actions (recommended, already configured in this repo)
-
-Pushing to `main` triggers the `Build Komiho V2 APK` workflow automatically; the artifact is published to the fixed `CI` release tag:
-
-```bash
-git push origin main
-# Download the latest APK (arm64-v8a)
-# https://github.com/ruzhe85/Komiho/releases/download/CI/komiho-ci-arm64-v8a.apk
-```
-
-- Artifact: `komiho-ci-arm64-v8a.apk` (single ABI on the CI channel for now).
-- Signing: fixed debug keystore (injected via GitHub Secrets `KOMIHO_DEBUG_KEYSTORE_BASE64`, never committed).
-- Dependencies: JDK 17 + Android SDK + NDK 28.2 + CMake.
-
-### Local Build (not recommended)
-
-```bash
-# Requires JDK 17, Android SDK, NDK 28.2.13676358, Gradle 9.6.1
-./gradlew assembleRelease
-```
 
 ---
 
@@ -122,8 +97,3 @@ See [CHANGELOG.en.md](./CHANGELOG.en.md).
 
 ---
 
-## Credits
-
-- [MihonSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY) — upstream fork base (reader capability)
-- [Mihon](https://github.com/mihonapp/mihon) — main project (Tachiyomi successor)
-- [Komga (gotson)](https://github.com/gotson/komga) — media server and API
