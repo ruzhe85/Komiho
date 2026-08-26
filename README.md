@@ -32,7 +32,7 @@ Komiho 是基于 [MihonSY](https://github.com/jobobby04/TachiyomiSY) / [Tachiyom
 
 - **连接管理**：通过 URL + API-Key（`X-API-Key`）连接自托管 Komga 服务器，连接前自动校验。
 - **多服务器**：可添加多个 Komga 服务器，设置内一键切换激活；每条可编辑 / 删除。
-- **无感迁移**：旧版单连接配置在首次启动自动迁移为单条连接，原有配置不丢。
+
 
 ### 2. 书库浏览
 
@@ -60,38 +60,7 @@ Komiho 是基于 [MihonSY](https://github.com/jobobby04/TachiyomiSY) / [Tachiyom
 
 - 全局关键词搜索（`/api/v1/series?search=`）。
 - 按 **标签 / 作者** 筛选；主页搜索范围为所有库，库内选择为当前库。
-- 搜索结果复用库的显示模式（不再固定平铺）。
-
-### 6. 设置与关于
-
-- 外观（主题 / 语言）、阅读器、服务器连接（多服务器管理器）。
-- **关于**页：显示版本号、检查更新（更新检查目标仓库 `ruzhe85/Komiho`）、GitHub 源码链接。
-
----
-
-## 📦 构建
-
-### GitHub Actions（推荐，本仓库已配置）
-
-推送到 `main` 分支自动触发 `Build Komiho V2 APK` workflow，构建产物发布到固定 `CI` release tag：
-
-```bash
-git push origin main
-# 下载最新 APK（arm64-v8a）
-# https://github.com/ruzhe85/Komiho/releases/download/CI/komiho-ci-arm64-v8a.apk
-```
-
-- 产物：`komiho-ci-arm64-v8a.apk`（当前为单 ABI，CI 通道）。
-- 签名：固定 debug keystore（经 GitHub Secrets `KOMIHO_DEBUG_KEYSTORE_BASE64` 注入，不落入代码库）。
-- 依赖：JDK 17 + Android SDK + NDK 28.2 + CMake。
-
-### 本地构建（不推荐）
-
-```bash
-# 需要 JDK 17、Android SDK、NDK 28.2.13676358、Gradle 9.6.1
-./gradlew assembleRelease
-```
-
+- 搜索结果复用库的显示模式）。
 ---
 
 ## 🗂️ 项目结构
@@ -117,12 +86,8 @@ git push origin main
 - 仅用于个人学习与使用，请勿用于商业用途。
 - 请遵守所阅读漫画的版权规定。
 - 本应用需要可用的 Komga 服务器，且需自行承担服务器数据安全责任。
-- 本 fork 与上游无关联，问题请在本仓库 Issue 讨论。
+- 问题请在本仓库 Issue 讨论。
 
 ---
 
-## 致谢
 
-- [MihonSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY) — 上游 fork 基础（阅读器能力）
-- [Mihon](https://github.com/mihonapp/mihon) — 主项目（Tachiyomi 继任）
-- [Komga (gotson)](https://github.com/gotson/komga) — 媒体服务器与 API
