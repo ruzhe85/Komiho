@@ -1,12 +1,12 @@
-# MihonSY
+# Komiho
 
 <div align="center">
 
-![MihonSY](.github/readme-images/app-icon.png)
+![Komiho](.github/readme-images/app-icon.png)
 
-**基于 [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY) 的漫画阅读器**
+**纯 [Komga](https://github.com/gotson/komga) 漫画阅读客户端**
 
-包名 `eu.kanade.mihonsy` ｜ 版本 1.0.6 (7) ｜ Android 8.0+
+包名 `cn.ruzhe.komiho` ｜ 版本 1.0.6 (7) ｜ Android 8.0+
 
 [中文](./README.md) | [English](./README.en.md)
 
@@ -16,66 +16,56 @@
 
 ## 简介
 
-MihonSY 是 TachiyomiSY（SY）的分支，在保留 SY 全部特性的基础上，针对**条漫阅读体验**做了增强：
+Komiho 是基于 [MihonSY](https://github.com/jobobby04/TachiyomiSY) / [Tachiyomi](https://github.com/mihonapp/mihon) 改造的 **Komga 专用漫画阅读器**。它砍掉了上游的多源 / 插件 / 追踪体系，**以 Komga 服务器作为唯一数据源**，把 MihonSY 成熟的阅读器能力直接对接 Komga API（v1.26.3）。
 
-- 点击滚动距离与匀速动画可调
-- 更聪明的自动条漫判定
-- Komga 追番进度**逐本精确**同步
-- 轻量图像增强（Lanczos3，无大模型）
-- 原始分辨率 1:1 显示
+- 连接自托管的 Komga 服务器（URL + API-Key），支持多服务器切换
+- 浏览库 / 系列 / 书，阅读进度实时回写 Komga
+- 复用 MihonSY 完整阅读器（翻页 / 条漫 / RTL / 双页 / 缩放 / 图像增强）
 
-> ⚠️ 本应用**移除了原版更新检查**，不会联网检查更新；与官方 TachiyomiSY 包名不同，可共存安装，但**请勿混淆两个版本的数据**（备份/恢复时注意区分）。
+> ⚠️ Komiho 需要你自建或已有可用的 **Komga 服务器**，本应用本身不提供漫画内容。
 
 ---
 
-## ✨ 新增功能
+## ✨ 核心功能
 
-### 1. 条漫点击滚动设置
+### 1. 服务器连接（多 Komga）
 
-- **点击滚动距离**：半个屏幕 / 3/4 屏幕 / 一个屏幕，三档可选。
-- **滚动动画**：点击滚动采用**匀速线性动画**，动画时长可调（0–1000ms，默认 250ms）；设为 0 即瞬时跳页。
-- **入口**：阅读器内设置（条漫分组）或 全局设置 → 阅读器 → 条漫。
+- **连接管理**：通过 URL + API-Key（`X-API-Key`）连接自托管 Komga 服务器，连接前自动校验。
+- **多服务器**：可添加多个 Komga 服务器，设置内一键切换激活；每条可编辑 / 删除。
+- **无感迁移**：旧版单连接配置在首次启动自动迁移为单条连接，原有配置不丢。
 
-### 2. 自动条漫判定增强
+### 2. 书库浏览
 
-- 保留原版标签判定（标签含 webtoon / long strip 等）。
-- 新增**按图片分辨率判定**：打开阅读器后若首页为长条图（高/宽 > 2.5），自动切换条漫模式。
+- **库 / 系列 / 书** 三层模型，对齐 Komga（Series = 书，Book = 章节）。
+- 库列表（支持多库）、系列网格（封面来自 Komga thumbnail）、系列详情（书按序排列）。
+- **Home 聚合**：Keep Reading / On Deck 等区块，语义对齐 Komga Web Dashboard。
+- 顶栏库选择器（DropdownMenu）快速切换当前库。
 
-### 3. Komga 进度逐本同步
+### 3. 阅读器（MihonSY 全能力）
 
-- 阅读进度不再使用"把第 1~N 话全部标记已读"的累积接口，改为对**实际读到的单话**逐本 PATCH
-  （`PATCH /api/v1/books/{id}/read-progress`），**其他章节不受影响**，进度精确到话。
+- 翻页（LTR / RTL / 垂直）、条漫（webtoon）、双击捏合缩放、双页。
+- 阅读设置、进度记忆、滚轮 / 按键翻页等完整交互。
+- **进度回写**：读到末页置 `completed`，book 级 + series 级（`/api/v2/series/{id}/read-progress/tachiyomi`）进度节流回写，Komga Web 端可见。
 
-### 4. 图像增强（轻量方案）
+### 4. 图像增强（轻量）
 
 | 算法 | 类型 | 档位 |
 |------|------|------|
 | **Lanczos3** | 经典插值 | 1.5x / 2x / 2.5x / 3x |
 
-- 针对漫画/条漫线条优化，加载快、内存占用低。
-- **不含** waifu2x / Real-CUGAN / Real-ESRGAN 等重型模型（避免卡顿）。
-- 入口：全局设置 → 阅读器 → 图像增强；阅读器设置内可直接开关「显示增强状态」。
+- 针对漫画 / 条漫线条优化，加载快、内存占用低，不含 waifu2x / Anime4K 等重型模型。
+- 入口：设置 → 阅读器 → 图像增强。
 
-### 5. 原始分辨率显示
+### 5. 搜索与筛选
 
-- 条漫模式新增「原始分辨率」开关：图片按原始像素 **1:1** 显示，不缩放。
-- 普通翻页模式可在缩放类型中选择「原始大小」。
+- 全局关键词搜索（`/api/v1/series?search=`）。
+- 按 **标签 / 作者** 筛选；主页搜索范围为所有库，库内选择为当前库。
+- 搜索结果复用库的显示模式（不再固定平铺）。
 
----
+### 6. 设置与关于
 
-## 🧩 原版 TachiyomiSY 特性（全部保留）
-
-- 多源在线阅读、本地阅读
-- 可配置阅读器（多视图、多阅读方向、其他设置）
-- 追踪支持：MyAnimeList、AniList、Kitsu、MangaUpdates、Shikimori、Bangumi、Hikka
-- 分类管理书架
-- 明/暗主题
-- 定时更新书架新章节
-- 本地/云备份
-- Latest 标签（最多 5 个源）
-- 自动 webtoon 检测（原版）
-- 漫画推荐（MAL / Anilist / Neko Similar Manga）
-- Lewd 过滤、追踪过滤、自定义源分类等
+- 外观（主题 / 语言）、阅读器、服务器连接（多服务器管理器）。
+- **关于**页：显示版本号、检查更新（更新检查目标仓库 `ruzhe85/Komiho`）、GitHub 源码链接。
 
 ---
 
@@ -83,25 +73,23 @@ MihonSY 是 TachiyomiSY（SY）的分支，在保留 SY 全部特性的基础上
 
 ### GitHub Actions（推荐，本仓库已配置）
 
-推送到 `master` 分支自动触发构建，或手动触发 `Build MihonSY APK` workflow：
+推送到 `main` 分支自动触发 `Build Komiho V2 APK` workflow，构建产物发布到固定 `CI` release tag：
 
 ```bash
-git push origin master
-# 或手动触发
-gh workflow run 332560481 --repo ruzhe85/MihonSY
-# 下载产物
-gh run download <run-id> --repo ruzhe85/MihonSY
+git push origin main
+# 下载最新 APK（arm64-v8a）
+# https://github.com/ruzhe85/Komiho/releases/download/CI/komiho-ci-arm64-v8a.apk
 ```
 
-- 产物：5 个 ABI 的 release APK（arm64-v8a / armeabi-v7a / x86_64 / x86 / universal）
-- 签名：`keystore/mihonmod.jks`（经 GitHub Secrets 注入，不落入代码库）
-- 依赖：JDK 17 + Android SDK 36 + NDK 28.2 + CMake
+- 产物：`komiho-ci-arm64-v8a.apk`（当前为单 ABI，CI 通道）。
+- 签名：固定 debug keystore（经 GitHub Secrets `KOMIHO_DEBUG_KEYSTORE_BASE64` 注入，不落入代码库）。
+- 依赖：JDK 17 + Android SDK + NDK 28.2 + CMake。
 
 ### 本地构建（不推荐）
 
 ```bash
-# 需要 JDK 17、Android SDK 36、NDK 28.2.13676358、Gradle 9.6.1
-./gradlew assembleRelease -Pdisable-code-shrink
+# 需要 JDK 17、Android SDK、NDK 28.2.13676358、Gradle 9.6.1
+./gradlew assembleRelease
 ```
 
 ---
@@ -110,11 +98,10 @@ gh run download <run-id> --repo ruzhe85/MihonSY
 
 | 路径 | 说明 |
 |------|------|
-| `app/src/main/cpp/` | Lanczos3 原生实现（JNI） |
-| `.../reader/viewer/webtoon/` | 条漫点击滚动、匀速动画、原始分辨率 |
-| `.../reader/setting/ReaderPreferences.kt` | 偏好项定义 |
-| `.../util/MihonSyEnhancer.kt` | 图像增强调度 |
-| `.../data/track/komga/` | Komga 逐本进度同步 |
+| `komga-data/` | Komga API 客户端（OkHttp + X-API-Key）、DTO、连接偏好 |
+| `app/src/main/java/app/mihonsy/komga/ui/` | Komiho 自有 UI（连接 / Home / 系列 / 阅读器 / 设置） |
+| `app/src/main/java/eu/kanade/tachiyomi/ui/reader/` | 复用的 MihonSY 阅读器 |
+| `i18n/` | 多平台资源（应用名 `Komiho` 等） |
 | `.github/workflows/build.yml` | GitHub Actions 构建配置 |
 
 ---
@@ -129,12 +116,13 @@ gh run download <run-id> --repo ruzhe85/MihonSY
 
 - 仅用于个人学习与使用，请勿用于商业用途。
 - 请遵守所阅读漫画的版权规定。
-- 本 fork 与上游无关联，问题请自行排查或在本仓库 Issue 讨论。
+- 本应用需要可用的 Komga 服务器，且需自行承担服务器数据安全责任。
+- 本 fork 与上游无关联，问题请在本仓库 Issue 讨论。
 
 ---
 
 ## 致谢
 
-- [TachiyomiSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY) — 上游项目
-- [Mihon](https://github.com/mihonapp/mihon) — 主项目
-- [Anime4K](https://github.com/bloc97/Anime4K) — 图像增强算法
+- [MihonSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY) — 上游 fork 基础（阅读器能力）
+- [Mihon](https://github.com/mihonapp/mihon) — 主项目（Tachiyomi 继任）
+- [Komga (gotson)](https://github.com/gotson/komga) — 媒体服务器与 API

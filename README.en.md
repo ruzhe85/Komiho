@@ -1,12 +1,12 @@
-# MihonSY
+# Komiho
 
 <div align="center">
 
-![MihonSY](.github/readme-images/app-icon.png)
+![Komiho](.github/readme-images/app-icon.png)
 
-**A manga reader based on [TachiyomiSY](https://github.com/jobobby04/TachiyomiSY)**
+**A dedicated [Komga](https://github.com/gotson/komga) manga reader**
 
-Package `eu.kanade.mihonsy` ｜ Version 1.0.6 (7) ｜ Android 8.0+
+Package `cn.ruzhe.komiho` ｜ Version 1.0.6 (7) ｜ Android 8.0+
 
 [English](./README.en.md) | [中文](./README.md)
 
@@ -16,67 +16,57 @@ Package `eu.kanade.mihonsy` ｜ Version 1.0.6 (7) ｜ Android 8.0+
 
 ## About
 
-MihonSY is a fork of TachiyomiSY (SY). It keeps all of SY's features and enhances the **webtoon reading experience**:
+Komiho is a **Komga-only manga reader** rebuilt from [MihonSY](https://github.com/jobobby04/TachiyomiSY) / [Tachiyomi](https://github.com/mihonapp/mihon). It removes the upstream multi-source / extension / tracker stack and uses a **Komga server as the single data source**, wiring MihonSY's mature reader directly to the Komga API (v1.26.3).
 
-- Adjustable tap-to-scroll distance with constant-speed animation
-- Smarter automatic webtoon detection
-- Komga tracking progress synced **per book**, precisely
-- Lightweight image enhancement (Lanczos3, no heavy models)
-- Original-resolution (1:1) display
+- Connect to a self-hosted Komga server (URL + API-Key), with multi-server switching
+- Browse libraries / series / books, with reading progress written back to Komga in real time
+- Reuses the full MihonSY reader (paged / webtoon / RTL / double-page / zoom / image enhancement)
 
-> ⚠️ This app has the **update checker removed** and never checks for updates online. It uses a different package name from the official TachiyomiSY, so both can be installed side by side — but **do not mix data between the two versions** (be careful when backing up / restoring).
+> ⚠️ Komiho requires an available **Komga server** (self-hosted or otherwise); it does not provide comic content by itself.
 
 ---
 
-## ✨ New Features
+## ✨ Core Features
 
-### 1. Webtoon Tap-to-Scroll Settings
+### 1. Server Connections (multi-Komga)
 
-- **Tap scroll distance**: half screen / 3/4 screen / full screen (3 options).
-- **Scroll animation**: tap scrolling uses a **constant-speed linear animation**; the duration is adjustable (0–1000ms, default 250ms). Set to 0 for an instant jump.
-- **Where**: reader settings (webtoon group) or Global settings → Reader → Webtoon.
+- **Connection management**: connect to a self-hosted Komga server via URL + API-Key (`X-API-Key`), validated before saving.
+- **Multiple servers**: add several Komga servers and switch the active one in settings; each can be edited / deleted.
+- **Seamless migration**: an old single-connection config is auto-migrated to a single entry on first launch — nothing is lost.
 
-### 2. Enhanced Auto-Webtoon Detection
+### 2. Library Browsing
 
-- Keeps the original tag-based detection (tags containing webtoon / long strip, etc.).
-- **New aspect-ratio detection**: when the first page of a chapter is a long strip (height/width > 2.5), the reader automatically switches to webtoon mode.
+- **Library / Series / Book** three-tier model, aligned with Komga (Series = book, Book = chapter).
+- Library list (multi-library), series grid (covers from Komga thumbnails), series detail (books in order).
+- **Home aggregation**: Keep Reading / On Deck sections, semantically aligned with the Komga Web Dashboard.
+- Top-bar library selector (DropdownMenu) to switch the current library quickly.
 
-### 3. Per-Book Komga Progress Sync
+### 3. Reader (full MihonSY capability)
 
-- Instead of the cumulative "mark chapters 1–N as read" endpoint, progress is now synced per book via a single-chapter PATCH
-  (`PATCH /api/v1/books/{id}/read-progress`) — **other chapters are unaffected**, progress is precise to the chapter.
+- Paged (LTR / RTL / vertical), webtoon, double-tap pinch zoom, double-page.
+- Reading settings, progress memory, wheel / key paging, and the full interaction set.
+- **Progress write-back**: marks `completed` at the last page; book-level + series-level
+  (`/api/v2/series/{id}/read-progress/tachiyomi`) progress is throttled back, visible on the Komga Web side.
 
-### 4. Image Enhancement (Lightweight)
+### 4. Image Enhancement (lightweight)
 
 | Algorithm | Type | Presets |
 |-----------|------|---------|
 | **Lanczos3** | Classic resampling | 1.5x / 2x / 2.5x / 3x |
 
-- Optimized for manga/webtoon line art; fast to load and low memory usage.
-- **No** heavy models such as waifu2x / Real-CUGAN / Real-ESRGAN (avoids lag).
-- **Where**: Global settings → Reader → Image enhancement; the reader settings
-  dialog can toggle "Show enhancement status" directly.
+- Tuned for manga / webtoon line art; fast to load and low memory usage — no heavy models like waifu2x / Anime4K.
+- **Where**: Settings → Reader → Image enhancement.
 
-### 5. Original-Resolution Display
+### 5. Search & Filter
 
-- Webtoon mode has a new "Original resolution" toggle: images display at **1:1** original pixels, no scaling.
-- In regular paging mode you can pick "Original size" in the zoom type.
+- Global keyword search (`/api/v1/series?search=`).
+- Filter by **tag / author**; on the home search the scope is all libraries, inside a library it is the current library.
+- Search results reuse the library display mode (no longer a fixed flat layout).
 
----
+### 6. Settings & About
 
-## 🧩 Upstream TachiyomiSY Features (All Kept)
-
-- Online reading from a variety of sources; local reading
-- Configurable reader (multiple viewers, reading directions, other settings)
-- Tracker support: MyAnimeList, AniList, Kitsu, MangaUpdates, Shikimori, Bangumi, Hikka
-- Categories to organize your library
-- Light and dark themes
-- Scheduled library updates for new chapters
-- Local/cloud backups
-- Latest tab (up to 5 sources)
-- Automatic webtoon detection (upstream)
-- Manga recommendations (MAL / AniList / Neko Similar Manga)
-- Lewd filter, tracking filter, custom source categories, and more
+- Appearance (theme / language), Reader, Server connections (multi-server manager).
+- **About** page: show version, check for updates (targeting `ruzhe85/Komiho`), and a GitHub source link.
 
 ---
 
@@ -84,25 +74,23 @@ MihonSY is a fork of TachiyomiSY (SY). It keeps all of SY's features and enhance
 
 ### GitHub Actions (recommended, already configured in this repo)
 
-Pushing to the `master` branch triggers a build automatically, or manually trigger the `Build MihonSY APK` workflow:
+Pushing to `main` triggers the `Build Komiho V2 APK` workflow automatically; the artifact is published to the fixed `CI` release tag:
 
 ```bash
-git push origin master
-# or manually trigger
-gh workflow run 332560481 --repo ruzhe85/MihonSY
-# download artifacts
-gh run download <run-id> --repo ruzhe85/MihonSY
+git push origin main
+# Download the latest APK (arm64-v8a)
+# https://github.com/ruzhe85/Komiho/releases/download/CI/komiho-ci-arm64-v8a.apk
 ```
 
-- Artifacts: release APKs for 5 ABIs (arm64-v8a / armeabi-v7a / x86_64 / x86 / universal)
-- Signing: `keystore/mihonmod.jks` (injected via GitHub Secrets, never committed)
-- Dependencies: JDK 17 + Android SDK 36 + NDK 28.2 + CMake
+- Artifact: `komiho-ci-arm64-v8a.apk` (single ABI on the CI channel for now).
+- Signing: fixed debug keystore (injected via GitHub Secrets `KOMIHO_DEBUG_KEYSTORE_BASE64`, never committed).
+- Dependencies: JDK 17 + Android SDK + NDK 28.2 + CMake.
 
 ### Local Build (not recommended)
 
 ```bash
-# Requires JDK 17, Android SDK 36, NDK 28.2.13676358, Gradle 9.6.1
-./gradlew assembleRelease -Pdisable-code-shrink
+# Requires JDK 17, Android SDK, NDK 28.2.13676358, Gradle 9.6.1
+./gradlew assembleRelease
 ```
 
 ---
@@ -111,11 +99,10 @@ gh run download <run-id> --repo ruzhe85/MihonSY
 
 | Path | Description |
 |------|-------------|
-| `app/src/main/cpp/` | Lanczos3 native implementation (JNI) |
-| `.../reader/viewer/webtoon/` | Tap-to-scroll, constant-speed animation, original resolution |
-| `.../reader/setting/ReaderPreferences.kt` | Preference definitions |
-| `.../util/MihonSyEnhancer.kt` | Image enhancement orchestration |
-| `.../data/track/komga/` | Per-book Komga progress sync |
+| `komga-data/` | Komga API client (OkHttp + X-API-Key), DTOs, connection preferences |
+| `app/src/main/java/app/mihonsy/komga/ui/` | Komiho's own UI (connect / home / series / reader / settings) |
+| `app/src/main/java/eu/kanade/tachiyomi/ui/reader/` | Reused MihonSY reader |
+| `i18n/` | Multiplatform resources (app name `Komiho`, etc.) |
 | `.github/workflows/build.yml` | GitHub Actions build configuration |
 
 ---
@@ -130,12 +117,13 @@ See [CHANGELOG.en.md](./CHANGELOG.en.md).
 
 - For personal learning and use only; do not use commercially.
 - Please respect the copyright of the manga you read.
+- This app requires an available Komga server; you are responsible for your server's data safety.
 - This fork is not affiliated with the upstream project; for issues please open an Issue in this repository.
 
 ---
 
 ## Credits
 
-- [TachiyomiSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY) — upstream project
-- [Mihon](https://github.com/mihonapp/mihon) — main project
-- [Anime4K](https://github.com/bloc97/Anime4K) — image enhancement algorithm
+- [MihonSY (jobobby04)](https://github.com/jobobby04/TachiyomiSY) — upstream fork base (reader capability)
+- [Mihon](https://github.com/mihonapp/mihon) — main project (Tachiyomi successor)
+- [Komga (gotson)](https://github.com/gotson/komga) — media server and API
