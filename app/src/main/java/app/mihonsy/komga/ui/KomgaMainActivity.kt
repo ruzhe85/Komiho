@@ -3915,6 +3915,7 @@ private fun fileIcon(file: UniFile): ImageVector {
     }
 }
 
+@Composable
 private fun fileTint(file: UniFile): Color {
     val isArchive = !file.isDirectory && (Archive.isSupported(file) || file.extension.equals("epub", true))
     val isPlain = !file.isDirectory && !isArchive
@@ -3935,9 +3936,9 @@ private fun LocalFileBrowser(base: UniFile) {
     val prefs = remember { Injekt.get<StoragePreferences>() }
 
     // 显示模式 / 排序 / 封面：从偏好读取并持久化（与书架一致，记设置）。
-    var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.localBrowseDisplayMode)) }
-    var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.localBrowseSort)) }
-    var showCover by remember { mutableStateOf(prefs.localBrowseShowCover) }
+    var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.localBrowseDisplayMode.get())) }
+    var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.localBrowseSort.get())) }
+    var showCover by remember { mutableStateOf(prefs.localBrowseShowCover.get()) }
     var showOptions by remember { mutableStateOf(false) }
 
     // 相对路径栈：栈底为空串代表根目录，下钻时追加段名。每个条目的相对路径 =
@@ -4082,11 +4083,11 @@ private fun LocalFileBrowser(base: UniFile) {
         expanded = showOptions,
         onDismiss = { showOptions = false },
         displayMode = displayMode,
-        onDisplayModeChange = { displayMode = it; prefs.localBrowseDisplayMode = it.prefValue },
+        onDisplayModeChange = { displayMode = it; prefs.localBrowseDisplayMode.set(it.prefValue) },
         showCover = showCover,
-        onShowCoverChange = { showCover = it; prefs.localBrowseShowCover = it },
+        onShowCoverChange = { showCover = it; prefs.localBrowseShowCover.set(it) },
         sort = sort,
-        onSortModeChange = { sort = it; prefs.localBrowseSort = it.toPref() },
+        onSortModeChange = { sort = it; prefs.localBrowseSort.set(it.toPref()) },
     )
 }
 
@@ -4228,7 +4229,7 @@ private fun LocalBrowseOptionsMenu(
                     CheckboxItem(
                         label = composeStringResource(R.string.local_browse_cover),
                         checked = showCover,
-                        onClick = onShowCoverChange,
+                        onClick = { onShowCoverChange(!showCover) },
                     )
                 }
             }
