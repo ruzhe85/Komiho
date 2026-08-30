@@ -26,6 +26,11 @@
     <string name="local_root_label">本地根目錄</string>
     <string name="local_history_empty">暫無閱讀紀錄</string>
     <string name="local_bookmarks_empty">暫無書籤</string>
+    <string name="local_history_aggregate">匯聚</string>
+    <string name="local_history_delete">刪除紀錄</string>
+    <string name="local_history_delete_all">清除全部紀錄</string>
+    <string name="local_history_cancel">取消</string>
+    <string name="local_bookmark_remove">取消書籤</string>
 
     <!-- 搜尋 -->
     <string name="cd_close_search">關閉搜尋</string>

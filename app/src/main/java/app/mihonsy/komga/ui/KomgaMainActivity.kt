@@ -6,6 +6,7 @@ import coil3.ImageLoader
 import android.content.Context
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.text.format.DateUtils
 import android.widget.Toast
 import java.util.Date
 import kotlin.math.max
@@ -233,6 +234,7 @@ import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Collections
+import java.util.LinkedHashMap
 import java.util.Locale
 // SY <--
 
@@ -4597,15 +4599,31 @@ private fun LocalEmptyHint(icon: ImageVector, text: String) {
     }
 }
 
-/** 从章节 URL（相对本地根目录的路径）重建真实的 tree-backed UniFile。 */
+// ---- 性能缓存：避免滚动时反复 SAF/IPC/开档导致卡顿 ----
+private val fileResolveCache = Collections.synchronizedMap(LinkedHashMap<String, UniFile?>(256, 0.75f, true))
+private val pageCountCache = Collections.synchronizedMap(LinkedHashMap<String, Int>(1024, 0.75f, true))
+private data class FileStat(val size: Long, val modified: Long)
+private val fileStatCache = Collections.synchronizedMap(LinkedHashMap<String, FileStat>(1024, 0.75f, true))
+
+/** 从章节 URL（相对本地根目录的路径）重建真实的 tree-backed UniFile（带缓存）。 */
 private fun resolveLocalFile(chapterUrl: String): UniFile? {
-    val base = Injekt.get<LocalSourceFileSystem>().getBaseDirectory() ?: return null
+    fileResolveCache[chapterUrl]?.let { return it }
+    val base = Injekt.get<LocalSourceFileSystem>().getBaseDirectory() ?: return null.also { fileResolveCache[chapterUrl] = null }
     var current = base
     for (seg in chapterUrl.split('/')) {
         if (seg.isBlank()) continue
-        current = current.findFile(seg) ?: return null
+        current = current.findFile(seg) ?: return null.also { fileResolveCache[chapterUrl] = null }
     }
-    return current
+    return current.also { fileResolveCache[chapterUrl] = it }
+}
+
+/** 文件元信息（大小/修改时间），带缓存，避免重复 SAF IPC。file 未解析时不缓存（避免陈旧 0）。 */
+private fun getFileStat(chapterUrl: String, file: UniFile?): FileStat {
+    if (file == null) return FileStat(0, 0)
+    fileStatCache[chapterUrl]?.let { return it }
+    val s = FileStat(file.length() ?: 0L, file.lastModified() ?: 0L)
+    fileStatCache[chapterUrl] = s
+    return s
 }
 
 /** 格式化文件大小。 */
@@ -4623,26 +4641,41 @@ private fun formatDateTime(timeMs: Long): String {
     return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timeMs))
 }
 
-/** 统计本地章节总页数（目录直接数图片；归档/EPUB 用 ArchiveReader 数图片条目）。 */
-private suspend fun countChapterPages(context: Context, file: UniFile?): Int = withContext(Dispatchers.IO) {
-    if (file == null) return@withContext 0
-    runCatching {
-        when {
-            file.isDirectory -> {
-                file.listFiles()
-                    ?.filter { !it.isDirectory && ImageUtil.isImage(it.name) }
-                    ?.size ?: 0
-            }
-            Archive.isSupported(file) || file.extension.equals("epub", true) -> {
-                file.archiveReader(context).use { reader ->
-                    reader.useEntries { entries ->
-                        entries.count { it.isFile && ImageUtil.isImage(it.name) }
+/** 相对阅读时间（如「3天前」），本地化由系统 DateUtils 处理。 */
+private fun formatRelativeTime(date: Date?): String {
+    if (date == null) return ""
+    return DateUtils.getRelativeTimeSpanString(
+        date.time,
+        System.currentTimeMillis(),
+        DateUtils.MINUTE_IN_MILLIS,
+    ).toString()
+}
+
+/** 统计本地章节总页数（目录直接数图片；归档/EPUB 用 ArchiveReader 数图片条目）。结果按 URL 缓存，避免滚动反复开档。file 未解析时不缓存（避免陈旧 0）。 */
+private suspend fun countChapterPages(context: Context, url: String, file: UniFile?): Int {
+    if (file == null) return 0
+    pageCountCache[url]?.let { return it }
+    val n = withContext(Dispatchers.IO) {
+        runCatching {
+            when {
+                file.isDirectory -> {
+                    file.listFiles()
+                        ?.filter { !it.isDirectory && ImageUtil.isImage(it.name) }
+                        ?.size ?: 0
+                }
+                Archive.isSupported(file) || file.extension.equals("epub", true) -> {
+                    file.archiveReader(context).use { reader ->
+                        reader.useEntries { entries ->
+                            entries.count { it.isFile && ImageUtil.isImage(it.name) }
+                        }
                     }
                 }
+                else -> 0
             }
-            else -> 0
-        }
-    }.getOrDefault(0)
+        }.getOrDefault(0)
+    }
+    pageCountCache[url] = n
+    return n
 }
 
 /** 尝试提取章节封面 URI：目录取第一张图片；归档/EPUB 暂不提取。 */
@@ -4665,19 +4698,20 @@ private fun resolveCoverUri(file: UniFile?): String? {
 private fun formatChapterNumber(n: Double): String =
     if (n % 1.0 == 0.0) n.toLong().toString() else "%.2f".format(n)
 
-/** 本地历史/书签共用条目行：左侧封面、标题、系列、大小/日期、进度条、右侧更多按钮。 */
+/** 本地历史/书签共用条目行：左侧封面、标题（与「⋯」按钮并排）、副标题、大小/日期、进度条。
+ *  moreMenu 为右侧「⋯」展开的菜单内容（历史=汇聚+删除；书签=取消书签）。 */
 @Composable
 private fun LocalFileRow(
     context: Context,
     title: String,
-    seriesTitle: String,
+    subtitle: String,
     fileSize: Long,
     dateTime: Long,
     lastPageRead: Long,
     totalPages: Int,
     coverUri: String?,
     onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
+    moreMenu: @Composable (dismiss: () -> Unit) -> Unit,
 ) {
     val progress = if (totalPages > 0) (lastPageRead + 1).toFloat() / totalPages.toFloat() else 0f
     val progressText = if (totalPages > 0) {
@@ -4685,17 +4719,12 @@ private fun LocalFileRow(
     } else {
         "${lastPageRead + 1}p"
     }
+    var menuExpanded by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(
-                if (onLongClick != null) {
-                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                } else {
-                    Modifier.clickable(onClick = onClick)
-                },
-            )
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -4726,15 +4755,30 @@ private fun LocalFileRow(
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // 标题行：标题 + 右侧「⋯」按钮（并排）
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Box {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                    ) {
+                        moreMenu { menuExpanded = false }
+                    }
+                }
+            }
             Spacer(Modifier.height(2.dp))
             Text(
-                text = seriesTitle,
+                text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -4762,60 +4806,144 @@ private fun LocalFileRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Spacer(Modifier.width(8.dp))
-        IconButton(onClick = { /* 更多菜单占位 */ }) {
-            Icon(Icons.Filled.MoreVert, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 
-/** 历史 tab：最近阅读（按来源过滤，文件级），点列表项续读。 */
+/** 一本「卷/文件」（chapter）合并后的历史记录：代表项（最近一次阅读）+ 全部阅读会话。
+ *  本地模型里 series=manga、volume=chapter，故按 chapterUrl（卷文件路径）聚合，
+ *  不能用 mangaId（会把整系列压成一行）。 */
+private data class MergedBook(
+    val chapterUrl: String,
+    val rep: LocalHistoryItem,
+    val all: List<LocalHistoryItem>,
+)
+
+/** 历史 tab：按卷（chapterUrl）合并的最近阅读；3-dot 菜单提供「汇聚」与「删除记录」。 */
 @Composable
 private fun HistoryTabLocal(refreshTick: Int) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val historyRepo = remember { Injekt.get<HistoryRepository>() }
     val items by remember(refreshTick) {
         historyRepo.getHistoryBySourceDetailed(LocalSource.ID)
     }.collectAsState(emptyList())
 
-    if (items.isEmpty()) {
+    // 按「卷/文件」(chapterUrl) 合并：每卷取最近一次阅读作为代表，保留全部阅读会话供「汇聚」对话框。
+    // 注意：本地模型 series=manga、volume=chapter，用 mangaId 聚合会把整系列压成一行，故用 chapterUrl。
+    val merged = remember(items) {
+        items.groupBy { it.chapterUrl }
+            .mapNotNull { (chapterUrl, recs) ->
+                val rep = recs.maxByOrNull { it.readAt?.time ?: 0L } ?: return@mapNotNull null
+                MergedBook(chapterUrl, rep, recs.sortedByDescending { it.readAt?.time ?: 0L })
+            }
+            .sortedByDescending { it.rep.readAt?.time ?: 0L }
+    }
+
+    var aggregateFor by remember { mutableStateOf<MergedBook?>(null) }
+
+    if (merged.isEmpty() && items.isEmpty()) {
         LocalEmptyHint(Icons.Filled.History, composeStringResource(R.string.local_history_empty))
         return
     }
     LazyColumn(Modifier.fillMaxSize()) {
-        items(items, key = { "${it.mangaId}:${it.chapterId}:${it.id}" }) { h ->
-            val file by produceState<UniFile?>(initialValue = null, key1 = h.chapterUrl) {
-                value = withContext(Dispatchers.IO) { resolveLocalFile(h.chapterUrl) }
+        items(merged, key = { it.chapterUrl }) { book ->
+            val rep = book.rep
+            val file by produceState<UniFile?>(initialValue = null, key1 = rep.chapterUrl) {
+                value = withContext(Dispatchers.IO) { resolveLocalFile(rep.chapterUrl) }
             }
             val totalPages by produceState(initialValue = 0, key1 = file) {
-                value = countChapterPages(context, file)
+                value = countChapterPages(context, rep.chapterUrl, file)
             }
-            val coverUri = remember(file) { resolveCoverUri(file) }
-                ?: h.thumbnailUrl?.takeIf { it.isNotBlank() }
-            val fileSize = remember(file) { file?.length() ?: 0L }
-            val dateTime = remember(h.dateUpload, file) {
-                h.dateUpload.takeIf { it > 0 } ?: file?.lastModified() ?: 0L
-            }
+            val coverUri = remember(file) { resolveCoverUri(file) } ?: rep.thumbnailUrl?.takeIf { it.isNotBlank() }
+            val stat = remember(rep.chapterUrl, file) { getFileStat(rep.chapterUrl, file) }
+            // 标题取「卷名」（章节名 / chapterUrl 末段），而非系列名；副标题展示系列名 + 最近阅读时间。
+            val volumeTitle = rep.chapterName.ifBlank { rep.chapterUrl.substringAfterLast('/') }
+            val subtitle = listOf(rep.mangaTitle, formatRelativeTime(rep.readAt)).filter { it.isNotBlank() }.joinToString(" · ")
 
             LocalFileRow(
                 context = context,
-                title = h.chapterName.ifBlank { "未知章节" },
-                seriesTitle = h.mangaTitle,
-                fileSize = fileSize,
-                dateTime = dateTime,
-                lastPageRead = h.lastPageRead,
+                title = volumeTitle,
+                subtitle = subtitle,
+                fileSize = stat.size,
+                dateTime = stat.modified,
+                lastPageRead = rep.lastPageRead,
                 totalPages = totalPages,
                 coverUri = coverUri,
                 onClick = {
-                    context.startActivity(ReaderActivity.newIntent(context, h.mangaId, h.chapterId))
+                    context.startActivity(ReaderActivity.newIntent(context, rep.mangaId, rep.chapterId))
+                },
+                moreMenu = { dismiss ->
+                    DropdownMenuItem(
+                        text = { Text(composeStringResource(R.string.local_history_aggregate)) },
+                        onClick = { dismiss(); aggregateFor = book },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(composeStringResource(R.string.local_history_delete)) },
+                        onClick = {
+                            dismiss()
+                            scope.launch {
+                                // 只删本卷的全部历史（多次阅读会话），而非整系列。
+                                withContext(Dispatchers.IO) {
+                                    book.all.forEach { historyRepo.resetHistory(it.id) }
+                                }
+                            }
+                        },
+                    )
                 },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
+
+    // 汇聚对话框：列出本卷全部阅读会话（多次阅读），可点续读；底部「清除全部记录」。
+    val aggregateBook = aggregateFor
+    if (aggregateBook != null) {
+        val volumeTitle = aggregateBook.rep.chapterName.ifBlank { aggregateBook.rep.chapterUrl.substringAfterLast('/') }
+        AlertDialog(
+            onDismissRequest = { aggregateFor = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        // 只删本卷的全部历史会话，而非整系列。
+                        withContext(Dispatchers.IO) {
+                            aggregateBook.all.forEach { historyRepo.resetHistory(it.id) }
+                        }
+                        aggregateFor = null
+                    }
+                }) { Text(composeStringResource(R.string.local_history_delete_all)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { aggregateFor = null }) { Text(composeStringResource(R.string.local_history_cancel)) }
+            },
+            title = { Text(volumeTitle) },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                    items(aggregateBook.all, key = { it.id }) { ch ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    aggregateFor = null
+                                    context.startActivity(ReaderActivity.newIntent(context, ch.mangaId, ch.chapterId))
+                                }
+                                .padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("看到第 ${ch.lastPageRead + 1} 页", style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(formatRelativeTime(ch.readAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text("${ch.lastPageRead + 1}p", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            },
+        )
+    }
 }
 
-/** 书签 tab：已加书签的章节（章节级），点续读、长按取消书签。 */
+/** 书签 tab：已加书签的章节（章节级），3-dot 菜单「取消书签」；点续读。 */
 @Composable
 private fun BookmarksTabLocal(refreshTick: Int) {
     val context = LocalContext.current
@@ -4845,34 +4973,37 @@ private fun BookmarksTabLocal(refreshTick: Int) {
                     value = withContext(Dispatchers.IO) { resolveLocalFile(b.chapterUrl) }
                 }
                 val totalPages by produceState(initialValue = 0, key1 = file) {
-                    value = countChapterPages(context, file)
+                    value = countChapterPages(context, b.chapterUrl, file)
                 }
-                val coverUri = remember(file) { resolveCoverUri(file) }
-                    ?: b.thumbnailUrl?.takeIf { it.isNotBlank() }
-                val fileSize = remember(file) { file?.length() ?: 0L }
-                val dateTime = remember(b.dateUpload, file) {
-                    b.dateUpload.takeIf { it > 0 } ?: file?.lastModified() ?: 0L
-                }
+                val coverUri = remember(file) { resolveCoverUri(file) } ?: b.thumbnailUrl?.takeIf { it.isNotBlank() }
+                val stat = remember(b.chapterUrl, file) { getFileStat(b.chapterUrl, file) }
+                val chapterText = if (b.chapterNumber >= 0) "第 ${formatChapterNumber(b.chapterNumber)} 话" else b.chapterName
 
                 LocalFileRow(
                     context = context,
-                    title = b.chapterName.ifBlank { "未知章节" },
-                    seriesTitle = b.mangaTitle,
-                    fileSize = fileSize,
-                    dateTime = dateTime,
+                    title = b.mangaTitle,
+                    subtitle = chapterText,
+                    fileSize = stat.size,
+                    dateTime = stat.modified,
                     lastPageRead = b.lastPageRead,
                     totalPages = totalPages,
                     coverUri = coverUri,
                     onClick = {
                         context.startActivity(ReaderActivity.newIntent(context, b.mangaId, b.chapterId))
                     },
-                    onLongClick = {
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                runCatching { chapterRepo.update(ChapterUpdate(id = b.chapterId, bookmark = false)) }
-                            }
-                            load()
-                        }
+                    moreMenu = { dismiss ->
+                        DropdownMenuItem(
+                            text = { Text(composeStringResource(R.string.local_bookmark_remove)) },
+                            onClick = {
+                                dismiss()
+                                scope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        runCatching { chapterRepo.update(ChapterUpdate(id = b.chapterId, bookmark = false)) }
+                                    }
+                                    load()
+                                }
+                            },
+                        )
                     },
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

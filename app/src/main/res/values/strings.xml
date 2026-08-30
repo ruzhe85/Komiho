@@ -27,6 +27,11 @@
     <string name="local_root_label">本地根目录</string>
     <string name="local_history_empty">暂无阅读记录</string>
     <string name="local_bookmarks_empty">暂无书签</string>
+    <string name="local_history_aggregate">汇聚</string>
+    <string name="local_history_delete">删除记录</string>
+    <string name="local_history_delete_all">清除全部记录</string>
+    <string name="local_history_cancel">取消</string>
+    <string name="local_bookmark_remove">取消书签</string>
 
     <!-- 搜索 -->
     <string name="cd_close_search">关闭搜索</string>
