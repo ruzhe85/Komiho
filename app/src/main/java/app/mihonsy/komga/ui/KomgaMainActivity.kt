@@ -207,6 +207,8 @@ import uy.kohesive.injekt.Injekt
 import com.hippo.unifile.UniFile
 import tachiyomi.core.common.storage.displayablePath
 import tachiyomi.core.common.storage.extension
+import tachiyomi.core.common.storage.nameWithoutExtension
+import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 // SY --> Komiho 本地浏览器：显示模式 + 排序 + 封面
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.aspectRatio
@@ -4152,9 +4154,10 @@ private fun LocalFileGridItem(
             modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
             contentAlignment = Alignment.Center,
         ) {
-            if (showCover && cover != null) {
+            val coverBitmap = cover
+            if (showCover && coverBitmap != null) {
                 Image(
-                    bitmap = cover.asImageBitmap(),
+                    bitmap = coverBitmap.asImageBitmap(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -4351,7 +4354,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                             url = mangaUrl,
                             ogTitle = title,
                             favorite = false,
-                            sorting = Manga.CHAPTER_SORTING_NUMBER,
+                            chapterFlags = Manga.CHAPTER_SORTING_NUMBER,
                         ),
                     ),
                 ).first()
@@ -4380,8 +4383,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                                         url = url,
                                         name = sib.nameWithoutExtension ?: sib.name.orEmpty(),
                                         chapterNumber = ChapterRecognition
-                                            .parseChapterNumber(mangaTitle, sib.name.orEmpty(), -1.0)
-                                            .toFloat(),
+                                            .parseChapterNumber(mangaTitle, sib.name.orEmpty(), -1.0),
                                         dateUpload = sib.lastModified(),
                                     ),
                                 ),
