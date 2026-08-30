@@ -194,6 +194,8 @@ import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.source.local.LocalSource
 import uy.kohesive.injekt.Injekt
+import com.hippo.unifile.UniFile
+import tachiyomi.core.common.storage.displayablePath
 // SY <--
 
 // 划动选择命中检测已移除（长按圈选废弃）。
@@ -304,13 +306,18 @@ private fun KomgaMainScreen(
     val storageManager = remember { Injekt.get<StorageManager>() }
     val storagePreferences = remember { Injekt.get<StoragePreferences>() }
     val pickLocalFolder = SettingsDataScreen.storageLocationPicker(storagePreferences.baseStorageDirectory)
-    var localDirReady by remember {
-        mutableStateOf(storageManager.getLocalSourceDirectory()?.exists() == true)
+    // 注意：getLocalSourceDirectory() 返回的是 <所选根目录>/local（不存在时会创建）。
+    // 这是 Mihon 的隔离设计——同一根下还会放 downloads/、autobackup/、logs/，
+    // 因此不能直接把用户所选文件夹当漫画根目录（否则会往里面塞这些杂项目录）。
+    // 代价是必须把「实际读取的是 local 子目录」显式告诉用户，否则会出现
+    // 「明明选了漫画文件夹却显示没有结果」。
+    var localDir by remember {
+        mutableStateOf(storageManager.getLocalSourceDirectory()?.takeIf { it.exists() })
     }
     // StorageManager 在偏好变更后异步更新 baseDir，监听其 changes 流同步状态。
     LaunchedEffect(Unit) {
         storageManager.changes.collect {
-            localDirReady = storageManager.getLocalSourceDirectory()?.exists() == true
+            localDir = storageManager.getLocalSourceDirectory()?.takeIf { it.exists() }
         }
     }
     // SY <--
@@ -595,10 +602,13 @@ private fun KomgaMainScreen(
         ) {
             // SY --> Komiho P0: 全局来源切换 chip。
             // 只渲染已实现的来源；SMB / WebDAV 落地后在此自动出现，底部导航不变。
-            SourceSwitcher(
-                current = currentSource,
-                onSelect = ::selectSource,
-            )
+            // 设置页与来源无关，不显示；只有一种来源时切换无意义，同样不显示。
+            if (MainTab.entries[currentTab] != MainTab.Settings && AppSource.entries.size > 1) {
+                SourceSwitcher(
+                    current = currentSource,
+                    onSelect = ::selectSource,
+                )
+            }
             // SY <--
             // Search field expands below the title row when the icon is tapped.
             if (searchOpen) {
@@ -675,7 +685,7 @@ private fun KomgaMainScreen(
                     )
                     // SY --> Komiho P0: 浏览 tab（本地 / SMB / WebDAV 共用）
                     MainTab.Browse -> LocalSourceTab(
-                        dirReady = localDirReady,
+                        localDir = localDir,
                         onPickFolder = { pickLocalFolder.launch(null) },
                     )
                     // SY <--
@@ -3791,10 +3801,10 @@ private fun SourceSwitcher(
  */
 @Composable
 private fun LocalSourceTab(
-    dirReady: Boolean,
+    localDir: UniFile?,
     onPickFolder: () -> Unit,
 ) {
-    if (!dirReady) {
+    if (localDir == null) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -3829,7 +3839,20 @@ private fun LocalSourceTab(
 
     // 目录已就绪：交给 Mihon 的源浏览页。
     // 用 Navigator 承载，使用户可继续下钻（浏览 → 详情 → 阅读器）。
-    Navigator(BrowseSourceScreen(LocalSource.ID, null))
+    Column(Modifier.fillMaxSize()) {
+        // 显式展示实际读取的目录。Komiho 读的是 <所选根>/local 而非所选根本身，
+        // 不显示出来的话，用户把漫画直接放在所选文件夹里就会看到「没有结果」
+        // 却无从判断原因。
+        Text(
+            text = composeStringResource(R.string.local_dir_path, localDir.displayablePath),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+        Navigator(BrowseSourceScreen(LocalSource.ID, null))
+    }
 }
 
 // ---------- Downloads (offline) tab ----------
