@@ -9,7 +9,11 @@
     <string name="tab_lists">列表</string>
     <string name="tab_downloads">下载</string>
     <string name="tab_local">本地</string>
+    <string name="tab_browse">浏览</string>
     <string name="tab_settings">设置</string>
+
+    <!-- 来源切换 chip -->
+    <string name="source_komga">Komga</string>
 
     <!-- 本地浏览（P0）：复用 Mihon 本地源 + BrowseSourceScreen -->
     <string name="local_no_folder">尚未选择本地漫画目录</string>

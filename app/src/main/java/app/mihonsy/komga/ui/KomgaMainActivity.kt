@@ -244,16 +244,45 @@ class KomgaMainActivity : KomgaBaseActivity() {
     }
 }
 
-private enum class MainTab(@StringRes val labelRes: Int, val icon: ImageVector) {
-    Home(R.string.tab_home, Icons.Filled.Home),
-    Library(R.string.tab_library, Icons.Filled.Book),
-    Lists(R.string.tab_lists, Icons.AutoMirrored.Filled.List),
-    Downloads(R.string.tab_downloads, Icons.Filled.Download),
-    // SY --> Komiho P0: 本地浏览 tab。置于 Settings 之前，保持「设置」在最后。
-    Local(R.string.tab_local, Icons.Filled.Folder),
-    // SY <--
+/**
+ * Komiho P0: 内容来源。由顶部的来源切换 chip 选择，决定底部导航与内容区。
+ *
+ * 分两类：
+ *  - Komga：库/系列语义，底部导航为 Home / Library / Lists / Downloads / Settings
+ *  - 文件型来源：文件夹浏览语义，底部导航为 Browse / Settings
+ *
+ * 文件型来源（本地、未来的 SMB / WebDAV）**共用** Browse tab，因此底部导航
+ * 的数量恒定，不会随来源增加而膨胀成 8 个 tab。
+ */
+private enum class AppSource(@StringRes val labelRes: Int, val isFileSource: Boolean) {
+    Komga(R.string.source_komga, isFileSource = false),
+    Local(R.string.tab_local, isFileSource = true),
+    // SMB / WebDAV：对应来源实现落地后再在此登记，未实现的不显示 chip。
+    ;
+}
+
+private enum class MainTab(
+    @StringRes val labelRes: Int,
+    val icon: ImageVector,
+    /** 仅在 Komga 来源下出现（库/系列语义）。 */
+    val komgaOnly: Boolean = false,
+    /** 仅在文件型来源下出现（浏览语义）。 */
+    val fileOnly: Boolean = false,
+) {
+    Home(R.string.tab_home, Icons.Filled.Home, komgaOnly = true),
+    Library(R.string.tab_library, Icons.Filled.Book, komgaOnly = true),
+    Lists(R.string.tab_lists, Icons.AutoMirrored.Filled.List, komgaOnly = true),
+    Downloads(R.string.tab_downloads, Icons.Filled.Download, komgaOnly = true),
+    // 本地 / SMB / WebDAV 共用这一个 tab。
+    Browse(R.string.tab_browse, Icons.Filled.Folder, fileOnly = true),
     Settings(R.string.tab_settings, Icons.Filled.Settings),
     ;
+
+    fun visibleFor(source: AppSource): Boolean = when {
+        komgaOnly -> !source.isFileSource
+        fileOnly -> source.isFileSource
+        else -> true
+    }
 
     @Composable
     fun labelText(): String = composeStringResource(labelRes)
@@ -299,6 +328,29 @@ private fun KomgaMainScreen(
     // the current tab across activity.recreate() — theme/language switches
     // in Settings would otherwise bounce back to the Home tab.
     var currentTab by rememberSaveable { mutableIntStateOf(MainTab.Home.ordinal) }
+
+    // SY --> Komiho P0: 全局来源切换。切换来源后底部导航会变（Komga 5 项 / 文件型 2 项），
+    // 因此必须把 currentTab 重置为该来源下的第一个可见 tab，否则会指向被隐藏的 tab。
+    var currentSourceOrdinal by rememberSaveable { mutableIntStateOf(AppSource.Komga.ordinal) }
+    val currentSource = AppSource.entries[currentSourceOrdinal]
+    val visibleTabs = remember(currentSource) {
+        MainTab.entries.filter { it.visibleFor(currentSource) }
+    }
+    // 恢复/切换后兜底：当前 tab 若不在可见集合内（如枚举变更），回落到第一个可见 tab。
+    LaunchedEffect(visibleTabs) {
+        if (visibleTabs.none { it.ordinal == currentTab }) {
+            currentTab = visibleTabs.first().ordinal
+        }
+    }
+    // 注：不在此处重置 searchOpen ——下方 LaunchedEffect(currentTab) 已负责，
+    // 且切换来源必定改变 currentTab（两类来源的首个可见 tab 不同）。
+    fun selectSource(source: AppSource) {
+        if (source.ordinal == currentSourceOrdinal) return
+        currentSourceOrdinal = source.ordinal
+        currentTab = MainTab.entries.first { it.visibleFor(source) }.ordinal
+    }
+    // SY <--
+
     // Refresh counter: bumped by tab re-tap and by Activity onResume (returning
     // from the reader). Passed to tabs to trigger data reload.
     val refreshTick by refreshSignal.collectAsState()
@@ -359,6 +411,10 @@ private fun KomgaMainScreen(
     val filterPair by filterSignal.collectAsState()
     LaunchedEffect(filterPair) {
         if (!filterPair?.first.isNullOrBlank() && !filterPair?.second.isNullOrBlank()) {
+            // SY --> Komiho P0: 过滤数据来自 Komga 系列页，先切回 Komga 来源；
+            // 否则若当前停在文件型来源，会跳到一个被隐藏的 Library tab。
+            currentSourceOrdinal = AppSource.Komga.ordinal
+            // SY <--
             currentTab = MainTab.Library.ordinal
         }
     }
@@ -380,13 +436,17 @@ private fun KomgaMainScreen(
     // Library selection now lives in the top-bar dropdown, so the only
     // "back" affordance needed is: close search/menu, or (root only) drop a
     // non-Home tab back to Home. A selected library no longer traps back.
+    // SY --> Komiho P0: 返回目标改为「当前来源的第一个可见 tab」。
+    // 文件型来源下 Home 是隐藏 tab，硬编码 Home 会让返回键在浏览页失效。
+    val firstTabOrdinal = visibleTabs.first().ordinal
+    // SY <--
     val interceptBack = searchOpen || shelfMenuOpen ||
-        (isRootActivity && currentTab != MainTab.Home.ordinal)
+        (isRootActivity && currentTab != firstTabOrdinal)
     BackHandler(enabled = interceptBack) {
         when {
             searchOpen -> searchOpen = false
             shelfMenuOpen -> shelfMenuOpen = false
-            currentTab != MainTab.Home.ordinal -> currentTab = MainTab.Home.ordinal
+            currentTab != firstTabOrdinal -> currentTab = firstTabOrdinal
         }
     }
 
@@ -483,10 +543,10 @@ private fun KomgaMainScreen(
                             )
                         }
                     }
-                    // SY --> Komiho P0: 本地 tab 用 Mihon 自己的搜索，隐藏 Komga 搜索。
-                    if (currentTabEnum != MainTab.Settings &&
-                        currentTabEnum != MainTab.Downloads &&
-                        currentTabEnum != MainTab.Local
+                    // SY --> Komiho P0: 搜索是 Komga 语义，文件型来源下直接隐藏。
+                    if (currentSource == AppSource.Komga &&
+                        currentTabEnum != MainTab.Settings &&
+                        currentTabEnum != MainTab.Downloads
                     ) {
                         androidx.compose.material3.IconButton(onClick = { searchOpen = !searchOpen }) {
                             Icon(
@@ -495,8 +555,8 @@ private fun KomgaMainScreen(
                             )
                         }
                     }
-                    // 本地 tab：提供「更改目录」入口（否则选错目录后无法在 Komiho 内改回）。
-                    if (currentTabEnum == MainTab.Local) {
+                    // 本地来源：提供「更改目录」入口（否则选错目录后无法在 Komiho 内改回）。
+                    if (currentSource == AppSource.Local) {
                         androidx.compose.material3.IconButton(onClick = { pickLocalFolder.launch(null) }) {
                             Icon(
                                 imageVector = Icons.Filled.FolderOpen,
@@ -512,24 +572,19 @@ private fun KomgaMainScreen(
             // Icon-only tabs: a compact bar — the default 80dp NavigationBar
             // leaves large empty areas above/below the icons.
             NavigationBar(modifier = Modifier.height(60.dp)) {
-                MainTab.entries.forEachIndexed { index, tab ->
+                // SY --> Komiho P0: 只渲染当前来源下可见的 tab。
+                visibleTabs.forEach { tab ->
                     NavigationBarItem(
-                        selected = currentTab == index,
+                        selected = currentTab == tab.ordinal,
                         onClick = {
-                        if (tab == MainTab.Library) {
-                            // Library selection is now in the top-bar dropdown;
-                            // tapping the icon just focuses the Library tab
-                            // (refresh if already there, like the other tabs).
-                            if (currentTab == index) refreshSignal.update { it + 1 } else currentTab = index
-                        } else {
-                                // 点击 tab（含重复点击当前 tab）触发刷新。
-                                if (currentTab == index) refreshSignal.update { it + 1 } else currentTab = index
-                            }
+                            // 点击 tab（含重复点击当前 tab）触发刷新。
+                            if (currentTab == tab.ordinal) refreshSignal.update { it + 1 } else currentTab = tab.ordinal
                         },
                         icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
                         label = null,
                     )
                 }
+                // SY <--
             }
         },
     ) { padding ->
@@ -538,6 +593,13 @@ private fun KomgaMainScreen(
                 .padding(padding)
                 .fillMaxSize(),
         ) {
+            // SY --> Komiho P0: 全局来源切换 chip。
+            // 只渲染已实现的来源；SMB / WebDAV 落地后在此自动出现，底部导航不变。
+            SourceSwitcher(
+                current = currentSource,
+                onSelect = ::selectSource,
+            )
+            // SY <--
             // Search field expands below the title row when the icon is tapped.
             if (searchOpen) {
                 EmbeddedSearch(
@@ -611,8 +673,8 @@ private fun KomgaMainScreen(
                                 }
                         },
                     )
-                    // SY --> Komiho P0: 本地浏览 tab
-                    MainTab.Local -> LocalSourceTab(
+                    // SY --> Komiho P0: 浏览 tab（本地 / SMB / WebDAV 共用）
+                    MainTab.Browse -> LocalSourceTab(
                         dirReady = localDirReady,
                         onPickFolder = { pickLocalFolder.launch(null) },
                     )
@@ -3687,6 +3749,34 @@ private suspend fun checkForKomihoUpdate(context: android.content.Context, onFin
 }
 
 // ---------- Local source tab (P0) ----------
+
+/**
+ * 全局来源切换 chip：Komga / 本地 /（SMB、WebDAV 落地后自动出现）。
+ *
+ * 只渲染 [AppSource] 中**已登记**的来源；未实现的来源不会登记进枚举，
+ * 因此不会出现「点了没反应」的死 UI。
+ */
+@Composable
+private fun SourceSwitcher(
+    current: AppSource,
+    onSelect: (AppSource) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        AppSource.entries.forEach { source ->
+            FilterChip(
+                selected = source == current,
+                onClick = { onSelect(source) },
+                label = { Text(composeStringResource(source.labelRes)) },
+            )
+        }
+    }
+}
 
 /**
  * Komiho P0：本地浏览 tab。
