@@ -15,12 +15,14 @@
     <!-- 来源切换 chip -->
     <string name="source_komga">Komga</string>
 
-    <!-- 本地浏览（P0）：复用 Mihon 本地源 + BrowseSourceScreen -->
+    <!-- 本地浏览（P0）：文件管理器语义，非 Mihon 图源 -->
     <string name="local_no_folder">尚未选择本地漫画目录</string>
     <string name="local_pick_folder">选择目录</string>
     <string name="local_change_folder">更改本地漫画目录</string>
-    <string name="local_folder_hint">请选择存放漫画的文件夹，该文件夹即作为漫画根目录。\n目录结构：漫画名/章节.cbz（或同名文件夹）</string>
-    <string name="local_dir_path">读取目录：%1$s</string>
+    <string name="local_folder_hint">请选择存放漫画的文件夹，该文件夹即作为根目录。\n之后以文件管理器方式浏览：点目录进入，点压缩包直接阅读。</string>
+    <string name="local_read_dir">阅读此目录（%1$d 张）</string>
+    <string name="local_empty_dir">空目录</string>
+    <string name="local_root_label">本地根目录</string>
 
     <!-- 搜索 -->
     <string name="cd_close_search">关闭搜索</string>

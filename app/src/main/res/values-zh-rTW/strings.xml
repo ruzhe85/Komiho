@@ -14,12 +14,14 @@
     <!-- 來源切換 chip -->
     <string name="source_komga">Komga</string>
 
-    <!-- 本機瀏覽（P0）：複用 Mihon 本機來源 + BrowseSourceScreen -->
+    <!-- 本機瀏覽（P0）：檔案管理器語義，非 Mihon 圖源 -->
     <string name="local_no_folder">尚未選擇本機漫畫目錄</string>
     <string name="local_pick_folder">選擇目錄</string>
     <string name="local_change_folder">變更本機漫畫目錄</string>
-    <string name="local_folder_hint">請選擇存放漫畫的資料夾，該資料夾即作為漫畫根目錄。\n目錄結構：漫畫名/章節.cbz（或同名資料夾）</string>
-    <string name="local_dir_path">讀取目錄：%1$s</string>
+    <string name="local_folder_hint">請選擇存放漫畫的資料夾，該資料夾即作為根目錄。\n之後以檔案管理器方式瀏覽：點資料夾進入，點壓縮檔直接閱讀。</string>
+    <string name="local_read_dir">閱讀此目錄（%1$d 張）</string>
+    <string name="local_empty_dir">空目錄</string>
+    <string name="local_root_label">本地根目錄</string>
 
     <!-- 搜尋 -->
     <string name="cd_close_search">關閉搜尋</string>
