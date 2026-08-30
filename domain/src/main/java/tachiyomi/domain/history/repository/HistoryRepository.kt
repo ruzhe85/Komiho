@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import tachiyomi.domain.history.model.History
 import tachiyomi.domain.history.model.HistoryUpdate
 import tachiyomi.domain.history.model.HistoryWithRelations
+import tachiyomi.domain.history.model.LocalHistoryItem
 
 interface HistoryRepository {
 
@@ -11,6 +12,9 @@ interface HistoryRepository {
 
     // SY --> Komiho: 本地模式历史 tab —— 按来源过滤最近阅读。
     fun getHistoryBySource(sourceId: Long): Flow<List<HistoryWithRelations>>
+
+    // 文件级历史：返回每一条历史记录，包含章节名/URL/进度，用于历史 tab 条目。
+    fun getHistoryBySourceDetailed(sourceId: Long): Flow<List<LocalHistoryItem>>
     // SY <--
 
     suspend fun getLastHistory(): HistoryWithRelations?
