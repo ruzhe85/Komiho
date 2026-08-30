@@ -8,7 +8,11 @@
     <string name="tab_lists">Lists</string>
     <string name="tab_downloads">Downloads</string>
     <string name="tab_local">Local</string>
+    <string name="tab_browse">Browse</string>
     <string name="tab_settings">Settings</string>
+
+    <!-- Source switcher chips -->
+    <string name="source_komga">Komga</string>
 
     <!-- Local browsing (P0): reuses Mihon local source + BrowseSourceScreen -->
     <string name="local_no_folder">No local comics folder selected</string>

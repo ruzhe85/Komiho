@@ -8,7 +8,11 @@
     <string name="tab_lists">列表</string>
     <string name="tab_downloads">下載</string>
     <string name="tab_local">本機</string>
+    <string name="tab_browse">瀏覽</string>
     <string name="tab_settings">設定</string>
+
+    <!-- 來源切換 chip -->
+    <string name="source_komga">Komga</string>
 
     <!-- 本機瀏覽（P0）：複用 Mihon 本機來源 + BrowseSourceScreen -->
     <string name="local_no_folder">尚未選擇本機漫畫目錄</string>
