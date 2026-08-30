@@ -7,7 +7,14 @@
     <string name="tab_library">庫</string>
     <string name="tab_lists">列表</string>
     <string name="tab_downloads">下載</string>
+    <string name="tab_local">本機</string>
     <string name="tab_settings">設定</string>
+
+    <!-- 本機瀏覽（P0）：複用 Mihon 本機來源 + BrowseSourceScreen -->
+    <string name="local_no_folder">尚未選擇本機漫畫目錄</string>
+    <string name="local_pick_folder">選擇目錄</string>
+    <string name="local_change_folder">變更本機漫畫目錄</string>
+    <string name="local_folder_hint">請選擇存放漫畫的資料夾，Komiho 會讀取其下的 local 子目錄。\n目錄結構：local/漫畫名/章節.cbz（或同名資料夾）</string>
 
     <!-- 搜尋 -->
     <string name="cd_close_search">關閉搜尋</string>

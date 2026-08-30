@@ -7,7 +7,14 @@
     <string name="tab_library">Library</string>
     <string name="tab_lists">Lists</string>
     <string name="tab_downloads">Downloads</string>
+    <string name="tab_local">Local</string>
     <string name="tab_settings">Settings</string>
+
+    <!-- Local browsing (P0): reuses Mihon local source + BrowseSourceScreen -->
+    <string name="local_no_folder">No local comics folder selected</string>
+    <string name="local_pick_folder">Choose folder</string>
+    <string name="local_change_folder">Change local comics folder</string>
+    <string name="local_folder_hint">Pick a folder for your comics; Komiho reads the "local" subfolder inside it.\nStructure: local/Manga name/Chapter.cbz (or a folder with the same name)</string>
 
     <!-- Search -->
     <string name="cd_close_search">Close search</string>
