@@ -414,12 +414,17 @@ actual class LocalSource(
 
     fun getFormat(chapter: SChapter): Format {
         try {
-            val (mangaDirName, chapterName) = chapter.url.split('/', limit = 2)
-            return fileSystem.getBaseDirectory()
-                ?.findFile(mangaDirName)
-                ?.findFile(chapterName)
-                ?.let(Format.Companion::valueOf)
+            // SY --> Komiho: 按 '/' 逐段下钻，支持根目录下任意层级
+            // （原实现仅认 base/<系列>/<章节> 两级）。向后兼容两级结构。
+            val segs = chapter.url.split('/')
+            var file = fileSystem.getBaseDirectory()
                 ?: throw Exception(context.stringResource(MR.strings.chapter_not_found))
+            for (seg in segs) {
+                if (seg.isBlank()) continue
+                file = file.findFile(seg) ?: throw Exception(context.stringResource(MR.strings.chapter_not_found))
+            }
+            return Format.valueOf(file)
+            // SY <--
         } catch (e: Format.UnknownFormatException) {
             throw Exception(context.stringResource(MR.strings.local_invalid_format))
         } catch (e: Exception) {
