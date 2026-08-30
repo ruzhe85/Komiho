@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.source
 
 import android.content.Context
 import app.mihonsy.komga.source.KomgaSource
-import app.mihonsy.komga.source.KomihoFileSource
 import tachiyomi.source.local.io.LocalSourceFileSystem
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.download.DownloadManager
@@ -95,9 +94,6 @@ class AndroidSourceManager(
                                 sourcePreferences.allowLocalSourceHiddenFolders::get,
                                 // SY <--
                             ),
-                            // SY --> Komiho P0: 本地文件源（文件管理器语义，非图源）
-                            KomihoFileSource.ID to KomihoFileSource(context, Injekt.get()),
-                            // SY <--
                         ),
                     )
 

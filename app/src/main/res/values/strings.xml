@@ -9,7 +9,7 @@
     <string name="tab_lists">列表</string>
     <string name="tab_downloads">下载</string>
     <string name="tab_local">本地</string>
-    <string name="tab_browse">浏览</string>
+    <string name="tab_browse">本地</string>
     <string name="tab_settings">设置</string>
 
     <!-- 来源切换 chip -->
