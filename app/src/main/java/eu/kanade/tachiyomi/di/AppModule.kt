@@ -170,7 +170,10 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory { ImageSaver(app) }
 
         addSingletonFactory { AndroidStorageFolderProvider(app) }
-        addSingletonFactory { LocalSourceFileSystem(get()) }
+        // SY --> Komiho: 注入 context 与 StoragePreferences，使本地源可直接以
+        // 用户所选文件夹为漫画根目录（而非 <base>/local）。
+        addSingletonFactory { LocalSourceFileSystem(app, get(), get()) }
+        // SY <--
         addSingletonFactory { LocalCoverManager(app, get()) }
         addSingletonFactory { StorageManager(app, get()) }
 
