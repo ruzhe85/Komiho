@@ -4430,13 +4430,23 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                 resolved = resolved.findFile(seg) ?: throw Exception("找不到文件：$relPath")
             }
             val isArchive = file.isLocalArchive() || file.extension.equals("epub", true)
-            // 书籍（用于建 manga）的相对路径：归档/epub 取父目录，目录/散图取自身。
+            // 书籍（用于建 manga）的相对路径：归档/epub 取父目录，目录/散图取父目录
+            // （卷目录的上一层=系列）。bookRelPath 对两种类型都是「父目录」相对路径。
             val bookRelPath = relPath.substringBeforeLast('/', "")
-            // 标题取「父目录（系列）名」而非某个具体归档名：否则同目录复用同一 manga，
-            // 标题会停在第一本被打开的归档上、阅读器左上角「被固定」。
+            // 父目录（系列层）：归档的 bookRelPath 已是父目录；目录型 relPath 是卷目录路径，
+            // 其 substringBeforeLast 也是父目录。提前算好供两分支共用（标题 + 兄弟章节扫描）。
+            val parentRel = bookRelPath
+            var parentDir = base
+            for (seg in parentRel.split('/')) {
+                if (seg.isBlank()) continue
+                parentDir = parentDir.findFile(seg) ?: throw Exception("找不到父目录：$parentRel")
+            }
+            val seriesTitle = parentDir.name.orEmpty()
+            // 标题取「系列（父目录）名」而非某个具体卷名：否则同系列复用同一 manga 时，
+            // 标题会停在首次打开的那一卷上、阅读器左上角跳变/被固定。
             val title = when {
                 isArchive -> if (bookRelPath.isEmpty()) file.name.orEmpty() else bookRelPath.substringAfterLast('/')
-                else -> file.name ?: relPath.substringAfterLast('/').ifBlank { relPath }
+                else -> seriesTitle.ifEmpty { file.name.orEmpty() }
             }
             // manga.url 必须「全局唯一」：不同根目录（重新选择目录）或不同类型（散图目录
             // vs 同名的归档父目录）若只用相对路径做 url，会撞上旧 manga，导致阅读器章节列表
@@ -4467,12 +4477,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                 // 归档/epub：把同目录所有归档/epub 都建成章节（去重），使阅读器能自动加载下一章。
                 // 按名称自然序插入，章节号经 ChapterRecognition 解析；manga.sorting=NUMBER，
                 // reader 按章节号升序排列 → 翻完当前卷自动续到下一卷。
-                var parentDir = base
-                for (seg in bookRelPath.split('/')) {
-                    if (seg.isBlank()) continue
-                    parentDir = parentDir.findFile(seg) ?: throw Exception("找不到父目录：$bookRelPath")
-                }
-                val mangaTitle = parentDir.name.orEmpty()
+                // parentDir/seriesTitle 已在外层提前算好（与目录型共用），此处直接复用。
                 parentDir.listFiles().orEmpty().toList()
                     .filter { it.isLocalArchive() || it.extension.equals("epub", true) }
                     .sortedWith { a, b ->
@@ -4488,7 +4493,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                                         url = url,
                                         name = sib.nameWithoutExtension ?: sib.name.orEmpty(),
                                         chapterNumber = ChapterRecognition
-                                            .parseChapterNumber(mangaTitle, sib.name.orEmpty(), -1.0),
+                                            .parseChapterNumber(seriesTitle, sib.name.orEmpty(), -1.0),
                                         dateUpload = sib.lastModified(),
                                     ),
                                 ),
@@ -4498,7 +4503,33 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                 chapterRepo.getChapterByUrlAndMangaId(relPath, manga.id!!)
                     ?: error("当前文件未写入章节：$relPath")
             } else {
-                // 目录/散图：保持原行为（一整个目录即一本书，单章节）。
+                // 目录/散图：把父目录（系列）下所有子目录（卷/话）都建成章节，
+                // 使翻完当前卷能自动续到下一卷；章节号经 ChapterRecognition 解析，
+                // reader 按号升序排列。当前打开的卷（relPath 目录）是其中一章。
+                parentDir.listFiles().orEmpty().toList()
+                    .filter { it.isDirectory }
+                    .sortedWith { a, b ->
+                        a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
+                    }
+                    .forEach { sib ->
+                        val url = if (parentRel.isEmpty()) sib.name.orEmpty() else "$parentRel/${sib.name}"
+                        if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                            chapterRepo.addAll(
+                                listOf(
+                                    Chapter.create().copy(
+                                        mangaId = manga.id!!,
+                                        url = url,
+                                        name = sib.nameWithoutExtension ?: sib.name.orEmpty(),
+                                        chapterNumber = ChapterRecognition
+                                            .parseChapterNumber(seriesTitle, sib.name.orEmpty(), -1.0),
+                                        dateUpload = sib.lastModified(),
+                                    ),
+                                ),
+                            )
+                        }
+                    }
+                // 保底：当前卷（relPath 目录）若未被兄弟扫描覆盖（如无子目录的叶子散图目录），
+                // 仍保留为单章节，避免读不了当前图。
                 chapterRepo.getChapterByUrlAndMangaId(relPath, manga.id!!)
                     ?: chapterRepo.addAll(
                         listOf(
