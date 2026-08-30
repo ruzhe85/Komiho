@@ -206,6 +206,16 @@ import uy.kohesive.injekt.Injekt
 import com.hippo.unifile.UniFile
 import tachiyomi.core.common.storage.displayablePath
 import tachiyomi.core.common.storage.extension
+// SY --> Komiho 本地浏览器：显示模式 + 排序 + 封面
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.style.TextAlign
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import mihon.core.common.archive.archiveReader
+import java.io.InputStream
 // SY <--
 
 // 划动选择命中检测已移除（长按圈选废弃）。
@@ -3850,11 +3860,86 @@ private fun LocalSourceTab(
     LocalFileBrowser(base = localDir)
 }
 
-/** 文件管理器主体：面包屑 + 目录下钻 + 「阅读此目录」。UI 参考 Material Files 的列表设计。 */
+/** 本地文件浏览器可排序字段（名称 / 修改时间 / 大小）。复用书架 SortItem 的样式。 */
+private enum class LocalFileSortBy(
+    @StringRes val labelRes: Int,
+    val prefKey: String,
+    val defaultDescending: Boolean,
+) {
+    Name(R.string.sort_name, "name", false),
+    DateModified(R.string.sort_date_updated, "date", true),
+    Size(R.string.local_sort_size, "size", true);
+
+    @Composable
+    fun labelText(): String = composeStringResource(labelRes)
+}
+
+/** 本地文件浏览器当前排序：字段 + 方向。目录恒置顶（文件管理器常规行为）。 */
+@Immutable
+private data class LocalFileSort(
+    val sortBy: LocalFileSortBy,
+    val descending: Boolean,
+) {
+    fun toPref(): String = "${sortBy.prefKey},${if (descending) "desc" else "asc"}"
+
+    companion object {
+        fun fromPref(v: String): LocalFileSort {
+            val parts = v.split(",")
+            val key = parts.getOrNull(0).orEmpty()
+            val descending = parts.getOrNull(1).equals("desc", ignoreCase = true)
+            val by = LocalFileSortBy.entries.find { it.prefKey == key } ?: LocalFileSortBy.Name
+            return LocalFileSort(by, descending)
+        }
+    }
+}
+
+/** 目录恒置顶，再按所选字段/方向排序。 */
+private fun localFileComparator(sort: LocalFileSort): Comparator<UniFile> {
+    val dirFirst = compareBy<UniFile> { !it.isDirectory }
+    val field: Comparator<UniFile> = when (sort.sortBy) {
+        LocalFileSortBy.Name -> compareBy { it.name.orEmpty().lowercase() }
+        LocalFileSortBy.DateModified -> compareBy { it.lastModified() }
+        LocalFileSortBy.Size -> compareBy { if (it.isDirectory) 0L else it.length() }
+    }
+    // 方向只作用于字段，不能把 dirFirst 一起 reverse（否则目录会沉底）。
+    return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
+}
+
+private fun fileIcon(file: UniFile): ImageVector {
+    val isArchive = !file.isDirectory && (Archive.isSupported(file) || file.extension.equals("epub", true))
+    return when {
+        file.isDirectory -> Icons.Filled.Folder
+        isArchive -> Icons.Filled.Book
+        ImageUtil.isImage(file.name) -> Icons.Filled.Image
+        else -> Icons.Filled.Description
+    }
+}
+
+private fun fileTint(file: UniFile): Color {
+    val isArchive = !file.isDirectory && (Archive.isSupported(file) || file.extension.equals("epub", true))
+    val isPlain = !file.isDirectory && !isArchive
+    return if (isPlain) {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+}
+
+/** 文件管理器主体：面包屑 + 目录下钻 + 「阅读此目录」。UI 参考 Material Files 的列表设计。
+ *  显示模式（列表/网格）与排序（名称/修改时间/大小，含方向）复用 Komga 书架成熟的
+ *  [LibraryDisplayMode] + [SortItem]；选择记 [StoragePreferences] 持久化。 */
 @Composable
 private fun LocalFileBrowser(base: UniFile) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val prefs = remember { Injekt.get<StoragePreferences>() }
+
+    // 显示模式 / 排序 / 封面：从偏好读取并持久化（与书架一致，记设置）。
+    var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.localBrowseDisplayMode)) }
+    var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.localBrowseSort)) }
+    var showCover by remember { mutableStateOf(prefs.localBrowseShowCover) }
+    var showOptions by remember { mutableStateOf(false) }
+
     // 相对路径栈：栈底为空串代表根目录，下钻时追加段名。每个条目的相对路径 =
     // (stack + 自身段名) 用 "/" 连接；chapter.url 就存这个相对路径，
     // 阅读时由 tree-backed 的 base.findFile(相对路径) 重建，散图目录才能正常列图。
@@ -3868,14 +3953,12 @@ private fun LocalFileBrowser(base: UniFile) {
     var loading by remember { mutableStateOf(true) }
     var imageCount by remember { mutableStateOf(0) }
 
-    // 列目录是跨进程 SAF 调用，必须在 IO 线程。
-    LaunchedEffect(current) {
+    // 列目录是跨进程 SAF 调用，必须在 IO 线程；排序在本地完成（目录恒置顶 + 所选字段/方向）。
+    LaunchedEffect(current, sort) {
         loading = true
         val (list, images) = withContext(Dispatchers.IO) {
             val all = current.listFiles().orEmpty().toList()
-            val sorted = all.sortedWith(
-                compareBy<UniFile> { !it.isDirectory }.thenBy { it.name.orEmpty().lowercase() },
-            )
+            val sorted = all.sortedWith(localFileComparator(sort))
             sorted to all.count { !it.isDirectory && ImageUtil.isImage(it.name) }
         }
         entries = list
@@ -3889,34 +3972,47 @@ private fun LocalFileBrowser(base: UniFile) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        // 面包屑：可点击跳回任一层级（参考 Material Files 的顶部路径条）。
+        // 顶栏：面包屑（可点跳层）+ 显示选项 Tune 按钮。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = { stack = emptyList() }) {
-                Text(
-                    text = base.name.orEmpty().ifBlank { composeStringResource(R.string.local_root_label) },
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                )
-            }
-            stack.forEachIndexed { index, seg ->
-                Text(
-                    text = "/",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = { stack = stack.take(index + 1) }) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { stack = emptyList() }) {
                     Text(
-                        text = seg,
+                        text = base.name.orEmpty().ifBlank { composeStringResource(R.string.local_root_label) },
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                     )
                 }
+                stack.forEachIndexed { index, seg ->
+                    Text(
+                        text = "/",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = { stack = stack.take(index + 1) }) {
+                        Text(
+                            text = seg,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            IconButton(onClick = { showOptions = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Tune,
+                    contentDescription = composeStringResource(R.string.display_mode_header),
+                )
             }
         }
 
@@ -3933,68 +4029,80 @@ private fun LocalFileBrowser(base: UniFile) {
         }
 
         when {
-            loading -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            entries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = composeStringResource(R.string.local_empty_dir),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            entries.isEmpty() -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = composeStringResource(R.string.local_empty_dir),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            else -> {
+            displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(entries, key = { it.uri.toString() }) { file ->
-                        val relPath = (stack + file.name.orEmpty()).joinToString("/")
                         FileRow(
                             file = file,
                             onOpen = {
-                                if (file.isDirectory) {
-                                    stack = stack + file.name.orEmpty()
-                                } else {
-                                    scope.launch { openLocalFile(context, file, (stack + file.name.orEmpty()).joinToString("/")) }
-                                }
+                                if (file.isDirectory) stack = stack + file.name.orEmpty()
+                                else scope.launch { openLocalFile(context, file, (stack + file.name.orEmpty()).joinToString("/")) }
                             },
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
             }
+            else -> {
+                // 网格模式（紧凑/舒适）复用 Komga 书架的 Adaptive 列密度 + 间距逻辑。
+                val isCompact = displayMode == LibraryDisplayMode.CompactGrid
+                val adaptiveMin = if (isCompact) 96.dp else 168.dp
+                val gridState = rememberLazyGridState()
+                LazyVerticalGrid(
+                    state = gridState,
+                    columns = GridCells.Adaptive(minSize = adaptiveMin),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 12.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(entries, key = { it.uri.toString() }) { file ->
+                        LocalFileGridItem(
+                            file = file,
+                            showCover = showCover,
+                            onClick = {
+                                if (file.isDirectory) stack = stack + file.name.orEmpty()
+                                else scope.launch { openLocalFile(context, file, (stack + file.name.orEmpty()).joinToString("/")) }
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
+
+    LocalBrowseOptionsMenu(
+        expanded = showOptions,
+        onDismiss = { showOptions = false },
+        displayMode = displayMode,
+        onDisplayModeChange = { displayMode = it; prefs.localBrowseDisplayMode = it.prefValue },
+        showCover = showCover,
+        onShowCoverChange = { showCover = it; prefs.localBrowseShowCover = it },
+        sort = sort,
+        onSortModeChange = { sort = it; prefs.localBrowseSort = it.toPref() },
+    )
 }
 
-/** 文件/目录一行。散图不可点——它们通过「阅读此目录」整目录打开。 */
+/** 文件/目录一行（列表模式）。散图不可点——它们通过「阅读此目录」整目录打开。 */
 @Composable
 private fun FileRow(file: UniFile, onOpen: () -> Unit) {
     val isDir = file.isDirectory
     val isArchive = !isDir && (Archive.isSupported(file) || file.extension.equals("epub", true))
-    val isImage = !isDir && !isArchive && ImageUtil.isImage(file.name)
-
-    val icon = when {
-        isDir -> Icons.Filled.Folder
-        isArchive -> Icons.Filled.Book
-        isImage -> Icons.Filled.Image
-        else -> Icons.Filled.Description
-    }
-    val tint = if (isImage || (!isDir && !isArchive)) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-    } else {
-        MaterialTheme.colorScheme.primary
-    }
-
     Row(
         modifier = Modifier
-        .fillMaxWidth()
-        .then(if (isDir || isArchive) Modifier.clickable(onClick = onOpen) else Modifier)
-        .padding(horizontal = 16.dp, vertical = 12.dp),
+            .fillMaxWidth()
+            .then(if (isDir || isArchive) Modifier.clickable(onClick = onOpen) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = tint)
+        Icon(fileIcon(file), contentDescription = null, tint = fileTint(file))
         Spacer(Modifier.width(12.dp))
         Text(
             text = file.name.orEmpty(),
@@ -4003,6 +4111,165 @@ private fun FileRow(file: UniFile, onOpen: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/** 网格模式一个格子：封面（开启时最佳努力取首图）或图标 + 名称。 */
+@Composable
+private fun LocalFileGridItem(file: UniFile, showCover: Boolean, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val isDir = file.isDirectory
+    val isArchive = !isDir && (Archive.isSupported(file) || file.extension.equals("epub", true))
+    val clickable = isDir || isArchive
+
+    val cover by produceState<Bitmap?>(null, file, showCover) {
+        value = if (showCover && (isDir || isArchive || ImageUtil.isImage(file.name))) {
+            loadCoverBitmap(context, file, 360)
+        } else null
+    }
+
+    Column(
+        modifier = Modifier
+            .then(if (clickable) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (cover != null) {
+                Image(
+                    bitmap = cover!!.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    fileIcon(file),
+                    contentDescription = null,
+                    tint = fileTint(file),
+                    modifier = Modifier.size(if (isDir || isArchive) 56.dp else 40.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = file.name.orEmpty(),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * 本地浏览器显示选项：排序 + 显示模式 + 封面开关。
+ * 复用书架成熟的 [SortItem] / [LibraryDisplayMode] / [TabbedDialog]，选择落地
+ * [StoragePreferences]（即用户要求的「可持久化的设置项」）。
+ */
+@Composable
+private fun LocalBrowseOptionsMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    displayMode: LibraryDisplayMode,
+    onDisplayModeChange: (LibraryDisplayMode) -> Unit,
+    showCover: Boolean,
+    onShowCoverChange: (Boolean) -> Unit,
+    sort: LocalFileSort,
+    onSortModeChange: (LocalFileSort) -> Unit,
+) {
+    if (!expanded) return
+    val tabTitles = listOf(
+        composeStringResource(R.string.sort_header),
+        composeStringResource(R.string.display_mode_header),
+    )
+    TabbedDialog(onDismissRequest = onDismiss, tabTitles = tabTitles) { page ->
+        Column(
+            modifier = Modifier
+                .padding(vertical = 8.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            when (page) {
+                0 -> LocalFileSortBy.entries.forEach { m ->
+                    SortItem(
+                        label = m.labelText(),
+                        sortDescending = if (sort.sortBy == m) sort.descending else null,
+                        onClick = {
+                            onSortModeChange(
+                                if (sort.sortBy == m) sort.copy(descending = !sort.descending)
+                                else LocalFileSort(m, m.defaultDescending),
+                            )
+                        },
+                    )
+                }
+                1 -> {
+                    Text(
+                        text = composeStringResource(R.string.display_mode_header),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        LibraryDisplayMode.entries.forEach { m ->
+                            FilterChip(
+                                selected = displayMode == m,
+                                onClick = { onDisplayModeChange(m) },
+                                label = { Text(m.labelText()) },
+                            )
+                        }
+                    }
+                    CheckboxItem(
+                        label = composeStringResource(R.string.local_browse_cover),
+                        checked = showCover,
+                        onClick = onShowCoverChange,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 最佳努力取封面位图：目录取首张图；归档取首张图条目；单图直接用。失败返回 null。 */
+private suspend fun loadCoverBitmap(context: android.content.Context, file: UniFile, maxPx: Int): Bitmap? =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            if (file.isDirectory) {
+                file.listFiles().orEmpty()
+                    .firstOrNull { it.isFile && ImageUtil.isImage(it.name) }
+                    ?.let { decodeSampled({ it.openInputStream() }, maxPx) }
+            } else if (Archive.isSupported(file)) {
+                file.archiveReader(context).use { reader ->
+                    val entryName = reader.useEntries { seq -> seq.firstOrNull { ImageUtil.isImage(it.name) }?.name }
+                    entryName?.let { decodeSampled({ reader.getInputStream(it) }, maxPx) }
+                }
+            } else if (file.extension.equals("epub", true)) {
+                null
+            } else if (ImageUtil.isImage(file.name)) {
+                decodeSampled({ file.openInputStream() }, maxPx)
+            } else null
+        }.getOrNull()
+    }
+
+/** 两次 decode：先读边界算 inSampleSize，再采样解码；open 提供可重开的输入流。 */
+private fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? {
+    open()?.use { first ->
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeStream(first, null, opts)
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
+        val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
+        open()?.use { second ->
+            val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
+            return BitmapFactory.decodeStream(second, null, opts2)
+        }
+    }
+    return null
 }
 
 /**

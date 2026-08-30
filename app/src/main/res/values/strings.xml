@@ -92,6 +92,8 @@
     <string name="display_compact_grid">紧凑网格</string>
     <string name="display_comfortable_grid">舒适网格</string>
     <string name="display_list">列表</string>
+    <string name="local_sort_size">大小</string>
+    <string name="local_browse_cover">显示封面</string>
     <string name="series_books_summary">%1$d 本 · %2$d 已读 · %3$d 未读</string>
 
     <!-- 阅读列表 -->
