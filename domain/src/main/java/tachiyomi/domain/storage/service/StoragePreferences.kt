@@ -29,4 +29,25 @@ class StoragePreferences(
         Preference.appStateKey("local_source_root"),
         "",
     )
+
+    /**
+     * Komiho: 本地文件浏览器的显示模式，存 [app.mihonsy.komga.ui.LibraryDisplayMode]
+     * 的 `prefValue`（LIST / COMPACT_GRID / COMFORTABLE_GRID）。默认列表。
+     */
+    val localBrowseDisplayMode: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("local_browse_display_mode"),
+        "LIST",
+    )
+
+    /** Komiho: 本地文件浏览器排序（`<字段>,<asc|desc>`），字段见 [LocalFileSortBy]。默认按名称升序。 */
+    val localBrowseSort: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("local_browse_sort"),
+        "name,asc",
+    )
+
+    /** Komiho: 本地文件浏览器网格模式是否尝试显示封面缩略图（默认关，避免 SAF 里读归档拖慢）。 */
+    val localBrowseShowCover: Preference<Boolean> = preferenceStore.getBoolean(
+        Preference.appStateKey("local_browse_show_cover"),
+        false,
+    )
 }

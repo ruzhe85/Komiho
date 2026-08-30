@@ -90,6 +90,8 @@
     <string name="display_compact_grid">Compact grid</string>
     <string name="display_comfortable_grid">Comfortable grid</string>
     <string name="display_list">List</string>
+    <string name="local_sort_size">Size</string>
+    <string name="local_browse_cover">Show cover</string>
     <string name="series_books_summary">%1$d vol · %2$d read · %3$d unread</string>
 
     <!-- Reading lists -->
