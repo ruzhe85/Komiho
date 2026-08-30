@@ -195,7 +195,12 @@ import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.source.local.io.Archive
 import tachiyomi.source.local.io.LocalSourceFileSystem
 import tachiyomi.core.common.util.system.ImageUtil
-import app.mihonsy.komga.reader.LocalReaderActivity
+import tachiyomi.source.local.LocalSource
+import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.manga.repository.MangaRepository
+import tachiyomi.domain.chapter.repository.ChapterRepository
+import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import androidx.compose.material.icons.filled.Description
 import uy.kohesive.injekt.Injekt
 import com.hippo.unifile.UniFile
@@ -3797,11 +3802,11 @@ private fun SourceSwitcher(
  *  - 点归档/epub   → 作为「一本」直接开读
  *  - 当前目录有图片 → 顶部出现「阅读此目录（N 张）」按钮
  *
- * 刻意**不用** Mihon 的图源模型（`LocalSource` + `BrowseSourceScreen`）：
- * 那套要求 base/<系列目录>/<章节文件> 的两层命名结构，且 getSearchManga 只认
- * 目录（`filter { it.isDirectory }`），散图目录或任意层级都会直接空列表。
- * 这里目录层级与「什么算一本」全部由本浏览器决定；点开即交给独立的
- * [LocalReaderActivity] 直接读文件，不注册图源、不写书架、不落库。
+ * 目录层级与「什么算一本」由本浏览器决定；点开即把条目**扔给现成的
+ * reader** 读：按 LocalSource 的约定建一条不进书架（favorite=false）的临时
+ * Manga+Chapter（url = 相对根目录的路径），启动 [ReaderActivity]。reader 的本地
+ * 加载管线（DirectoryPageLoader / ArchivePageLoader / EpubPageLoader）自动按
+ * chapter.url 定位文件，Lanczos 等增强随 reader 自带，无需另接。
  */
 @Composable
 private fun LocalSourceTab(
@@ -3918,7 +3923,7 @@ private fun LocalFileBrowser(base: UniFile) {
         // 当前目录内含图片 → 提供「阅读此目录」。
         if (imageCount > 0) {
             Button(
-                onClick = { scope.launch { openLocalFile(context, current) } },
+                onClick = { scope.launch { openLocalFile(context, current, stack.joinToString("/")) } },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -3951,7 +3956,7 @@ private fun LocalFileBrowser(base: UniFile) {
                                 if (file.isDirectory) {
                                     stack = stack + file.name.orEmpty()
                                 } else {
-                                    scope.launch { openLocalFile(context, file) }
+                                    scope.launch { openLocalFile(context, file, (stack + file.name.orEmpty()).joinToString("/")) }
                                 }
                             },
                         )
@@ -4000,16 +4005,60 @@ private fun FileRow(file: UniFile, onOpen: () -> Unit) {
     }
 }
 
-/** 打开一个条目（归档/epub/含图目录）为「一本」。失败时提示原因。 */
-private fun openLocalFile(context: android.content.Context, file: UniFile) {
-    runCatching { LocalReaderActivity.launch(context, file) }
-        .onFailure { e ->
-            android.widget.Toast.makeText(
-                context,
-                "打开失败：${e.message}",
-                android.widget.Toast.LENGTH_LONG,
-            ).show()
+/**
+ * 打开一个本地条目（目录/归档/epub）为「一本」：按 LocalSource 约定建一条
+ * 不进书架（favorite=false）的临时 Manga+Chapter（url = 相对根目录的路径），
+ * 再启动现有 [ReaderActivity]。reader 的本地加载管线按 chapter.url 自动定位
+ * 文件并解码，Lanczos 等增强随 reader 自带。失败时在 UI 提示原因。
+ */
+private suspend fun openLocalFile(context: android.content.Context, file: UniFile, relPath: String) {
+    try {
+        val (mangaId, chapterId) = withContext(Dispatchers.IO) {
+            val fs = Injekt.get<LocalSourceFileSystem>()
+            val base = fs.getBaseDirectory()
+                ?: throw Exception("本地根目录未设置，请先在设置里选择文件夹")
+            // 先按相对路径定位真实文件，确保存在。
+            var resolved = base
+            for (seg in relPath.split('/')) {
+                if (seg.isBlank()) continue
+                resolved = resolved.findFile(seg) ?: throw Exception("找不到文件：$relPath")
+            }
+            val title = file.name ?: relPath.substringAfterLast('/').ifBlank { relPath }
+            val mangaUrl = relPath.substringBeforeLast('/', "")
+            val mangaRepo = Injekt.get<MangaRepository>()
+            val chapterRepo = Injekt.get<ChapterRepository>()
+            val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
+                ?: mangaRepo.insertNetworkManga(
+                    listOf(
+                        Manga.create().copy(
+                            source = LocalSource.ID,
+                            url = mangaUrl,
+                            ogTitle = title,
+                            favorite = false,
+                        ),
+                    ),
+                ).first()
+            val chapter = chapterRepo.getChapterByUrlAndMangaId(relPath, manga.id!!)
+                ?: chapterRepo.addAll(
+                    listOf(
+                        Chapter.create().copy(
+                            mangaId = manga.id!!,
+                            url = relPath,
+                            name = title,
+                            chapterNumber = 1.0,
+                        ),
+                    ),
+                ).first()
+            manga.id!! to chapter.id!!.toLong()
         }
+        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
+    } catch (e: Throwable) {
+        android.widget.Toast.makeText(
+            context,
+            "打开失败：${e.message}",
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
 }
 
 // ---------- Downloads (offline) tab ----------
