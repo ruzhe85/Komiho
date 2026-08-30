@@ -95,8 +95,10 @@ class KomihoFileSource(
         val file = if (relativePath.isEmpty()) {
             base
         } else {
-            relativePath.split("/").fold(base) { dir, seg -> dir.findFile(seg) }
-                ?: throw Exception("找不到文件：$relativePath")
+            // findFile 返回可空；任意一级找不到即抛错，确保最终类型为非空 UniFile。
+            relativePath.split("/").fold(base) { dir, seg ->
+                dir.findFile(seg) ?: throw Exception("找不到文件：$relativePath")
+            }
         }
         if (!file.exists()) {
             throw Exception("文件不存在：$relativePath")
