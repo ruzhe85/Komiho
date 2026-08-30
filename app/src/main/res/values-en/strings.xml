@@ -87,7 +87,7 @@
     <string name="sort_date_added">Date added</string>
     <string name="sort_date_updated">Date updated</string>
     <string name="sort_date_read">Date read</string>
-    <string name="display_compact_grid">Compact grid</string>
+    <string name="display_compact_grid">Grid</string>
     <string name="display_comfortable_grid">Comfortable grid</string>
     <string name="display_list">List</string>
     <string name="local_sort_size">Size</string>

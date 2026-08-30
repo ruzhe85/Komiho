@@ -89,7 +89,7 @@
     <string name="sort_date_added">添加时间</string>
     <string name="sort_date_updated">更新时间</string>
     <string name="sort_date_read">阅读日期</string>
-    <string name="display_compact_grid">紧凑网格</string>
+    <string name="display_compact_grid">网格</string>
     <string name="display_comfortable_grid">舒适网格</string>
     <string name="display_list">列表</string>
     <string name="local_sort_size">大小</string>

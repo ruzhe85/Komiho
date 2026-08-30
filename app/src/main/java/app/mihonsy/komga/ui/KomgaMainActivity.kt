@@ -183,6 +183,8 @@ import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import uy.kohesive.injekt.api.get
 import androidx.compose.material.icons.outlined.Info
 import eu.kanade.tachiyomi.BuildConfig
@@ -209,7 +211,6 @@ import tachiyomi.core.common.storage.extension
 // SY --> Komiho 本地浏览器：显示模式 + 排序 + 封面
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.style.TextAlign
 import android.graphics.Bitmap
@@ -3907,8 +3908,11 @@ private fun localFileComparator(sort: LocalFileSort): Comparator<UniFile> {
     return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
 }
 
+private fun UniFile.isLocalArchive(): Boolean =
+    !isDirectory && (Archive.isSupported(this) || extension.equals("epub", true))
+
 private fun fileIcon(file: UniFile): ImageVector {
-    val isArchive = !file.isDirectory && (Archive.isSupported(file) || file.extension.equals("epub", true))
+    val isArchive = file.isLocalArchive()
     return when {
         file.isDirectory -> Icons.Filled.Folder
         isArchive -> Icons.Filled.Book
@@ -3919,7 +3923,7 @@ private fun fileIcon(file: UniFile): ImageVector {
 
 @Composable
 private fun fileTint(file: UniFile): Color {
-    val isArchive = !file.isDirectory && (Archive.isSupported(file) || file.extension.equals("epub", true))
+    val isArchive = file.isLocalArchive()
     val isPlain = !file.isDirectory && !isArchive
     return if (isPlain) {
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
@@ -3928,9 +3932,10 @@ private fun fileTint(file: UniFile): Color {
     }
 }
 
-/** 文件管理器主体：面包屑 + 目录下钻 + 「阅读此目录」。UI 参考 Material Files 的列表设计。
+/** 文件管理器主体：面包屑 + 目录下钻 + 点击即读。UI 参考 Material Files 的列表设计。
  *  显示模式（列表/网格）与排序（名称/修改时间/大小，含方向）复用 Komga 书架成熟的
- *  [LibraryDisplayMode] + [SortItem]；选择记 [StoragePreferences] 持久化。 */
+ *  [LibraryDisplayMode] + [SortItem]；选择记 [StoragePreferences] 持久化。
+ *  点击图片/归档/目录分别在 reader 中整目录加载（reader 自动载入同目录全部图片），不另设「阅读此目录」按钮。 */
 @Composable
 private fun LocalFileBrowser(base: UniFile) {
     val context = LocalContext.current
@@ -3954,25 +3959,50 @@ private fun LocalFileBrowser(base: UniFile) {
 
     var entries by remember { mutableStateOf<List<UniFile>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
-    var imageCount by remember { mutableStateOf(0) }
 
     // 列目录是跨进程 SAF 调用，必须在 IO 线程；排序在本地完成（目录恒置顶 + 所选字段/方向）。
+    // 不再统计图片数（「阅读此目录」已移除，统计无用途且拖慢列目录）。
     LaunchedEffect(current, sort) {
         loading = true
-        val (list, images) = withContext(Dispatchers.IO) {
+        val list = withContext(Dispatchers.IO) {
             val all = current.listFiles().orEmpty().toList()
-            val sorted = all.sortedWith(localFileComparator(sort))
-            sorted to all.count { !it.isDirectory && ImageUtil.isImage(it.name) }
+            all.sortedWith(localFileComparator(sort))
         }
         entries = list
-        imageCount = images
         loading = false
+    }
+
+    // 封面（开启时）一次性批量预取存入 map；滚动时直接读 map，不再逐条解码，消除卡顿。
+    // loadCoverBitmap 内部已带内存 LRU 缓存，重进目录/重切显示模式即时命中。
+    var covers by remember { mutableStateOf<Map<String, Bitmap?>>(emptyMap()) }
+    LaunchedEffect(entries, showCover) {
+        if (!showCover) { covers = emptyMap(); return@LaunchedEffect }
+        val targets = entries.filter { it.isDirectory || it.isLocalArchive() || ImageUtil.isImage(it.name) }
+        val loaded = withContext(coverDispatcher) {
+            targets.map { f -> async { f.uri.toString() to loadCoverBitmap(context, f, 360) } }.awaitAll()
+        }
+        covers = loaded.toMap()
     }
 
     // 返回键回上一层；已在根目录时不拦截，交还外层（回 Home）。
     BackHandler(enabled = stack.isNotEmpty()) {
         stack = stack.dropLast(1)
     }
+
+    // 统一点击行为：目录→下钻；归档/epub→直接读该文件；图片→读所在目录（reader 自动载入同目录全部图片）。
+    val onItemOpen: (UniFile) -> Unit = { file ->
+        when {
+            file.isDirectory -> stack = stack + file.name.orEmpty()
+            file.isLocalArchive() -> scope.launch {
+                openLocalFile(context, file, (stack + file.name.orEmpty()).joinToString("/"))
+            }
+            ImageUtil.isImage(file.name) -> scope.launch {
+                openLocalFile(context, current, stack.joinToString("/"))
+            }
+        }
+    }
+    val isItemClickable: (UniFile) -> Boolean =
+        { it.isDirectory || it.isLocalArchive() || ImageUtil.isImage(it.name) }
 
     Column(Modifier.fillMaxSize()) {
         // 顶栏：面包屑（可点跳层）+ 显示选项 Tune 按钮。
@@ -4019,18 +4049,7 @@ private fun LocalFileBrowser(base: UniFile) {
             }
         }
 
-        // 当前目录内含图片 → 提供「阅读此目录」。
-        if (imageCount > 0) {
-            Button(
-                onClick = { scope.launch { openLocalFile(context, current, stack.joinToString("/")) } },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            ) {
-                Text(composeStringResource(R.string.local_read_dir, imageCount))
-            }
-        }
-
+        // 列目录内容。
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             entries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -4044,10 +4063,8 @@ private fun LocalFileBrowser(base: UniFile) {
                     items(entries, key = { it.uri.toString() }) { file ->
                         FileRow(
                             file = file,
-                            onOpen = {
-                                if (file.isDirectory) stack = stack + file.name.orEmpty()
-                                else scope.launch { openLocalFile(context, file, (stack + file.name.orEmpty()).joinToString("/")) }
-                            },
+                            clickable = isItemClickable(file),
+                            onOpen = { onItemOpen(file) },
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
@@ -4070,10 +4087,9 @@ private fun LocalFileBrowser(base: UniFile) {
                         LocalFileGridItem(
                             file = file,
                             showCover = showCover,
-                            onClick = {
-                                if (file.isDirectory) stack = stack + file.name.orEmpty()
-                                else scope.launch { openLocalFile(context, file, (stack + file.name.orEmpty()).joinToString("/")) }
-                            },
+                            cover = covers[file.uri.toString()],
+                            clickable = isItemClickable(file),
+                            onClick = { onItemOpen(file) },
                         )
                     }
                 }
@@ -4093,15 +4109,13 @@ private fun LocalFileBrowser(base: UniFile) {
     )
 }
 
-/** 文件/目录一行（列表模式）。散图不可点——它们通过「阅读此目录」整目录打开。 */
+/** 文件/目录一行（列表模式）。可点性由调用方按「目录/归档/图片」决定。 */
 @Composable
-private fun FileRow(file: UniFile, onOpen: () -> Unit) {
-    val isDir = file.isDirectory
-    val isArchive = !isDir && (Archive.isSupported(file) || file.extension.equals("epub", true))
+private fun FileRow(file: UniFile, clickable: Boolean, onOpen: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (isDir || isArchive) Modifier.clickable(onClick = onOpen) else Modifier)
+            .then(if (clickable) Modifier.clickable(onClick = onOpen) else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -4116,19 +4130,17 @@ private fun FileRow(file: UniFile, onOpen: () -> Unit) {
     }
 }
 
-/** 网格模式一个格子：封面（开启时最佳努力取首图）或图标 + 名称。 */
+/** 网格模式一个格子：封面（开启且已预取到）直接显示，否则图标 + 名称。 */
 @Composable
-private fun LocalFileGridItem(file: UniFile, showCover: Boolean, onClick: () -> Unit) {
-    val context = LocalContext.current
+private fun LocalFileGridItem(
+    file: UniFile,
+    showCover: Boolean,
+    cover: Bitmap?,
+    clickable: Boolean,
+    onClick: () -> Unit,
+) {
     val isDir = file.isDirectory
-    val isArchive = !isDir && (Archive.isSupported(file) || file.extension.equals("epub", true))
-    val clickable = isDir || isArchive
-
-    val cover by produceState<Bitmap?>(null, file, showCover) {
-        value = if (showCover && (isDir || isArchive || ImageUtil.isImage(file.name))) {
-            loadCoverBitmap(context, file, 360)
-        } else null
-    }
+    val isArchive = file.isLocalArchive()
 
     Column(
         modifier = Modifier
@@ -4140,9 +4152,9 @@ private fun LocalFileGridItem(file: UniFile, showCover: Boolean, onClick: () -> 
             modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
             contentAlignment = Alignment.Center,
         ) {
-            if (cover != null) {
+            if (showCover && cover != null) {
                 Image(
-                    bitmap = cover!!.asImageBitmap(),
+                    bitmap = cover.asImageBitmap(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
