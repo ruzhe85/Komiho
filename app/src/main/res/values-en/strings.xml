@@ -26,6 +26,11 @@
     <string name="local_root_label">Local root</string>
     <string name="local_history_empty">No reading history</string>
     <string name="local_bookmarks_empty">No bookmarks</string>
+    <string name="local_history_aggregate">Aggregate</string>
+    <string name="local_history_delete">Delete record</string>
+    <string name="local_history_delete_all">Clear all records</string>
+    <string name="local_history_cancel">Cancel</string>
+    <string name="local_bookmark_remove">Remove bookmark</string>
 
     <!-- Search -->
     <string name="cd_close_search">Close search</string>
