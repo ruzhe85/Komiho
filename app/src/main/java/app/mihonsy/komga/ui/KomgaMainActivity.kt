@@ -3,9 +3,9 @@ package app.mihonsy.komga.ui
 import android.content.Intent
 import android.content.res.Configuration
 import coil3.ImageLoader
+import android.content.Context
 import android.os.Bundle
 import android.provider.DocumentsContract
-import android.text.format.DateUtils
 import android.widget.Toast
 import java.util.Date
 import kotlin.math.max
@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -125,6 +126,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -209,6 +211,7 @@ import tachiyomi.domain.chapter.model.LocalBookmarkItem
 import tachiyomi.domain.chapter.service.ChapterRecognition
 import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.domain.chapter.repository.ChapterRepository
+import tachiyomi.domain.history.model.LocalHistoryItem
 import tachiyomi.domain.history.repository.HistoryRepository
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import androidx.compose.material.icons.filled.Description
@@ -228,7 +231,9 @@ import android.graphics.BitmapFactory
 import mihon.core.common.archive.archiveReader
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.text.SimpleDateFormat
 import java.util.Collections
+import java.util.Locale
 // SY <--
 
 // 划动选择命中检测已移除（长按圈选废弃）。
@@ -4592,15 +4597,95 @@ private fun LocalEmptyHint(icon: ImageVector, text: String) {
     }
 }
 
-/** 本地 tab 通用列表行：左图标 + 主副标题，支持点击与长按。 */
+/** 从章节 URL（相对本地根目录的路径）重建真实的 tree-backed UniFile。 */
+private fun resolveLocalFile(chapterUrl: String): UniFile? {
+    val base = Injekt.get<LocalSourceFileSystem>().getBaseDirectory() ?: return null
+    var current = base
+    for (seg in chapterUrl.split('/')) {
+        if (seg.isBlank()) continue
+        current = current.findFile(seg) ?: return null
+    }
+    return current
+}
+
+/** 格式化文件大小。 */
+private fun formatFileSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 * 1024 -> "%.2f TB".format(bytes / (1024.0 * 1024 * 1024 * 1024))
+    bytes >= 1024L * 1024 * 1024 -> "%.2f GB".format(bytes / (1024.0 * 1024 * 1024))
+    bytes >= 1024L * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
+    bytes >= 1024L -> "%.1f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
+}
+
+/** 格式化时间戳为 yyyy-MM-dd HH:mm。 */
+private fun formatDateTime(timeMs: Long): String {
+    if (timeMs <= 0) return ""
+    return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timeMs))
+}
+
+/** 统计本地章节总页数（目录直接数图片；归档/EPUB 用 ArchiveReader 数图片条目）。 */
+private suspend fun countChapterPages(context: Context, file: UniFile?): Int = withContext(Dispatchers.IO) {
+    if (file == null) return@withContext 0
+    runCatching {
+        when {
+            file.isDirectory -> {
+                file.listFiles()
+                    ?.filter { !it.isDirectory && ImageUtil.isImage(it.name) }
+                    ?.size ?: 0
+            }
+            Archive.isSupported(file) || file.extension.equals("epub", true) -> {
+                file.archiveReader(context).use { reader ->
+                    reader.useEntries { entries ->
+                        entries.count { it.isFile && ImageUtil.isImage(it.name) }
+                    }
+                }
+            }
+            else -> 0
+        }
+    }.getOrDefault(0)
+}
+
+/** 尝试提取章节封面 URI：目录取第一张图片；归档/EPUB 暂不提取。 */
+private fun resolveCoverUri(file: UniFile?): String? {
+    if (file == null) return null
+    return when {
+        file.isDirectory -> {
+            file.listFiles()
+                ?.filter { !it.isDirectory && ImageUtil.isImage(it.name) }
+                ?.sortedWith { a, b -> a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty()) }
+                ?.firstOrNull()
+                ?.uri
+                ?.toString()
+        }
+        else -> null
+    }
+}
+
+/** 章节号格式化：整数不带小数（1.0 → 1），否则保留两位小数。 */
+private fun formatChapterNumber(n: Double): String =
+    if (n % 1.0 == 0.0) n.toLong().toString() else "%.2f".format(n)
+
+/** 本地历史/书签共用条目行：左侧封面、标题、系列、大小/日期、进度条、右侧更多按钮。 */
 @Composable
-private fun LocalRow(
+private fun LocalFileRow(
+    context: Context,
     title: String,
-    subtitle: String,
-    icon: ImageVector,
+    seriesTitle: String,
+    fileSize: Long,
+    dateTime: Long,
+    lastPageRead: Long,
+    totalPages: Int,
+    coverUri: String?,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
+    val progress = if (totalPages > 0) (lastPageRead + 1).toFloat() / totalPages.toFloat() else 0f
+    val progressText = if (totalPages > 0) {
+        "${lastPageRead + 1}/$totalPages · ${(progress * 100).roundToInt()}%"
+    } else {
+        "${lastPageRead + 1}p"
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -4611,10 +4696,34 @@ private fun LocalRow(
                     Modifier.clickable(onClick = onClick)
                 },
             )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        // 封面
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.size(56.dp, 74.dp),
+        ) {
+            if (coverUri != null) {
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(context).data(coverUri).build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    loading = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp)) } },
+                    error = {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Description, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -4623,38 +4732,50 @@ private fun LocalRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (subtitle.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = seriesTitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "${formatFileSize(fileSize)} · ${formatDateTime(dateTime)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = progressText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        IconButton(onClick = { /* 更多菜单占位 */ }) {
+            Icon(Icons.Filled.MoreVert, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
-/** 相对阅读时间（如「3天前」），本地化由系统 DateUtils 处理。 */
-private fun formatRelativeTime(date: Date?): String {
-    if (date == null) return ""
-    return DateUtils.getRelativeTimeSpanString(
-        date.time,
-        System.currentTimeMillis(),
-        DateUtils.MINUTE_IN_MILLIS,
-    ).toString()
-}
-
-/** 历史 tab：最近阅读（按来源过滤），点列表项续读。 */
+/** 历史 tab：最近阅读（按来源过滤，文件级），点列表项续读。 */
 @Composable
 private fun HistoryTabLocal(refreshTick: Int) {
     val context = LocalContext.current
     val historyRepo = remember { Injekt.get<HistoryRepository>() }
-    // 响应式：阅读写入 history 表后 flow 自动推送；refreshTick 变化（从阅读器返回）重新订阅取最新。
     val items by remember(refreshTick) {
-        historyRepo.getHistoryBySource(LocalSource.ID)
+        historyRepo.getHistoryBySourceDetailed(LocalSource.ID)
     }.collectAsState(emptyList())
 
     if (items.isEmpty()) {
@@ -4662,13 +4783,29 @@ private fun HistoryTabLocal(refreshTick: Int) {
         return
     }
     LazyColumn(Modifier.fillMaxSize()) {
-        items(items, key = { "${it.mangaId}:${it.chapterId}" }) { h ->
-            val chapterText = if (h.chapterNumber >= 0) "第 ${formatChapterNumber(h.chapterNumber)} 话" else ""
-            val subtitle = listOf(chapterText, formatRelativeTime(h.readAt)).filter { it.isNotBlank() }.joinToString(" · ")
-            LocalRow(
-                title = h.title,
-                subtitle = subtitle,
-                icon = Icons.Filled.History,
+        items(items, key = { "${it.mangaId}:${it.chapterId}:${it.id}" }) { h ->
+            val file by produceState<UniFile?>(initialValue = null, key1 = h.chapterUrl) {
+                value = withContext(Dispatchers.IO) { resolveLocalFile(h.chapterUrl) }
+            }
+            val totalPages by produceState(initialValue = 0, key1 = file) {
+                value = countChapterPages(context, file)
+            }
+            val coverUri = remember(file) { resolveCoverUri(file) }
+                ?: h.thumbnailUrl?.takeIf { it.isNotBlank() }
+            val fileSize = remember(file) { file?.length() ?: 0L }
+            val dateTime = remember(h.dateUpload, file) {
+                h.dateUpload.takeIf { it > 0 } ?: file?.lastModified() ?: 0L
+            }
+
+            LocalFileRow(
+                context = context,
+                title = h.chapterName.ifBlank { "未知章节" },
+                seriesTitle = h.mangaTitle,
+                fileSize = fileSize,
+                dateTime = dateTime,
+                lastPageRead = h.lastPageRead,
+                totalPages = totalPages,
+                coverUri = coverUri,
                 onClick = {
                     context.startActivity(ReaderActivity.newIntent(context, h.mangaId, h.chapterId))
                 },
@@ -4704,11 +4841,28 @@ private fun BookmarksTabLocal(refreshTick: Int) {
         items.isEmpty() -> LocalEmptyHint(Icons.Filled.Bookmark, composeStringResource(R.string.local_bookmarks_empty))
         else -> LazyColumn(Modifier.fillMaxSize()) {
             items(items, key = { it.chapterId }) { b ->
-                val chapterText = if (b.chapterNumber >= 0) "第 ${formatChapterNumber(b.chapterNumber)} 话" else b.chapterName
-                LocalRow(
-                    title = b.mangaTitle,
-                    subtitle = chapterText,
-                    icon = Icons.Filled.Bookmark,
+                val file by produceState<UniFile?>(initialValue = null, key1 = b.chapterUrl) {
+                    value = withContext(Dispatchers.IO) { resolveLocalFile(b.chapterUrl) }
+                }
+                val totalPages by produceState(initialValue = 0, key1 = file) {
+                    value = countChapterPages(context, file)
+                }
+                val coverUri = remember(file) { resolveCoverUri(file) }
+                    ?: b.thumbnailUrl?.takeIf { it.isNotBlank() }
+                val fileSize = remember(file) { file?.length() ?: 0L }
+                val dateTime = remember(b.dateUpload, file) {
+                    b.dateUpload.takeIf { it > 0 } ?: file?.lastModified() ?: 0L
+                }
+
+                LocalFileRow(
+                    context = context,
+                    title = b.chapterName.ifBlank { "未知章节" },
+                    seriesTitle = b.mangaTitle,
+                    fileSize = fileSize,
+                    dateTime = dateTime,
+                    lastPageRead = b.lastPageRead,
+                    totalPages = totalPages,
+                    coverUri = coverUri,
                     onClick = {
                         context.startActivity(ReaderActivity.newIntent(context, b.mangaId, b.chapterId))
                     },
@@ -4726,10 +4880,6 @@ private fun BookmarksTabLocal(refreshTick: Int) {
         }
     }
 }
-
-/** 章节号格式化：整数不带小数（1.0 → 1），否则保留两位小数。 */
-private fun formatChapterNumber(n: Double): String =
-    if (n % 1.0 == 0.0) n.toLong().toString() else "%.2f".format(n)
 // SY <--
 
 // ---------- Downloads (offline) tab ----------

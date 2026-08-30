@@ -83,4 +83,27 @@ WHERE historyView.readAt > 0
 AND maxReadAtChapterId = historyView.chapterId
 AND historyView.source = :sourceId
 ORDER BY readAt DESC;
+
+-- 文件级历史：返回该来源下每一条历史记录（不按 manga 去重），
+-- 包含章节名、章节 URL、last_page_read、date_upload 等用于列表展示。
+historyBySourceDetailed:
+SELECT
+    history._id AS id,
+    chapters.manga_id AS mangaId,
+    chapters._id AS chapterId,
+    mangas.title AS mangaTitle,
+    mangas.thumbnail_url AS thumbnailUrl,
+    chapters.name AS chapterName,
+    chapters.chapter_number AS chapterNumber,
+    chapters.last_page_read AS lastPageRead,
+    chapters.url AS chapterUrl,
+    chapters.date_upload AS dateUpload,
+    history.last_read AS readAt,
+    history.time_read AS readDuration
+FROM history
+JOIN chapters ON chapters._id = history.chapter_id
+JOIN mangas ON mangas._id = chapters.manga_id
+WHERE history.last_read > 0
+AND mangas.source = :sourceId
+ORDER BY history.last_read DESC;
 -- SY <--

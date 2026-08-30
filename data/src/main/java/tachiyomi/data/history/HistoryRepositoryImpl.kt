@@ -11,6 +11,7 @@ import tachiyomi.data.subscribeToList
 import tachiyomi.domain.history.model.History
 import tachiyomi.domain.history.model.HistoryUpdate
 import tachiyomi.domain.history.model.HistoryWithRelations
+import tachiyomi.domain.history.model.LocalHistoryItem
 import tachiyomi.domain.history.repository.HistoryRepository
 
 class HistoryRepositoryImpl(
@@ -27,6 +28,27 @@ class HistoryRepositoryImpl(
     override fun getHistoryBySource(sourceId: Long): Flow<List<HistoryWithRelations>> {
         return database.historyViewQueries
             .historyBySource(sourceId, HistoryMapper::mapHistoryWithRelations)
+            .subscribeToList()
+    }
+
+    override fun getHistoryBySourceDetailed(sourceId: Long): Flow<List<LocalHistoryItem>> {
+        return database.historyViewQueries
+            .historyBySourceDetailed(sourceId) { id, mangaId, chapterId, mangaTitle, thumbnailUrl, chapterName, chapterNumber, lastPageRead, chapterUrl, dateUpload, readAt, readDuration ->
+                LocalHistoryItem(
+                    id = id,
+                    mangaId = mangaId,
+                    chapterId = chapterId,
+                    mangaTitle = mangaTitle,
+                    thumbnailUrl = thumbnailUrl,
+                    chapterName = chapterName,
+                    chapterNumber = chapterNumber,
+                    lastPageRead = lastPageRead,
+                    chapterUrl = chapterUrl,
+                    dateUpload = dateUpload,
+                    readAt = readAt,
+                    readDuration = readDuration,
+                )
+            }
             .subscribeToList()
     }
     // SY <--
