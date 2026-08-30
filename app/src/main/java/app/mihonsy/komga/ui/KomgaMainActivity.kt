@@ -215,7 +215,9 @@ import androidx.compose.ui.text.style.TextAlign
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import mihon.core.common.archive.archiveReader
+import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.util.Collections
 // SY <--
 
 // 划动选择命中检测已移除（长按圈选废弃）。
@@ -3945,7 +3947,7 @@ private fun LocalFileBrowser(base: UniFile) {
     // (stack + 自身段名) 用 "/" 连接；chapter.url 就存这个相对路径，
     // 阅读时由 tree-backed 的 base.findFile(相对路径) 重建，散图目录才能正常列图。
     var stack by remember(base) { mutableStateOf<List<String>>(emptyList()) }
-    val current = remember(stack) {
+    val current = remember(base, stack) {
         if (stack.isEmpty()) base
         else stack.fold(base) { dir, seg -> dir.findFile(seg) ?: base }
     }
@@ -4052,8 +4054,8 @@ private fun LocalFileBrowser(base: UniFile) {
                 }
             }
             else -> {
-                // 网格模式（紧凑/舒适）复用 Komga 书架的 Adaptive 列密度 + 间距逻辑。
-                val isCompact = displayMode == LibraryDisplayMode.CompactGrid
+                // 网格模式复用 Komga 书架的 Adaptive 列密度 + 间距逻辑（仅列表/紧凑网格两种）。
+                val isCompact = displayMode != LibraryDisplayMode.List
                 val adaptiveMin = if (isCompact) 96.dp else 168.dp
                 val gridState = rememberLazyGridState()
                 LazyVerticalGrid(
@@ -4218,7 +4220,7 @@ private fun LocalBrowseOptionsMenu(
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        LibraryDisplayMode.entries.forEach { m ->
+                        listOf(LibraryDisplayMode.List, LibraryDisplayMode.CompactGrid).forEach { m ->
                             FilterChip(
                                 selected = displayMode == m,
                                 onClick = { onDisplayModeChange(m) },
@@ -4237,26 +4239,55 @@ private fun LocalBrowseOptionsMenu(
     }
 }
 
-/** 最佳努力取封面位图：目录取首张图；归档取首张图条目；单图直接用。失败返回 null。 */
-private suspend fun loadCoverBitmap(context: android.content.Context, file: UniFile, maxPx: Int): Bitmap? =
-    withContext(Dispatchers.IO) {
+/** 封面位图内存缓存：避免网格/列表切换、滚动回看时重复解码造成卡顿。键为文件 uri。 */
+private val localCoverCache =
+    Collections.synchronizedMap(LinkedHashMap<String, Bitmap>(64, 0.75f, true))
+private const val LOCAL_COVER_CACHE_MAX = 200
+
+/** 限定并发度，避免进入网格时一次性并行解码大量封面导致掉帧。 */
+private val coverDispatcher = Dispatchers.IO.limitedParallelism(4)
+
+/**
+ * 最佳努力取封面位图：目录取首张图；归档取首张图条目（读入内存后解码，避免
+ * archiveReader 的 PFD 被 .use 提前关闭后二次开档读 mmap 引发的 native 闪退）；
+ * 单图直接用。结果进内存缓存，失败返回 null。
+ */
+private suspend fun loadCoverBitmap(context: android.content.Context, file: UniFile, maxPx: Int): Bitmap? {
+    val key = file.uri.toString()
+    localCoverCache[key]?.let { return it }
+    return withContext(coverDispatcher) {
         runCatching {
-            if (file.isDirectory) {
-                file.listFiles().orEmpty()
+            val bmp = when {
+                file.isDirectory -> file.listFiles().orEmpty()
                     .firstOrNull { it.isFile && ImageUtil.isImage(it.name) }
                     ?.let { decodeSampled({ it.openInputStream() }, maxPx) }
-            } else if (Archive.isSupported(file)) {
-                file.archiveReader(context).use { reader ->
-                    val entryName = reader.useEntries { seq -> seq.firstOrNull { ImageUtil.isImage(it.name) }?.name }
-                    entryName?.let { decodeSampled({ reader.getInputStream(it) }, maxPx) }
+                Archive.isSupported(file) -> file.archiveReader(context).use { reader ->
+                    val name = reader.useEntries { seq ->
+                        seq.firstOrNull { ImageUtil.isImage(it.name) }?.name
+                    }
+                    if (name == null) {
+                        null
+                    } else {
+                        reader.getInputStream(name)?.use { stream ->
+                            val bytes = stream.readBytes()
+                            decodeSampled({ ByteArrayInputStream(bytes) }, maxPx)
+                        }
+                    }
                 }
-            } else if (file.extension.equals("epub", true)) {
-                null
-            } else if (ImageUtil.isImage(file.name)) {
-                decodeSampled({ file.openInputStream() }, maxPx)
-            } else null
+                file.extension.equals("epub", true) -> null
+                ImageUtil.isImage(file.name) -> decodeSampled({ file.openInputStream() }, maxPx)
+                else -> null
+            }
+            bmp?.let {
+                synchronized(localCoverCache) {
+                    if (localCoverCache.size >= LOCAL_COVER_CACHE_MAX) localCoverCache.clear()
+                    localCoverCache[key] = it
+                }
+            }
+            bmp
         }.getOrNull()
     }
+}
 
 /** 两次 decode：先读边界算 inSampleSize，再采样解码；open 提供可重开的输入流。 */
 private fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? {
