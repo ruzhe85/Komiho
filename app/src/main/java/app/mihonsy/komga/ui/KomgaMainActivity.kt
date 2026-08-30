@@ -183,8 +183,6 @@ import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import uy.kohesive.injekt.api.get
 import androidx.compose.material.icons.outlined.Info
 import eu.kanade.tachiyomi.BuildConfig
@@ -200,6 +198,7 @@ import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.source.local.LocalSource
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.service.ChapterRecognition
 import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
@@ -3972,17 +3971,8 @@ private fun LocalFileBrowser(base: UniFile) {
         loading = false
     }
 
-    // 封面（开启时）一次性批量预取存入 map；滚动时直接读 map，不再逐条解码，消除卡顿。
-    // loadCoverBitmap 内部已带内存 LRU 缓存，重进目录/重切显示模式即时命中。
-    var covers by remember { mutableStateOf<Map<String, Bitmap?>>(emptyMap()) }
-    LaunchedEffect(entries, showCover) {
-        if (!showCover) { covers = emptyMap(); return@LaunchedEffect }
-        val targets = entries.filter { it.isDirectory || it.isLocalArchive() || ImageUtil.isImage(it.name) }
-        val loaded = withContext(coverDispatcher) {
-            targets.map { f -> async { f.uri.toString() to loadCoverBitmap(context, f, 360) } }.awaitAll()
-        }
-        covers = loaded.toMap()
-    }
+    // 封面改为网格格子「可见时懒加载」（见 LocalFileGridItem）：进入目录不再批量预取全部
+    // 封面，避免点目录/滚动突发卡顿；列表模式完全不解码封面。
 
     // 返回键回上一层；已在根目录时不拦截，交还外层（回 Home）。
     BackHandler(enabled = stack.isNotEmpty()) {
@@ -4087,7 +4077,6 @@ private fun LocalFileBrowser(base: UniFile) {
                         LocalFileGridItem(
                             file = file,
                             showCover = showCover,
-                            cover = covers[file.uri.toString()],
                             clickable = isItemClickable(file),
                             onClick = { onItemOpen(file) },
                         )
@@ -4130,17 +4119,28 @@ private fun FileRow(file: UniFile, clickable: Boolean, onOpen: () -> Unit) {
     }
 }
 
-/** 网格模式一个格子：封面（开启且已预取到）直接显示，否则图标 + 名称。 */
+/** 网格模式一个格子：封面（开启且已懒加载到）直接显示，否则图标 + 名称。
+ *  封面仅在格子挂载（即可见）时解码，离屏自动取消；命中内存缓存即时显示，
+ *  因此进入目录/滚动都不会突发解码，列表模式完全不触发本函数。 */
 @Composable
 private fun LocalFileGridItem(
     file: UniFile,
     showCover: Boolean,
-    cover: Bitmap?,
     clickable: Boolean,
     onClick: () -> Unit,
 ) {
+    val context = LocalContext.current
     val isDir = file.isDirectory
     val isArchive = file.isLocalArchive()
+    val uriKey = file.uri.toString()
+    var cover by remember(uriKey) { mutableStateOf(localCoverCache[uriKey]) }
+
+    // 懒加载：仅可见格子才解码；并发由 coverDispatcher 限 4，离屏取消。
+    LaunchedEffect(uriKey, showCover) {
+        if (!showCover) { cover = null; return@LaunchedEffect }
+        localCoverCache[uriKey]?.let { cover = it; return@LaunchedEffect }
+        cover = withContext(coverDispatcher) { loadCoverBitmap(context, file, 360) }
+    }
 
     Column(
         modifier = Modifier
@@ -4254,7 +4254,7 @@ private fun LocalBrowseOptionsMenu(
 /** 封面位图内存缓存：避免网格/列表切换、滚动回看时重复解码造成卡顿。键为文件 uri。 */
 private val localCoverCache =
     Collections.synchronizedMap(LinkedHashMap<String, Bitmap>(64, 0.75f, true))
-private const val LOCAL_COVER_CACHE_MAX = 200
+private const val LOCAL_COVER_CACHE_MAX = 96
 
 /** 限定并发度，避免进入网格时一次性并行解码大量封面导致掉帧。 */
 private val coverDispatcher = Dispatchers.IO.limitedParallelism(4)
@@ -4292,7 +4292,10 @@ private suspend fun loadCoverBitmap(context: android.content.Context, file: UniF
             }
             bmp?.let {
                 synchronized(localCoverCache) {
-                    if (localCoverCache.size >= LOCAL_COVER_CACHE_MAX) localCoverCache.clear()
+                    while (localCoverCache.size >= LOCAL_COVER_CACHE_MAX) {
+                        val eldest = localCoverCache.keys.firstOrNull() ?: break
+                        localCoverCache.remove(eldest)
+                    }
                     localCoverCache[key] = it
                 }
             }
@@ -4335,6 +4338,8 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                 resolved = resolved.findFile(seg) ?: throw Exception("找不到文件：$relPath")
             }
             val title = file.name ?: relPath.substringAfterLast('/').ifBlank { relPath }
+            // manga 一律按「父目录」维度建：同目录所有归档/epub 共享一个 manga，
+            // 阅读器章节列表因此能列出全部同目录卷，翻完可自动续到下一章。
             val mangaUrl = relPath.substringBeforeLast('/', "")
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
@@ -4346,20 +4351,59 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                             url = mangaUrl,
                             ogTitle = title,
                             favorite = false,
+                            sorting = Manga.CHAPTER_SORTING_NUMBER,
                         ),
                     ),
                 ).first()
-            val chapter = chapterRepo.getChapterByUrlAndMangaId(relPath, manga.id!!)
-                ?: chapterRepo.addAll(
-                    listOf(
-                        Chapter.create().copy(
-                            mangaId = manga.id!!,
-                            url = relPath,
-                            name = title,
-                            chapterNumber = 1.0,
+            val chapter = if (file.isLocalArchive() || file.extension.equals("epub", true)) {
+                // 归档/epub：把同目录所有归档/epub 都建成章节（去重），使阅读器能自动加载下一章。
+                // 按名称自然序插入，章节号经 ChapterRecognition 解析；manga.sorting=NUMBER，
+                // reader 按章节号升序排列 → 翻完当前卷自动续到下一卷。
+                var parentDir = base
+                for (seg in mangaUrl.split('/')) {
+                    if (seg.isBlank()) continue
+                    parentDir = parentDir.findFile(seg) ?: throw Exception("找不到父目录：$mangaUrl")
+                }
+                val mangaTitle = parentDir.name.orEmpty()
+                parentDir.listFiles().orEmpty().toList()
+                    .filter { it.isLocalArchive() || it.extension.equals("epub", true) }
+                    .sortedWith { a, b ->
+                        a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
+                    }
+                    .forEach { sib ->
+                        val url = if (mangaUrl.isEmpty()) sib.name.orEmpty() else "$mangaUrl/${sib.name}"
+                        if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                            chapterRepo.addAll(
+                                listOf(
+                                    Chapter.create().copy(
+                                        mangaId = manga.id!!,
+                                        url = url,
+                                        name = sib.nameWithoutExtension ?: sib.name.orEmpty(),
+                                        chapterNumber = ChapterRecognition
+                                            .parseChapterNumber(mangaTitle, sib.name.orEmpty(), -1.0)
+                                            .toFloat(),
+                                        dateUpload = sib.lastModified(),
+                                    ),
+                                ),
+                            )
+                        }
+                    }
+                chapterRepo.getChapterByUrlAndMangaId(relPath, manga.id!!)
+                    ?: error("当前文件未写入章节：$relPath")
+            } else {
+                // 目录/散图：保持原行为（一整个目录即一本书，单章节）。
+                chapterRepo.getChapterByUrlAndMangaId(relPath, manga.id!!)
+                    ?: chapterRepo.addAll(
+                        listOf(
+                            Chapter.create().copy(
+                                mangaId = manga.id!!,
+                                url = relPath,
+                                name = title,
+                                chapterNumber = 1.0,
+                            ),
                         ),
-                    ),
-                ).first()
+                    ).first()
+            }
             manga.id!! to chapter.id!!.toLong()
         }
         context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
