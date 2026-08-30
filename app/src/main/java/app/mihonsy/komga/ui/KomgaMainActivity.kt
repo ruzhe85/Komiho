@@ -198,6 +198,7 @@ import tachiyomi.source.local.io.LocalSourceFileSystem
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.source.local.LocalSource
 import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.service.ChapterRecognition
 import tachiyomi.domain.manga.repository.MangaRepository
@@ -4428,10 +4429,21 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                 if (seg.isBlank()) continue
                 resolved = resolved.findFile(seg) ?: throw Exception("找不到文件：$relPath")
             }
-            val title = file.name ?: relPath.substringAfterLast('/').ifBlank { relPath }
-            // manga 一律按「父目录」维度建：同目录所有归档/epub 共享一个 manga，
-            // 阅读器章节列表因此能列出全部同目录卷，翻完可自动续到下一章。
-            val mangaUrl = relPath.substringBeforeLast('/', "")
+            val isArchive = file.isLocalArchive() || file.extension.equals("epub", true)
+            // 书籍（用于建 manga）的相对路径：归档/epub 取父目录，目录/散图取自身。
+            val bookRelPath = relPath.substringBeforeLast('/', "")
+            // 标题取「父目录（系列）名」而非某个具体归档名：否则同目录复用同一 manga，
+            // 标题会停在第一本被打开的归档上、阅读器左上角「被固定」。
+            val title = when {
+                isArchive -> if (bookRelPath.isEmpty()) file.name.orEmpty() else bookRelPath.substringAfterLast('/')
+                else -> file.name ?: relPath.substringAfterLast('/').ifBlank { relPath }
+            }
+            // manga.url 必须「全局唯一」：不同根目录（重新选择目录）或不同类型（散图目录
+            // vs 同名的归档父目录）若只用相对路径做 url，会撞上旧 manga，导致阅读器章节列表
+            // 显示「历史记录/之前选过的目录」。这里把「根 treeUri + 类型 + 相对路径」拼成
+            // 唯一键；章节 url 仍保持纯相对路径（reader 用它从 base 重建文件，不能带前缀）。
+            val rootMarker = base.uri.toString()
+            val mangaUrl = "$rootMarker#${if (isArchive) "a" else "d"}#$bookRelPath"
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
             val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
@@ -4446,14 +4458,19 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                         ),
                     ),
                 ).first()
+            // 修正旧数据：早期版本把归档名写入了标题，复用同一 manga 时不再回写，
+            // 这里若发现不一致直接更新，保证左上角始终显示系列（父目录）名。
+            if (manga.ogTitle != title) {
+                mangaRepo.update(MangaUpdate(id = manga.id!!, title = title))
+            }
             val chapter = if (file.isLocalArchive() || file.extension.equals("epub", true)) {
                 // 归档/epub：把同目录所有归档/epub 都建成章节（去重），使阅读器能自动加载下一章。
                 // 按名称自然序插入，章节号经 ChapterRecognition 解析；manga.sorting=NUMBER，
                 // reader 按章节号升序排列 → 翻完当前卷自动续到下一卷。
                 var parentDir = base
-                for (seg in mangaUrl.split('/')) {
+                for (seg in bookRelPath.split('/')) {
                     if (seg.isBlank()) continue
-                    parentDir = parentDir.findFile(seg) ?: throw Exception("找不到父目录：$mangaUrl")
+                    parentDir = parentDir.findFile(seg) ?: throw Exception("找不到父目录：$bookRelPath")
                 }
                 val mangaTitle = parentDir.name.orEmpty()
                 parentDir.listFiles().orEmpty().toList()
@@ -4462,7 +4479,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                         a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
                     }
                     .forEach { sib ->
-                        val url = if (mangaUrl.isEmpty()) sib.name.orEmpty() else "$mangaUrl/${sib.name}"
+                        val url = if (bookRelPath.isEmpty()) sib.name.orEmpty() else "$bookRelPath/${sib.name}"
                         if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
                             chapterRepo.addAll(
                                 listOf(
