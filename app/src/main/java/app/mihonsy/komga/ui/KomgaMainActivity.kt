@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import coil3.ImageLoader
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.widget.Toast
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -3898,34 +3899,119 @@ private data class LocalFileSort(
 }
 
 /** 目录恒置顶，再按所选字段/方向排序。 */
-private fun localFileComparator(sort: LocalFileSort): Comparator<UniFile> {
-    val dirFirst = compareBy<UniFile> { !it.isDirectory }
-    val field: Comparator<UniFile> = when (sort.sortBy) {
-        LocalFileSortBy.Name -> compareBy { it.name.orEmpty().lowercase() }
-        LocalFileSortBy.DateModified -> compareBy { it.lastModified() }
-        LocalFileSortBy.Size -> compareBy { if (it.isDirectory) 0L else it.length() }
+/**
+ * 本地浏览器一个条目的内存缓存元数据：进入目录时一次性从 SAF 游标取全（名称/类型/大小/修改时间），
+ * 之后排序、图标、归档/图片判断全走内存，避免每比较/每渲染都触发 SAF 跨进程查询导致卡顿。
+ */
+private data class LocalEntry(
+    val uni: UniFile,
+    val name: String,
+    val isDirectory: Boolean,
+    val size: Long,
+    val lastModified: Long,
+) {
+    val isArchive: Boolean = !isDirectory &&
+        name.substringAfterLast('.', "").lowercase() in LOCAL_ARCHIVE_EXTS
+    val isImage: Boolean = ImageUtil.isImage(name)
+}
+
+/** 与 Archive.isSupported 对齐的归档扩展名（含 epub，因阅读器也支持）。 */
+private val LOCAL_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "tar", "cbt", "epub")
+
+private fun localEntryComparator(sort: LocalFileSort): Comparator<LocalEntry> {
+    val dirFirst = compareBy<LocalEntry> { !it.isDirectory }
+    val field: Comparator<LocalEntry> = when (sort.sortBy) {
+        LocalFileSortBy.Name -> compareBy { it.name.lowercase() }
+        LocalFileSortBy.DateModified -> compareBy { it.lastModified }
+        LocalFileSortBy.Size -> compareBy { if (it.isDirectory) 0L else it.size }
     }
     // 方向只作用于字段，不能把 dirFirst 一起 reverse（否则目录会沉底）。
     return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
 }
 
+/**
+ * 一次性用 DocumentsContract 子文档游标把整目录的 名称/类型/大小/修改时间 全部取回（1 次 IPC），
+ * 构建带缓存元数据的 [LocalEntry]；之后排序/图标/判断归档全走内存，零 SAF。
+ * 失败（如 URI 形态异常）则回退到 UniFile.listFiles()（慢但稳，不崩溃）。
+ */
+private fun listLocalEntries(
+    context: android.content.Context,
+    base: UniFile,
+    current: UniFile,
+    atRoot: Boolean,
+): List<LocalEntry> = runCatching {
+    val treeUri = base.uri
+    val docId = if (atRoot) {
+        DocumentsContract.getTreeDocumentId(treeUri)
+    } else {
+        DocumentsContract.getDocumentId(current.uri)
+    }
+    val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+    val projection = arrayOf(
+        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        DocumentsContract.Document.COLUMN_MIME_TYPE,
+        DocumentsContract.Document.COLUMN_SIZE,
+        DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+    )
+    val cursor = context.contentResolver.query(childrenUri, projection, null, null, null)
+        ?: return@runCatching fallbackList(current)
+    cursor.use { c ->
+        val idIdx = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+        val nameIdx = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        val mimeIdx = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val sizeIdx = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE)
+        val modIdx = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+        buildList {
+            while (c.moveToNext()) {
+                val childDocId = c.getString(idIdx) ?: continue
+                val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+                val name = c.getString(nameIdx) ?: ""
+                val mime = c.getString(mimeIdx) ?: ""
+                val size = if (c.isNull(sizeIdx)) 0L else c.getLong(sizeIdx)
+                val lastMod = if (c.isNull(modIdx)) 0L else c.getLong(modIdx)
+                val uni = UniFile.fromUri(context, childUri) ?: continue
+                add(
+                    LocalEntry(
+                        uni = uni,
+                        name = name,
+                        isDirectory = mime == DocumentsContract.Document.MIME_TYPE_DIR,
+                        size = size,
+                        lastModified = lastMod,
+                    ),
+                )
+            }
+        }
+    }
+}.getOrElse { fallbackList(current) }
+
+/** 回退路径：逐个 UniFile 取元数据（会触发 SAF，慢，但保证可用）。 */
+private fun fallbackList(current: UniFile): List<LocalEntry> =
+    current.listFiles().orEmpty().map { f ->
+        LocalEntry(
+            uni = f,
+            name = f.name.orEmpty(),
+            isDirectory = f.isDirectory,
+            size = f.length(),
+            lastModified = f.lastModified(),
+        )
+    }
+
 private fun UniFile.isLocalArchive(): Boolean =
     !isDirectory && (Archive.isSupported(this) || extension.equals("epub", true))
 
-private fun fileIcon(file: UniFile): ImageVector {
-    val isArchive = file.isLocalArchive()
+private fun fileIcon(entry: LocalEntry): ImageVector {
     return when {
-        file.isDirectory -> Icons.Filled.Folder
-        isArchive -> Icons.Filled.Book
-        ImageUtil.isImage(file.name) -> Icons.Filled.Image
+        entry.isDirectory -> Icons.Filled.Folder
+        entry.isArchive -> Icons.Filled.Book
+        entry.isImage -> Icons.Filled.Image
         else -> Icons.Filled.Description
     }
 }
 
 @Composable
-private fun fileTint(file: UniFile): Color {
-    val isArchive = file.isLocalArchive()
-    val isPlain = !file.isDirectory && !isArchive
+private fun fileTint(entry: LocalEntry): Color {
+    val isPlain = !entry.isDirectory && !entry.isArchive
     return if (isPlain) {
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
     } else {
@@ -3958,16 +4044,17 @@ private fun LocalFileBrowser(base: UniFile) {
         else stack.fold(base) { dir, seg -> dir.findFile(seg) ?: base }
     }
 
-    var entries by remember { mutableStateOf<List<UniFile>>(emptyList()) }
+    var entries by remember { mutableStateOf<List<LocalEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
 
-    // 列目录是跨进程 SAF 调用，必须在 IO 线程；排序在本地完成（目录恒置顶 + 所选字段/方向）。
-    // 不再统计图片数（「阅读此目录」已移除，统计无用途且拖慢列目录）。
+    // 列目录：仿 Material Files，用 DocumentsContract 子文档游标一次性把整目录元数据取全
+    // （1 次 IPC），之后排序/图标/归档判断全走内存，杜绝每比较都触发 SAF 跨进程查询的卡顿。
+    // 失败（URI 形态异常等）自动回退到 UniFile.listFiles()，不崩溃。
     LaunchedEffect(current, sort) {
         loading = true
         val list = withContext(Dispatchers.IO) {
-            val all = current.listFiles().orEmpty().toList()
-            all.sortedWith(localFileComparator(sort))
+            listLocalEntries(context, base, current, stack.isEmpty())
+                .sortedWith(localEntryComparator(sort))
         }
         entries = list
         loading = false
@@ -3982,19 +4069,19 @@ private fun LocalFileBrowser(base: UniFile) {
     }
 
     // 统一点击行为：目录→下钻；归档/epub→直接读该文件；图片→读所在目录（reader 自动载入同目录全部图片）。
-    val onItemOpen: (UniFile) -> Unit = { file ->
+    val onItemOpen: (LocalEntry) -> Unit = { entry ->
         when {
-            file.isDirectory -> stack = stack + file.name.orEmpty()
-            file.isLocalArchive() -> scope.launch {
-                openLocalFile(context, file, (stack + file.name.orEmpty()).joinToString("/"))
+            entry.isDirectory -> stack = stack + entry.name
+            entry.isArchive -> scope.launch {
+                openLocalFile(context, entry.uni, (stack + entry.name).joinToString("/"))
             }
-            ImageUtil.isImage(file.name) -> scope.launch {
+            entry.isImage -> scope.launch {
                 openLocalFile(context, current, stack.joinToString("/"))
             }
         }
     }
-    val isItemClickable: (UniFile) -> Boolean =
-        { it.isDirectory || it.isLocalArchive() || ImageUtil.isImage(it.name) }
+    val isItemClickable: (LocalEntry) -> Boolean =
+        { it.isDirectory || it.isArchive || it.isImage }
 
     Column(Modifier.fillMaxSize()) {
         // 顶栏：面包屑（可点跳层）+ 显示选项 Tune 按钮。
@@ -4052,9 +4139,9 @@ private fun LocalFileBrowser(base: UniFile) {
             }
             displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(Modifier.fillMaxSize()) {
-                    items(entries, key = { it.uri.toString() }) { file ->
+                    items(entries, key = { it.uni.uri.toString() }) { file ->
                         FileRow(
-                            file = file,
+                            entry = file,
                             clickable = isItemClickable(file),
                             onOpen = { onItemOpen(file) },
                         )
@@ -4075,9 +4162,9 @@ private fun LocalFileBrowser(base: UniFile) {
                     verticalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(entries, key = { it.uri.toString() }) { file ->
+                    items(entries, key = { it.uni.uri.toString() }) { file ->
                         LocalFileGridItem(
-                            file = file,
+                            entry = file,
                             showCover = showCover,
                             clickable = isItemClickable(file),
                             onClick = { onItemOpen(file) },
@@ -4102,7 +4189,7 @@ private fun LocalFileBrowser(base: UniFile) {
 
 /** 文件/目录一行（列表模式）。可点性由调用方按「目录/归档/图片」决定。 */
 @Composable
-private fun FileRow(file: UniFile, clickable: Boolean, onOpen: () -> Unit) {
+private fun FileRow(entry: LocalEntry, clickable: Boolean, onOpen: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -4110,10 +4197,10 @@ private fun FileRow(file: UniFile, clickable: Boolean, onOpen: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(fileIcon(file), contentDescription = null, tint = fileTint(file))
+        Icon(fileIcon(entry), contentDescription = null, tint = fileTint(entry))
         Spacer(Modifier.width(12.dp))
         Text(
-            text = file.name.orEmpty(),
+            text = entry.name,
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -4123,25 +4210,26 @@ private fun FileRow(file: UniFile, clickable: Boolean, onOpen: () -> Unit) {
 
 /** 网格模式一个格子：封面（开启且已懒加载到）直接显示，否则图标 + 名称。
  *  封面仅在格子挂载（即可见）时解码，离屏自动取消；命中内存缓存即时显示，
- *  因此进入目录/滚动都不会突发解码，列表模式完全不触发本函数。 */
+ *  因此进入目录/滚动都不会突发解码，列表模式完全不触发本函数。
+ *  全部展示字段来自 [LocalEntry] 缓存，渲染期零 SAF 调用。 */
 @Composable
 private fun LocalFileGridItem(
-    file: UniFile,
+    entry: LocalEntry,
     showCover: Boolean,
     clickable: Boolean,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
-    val isDir = file.isDirectory
-    val isArchive = file.isLocalArchive()
-    val uriKey = file.uri.toString()
+    val isDir = entry.isDirectory
+    val isArchive = entry.isArchive
+    val uriKey = entry.uni.uri.toString()
     var cover by remember(uriKey) { mutableStateOf(localCoverCache[uriKey]) }
 
     // 懒加载：仅可见格子才解码；并发由 coverDispatcher 限 4，离屏取消。
     LaunchedEffect(uriKey, showCover) {
         if (!showCover) { cover = null; return@LaunchedEffect }
         localCoverCache[uriKey]?.let { cover = it; return@LaunchedEffect }
-        cover = withContext(coverDispatcher) { loadCoverBitmap(context, file, 360) }
+        cover = withContext(coverDispatcher) { loadCoverBitmap(context, entry.uni, 360) }
     }
 
     Column(
@@ -4164,16 +4252,16 @@ private fun LocalFileGridItem(
                 )
             } else {
                 Icon(
-                    fileIcon(file),
+                    fileIcon(entry),
                     contentDescription = null,
-                    tint = fileTint(file),
+                    tint = fileTint(entry),
                     modifier = Modifier.size(if (isDir || isArchive) 56.dp else 40.dp),
                 )
             }
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            text = file.name.orEmpty(),
+            text = entry.name,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
