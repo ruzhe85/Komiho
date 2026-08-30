@@ -18,7 +18,7 @@
     <string name="local_no_folder">No local comics folder selected</string>
     <string name="local_pick_folder">Choose folder</string>
     <string name="local_change_folder">Change local comics folder</string>
-    <string name="local_folder_hint">Pick a folder for your comics.\nNote: Komiho reads the "local" subfolder inside it, so put your comics there:\nlocal/Manga name/Chapter.cbz (or a folder with the same name)</string>
+    <string name="local_folder_hint">Pick a folder for your comics — that folder becomes the comics root.\nStructure: Manga name/Chapter.cbz (or a folder with the same name)</string>
     <string name="local_dir_path">Reading from: %1$s</string>
 
     <!-- Search -->

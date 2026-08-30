@@ -13,4 +13,20 @@ class StoragePreferences(
         Preference.appStateKey("storage_dir"),
         folderProvider.path(),
     )
+
+    /**
+     * Komiho: 本地源的**漫画根目录**（SAF tree URI）。
+     *
+     * 用户选哪个文件夹，哪个就是漫画根目录，不再强制 Mihon 的 `<base>/local`
+     * 子目录——否则为了看漫画还得先把目录搬进 local/，不符合实际使用。
+     *
+     * 与 [baseStorageDirectory] **分开存**是刻意的：StorageManager 会在自己的
+     * 根目录下创建 autobackup/、downloads/、logs/ 等目录，若把用户的漫画目录
+     * 直接设成它的根，就会往漫画目录里塞这些杂物。留空则回退到
+     * [StorageManager.getLocalSourceDirectory]（Mihon 原行为）。
+     */
+    val localSourceRoot: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("local_source_root"),
+        "",
+    )
 }

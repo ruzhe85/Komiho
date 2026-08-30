@@ -19,7 +19,7 @@
     <string name="local_no_folder">尚未选择本地漫画目录</string>
     <string name="local_pick_folder">选择目录</string>
     <string name="local_change_folder">更改本地漫画目录</string>
-    <string name="local_folder_hint">请选择一个存放漫画的文件夹。\n注意：Komiho 读取的是该文件夹下的 local 子目录，请把漫画放进去：\nlocal/漫画名/章节.cbz（或同名文件夹）</string>
+    <string name="local_folder_hint">请选择存放漫画的文件夹，该文件夹即作为漫画根目录。\n目录结构：漫画名/章节.cbz（或同名文件夹）</string>
     <string name="local_dir_path">读取目录：%1$s</string>
 
     <!-- 搜索 -->

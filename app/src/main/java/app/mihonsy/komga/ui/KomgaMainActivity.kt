@@ -190,9 +190,9 @@ import tachiyomi.domain.release.interactor.GetApplicationRelease
 // SY --> Komiho P0: 本地浏览（复用 Mihon 本地源 + BrowseSourceScreen）
 import eu.kanade.presentation.more.settings.screen.SettingsDataScreen
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
-import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.source.local.LocalSource
+import tachiyomi.source.local.io.LocalSourceFileSystem
 import uy.kohesive.injekt.Injekt
 import com.hippo.unifile.UniFile
 import tachiyomi.core.common.storage.displayablePath
@@ -300,24 +300,19 @@ private fun KomgaMainScreen(
     val client = remember { KomgaApiClient(prefs.connection()) }
 
     // SY --> Komiho P0: 本地浏览所需状态。
-    // 本地源的漫画根目录 = <SAF 根>/local，由 StorageManager 派生；目录未设置时
+    // 用户所选文件夹**即**漫画根目录（不再有 local 子目录这一层）；目录未选择时
     // 展示空态并引导用户用 SAF 选择器授权（复用 Mihon 现成的 storageLocationPicker，
     // 它已处理 takePersistableUriPermission 与写入偏好）。
-    val storageManager = remember { Injekt.get<StorageManager>() }
+    val localSourceFs = remember { Injekt.get<LocalSourceFileSystem>() }
     val storagePreferences = remember { Injekt.get<StoragePreferences>() }
-    val pickLocalFolder = SettingsDataScreen.storageLocationPicker(storagePreferences.baseStorageDirectory)
-    // 注意：getLocalSourceDirectory() 返回的是 <所选根目录>/local（不存在时会创建）。
-    // 这是 Mihon 的隔离设计——同一根下还会放 downloads/、autobackup/、logs/，
-    // 因此不能直接把用户所选文件夹当漫画根目录（否则会往里面塞这些杂项目录）。
-    // 代价是必须把「实际读取的是 local 子目录」显式告诉用户，否则会出现
-    // 「明明选了漫画文件夹却显示没有结果」。
-    var localDir by remember {
-        mutableStateOf(storageManager.getLocalSourceDirectory()?.takeIf { it.exists() })
-    }
-    // StorageManager 在偏好变更后异步更新 baseDir，监听其 changes 流同步状态。
+    // 所选文件夹即漫画根目录：写入独立的 localSourceRoot 偏好（不再走
+    // StorageManager 的 <base>/local，否则用户得先把漫画搬进 local/ 才能看）。
+    val pickLocalFolder = SettingsDataScreen.storageLocationPicker(storagePreferences.localSourceRoot)
+    var localDir by remember { mutableStateOf(localSourceFs.getBaseDirectory()) }
+    // 目录偏好变更后同步状态。
     LaunchedEffect(Unit) {
-        storageManager.changes.collect {
-            localDir = storageManager.getLocalSourceDirectory()?.takeIf { it.exists() }
+        storagePreferences.localSourceRoot.changes().collect {
+            localDir = localSourceFs.getBaseDirectory()
         }
     }
     // SY <--
@@ -3796,8 +3791,9 @@ private fun SourceSwitcher(
  * 阅读链路由 ChapterLoader 的 `source is LocalSource` 分支分发到
  * DirectoryPageLoader / ArchivePageLoader / EpubPageLoader，无需任何改动。
  *
- * 漫画根目录 = <SAF 根>/local，由 [StorageManager.getLocalSourceDirectory] 派生。
- * 未授权目录时展示空态引导用户选择（SAF，非 MANAGE_EXTERNAL_STORAGE）。
+ * 漫画根目录 = 用户所选文件夹本身（localSourceRoot 偏好），
+ * 由 [LocalSourceFileSystem.getBaseDirectory] 解析；未选择时展示空态引导用户
+ * 授权（SAF，非 MANAGE_EXTERNAL_STORAGE）。
  */
 @Composable
 private fun LocalSourceTab(
@@ -3840,9 +3836,7 @@ private fun LocalSourceTab(
     // 目录已就绪：交给 Mihon 的源浏览页。
     // 用 Navigator 承载，使用户可继续下钻（浏览 → 详情 → 阅读器）。
     Column(Modifier.fillMaxSize()) {
-        // 显式展示实际读取的目录。Komiho 读的是 <所选根>/local 而非所选根本身，
-        // 不显示出来的话，用户把漫画直接放在所选文件夹里就会看到「没有结果」
-        // 却无从判断原因。
+        // 显式展示当前读取的漫画根目录，换目录时便于确认是否选对。
         Text(
             text = composeStringResource(R.string.local_dir_path, localDir.displayablePath),
             style = MaterialTheme.typography.bodySmall,
