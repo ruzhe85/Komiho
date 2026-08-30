@@ -8,7 +8,14 @@
     <string name="tab_library">库</string>
     <string name="tab_lists">列表</string>
     <string name="tab_downloads">下载</string>
+    <string name="tab_local">本地</string>
     <string name="tab_settings">设置</string>
+
+    <!-- 本地浏览（P0）：复用 Mihon 本地源 + BrowseSourceScreen -->
+    <string name="local_no_folder">尚未选择本地漫画目录</string>
+    <string name="local_pick_folder">选择目录</string>
+    <string name="local_change_folder">更改本地漫画目录</string>
+    <string name="local_folder_hint">请选择存放漫画的文件夹，Komiho 会读取其下的 local 子目录。\n目录结构：local/漫画名/章节.cbz（或同名文件夹）</string>
 
     <!-- 搜索 -->
     <string name="cd_close_search">关闭搜索</string>

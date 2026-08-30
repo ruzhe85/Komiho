@@ -65,6 +65,8 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
@@ -185,6 +187,14 @@ import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import tachiyomi.domain.release.interactor.GetApplicationRelease
+// SY --> Komiho P0: 本地浏览（复用 Mihon 本地源 + BrowseSourceScreen）
+import eu.kanade.presentation.more.settings.screen.SettingsDataScreen
+import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
+import tachiyomi.domain.storage.service.StorageManager
+import tachiyomi.domain.storage.service.StoragePreferences
+import tachiyomi.source.local.LocalSource
+import uy.kohesive.injekt.Injekt
+// SY <--
 
 // 划动选择命中检测已移除（长按圈选废弃）。
 
@@ -239,6 +249,9 @@ private enum class MainTab(@StringRes val labelRes: Int, val icon: ImageVector) 
     Library(R.string.tab_library, Icons.Filled.Book),
     Lists(R.string.tab_lists, Icons.AutoMirrored.Filled.List),
     Downloads(R.string.tab_downloads, Icons.Filled.Download),
+    // SY --> Komiho P0: 本地浏览 tab。置于 Settings 之前，保持「设置」在最后。
+    Local(R.string.tab_local, Icons.Filled.Folder),
+    // SY <--
     Settings(R.string.tab_settings, Icons.Filled.Settings),
     ;
 
@@ -254,6 +267,24 @@ private fun KomgaMainScreen(
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
+
+    // SY --> Komiho P0: 本地浏览所需状态。
+    // 本地源的漫画根目录 = <SAF 根>/local，由 StorageManager 派生；目录未设置时
+    // 展示空态并引导用户用 SAF 选择器授权（复用 Mihon 现成的 storageLocationPicker，
+    // 它已处理 takePersistableUriPermission 与写入偏好）。
+    val storageManager = remember { Injekt.get<StorageManager>() }
+    val storagePreferences = remember { Injekt.get<StoragePreferences>() }
+    val pickLocalFolder = SettingsDataScreen.storageLocationPicker(storagePreferences.baseStorageDirectory)
+    var localDirReady by remember {
+        mutableStateOf(storageManager.getLocalSourceDirectory()?.exists() == true)
+    }
+    // StorageManager 在偏好变更后异步更新 baseDir，监听其 changes 流同步状态。
+    LaunchedEffect(Unit) {
+        storageManager.changes.collect {
+            localDirReady = storageManager.getLocalSourceDirectory()?.exists() == true
+        }
+    }
+    // SY <--
 
     // Filter coming from the Series detail page (tap tag/genre/author → filter Library).
     // Driven reactively by filterSignal so taps arriving via onNewIntent (when this
@@ -452,7 +483,11 @@ private fun KomgaMainScreen(
                             )
                         }
                     }
-                    if (currentTabEnum != MainTab.Settings && currentTabEnum != MainTab.Downloads) {
+                    // SY --> Komiho P0: 本地 tab 用 Mihon 自己的搜索，隐藏 Komga 搜索。
+                    if (currentTabEnum != MainTab.Settings &&
+                        currentTabEnum != MainTab.Downloads &&
+                        currentTabEnum != MainTab.Local
+                    ) {
                         androidx.compose.material3.IconButton(onClick = { searchOpen = !searchOpen }) {
                             Icon(
                                 imageVector = if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
@@ -460,6 +495,16 @@ private fun KomgaMainScreen(
                             )
                         }
                     }
+                    // 本地 tab：提供「更改目录」入口（否则选错目录后无法在 Komiho 内改回）。
+                    if (currentTabEnum == MainTab.Local) {
+                        androidx.compose.material3.IconButton(onClick = { pickLocalFolder.launch(null) }) {
+                            Icon(
+                                imageVector = Icons.Filled.FolderOpen,
+                                contentDescription = composeStringResource(R.string.local_change_folder),
+                            )
+                        }
+                    }
+                    // SY <--
                 },
             )
         },
@@ -566,6 +611,12 @@ private fun KomgaMainScreen(
                                 }
                         },
                     )
+                    // SY --> Komiho P0: 本地浏览 tab
+                    MainTab.Local -> LocalSourceTab(
+                        dirReady = localDirReady,
+                        onPickFolder = { pickLocalFolder.launch(null) },
+                    )
+                    // SY <--
                     MainTab.Settings -> SettingsTab(context)
                 }
             }
@@ -3633,6 +3684,62 @@ private suspend fun checkForKomihoUpdate(context: android.content.Context, onFin
     } finally {
         onFinish()
     }
+}
+
+// ---------- Local source tab (P0) ----------
+
+/**
+ * Komiho P0：本地浏览 tab。
+ *
+ * 复用 Mihon 已注册且成熟的本地源（[LocalSource]，id = 0），直接以 Voyager
+ * [BrowseSourceScreen] 承载——列表、详情、章节、封面、入库、阅读全部现成，
+ * 阅读链路由 ChapterLoader 的 `source is LocalSource` 分支分发到
+ * DirectoryPageLoader / ArchivePageLoader / EpubPageLoader，无需任何改动。
+ *
+ * 漫画根目录 = <SAF 根>/local，由 [StorageManager.getLocalSourceDirectory] 派生。
+ * 未授权目录时展示空态引导用户选择（SAF，非 MANAGE_EXTERNAL_STORAGE）。
+ */
+@Composable
+private fun LocalSourceTab(
+    dirReady: Boolean,
+    onPickFolder: () -> Unit,
+) {
+    if (!dirReady) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Folder,
+                contentDescription = null,
+                modifier = Modifier.size(56.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = composeStringResource(R.string.local_no_folder),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = composeStringResource(R.string.local_folder_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onPickFolder) {
+                Text(composeStringResource(R.string.local_pick_folder))
+            }
+        }
+        return
+    }
+
+    // 目录已就绪：交给 Mihon 的源浏览页。
+    // 用 Navigator 承载，使用户可继续下钻（浏览 → 详情 → 阅读器）。
+    Navigator(BrowseSourceScreen(LocalSource.ID, null))
 }
 
 // ---------- Downloads (offline) tab ----------
