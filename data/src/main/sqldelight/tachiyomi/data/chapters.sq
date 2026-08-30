@@ -79,6 +79,24 @@ FROM chapters
 WHERE bookmark
 AND manga_id = :mangaId;
 
+-- SY --> Komiho: 本地模式书签 tab —— 取某来源下所有已加书签的章节（章节级书签），
+-- 关联 manga 取系列名/url，供列表展示与续读。
+bookmarkedChaptersBySource:
+SELECT
+    C._id AS chapterId,
+    C.manga_id AS mangaId,
+    C.name AS chapterName,
+    C.chapter_number AS chapterNumber,
+    C.url AS chapterUrl,
+    M.title AS mangaTitle,
+    M.url AS mangaUrl
+FROM chapters C
+JOIN mangas M ON C.manga_id = M._id
+WHERE C.bookmark
+AND M.source = :sourceId
+ORDER BY C.date_upload DESC;
+-- SY <--
+
 getChapterByUrl:
 SELECT *
 FROM chapters

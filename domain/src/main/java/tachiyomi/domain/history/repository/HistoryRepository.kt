@@ -9,6 +9,10 @@ interface HistoryRepository {
 
     fun getHistory(query: String): Flow<List<HistoryWithRelations>>
 
+    // SY --> Komiho: 本地模式历史 tab —— 按来源过滤最近阅读。
+    fun getHistoryBySource(sourceId: Long): Flow<List<HistoryWithRelations>>
+    // SY <--
+
     suspend fun getLastHistory(): HistoryWithRelations?
 
     suspend fun getTotalReadDuration(): Long

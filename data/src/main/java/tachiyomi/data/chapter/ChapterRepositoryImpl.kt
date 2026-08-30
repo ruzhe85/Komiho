@@ -13,6 +13,7 @@ import tachiyomi.data.chapter.ChapterMapper.mapChapter
 import tachiyomi.data.subscribeToList
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
+import tachiyomi.domain.chapter.model.LocalBookmarkItem
 import tachiyomi.domain.chapter.repository.ChapterRepository
 
 class ChapterRepositoryImpl(
@@ -111,6 +112,24 @@ class ChapterRepositoryImpl(
             .getBookmarkedChaptersByMangaId(mangaId, ::mapChapter)
             .awaitAsList()
     }
+
+    // SY --> Komiho: 本地模式书签 tab —— 取某来源下所有已加书签的章节。
+    override suspend fun getBookmarkedChaptersBySource(sourceId: Long): List<LocalBookmarkItem> {
+        return database.chaptersQueries
+            .bookmarkedChaptersBySource(sourceId) { chapterId, mangaId, chapterName, chapterNumber, chapterUrl, mangaTitle, mangaUrl ->
+                LocalBookmarkItem(
+                    chapterId = chapterId,
+                    mangaId = mangaId,
+                    chapterName = chapterName,
+                    chapterNumber = chapterNumber,
+                    chapterUrl = chapterUrl,
+                    mangaTitle = mangaTitle,
+                    mangaUrl = mangaUrl,
+                )
+            }
+            .awaitAsList()
+    }
+    // SY <--
 
     override suspend fun getChapterById(id: Long): Chapter? {
         return database.chaptersQueries

@@ -5,6 +5,7 @@ import android.content.res.Configuration
 import coil3.ImageLoader
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.text.format.DateUtils
 import android.widget.Toast
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -70,6 +71,8 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -200,9 +203,12 @@ import tachiyomi.source.local.LocalSource
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.model.ChapterUpdate
+import tachiyomi.domain.chapter.model.LocalBookmarkItem
 import tachiyomi.domain.chapter.service.ChapterRecognition
 import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.domain.chapter.repository.ChapterRepository
+import tachiyomi.domain.history.repository.HistoryRepository
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import androidx.compose.material.icons.filled.Description
 import uy.kohesive.injekt.Injekt
@@ -304,6 +310,10 @@ private enum class MainTab(
     // 本地文件浏览器：常驻一级 tab（不依赖来源切换，不挂书架）。
     // SMB / WebDAV 落地后各自独立成 tab，或在此下扩展。
     Browse(R.string.tab_browse, Icons.Filled.Folder),
+    // SY --> Komiho: 本地模式历史 / 书签 tab（fileOnly，仅文件型来源下出现）。
+    History(R.string.tab_history, Icons.Filled.History, fileOnly = true),
+    Bookmarks(R.string.tab_bookmarks, Icons.Filled.Bookmark, fileOnly = true),
+    // SY <--
     Settings(R.string.tab_settings, Icons.Filled.Settings),
     ;
 
@@ -710,6 +720,9 @@ private fun KomgaMainScreen(
                         localDir = localDir,
                         onPickFolder = { pickLocalFolder.launch(null) },
                     )
+                    // SY --> Komiho: 本地模式历史 / 书签 tab。
+                    MainTab.History -> HistoryTabLocal(refreshTick = refreshTick)
+                    MainTab.Bookmarks -> BookmarksTabLocal(refreshTick = refreshTick)
                     // SY <--
                     MainTab.Settings -> SettingsTab(context)
                 }
@@ -4553,6 +4566,170 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
         ).show()
     }
 }
+
+// SY --> Komiho: 本地模式「历史 / 书签」tab（章节级书签，复用现有 history / chapters.bookmark 表）。
+// 历史 = 最近阅读（按来源过滤）；书签 = 已加书签的章节。点列表项 → ReaderActivity 续读；
+// 书签项长按 → 取消书签。两者都只在「本地来源」下出现（MainTab.fileOnly）。
+
+/** 本地 tab 的空态提示（图标 + 文案，居中）。 */
+@Composable
+private fun LocalEmptyHint(icon: ImageVector, text: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(56.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(text, style = MaterialTheme.typography.titleMedium)
+        }
+    }
+}
+
+/** 本地 tab 通用列表行：左图标 + 主副标题，支持点击与长按。 */
+@Composable
+private fun LocalRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onLongClick != null) {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                },
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** 相对阅读时间（如「3天前」），本地化由系统 DateUtils 处理。 */
+private fun formatRelativeTime(date: Date?): String {
+    if (date == null) return ""
+    return DateUtils.getRelativeTimeSpanString(
+        date.time,
+        System.currentTimeMillis(),
+        DateUtils.MINUTE_IN_MILLIS,
+    ).toString()
+}
+
+/** 历史 tab：最近阅读（按来源过滤），点列表项续读。 */
+@Composable
+private fun HistoryTabLocal(refreshTick: Int) {
+    val context = LocalContext.current
+    val historyRepo = remember { Injekt.get<HistoryRepository>() }
+    // 响应式：阅读写入 history 表后 flow 自动推送；refreshTick 变化（从阅读器返回）重新订阅取最新。
+    val items by remember(refreshTick) {
+        historyRepo.getHistoryBySource(LocalSource.ID)
+    }.collectAsState(emptyList())
+
+    if (items.isEmpty()) {
+        LocalEmptyHint(Icons.Filled.History, composeStringResource(R.string.local_history_empty))
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(items, key = { "${it.mangaId}:${it.chapterId}" }) { h ->
+            val chapterText = if (h.chapterNumber >= 0) "第 ${formatChapterNumber(h.chapterNumber)} 话" else ""
+            val subtitle = listOf(chapterText, formatRelativeTime(h.readAt)).filter { it.isNotBlank() }.joinToString(" · ")
+            LocalRow(
+                title = h.title,
+                subtitle = subtitle,
+                icon = Icons.Filled.History,
+                onClick = {
+                    context.startActivity(ReaderActivity.newIntent(context, h.mangaId, h.chapterId))
+                },
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+    }
+}
+
+/** 书签 tab：已加书签的章节（章节级），点续读、长按取消书签。 */
+@Composable
+private fun BookmarksTabLocal(refreshTick: Int) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val chapterRepo = remember { Injekt.get<ChapterRepository>() }
+    var items by remember { mutableStateOf<List<LocalBookmarkItem>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+
+    fun load() {
+        scope.launch {
+            loading = true
+            items = withContext(Dispatchers.IO) {
+                runCatching { chapterRepo.getBookmarkedChaptersBySource(LocalSource.ID) }
+                    .getOrDefault(emptyList())
+            }
+            loading = false
+        }
+    }
+    LaunchedEffect(refreshTick) { load() }
+
+    when {
+        loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        items.isEmpty() -> LocalEmptyHint(Icons.Filled.Bookmark, composeStringResource(R.string.local_bookmarks_empty))
+        else -> LazyColumn(Modifier.fillMaxSize()) {
+            items(items, key = { it.chapterId }) { b ->
+                val chapterText = if (b.chapterNumber >= 0) "第 ${formatChapterNumber(b.chapterNumber)} 话" else b.chapterName
+                LocalRow(
+                    title = b.mangaTitle,
+                    subtitle = chapterText,
+                    icon = Icons.Filled.Bookmark,
+                    onClick = {
+                        context.startActivity(ReaderActivity.newIntent(context, b.mangaId, b.chapterId))
+                    },
+                    onLongClick = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                runCatching { chapterRepo.update(ChapterUpdate(id = b.chapterId, bookmark = false)) }
+                            }
+                            load()
+                        }
+                    },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+    }
+}
+
+/** 章节号格式化：整数不带小数（1.0 → 1），否则保留两位小数。 */
+private fun formatChapterNumber(n: Double): String =
+    if (n % 1.0 == 0.0) n.toLong().toString() else "%.2f".format(n)
+// SY <--
 
 // ---------- Downloads (offline) tab ----------
 

@@ -9,6 +9,8 @@
     <string name="tab_downloads">下載</string>
     <string name="tab_local">本機</string>
     <string name="tab_browse">本機</string>
+    <string name="tab_history">歷史</string>
+    <string name="tab_bookmarks">書籤</string>
     <string name="tab_settings">設定</string>
 
     <!-- 來源切換 chip -->
@@ -22,6 +24,8 @@
     <string name="local_read_dir">閱讀此目錄（%1$d 張）</string>
     <string name="local_empty_dir">空目錄</string>
     <string name="local_root_label">本地根目錄</string>
+    <string name="local_history_empty">暫無閱讀紀錄</string>
+    <string name="local_bookmarks_empty">暫無書籤</string>
 
     <!-- 搜尋 -->
     <string name="cd_close_search">關閉搜尋</string>

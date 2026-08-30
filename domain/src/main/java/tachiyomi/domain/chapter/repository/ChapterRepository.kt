@@ -3,6 +3,7 @@ package tachiyomi.domain.chapter.repository
 import kotlinx.coroutines.flow.Flow
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
+import tachiyomi.domain.chapter.model.LocalBookmarkItem
 
 interface ChapterRepository {
 
@@ -21,6 +22,10 @@ interface ChapterRepository {
     fun getScanlatorsByMangaIdAsFlow(mangaId: Long): Flow<List<String>>
 
     suspend fun getBookmarkedChaptersByMangaId(mangaId: Long): List<Chapter>
+
+    // SY --> Komiho: 本地模式书签 tab —— 取某来源下所有已加书签的章节。
+    suspend fun getBookmarkedChaptersBySource(sourceId: Long): List<LocalBookmarkItem>
+    // SY <--
 
     suspend fun getChapterById(id: Long): Chapter?
 

@@ -23,6 +23,14 @@ class HistoryRepositoryImpl(
             .subscribeToList()
     }
 
+    // SY --> Komiho: 本地模式历史 tab —— 按来源过滤最近阅读。
+    override fun getHistoryBySource(sourceId: Long): Flow<List<HistoryWithRelations>> {
+        return database.historyViewQueries
+            .historyBySource(sourceId, HistoryMapper::mapHistoryWithRelations)
+            .subscribeToList()
+    }
+    // SY <--
+
     override suspend fun getLastHistory(): HistoryWithRelations? {
         return database.historyViewQueries
             .getLatestHistory(HistoryMapper::mapHistoryWithRelations)

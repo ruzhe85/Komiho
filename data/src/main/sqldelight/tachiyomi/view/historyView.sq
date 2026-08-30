@@ -62,3 +62,25 @@ FROM historyView
 WHERE historyView.readAt > 0
 ORDER BY readAt DESC
 LIMIT 1;
+
+-- SY --> Komiho: 本地模式历史 tab —— 按来源（如 LocalSource.ID）过滤最近阅读。
+-- 复用 mapHistoryWithRelations，列顺序/类型必须与 history 查询一致。
+historyBySource:
+SELECT
+id,
+mangaId,
+chapterId,
+title,
+thumbnailUrl,
+source,
+favorite,
+cover_last_modified,
+chapterNumber,
+readAt,
+readDuration
+FROM historyView
+WHERE historyView.readAt > 0
+AND maxReadAtChapterId = historyView.chapterId
+AND historyView.source = :sourceId
+ORDER BY readAt DESC;
+-- SY <--
