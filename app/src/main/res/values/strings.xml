@@ -10,6 +10,8 @@
     <string name="tab_downloads">下载</string>
     <string name="tab_local">本地</string>
     <string name="tab_browse">本地</string>
+    <string name="tab_history">历史</string>
+    <string name="tab_bookmarks">书签</string>
     <string name="tab_settings">设置</string>
 
     <!-- 来源切换 chip -->
@@ -23,6 +25,8 @@
     <string name="local_read_dir">阅读此目录（%1$d 张）</string>
     <string name="local_empty_dir">空目录</string>
     <string name="local_root_label">本地根目录</string>
+    <string name="local_history_empty">暂无阅读记录</string>
+    <string name="local_bookmarks_empty">暂无书签</string>
 
     <!-- 搜索 -->
     <string name="cd_close_search">关闭搜索</string>

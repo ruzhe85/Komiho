@@ -9,6 +9,8 @@
     <string name="tab_downloads">Downloads</string>
     <string name="tab_local">Local</string>
     <string name="tab_browse">Local</string>
+    <string name="tab_history">History</string>
+    <string name="tab_bookmarks">Bookmarks</string>
     <string name="tab_settings">Settings</string>
 
     <!-- Source switcher chips -->
@@ -22,6 +24,8 @@
     <string name="local_read_dir">Read this folder (%1$d images)</string>
     <string name="local_empty_dir">Empty folder</string>
     <string name="local_root_label">Local root</string>
+    <string name="local_history_empty">No reading history</string>
+    <string name="local_bookmarks_empty">No bookmarks</string>
 
     <!-- Search -->
     <string name="cd_close_search">Close search</string>
