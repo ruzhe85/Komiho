@@ -8,7 +8,7 @@
     <string name="tab_lists">Lists</string>
     <string name="tab_downloads">Downloads</string>
     <string name="tab_local">Local</string>
-    <string name="tab_browse">Browse</string>
+    <string name="tab_browse">Local</string>
     <string name="tab_settings">Settings</string>
 
     <!-- Source switcher chips -->

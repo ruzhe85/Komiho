@@ -68,6 +68,13 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
         </activity>
 
+        <!-- Komiho: 本地漫画浏览器专用阅读器（脱离 Mihon 书架/图源，直接读文件）。 -->
+        <activity
+            android:name="app.mihonsy.komga.reader.LocalReaderActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+        </activity>
+
         <!-- Komiho M3: readlist detail (books inside a reading list) -->
         <activity
             android:name="app.mihonsy.komga.ui.KomgaReadlistActivity"

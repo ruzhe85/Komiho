@@ -195,7 +195,7 @@ import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.source.local.io.Archive
 import tachiyomi.source.local.io.LocalSourceFileSystem
 import tachiyomi.core.common.util.system.ImageUtil
-import app.mihonsy.komga.data.KomihoFileLauncher
+import app.mihonsy.komga.reader.LocalReaderActivity
 import androidx.compose.material.icons.filled.Description
 import uy.kohesive.injekt.Injekt
 import com.hippo.unifile.UniFile
@@ -280,8 +280,9 @@ private enum class MainTab(
     Library(R.string.tab_library, Icons.Filled.Book, komgaOnly = true),
     Lists(R.string.tab_lists, Icons.AutoMirrored.Filled.List, komgaOnly = true),
     Downloads(R.string.tab_downloads, Icons.Filled.Download, komgaOnly = true),
-    // 本地 / SMB / WebDAV 共用这一个 tab。
-    Browse(R.string.tab_browse, Icons.Filled.Folder, fileOnly = true),
+    // 本地文件浏览器：常驻一级 tab（不依赖来源切换，不挂书架）。
+    // SMB / WebDAV 落地后各自独立成 tab，或在此下扩展。
+    Browse(R.string.tab_browse, Icons.Filled.Folder),
     Settings(R.string.tab_settings, Icons.Filled.Settings),
     ;
 
@@ -3799,8 +3800,8 @@ private fun SourceSwitcher(
  * 刻意**不用** Mihon 的图源模型（`LocalSource` + `BrowseSourceScreen`）：
  * 那套要求 base/<系列目录>/<章节文件> 的两层命名结构，且 getSearchManga 只认
  * 目录（`filter { it.isDirectory }`），散图目录或任意层级都会直接空列表。
- * 这里目录层级与「什么算一本」全部由本浏览器决定，落库与阅读走
- * [KomihoFileLauncher] + [KomihoFileSource]。
+ * 这里目录层级与「什么算一本」全部由本浏览器决定；点开即交给独立的
+ * [LocalReaderActivity] 直接读文件，不注册图源、不写书架、不落库。
  */
 @Composable
 private fun LocalSourceTab(
@@ -3916,9 +3917,8 @@ private fun LocalFileBrowser(base: UniFile) {
 
         // 当前目录内含图片 → 提供「阅读此目录」。
         if (imageCount > 0) {
-            val dirRelPath = stack.joinToString("/")
             Button(
-                onClick = { scope.launch { openLocalFile(context, dirRelPath) } },
+                onClick = { scope.launch { openLocalFile(context, current) } },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -3951,7 +3951,7 @@ private fun LocalFileBrowser(base: UniFile) {
                                 if (file.isDirectory) {
                                     stack = stack + file.name.orEmpty()
                                 } else {
-                                    scope.launch { openLocalFile(context, relPath) }
+                                    scope.launch { openLocalFile(context, file) }
                                 }
                             },
                         )
@@ -4001,16 +4001,14 @@ private fun FileRow(file: UniFile, onOpen: () -> Unit) {
 }
 
 /** 打开一个条目（归档/epub/含图目录）为「一本」。失败时提示原因。 */
-private suspend fun openLocalFile(context: android.content.Context, relativePath: String) {
-    runCatching { KomihoFileLauncher.open(context, relativePath) }
+private fun openLocalFile(context: android.content.Context, file: UniFile) {
+    runCatching { LocalReaderActivity.launch(context, file) }
         .onFailure { e ->
-            withContext(Dispatchers.Main) {
-                android.widget.Toast.makeText(
-                    context,
-                    "打开失败：${e.message}",
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
-            }
+            android.widget.Toast.makeText(
+                context,
+                "打开失败：${e.message}",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
         }
 }
 
