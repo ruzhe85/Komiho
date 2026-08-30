@@ -181,21 +181,26 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import uy.kohesive.injekt.api.get
 import androidx.compose.material.icons.outlined.Info
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import tachiyomi.domain.release.interactor.GetApplicationRelease
-// SY --> Komiho P0: 本地浏览（复用 Mihon 本地源 + BrowseSourceScreen）
+// SY --> Komiho P0: 本地浏览（文件管理器语义，非 Mihon 图源）
 import eu.kanade.presentation.more.settings.screen.SettingsDataScreen
-import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
 import tachiyomi.domain.storage.service.StoragePreferences
-import tachiyomi.source.local.LocalSource
+import tachiyomi.source.local.io.Archive
 import tachiyomi.source.local.io.LocalSourceFileSystem
+import tachiyomi.core.common.util.system.ImageUtil
+import app.mihonsy.komga.data.KomihoFileLauncher
+import androidx.compose.material.icons.filled.Description
 import uy.kohesive.injekt.Injekt
 import com.hippo.unifile.UniFile
 import tachiyomi.core.common.storage.displayablePath
+import tachiyomi.core.common.storage.extension
 // SY <--
 
 // 划动选择命中检测已移除（长按圈选废弃）。
@@ -3784,16 +3789,18 @@ private fun SourceSwitcher(
 }
 
 /**
- * Komiho P0：本地浏览 tab。
+ * Komiho P0（重做）：本地浏览 tab —— **文件管理器语义，不是图源**。
  *
- * 复用 Mihon 已注册且成熟的本地源（[LocalSource]，id = 0），直接以 Voyager
- * [BrowseSourceScreen] 承载——列表、详情、章节、封面、入库、阅读全部现成，
- * 阅读链路由 ChapterLoader 的 `source is LocalSource` 分支分发到
- * DirectoryPageLoader / ArchivePageLoader / EpubPageLoader，无需任何改动。
+ * 用户所选文件夹即根目录，规则如下：
+ *  - 点目录        → 下钻
+ *  - 点归档/epub   → 作为「一本」直接开读
+ *  - 当前目录有图片 → 顶部出现「阅读此目录（N 张）」按钮
  *
- * 漫画根目录 = 用户所选文件夹本身（localSourceRoot 偏好），
- * 由 [LocalSourceFileSystem.getBaseDirectory] 解析；未选择时展示空态引导用户
- * 授权（SAF，非 MANAGE_EXTERNAL_STORAGE）。
+ * 刻意**不用** Mihon 的图源模型（`LocalSource` + `BrowseSourceScreen`）：
+ * 那套要求 base/<系列目录>/<章节文件> 的两层命名结构，且 getSearchManga 只认
+ * 目录（`filter { it.isDirectory }`），散图目录或任意层级都会直接空列表。
+ * 这里目录层级与「什么算一本」全部由本浏览器决定，落库与阅读走
+ * [KomihoFileLauncher] + [KomihoFileSource]。
  */
 @Composable
 private fun LocalSourceTab(
@@ -3833,20 +3840,178 @@ private fun LocalSourceTab(
         return
     }
 
-    // 目录已就绪：交给 Mihon 的源浏览页。
-    // 用 Navigator 承载，使用户可继续下钻（浏览 → 详情 → 阅读器）。
+    // 目录已就绪：进入自研文件管理器（UI 参考 Material Files 的列表设计）。
+    LocalFileBrowser(base = localDir)
+}
+
+/** 文件管理器主体：面包屑 + 目录下钻 + 「阅读此目录」。UI 参考 Material Files 的列表设计。 */
+@Composable
+private fun LocalFileBrowser(base: UniFile) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // 相对路径栈：栈底为空串代表根目录，下钻时追加段名。每个条目的相对路径 =
+    // (stack + 自身段名) 用 "/" 连接；chapter.url 就存这个相对路径，
+    // 阅读时由 tree-backed 的 base.findFile(相对路径) 重建，散图目录才能正常列图。
+    var stack by remember(base) { mutableStateOf<List<String>>(emptyList()) }
+    val current = remember(stack) {
+        if (stack.isEmpty()) base
+        else stack.fold(base) { dir, seg -> dir.findFile(seg) ?: base }
+    }
+
+    var entries by remember { mutableStateOf<List<UniFile>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var imageCount by remember { mutableStateOf(0) }
+
+    // 列目录是跨进程 SAF 调用，必须在 IO 线程。
+    LaunchedEffect(current) {
+        loading = true
+        val (list, images) = withContext(Dispatchers.IO) {
+            val all = current.listFiles().orEmpty().toList()
+            val sorted = all.sortedWith(
+                compareBy<UniFile> { !it.isDirectory }.thenBy { it.name.orEmpty().lowercase() },
+            )
+            sorted to all.count { !it.isDirectory && ImageUtil.isImage(it.name) }
+        }
+        entries = list
+        imageCount = images
+        loading = false
+    }
+
+    // 返回键回上一层；已在根目录时不拦截，交还外层（回 Home）。
+    BackHandler(enabled = stack.isNotEmpty()) {
+        stack = stack.dropLast(1)
+    }
+
     Column(Modifier.fillMaxSize()) {
-        // 显式展示当前读取的漫画根目录，换目录时便于确认是否选对。
+        // 面包屑：可点击跳回任一层级（参考 Material Files 的顶部路径条）。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { stack = emptyList() }) {
+                Text(
+                    text = base.name.orEmpty().ifBlank { composeStringResource(R.string.local_root_label) },
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                )
+            }
+            stack.forEachIndexed { index, seg ->
+                Text(
+                    text = "/",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { stack = stack.take(index + 1) }) {
+                    Text(
+                        text = seg,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+
+        // 当前目录内含图片 → 提供「阅读此目录」。
+        if (imageCount > 0) {
+            val dirRelPath = stack.joinToString("/")
+            Button(
+                onClick = { scope.launch { openLocalFile(context, dirRelPath) } },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(composeStringResource(R.string.local_read_dir, imageCount))
+            }
+        }
+
+        when {
+            loading -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+            entries.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = composeStringResource(R.string.local_empty_dir),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            else -> {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(entries, key = { it.uri.toString() }) { file ->
+                        val relPath = (stack + file.name.orEmpty()).joinToString("/")
+                        FileRow(
+                            file = file,
+                            onOpen = {
+                                if (file.isDirectory) {
+                                    stack = stack + file.name.orEmpty()
+                                } else {
+                                    scope.launch { openLocalFile(context, relPath) }
+                                }
+                            },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 文件/目录一行。散图不可点——它们通过「阅读此目录」整目录打开。 */
+@Composable
+private fun FileRow(file: UniFile, onOpen: () -> Unit) {
+    val isDir = file.isDirectory
+    val isArchive = !isDir && (Archive.isSupported(file) || file.extension.equals("epub", true))
+    val isImage = !isDir && !isArchive && ImageUtil.isImage(file.name)
+
+    val icon = when {
+        isDir -> Icons.Filled.Folder
+        isArchive -> Icons.Filled.Book
+        isImage -> Icons.Filled.Image
+        else -> Icons.Filled.Description
+    }
+    val tint = if (isImage || (!isDir && !isArchive)) {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+
+    Row(
+        modifier = Modifier
+        .fillMaxWidth()
+        .then(if (isDir || isArchive) Modifier.clickable(onClick = onOpen) else Modifier)
+        .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint)
+        Spacer(Modifier.width(12.dp))
         Text(
-            text = composeStringResource(R.string.local_dir_path, localDir.displayablePath),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = file.name.orEmpty(),
+            style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
         )
-        Navigator(BrowseSourceScreen(LocalSource.ID, null))
     }
+}
+
+/** 打开一个条目（归档/epub/含图目录）为「一本」。失败时提示原因。 */
+private suspend fun openLocalFile(context: android.content.Context, relativePath: String) {
+    runCatching { KomihoFileLauncher.open(context, relativePath) }
+        .onFailure { e ->
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    context,
+                    "打开失败：${e.message}",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
 }
 
 // ---------- Downloads (offline) tab ----------

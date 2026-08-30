@@ -14,12 +14,14 @@
     <!-- Source switcher chips -->
     <string name="source_komga">Komga</string>
 
-    <!-- Local browsing (P0): reuses Mihon local source + BrowseSourceScreen -->
+    <!-- Local browsing (P0): file-manager semantics, not a Mihon source -->
     <string name="local_no_folder">No local comics folder selected</string>
     <string name="local_pick_folder">Choose folder</string>
     <string name="local_change_folder">Change local comics folder</string>
-    <string name="local_folder_hint">Pick a folder for your comics — that folder becomes the comics root.\nStructure: Manga name/Chapter.cbz (or a folder with the same name)</string>
-    <string name="local_dir_path">Reading from: %1$s</string>
+    <string name="local_folder_hint">Pick a folder for your comics — it becomes the root.\nThen browse it like a file manager: tap a folder to enter, tap an archive to read.</string>
+    <string name="local_read_dir">Read this folder (%1$d images)</string>
+    <string name="local_empty_dir">Empty folder</string>
+    <string name="local_root_label">Local root</string>
 
     <!-- Search -->
     <string name="cd_close_search">Close search</string>
