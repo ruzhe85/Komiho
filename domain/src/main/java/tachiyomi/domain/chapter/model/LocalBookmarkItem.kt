@@ -9,6 +9,7 @@ data class LocalBookmarkItem(
     val chapterNumber: Double,
     val chapterUrl: String,
     val lastPageRead: Long,
+    val bookmarkPage: Long,
     val dateUpload: Long,
     val mangaTitle: String,
     val mangaUrl: String,

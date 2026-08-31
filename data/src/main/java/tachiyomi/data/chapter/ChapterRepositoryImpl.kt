@@ -32,6 +32,7 @@ class ChapterRepositoryImpl(
                         chapter.read,
                         chapter.bookmark,
                         chapter.lastPageRead,
+                        chapter.bookmarkPage,
                         chapter.chapterNumber,
                         chapter.sourceOrder,
                         chapter.dateFetch,
@@ -68,6 +69,7 @@ class ChapterRepositoryImpl(
                     read = chapterUpdate.read,
                     bookmark = chapterUpdate.bookmark,
                     lastPageRead = chapterUpdate.lastPageRead,
+                    bookmarkPage = chapterUpdate.bookmarkPage,
                     chapterNumber = chapterUpdate.chapterNumber,
                     sourceOrder = chapterUpdate.sourceOrder,
                     dateFetch = chapterUpdate.dateFetch,
@@ -116,7 +118,7 @@ class ChapterRepositoryImpl(
     // SY --> Komiho: 本地模式书签 tab —— 取某来源下所有已加书签的章节。
     override suspend fun getBookmarkedChaptersBySource(sourceId: Long): List<LocalBookmarkItem> {
         return database.chaptersQueries
-            .bookmarkedChaptersBySource(sourceId) { chapterId, mangaId, chapterName, chapterNumber, chapterUrl, lastPageRead, dateUpload, mangaTitle, mangaUrl, thumbnailUrl ->
+            .bookmarkedChaptersBySource(sourceId) { chapterId, mangaId, chapterName, chapterNumber, chapterUrl, lastPageRead, bookmarkPage, dateUpload, mangaTitle, mangaUrl, thumbnailUrl ->
                 LocalBookmarkItem(
                     chapterId = chapterId,
                     mangaId = mangaId,
@@ -124,6 +126,7 @@ class ChapterRepositoryImpl(
                     chapterNumber = chapterNumber,
                     chapterUrl = chapterUrl,
                     lastPageRead = lastPageRead,
+                    bookmarkPage = bookmarkPage,
                     dateUpload = dateUpload,
                     mangaTitle = mangaTitle,
                     mangaUrl = mangaUrl,

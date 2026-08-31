@@ -1004,12 +1004,15 @@ class ReaderViewModel @JvmOverloads constructor(
         val chapter = getCurrentChapter()?.chapter ?: return
         val bookmarked = !chapter.bookmark
         chapter.bookmark = bookmarked
+        // SY --> Komiho: 书签页冻结在「标记那一刻」的阅读进度，不随后续阅读漂移。
+        val bookmarkPage = if (bookmarked) chapter.lastPageRead else 0L
 
         viewModelScope.launchNonCancellable {
             updateChapter.await(
                 ChapterUpdate(
                     id = chapter.id!!,
                     bookmark = bookmarked,
+                    bookmarkPage = bookmarkPage,
                 ),
             )
         }
@@ -1030,6 +1033,7 @@ class ReaderViewModel @JvmOverloads constructor(
                 ChapterUpdate(
                     id = chapterId,
                     bookmark = bookmarked,
+                    bookmarkPage = if (bookmarked) chapter.lastPageRead else 0L,
                 ),
             )
         }
