@@ -209,9 +209,10 @@ import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
-import tachiyomi.domain.chapter.model.LocalBookmarkItem
+import tachiyomi.domain.chapter.model.BookmarkItem
 import tachiyomi.domain.chapter.service.ChapterRecognition
 import tachiyomi.domain.manga.repository.MangaRepository
+import tachiyomi.domain.chapter.repository.BookmarkRepository
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.history.model.LocalHistoryItem
 import tachiyomi.domain.history.repository.HistoryRepository
@@ -4959,20 +4960,21 @@ private fun HistoryTabLocal(refreshTick: Int) {
     }
 }
 
-/** 书签 tab：已加书签的章节（章节级），3-dot 菜单「取消书签」；点续读。 */
+/** 书签 tab：按页书签（一本书可多条），按书聚合一行，展开看多页；点页跳到该页，删除删对应书签。 */
 @Composable
 private fun BookmarksTabLocal(refreshTick: Int) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val chapterRepo = remember { Injekt.get<ChapterRepository>() }
-    var items by remember { mutableStateOf<List<LocalBookmarkItem>>(emptyList()) }
+    val bookmarkRepo = remember { Injekt.get<BookmarkRepository>() }
+    var items by remember { mutableStateOf<List<BookmarkItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var expanded by remember { mutableStateOf<Set<Long>>(emptySet()) }
 
     fun load() {
         scope.launch {
             loading = true
             items = withContext(Dispatchers.IO) {
-                runCatching { chapterRepo.getBookmarkedChaptersBySource(LocalSource.ID) }
+                runCatching { bookmarkRepo.getBookmarksBySource(LocalSource.ID) }
                     .getOrDefault(emptyList())
             }
             loading = false
@@ -4983,54 +4985,113 @@ private fun BookmarksTabLocal(refreshTick: Int) {
     when {
         loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         items.isEmpty() -> LocalEmptyHint(Icons.Filled.Bookmark, composeStringResource(R.string.local_bookmarks_empty))
-        else -> LazyColumn(Modifier.fillMaxSize()) {
-            items(items, key = { it.chapterId }) { b ->
-                val file by produceState<UniFile?>(initialValue = null, key1 = b.chapterUrl) {
-                    value = withContext(Dispatchers.IO) { resolveLocalFile(b.chapterUrl) }
-                }
-                val totalPages by produceState(initialValue = 0, key1 = file) {
-                    value = countChapterPages(context, b.chapterUrl, file)
-                }
-                val coverUri = remember(file) { resolveCoverUri(file) } ?: b.thumbnailUrl?.takeIf { it.isNotBlank() }
-                val stat = remember(b.chapterUrl, file) { getFileStat(b.chapterUrl, file) }
-                val chapterText = if (b.chapterNumber >= 0) "第 ${formatChapterNumber(b.chapterNumber)} 话" else b.chapterName
+        else -> {
+            val groups = items.groupBy { it.chapterId }.toList()
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(groups, key = { it.first }) { (chapterId, bms) ->
+                    val first = bms.first()
+                    val file by produceState<UniFile?>(initialValue = null, key1 = first.chapterUrl) {
+                        value = withContext(Dispatchers.IO) { resolveLocalFile(first.chapterUrl) }
+                    }
+                    val totalPages by produceState(initialValue = 0, key1 = file) {
+                        value = countChapterPages(context, first.chapterUrl, file)
+                    }
+                    val coverUri = remember(file) { resolveCoverUri(file) } ?: first.thumbnailUrl?.takeIf { it.isNotBlank() }
+                    val stat = remember(first.chapterUrl, file) { getFileStat(first.chapterUrl, file) }
+                    val chapterText = if (first.chapterNumber >= 0) "第 ${formatChapterNumber(first.chapterNumber)} 话" else first.chapterName
+                    val isExpanded = expanded.contains(chapterId)
+                    val firstPage = bms.minOf { it.page }
 
-                LocalFileRow(
-                    context = context,
-                    title = b.mangaTitle,
-                    subtitle = chapterText,
-                    fileSize = stat.size,
-                    dateTime = stat.modified,
-                    lastPageRead = b.bookmarkPage,
-                    totalPages = totalPages,
-                    coverUri = coverUri,
-                    onClick = {
-                        context.startActivity(ReaderActivity.newIntent(context, b.mangaId, b.chapterId, b.bookmarkPage.toInt()))
-                    },
-                    moreMenu = { dismiss ->
-                        DropdownMenuItem(
-                            text = { Text(composeStringResource(R.string.local_open_file_location)) },
-                            onClick = {
-                                dismiss()
-                                scope.launch { openFileLocation(context, b.chapterUrl) }
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(composeStringResource(R.string.local_bookmark_remove)) },
-                            onClick = {
-                                dismiss()
-                                scope.launch {
-                                    withContext(Dispatchers.IO) {
-                                        runCatching { chapterRepo.update(ChapterUpdate(id = b.chapterId, bookmark = false)) }
+                    LocalFileRow(
+                        context = context,
+                        title = first.mangaTitle,
+                        subtitle = "$chapterText · ${bms.size} 个书签",
+                        fileSize = stat.size,
+                        dateTime = stat.modified,
+                        lastPageRead = firstPage.toLong(),
+                        totalPages = totalPages,
+                        coverUri = coverUri,
+                        onClick = {
+                            expanded = if (isExpanded) expanded - chapterId else expanded + chapterId
+                        },
+                        moreMenu = { dismiss ->
+                            DropdownMenuItem(
+                                text = { Text(composeStringResource(R.string.local_open_file_location)) },
+                                onClick = {
+                                    dismiss()
+                                    scope.launch { openFileLocation(context, first.chapterUrl) }
+                                },
+                            )
+                        },
+                    )
+                    if (isExpanded) {
+                        items(bms.sortedBy { it.page }, key = { it.id }) { bm ->
+                            BookmarkPageRow(
+                                context = context,
+                                page = bm.page,
+                                totalPages = totalPages,
+                                onClick = {
+                                    context.startActivity(ReaderActivity.newIntent(context, bm.mangaId, chapterId, bm.page))
+                                },
+                                onRemove = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            runCatching { bookmarkRepo.removeBookmark(bm.id) }
+                                        }
+                                        load()
                                     }
-                                    load()
-                                }
-                            },
-                        )
-                    },
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                },
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
             }
+        }
+    }
+}
+
+/** 书签 tab：展开后单条「第 N 页」书签行。点击跳到该页，右侧删除。 */
+@Composable
+private fun BookmarkPageRow(
+    context: Context,
+    page: Int,
+    totalPages: Int,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 28.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.Bookmark,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "第 ${page + 1} 页",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (totalPages > 0) {
+                Text(
+                    text = "${page + 1}/$totalPages",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        IconButton(onClick = onRemove) {
+            Icon(
+                Icons.Filled.Delete,
+                contentDescription = composeStringResource(R.string.reader_bookmark_remove),
+                tint = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }
