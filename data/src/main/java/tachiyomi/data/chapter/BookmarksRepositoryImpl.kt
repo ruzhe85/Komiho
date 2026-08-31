@@ -21,7 +21,7 @@ class BookmarksRepositoryImpl(
                     chapterName = chapterName,
                     chapterNumber = chapterNumber,
                     chapterUrl = chapterUrl,
-                    page = page,
+                    page = page.toInt(),
                     createdAt = createdAt,
                     mangaTitle = mangaTitle,
                     mangaUrl = mangaUrl,
@@ -42,7 +42,7 @@ class BookmarksRepositoryImpl(
                     chapterName = "",
                     chapterNumber = -1.0,
                     chapterUrl = "",
-                    page = page,
+                    page = page.toInt(),
                     createdAt = createdAt,
                     mangaTitle = "",
                     mangaUrl = "",
@@ -54,7 +54,7 @@ class BookmarksRepositoryImpl(
 
     override suspend fun addBookmark(chapterId: Long, page: Int) {
         if (isPageBookmarked(chapterId, page)) return
-        database.bookmarksQueries.insert(chapterId, page, System.currentTimeMillis())
+        database.bookmarksQueries.insert(chapterId, page.toLong(), System.currentTimeMillis())
     }
 
     override suspend fun removeBookmark(id: Long) {
@@ -62,11 +62,11 @@ class BookmarksRepositoryImpl(
     }
 
     override suspend fun removeBookmarkAtPage(chapterId: Long, page: Int) {
-        database.bookmarksQueries.deleteByChapterAndPage(chapterId, page)
+        database.bookmarksQueries.deleteByChapterAndPage(chapterId, page.toLong())
     }
 
     override suspend fun isPageBookmarked(chapterId: Long, page: Int): Boolean {
-        return database.bookmarksQueries.countByChapterAndPage(chapterId, page).awaitAsOne() > 0
+        return database.bookmarksQueries.countByChapterAndPage(chapterId, page.toLong()).awaitAsOne() > 0
     }
 }
 // SY <--
