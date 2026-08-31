@@ -52,6 +52,9 @@ fun ReaderAppBars(
     onClickTopAppBar: () -> Unit,
     bookmarked: Boolean,
     onToggleBookmarked: () -> Unit,
+    // SY --> Komiho: 长按书签按钮打开书签列表
+    onOpenBookmarks: () -> Unit,
+    // SY <--
     // SY: 源无真实网页地址时 ReaderActivity 传 null，顶栏也不再消费这几项
     onOpenInWebView: (() -> Unit)?,
     onOpenInBrowser: (() -> Unit)?,
@@ -120,7 +123,9 @@ fun ReaderAppBars(
                     navigateUp = navigateUp,
                     bookmarked = bookmarked,
                     onToggleBookmarked = onToggleBookmarked,
-                )
+                    // SY --> Komiho
+                    onOpenBookmarks = onOpenBookmarks,
+                    // SY <--
                 // SY -->
                 ExhUtils(
                     isVisible = isExhToolsVisible,

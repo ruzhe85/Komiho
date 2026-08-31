@@ -92,8 +92,10 @@ import tachiyomi.decoder.ImageDecoder
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.UpdateChapter
+import tachiyomi.domain.chapter.model.BookmarkItem
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
+import tachiyomi.domain.chapter.repository.BookmarkRepository
 import tachiyomi.domain.chapter.service.getChapterSort
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.history.interactor.GetNextChapters
@@ -145,6 +147,8 @@ class ReaderViewModel @JvmOverloads constructor(
     private val getMergedReferencesById: GetMergedReferencesById = Injekt.get(),
     private val getMergedChaptersByMangaId: GetMergedChaptersByMangaId = Injekt.get(),
     private val setReadStatus: SetReadStatus = Injekt.get(),
+    // SY -->
+    private val bookmarkRepository: BookmarkRepository = Injekt.get(),
     // SY <--
 ) : ViewModel() {
 
@@ -477,7 +481,7 @@ class ReaderViewModel @JvmOverloads constructor(
                 chapterToDownload = cancelQueuedDownloads(newChapters.currChapter)
                 it.copy(
                     viewerChapters = newChapters,
-                    bookmarked = newChapters.currChapter.chapter.bookmark,
+                    currentPageBookmarked = false,
                 )
             }
         }
@@ -611,6 +615,15 @@ class ReaderViewModel @JvmOverloads constructor(
         viewModelScope.launchNonCancellable {
             updateChapterProgress(selectedChapter, page/* SY --> */, hasExtraPage/* SY <-- */)
         }
+
+        // SY --> Komiho: 翻页后刷新「当前页是否已加书签」图标状态。
+        viewModelScope.launchNonCancellable {
+            selectedChapter.chapter.id?.let { cid ->
+                val marked = bookmarkRepository.isPageBookmarked(cid, page.index)
+                mutableState.update { it.copy(currentPageBookmarked = marked) }
+            }
+        }
+        // SY <--
 
         if (selectedChapter != getCurrentChapter()) {
             logcat { "Setting ${selectedChapter.chapter.url} as active" }
@@ -1000,29 +1013,59 @@ class ReaderViewModel @JvmOverloads constructor(
     /**
      * Bookmarks the currently active chapter.
      */
-    fun toggleChapterBookmark() {
+    // SY --> Komiho: 按页书签 —— 一本书（章节）可加多个，顶栏按钮在当前页加/取消。
+    /** 在当前页切换书签：已标则取消，未标则新增。 */
+    fun toggleBookmarkAtCurrentPage() {
         val chapter = getCurrentChapter()?.chapter ?: return
-        val bookmarked = !chapter.bookmark
-        chapter.bookmark = bookmarked
-        // SY --> Komiho: 书签页冻结在「标记那一刻」的阅读进度，不随后续阅读漂移。
-        val bookmarkPage = if (bookmarked) chapter.last_page_read.toLong() else 0L
-
+        val chapterId = chapter.id ?: return
+        val page = (state.value.currentPage - 1).coerceAtLeast(0)
         viewModelScope.launchNonCancellable {
-            updateChapter.await(
-                ChapterUpdate(
-                    id = chapter.id!!,
-                    bookmark = bookmarked,
-                    bookmarkPage = bookmarkPage,
-                ),
-            )
-        }
-
-        mutableState.update {
-            it.copy(
-                bookmarked = bookmarked,
-            )
+            val marked = bookmarkRepository.isPageBookmarked(chapterId, page)
+            if (marked) {
+                bookmarkRepository.removeBookmarkAtPage(chapterId, page)
+            } else {
+                bookmarkRepository.addBookmark(chapterId, page)
+            }
+            mutableState.update { it.copy(currentPageBookmarked = !marked) }
         }
     }
+
+    /** 在当前页新增书签（用于列表对话框的「加书签」按钮，已存在则忽略）。 */
+    fun addBookmarkAtCurrentPage() {
+        val chapter = getCurrentChapter()?.chapter ?: return
+        val chapterId = chapter.id ?: return
+        val page = (state.value.currentPage - 1).coerceAtLeast(0)
+        viewModelScope.launchNonCancellable {
+            bookmarkRepository.addBookmark(chapterId, page)
+            mutableState.update { it.copy(currentPageBookmarked = true) }
+        }
+    }
+
+    /** 删除指定书签（列表对话框）。 */
+    fun removeBookmark(id: Long) {
+        viewModelScope.launchNonCancellable {
+            bookmarkRepository.removeBookmark(id)
+            getCurrentChapter()?.chapter?.id?.let { cid ->
+                val marked = bookmarkRepository.isPageBookmarked(
+                    cid,
+                    (state.value.currentPage - 1).coerceAtLeast(0),
+                )
+                mutableState.update { it.copy(currentPageBookmarked = marked) }
+            }
+        }
+    }
+
+    /** 打开本书签列表对话框。 */
+    fun openBookmarksDialog() {
+        mutableState.update { it.copy(dialog = Dialog.Bookmarks) }
+    }
+
+    /** 取当前章节下的所有按页书签，供列表对话框展示。 */
+    suspend fun getBookmarksForCurrentChapter(): List<BookmarkItem> {
+        val chapterId = getCurrentChapter()?.chapter?.id ?: return emptyList()
+        return bookmarkRepository.getBookmarksByChapter(chapterId)
+    }
+    // SY <--
 
     // SY -->
     fun toggleBookmark(chapterId: Long, bookmarked: Boolean) {
@@ -1564,7 +1607,7 @@ class ReaderViewModel @JvmOverloads constructor(
     data class State(
         val manga: Manga? = null,
         val viewerChapters: ViewerChapters? = null,
-        val bookmarked: Boolean = false,
+        val currentPageBookmarked: Boolean = false,
         val isLoadingAdjacentChapter: Boolean = false,
         val currentPage: Int = -1,
 
@@ -1606,6 +1649,8 @@ class ReaderViewModel @JvmOverloads constructor(
 
         // SY -->
         data object ChapterList : Dialog
+        // SY --> Komiho: 阅读器内按页书签列表对话框
+        data object Bookmarks : Dialog
         // SY <--
 
         data class PageActions(

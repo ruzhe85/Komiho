@@ -463,6 +463,14 @@ class ReaderActivity : BaseActivity() {
                     state.dateRelativeTime,
                 )
             }
+            // SY --> Komiho: 阅读器内按页书签列表
+            is ReaderViewModel.Dialog.Bookmarks -> {
+                ReaderBookmarksDialog(
+                    viewModel = viewModel,
+                    onJump = { moveToPageIndex(it) },
+                    onDismissRequest = onDismissRequest,
+                )
+            }
             // SY -->
             ReaderViewModel.Dialog.AutoScrollHelp -> AlertDialog(
                 onDismissRequest = onDismissRequest,
@@ -659,8 +667,11 @@ class ReaderActivity : BaseActivity() {
             chapterTitle = state.currentChapter?.chapter?.name,
             navigateUp = onBackPressedDispatcher::onBackPressed,
             onClickTopAppBar = ::openMangaScreen,
-            bookmarked = state.bookmarked,
-            onToggleBookmarked = viewModel::toggleChapterBookmark,
+            bookmarked = state.currentPageBookmarked,
+            onToggleBookmarked = viewModel::toggleBookmarkAtCurrentPage,
+            // SY --> Komiho: 长按书签按钮打开列表
+            onOpenBookmarks = viewModel::openBookmarksDialog,
+            // SY <--
             onOpenInWebView = ::openChapterInWebView.takeIf { isHttpSource },
             onOpenInBrowser = ::openChapterInBrowser.takeIf { isHttpSource },
             onShare = ::shareChapter.takeIf { isHttpSource },
