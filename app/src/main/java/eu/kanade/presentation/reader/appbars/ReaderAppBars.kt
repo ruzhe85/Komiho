@@ -111,9 +111,7 @@ fun ReaderAppBars(
             enter = slideInVertically(readerBarsSlideAnimationSpec) { -it } + fadeIn(readerBarsFadeAnimationSpec),
             exit = slideOutVertically(readerBarsSlideAnimationSpec) { -it } + fadeOut(readerBarsFadeAnimationSpec),
         ) {
-            // SY -->
             Column {
-                // SY <--
                 ReaderTopBar(
                     modifier = Modifier
                         .background(backgroundColor)
@@ -123,10 +121,8 @@ fun ReaderAppBars(
                     navigateUp = navigateUp,
                     bookmarked = bookmarked,
                     onToggleBookmarked = onToggleBookmarked,
-                    // SY --> Komiho
                     onOpenBookmarks = onOpenBookmarks,
-                    // SY <--
-                // SY -->
+                )
                 ExhUtils(
                     isVisible = isExhToolsVisible,
                     onSetExhUtilsVisibility = onSetExhUtilsVisibility,
