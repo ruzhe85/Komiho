@@ -31,6 +31,10 @@
     <string name="local_history_delete_all">清除全部紀錄</string>
     <string name="local_history_cancel">取消</string>
     <string name="local_bookmark_remove">取消書籤</string>
+    <string name="local_open_file_location">開啟檔案位置</string>
+    <string name="local_read_resume">繼續閱讀</string>
+    <string name="local_read_from_first">從頭閱讀</string>
+    <string name="local_open_location_failed">無法開啟檔案管理員\n路徑：%1$s</string>
 
     <!-- 搜尋 -->
     <string name="cd_close_search">關閉搜尋</string>

@@ -4695,6 +4695,44 @@ private fun resolveCoverUri(file: UniFile?): String? {
     }
 }
 
+/** 用系统文件管理器打开本卷所在目录（父目录）。chapterUrl 为相对本地根目录的路径。
+ *  目录走 SAF tree-backed URI；SAF 没有真实文件路径，故失败时退化为 Toast 显示相对路径。 */
+private suspend fun openFileLocation(context: Context, chapterUrl: String) {
+    val parentRel = chapterUrl.substringBeforeLast('/')
+    val dir = withContext(Dispatchers.IO) {
+        if (parentRel.isBlank()) {
+            Injekt.get<LocalSourceFileSystem>().getBaseDirectory()
+        } else {
+            resolveLocalFile(parentRel)
+        }
+    }
+    val uri = dir?.uri
+    val intent = uri?.let {
+        Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(it, DocumentsContract.Document.MIME_TYPE_DIR)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+    withContext(Dispatchers.Main) {
+        if (intent != null) {
+            runCatching { context.startActivity(intent) }
+                .onFailure {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.local_open_location_failed, chapterUrl),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+        } else {
+            Toast.makeText(
+                context,
+                context.getString(R.string.local_open_location_failed, chapterUrl),
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+}
+
 /** 章节号格式化：整数不带小数（1.0 → 1），否则保留两位小数。 */
 private fun formatChapterNumber(n: Double): String =
     if (n % 1.0 == 0.0) n.toLong().toString() else "%.2f".format(n)
@@ -4766,8 +4804,19 @@ private fun LocalFileRow(
                     modifier = Modifier.weight(1f),
                 )
                 Box {
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // 不用 IconButton：它强制 48dp 最小触摸尺寸，图标居中会让三点右端内缩 12dp，
+                    // 与下方进度条右端对不齐。改用定宽 Box + 图标靠右对齐，视觉上与进度条右端齐平。
+                    Box(
+                        modifier = Modifier
+                            .size(width = 32.dp, height = 32.dp)
+                            .clickable { menuExpanded = true },
+                        contentAlignment = Alignment.CenterEnd,
+                    ) {
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     DropdownMenu(
                         expanded = menuExpanded,
@@ -4841,6 +4890,8 @@ private fun HistoryTabLocal(refreshTick: Int) {
     }
 
     var aggregateFor by remember { mutableStateOf<MergedBook?>(null) }
+    // 点击整行时不直接进阅读器，先弹「继续阅读 / 从头阅读」选择框
+    var readChoiceFor by remember { mutableStateOf<MergedBook?>(null) }
 
     if (merged.isEmpty() && items.isEmpty()) {
         LocalEmptyHint(Icons.Filled.History, composeStringResource(R.string.local_history_empty))
@@ -4870,13 +4921,18 @@ private fun HistoryTabLocal(refreshTick: Int) {
                 lastPageRead = rep.lastPageRead,
                 totalPages = totalPages,
                 coverUri = coverUri,
-                onClick = {
-                    context.startActivity(ReaderActivity.newIntent(context, rep.mangaId, rep.chapterId))
-                },
+                onClick = { readChoiceFor = book },
                 moreMenu = { dismiss ->
                     DropdownMenuItem(
                         text = { Text(composeStringResource(R.string.local_history_aggregate)) },
                         onClick = { dismiss(); aggregateFor = book },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(composeStringResource(R.string.local_open_file_location)) },
+                        onClick = {
+                            dismiss()
+                            scope.launch { openFileLocation(context, rep.chapterUrl) }
+                        },
                     )
                     DropdownMenuItem(
                         text = { Text(composeStringResource(R.string.local_history_delete)) },
@@ -4942,6 +4998,54 @@ private fun HistoryTabLocal(refreshTick: Int) {
             },
         )
     }
+
+    // 阅读方式选择框：继续阅读（按历史续读）/ 从头阅读（强制第 1 页，历史记录保留）。
+    val choiceBook = readChoiceFor
+    if (choiceBook != null) {
+        val volumeTitle = choiceBook.rep.chapterName.ifBlank { choiceBook.rep.chapterUrl.substringAfterLast('/') }
+        AlertDialog(
+            onDismissRequest = { readChoiceFor = null },
+            title = { Text(volumeTitle) },
+            text = {
+                Column {
+                    Text(
+                        text = composeStringResource(R.string.local_read_resume),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                readChoiceFor = null
+                                context.startActivity(
+                                    ReaderActivity.newIntent(context, choiceBook.rep.mangaId, choiceBook.rep.chapterId),
+                                )
+                            }
+                            .padding(vertical = 14.dp),
+                    )
+                    Text(
+                        text = composeStringResource(R.string.local_read_from_first),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                readChoiceFor = null
+                                // page=0：ChapterLoader 里 requestedPage = page ?: last_page_read，
+                                // 传 0 会强制从第 1 页开始，且不删除历史记录。
+                                context.startActivity(
+                                    ReaderActivity.newIntent(context, choiceBook.rep.mangaId, choiceBook.rep.chapterId, 0),
+                                )
+                            }
+                            .padding(vertical = 14.dp),
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { readChoiceFor = null }) {
+                    Text(composeStringResource(R.string.local_history_cancel))
+                }
+            },
+        )
+    }
 }
 
 /** 书签 tab：已加书签的章节（章节级），3-dot 菜单「取消书签」；点续读。 */
@@ -4993,6 +5097,13 @@ private fun BookmarksTabLocal(refreshTick: Int) {
                         context.startActivity(ReaderActivity.newIntent(context, b.mangaId, b.chapterId))
                     },
                     moreMenu = { dismiss ->
+                        DropdownMenuItem(
+                            text = { Text(composeStringResource(R.string.local_open_file_location)) },
+                            onClick = {
+                                dismiss()
+                                scope.launch { openFileLocation(context, b.chapterUrl) }
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text(composeStringResource(R.string.local_bookmark_remove)) },
                             onClick = {
