@@ -50,8 +50,9 @@ fun ReaderAppBars(
     chapterTitle: String?,
     navigateUp: () -> Unit,
     onClickTopAppBar: () -> Unit,
-    // bookmarked: Boolean,
-    // onToggleBookmarked: () -> Unit,
+    bookmarked: Boolean,
+    onToggleBookmarked: () -> Unit,
+    // SY: 源无真实网页地址时 ReaderActivity 传 null，顶栏也不再消费这几项
     onOpenInWebView: (() -> Unit)?,
     onOpenInBrowser: (() -> Unit)?,
     onShare: (() -> Unit)?,
@@ -117,13 +118,8 @@ fun ReaderAppBars(
                     mangaTitle = mangaTitle,
                     chapterTitle = chapterTitle,
                     navigateUp = navigateUp,
-                    /* SY -->
                     bookmarked = bookmarked,
                     onToggleBookmarked = onToggleBookmarked,
-                    onOpenInWebView = onOpenInWebView,
-                    onOpenInBrowser = onOpenInBrowser,
-                    onShare = onShare,
-                    SY <-- */
                 )
                 // SY -->
                 ExhUtils(
