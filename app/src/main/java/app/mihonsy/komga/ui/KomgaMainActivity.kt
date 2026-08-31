@@ -5025,23 +5025,25 @@ private fun BookmarksTabLocal(refreshTick: Int) {
                         },
                     )
                     if (isExpanded) {
-                        items(bms.sortedBy { it.page }, key = { it.id }) { bm ->
-                            BookmarkPageRow(
-                                context = context,
-                                page = bm.page,
-                                totalPages = totalPages,
-                                onClick = {
-                                    context.startActivity(ReaderActivity.newIntent(context, bm.mangaId, chapterId, bm.page))
-                                },
-                                onRemove = {
-                                    scope.launch {
-                                        withContext(Dispatchers.IO) {
-                                            runCatching { bookmarkRepo.removeBookmark(bm.id) }
+                        Column {
+                            bms.sortedBy { it.page }.forEach { bm ->
+                                BookmarkPageRow(
+                                    context = context,
+                                    page = bm.page,
+                                    totalPages = totalPages,
+                                    onClick = {
+                                        context.startActivity(ReaderActivity.newIntent(context, bm.mangaId, chapterId, bm.page))
+                                    },
+                                    onRemove = {
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                runCatching { bookmarkRepo.removeBookmark(bm.id) }
+                                            }
+                                            load()
                                         }
-                                        load()
-                                    }
-                                },
-                            )
+                                    },
+                                )
+                            }
                         }
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
