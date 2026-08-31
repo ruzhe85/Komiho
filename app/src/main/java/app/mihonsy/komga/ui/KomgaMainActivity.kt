@@ -4889,10 +4889,6 @@ private fun HistoryTabLocal(refreshTick: Int) {
             .sortedByDescending { it.rep.readAt?.time ?: 0L }
     }
 
-    var aggregateFor by remember { mutableStateOf<MergedBook?>(null) }
-    // 点击整行时不直接进阅读器，先弹「继续阅读 / 从头阅读」选择框
-    var readChoiceFor by remember { mutableStateOf<MergedBook?>(null) }
-
     if (merged.isEmpty() && items.isEmpty()) {
         LocalEmptyHint(Icons.Filled.History, composeStringResource(R.string.local_history_empty))
         return
@@ -4921,17 +4917,20 @@ private fun HistoryTabLocal(refreshTick: Int) {
                 lastPageRead = rep.lastPageRead,
                 totalPages = totalPages,
                 coverUri = coverUri,
-                onClick = { readChoiceFor = book },
+                onClick = {
+                    // 直接续读（按历史恢复进度，不再弹选择框）
+                    context.startActivity(ReaderActivity.newIntent(context, rep.mangaId, rep.chapterId))
+                },
                 moreMenu = { dismiss ->
                     DropdownMenuItem(
-                        text = { Text(composeStringResource(R.string.local_history_aggregate)) },
-                        onClick = { dismiss(); aggregateFor = book },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(composeStringResource(R.string.local_open_file_location)) },
+                        text = { Text(composeStringResource(R.string.local_read_from_first)) },
                         onClick = {
                             dismiss()
-                            scope.launch { openFileLocation(context, rep.chapterUrl) }
+                            // page=0：ChapterLoader 里 requestedPage = page ?: last_page_read，
+                            // 传 0 会强制从第 1 页开始，且不删除历史记录。
+                            context.startActivity(
+                                ReaderActivity.newIntent(context, rep.mangaId, rep.chapterId, 0),
+                            )
                         },
                     )
                     DropdownMenuItem(
@@ -4946,105 +4945,17 @@ private fun HistoryTabLocal(refreshTick: Int) {
                             }
                         },
                     )
+                    DropdownMenuItem(
+                        text = { Text(composeStringResource(R.string.local_open_file_location)) },
+                        onClick = {
+                            dismiss()
+                            scope.launch { openFileLocation(context, rep.chapterUrl) }
+                        },
+                    )
                 },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
-    }
-
-    // 汇聚对话框：列出本卷全部阅读会话（多次阅读），可点续读；底部「清除全部记录」。
-    val aggregateBook = aggregateFor
-    if (aggregateBook != null) {
-        val volumeTitle = aggregateBook.rep.chapterName.ifBlank { aggregateBook.rep.chapterUrl.substringAfterLast('/') }
-        AlertDialog(
-            onDismissRequest = { aggregateFor = null },
-            confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        // 只删本卷的全部历史会话，而非整系列。
-                        withContext(Dispatchers.IO) {
-                            aggregateBook.all.forEach { historyRepo.resetHistory(it.id) }
-                        }
-                        aggregateFor = null
-                    }
-                }) { Text(composeStringResource(R.string.local_history_delete_all)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { aggregateFor = null }) { Text(composeStringResource(R.string.local_history_cancel)) }
-            },
-            title = { Text(volumeTitle) },
-            text = {
-                LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
-                    items(aggregateBook.all, key = { it.id }) { ch ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    aggregateFor = null
-                                    context.startActivity(ReaderActivity.newIntent(context, ch.mangaId, ch.chapterId))
-                                }
-                                .padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("看到第 ${ch.lastPageRead + 1} 页", style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(formatRelativeTime(ch.readAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Text("${ch.lastPageRead + 1}p", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    }
-                }
-            },
-        )
-    }
-
-    // 阅读方式选择框：继续阅读（按历史续读）/ 从头阅读（强制第 1 页，历史记录保留）。
-    val choiceBook = readChoiceFor
-    if (choiceBook != null) {
-        val volumeTitle = choiceBook.rep.chapterName.ifBlank { choiceBook.rep.chapterUrl.substringAfterLast('/') }
-        AlertDialog(
-            onDismissRequest = { readChoiceFor = null },
-            title = { Text(volumeTitle) },
-            text = {
-                Column {
-                    Text(
-                        text = composeStringResource(R.string.local_read_resume),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                readChoiceFor = null
-                                context.startActivity(
-                                    ReaderActivity.newIntent(context, choiceBook.rep.mangaId, choiceBook.rep.chapterId),
-                                )
-                            }
-                            .padding(vertical = 14.dp),
-                    )
-                    Text(
-                        text = composeStringResource(R.string.local_read_from_first),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                readChoiceFor = null
-                                // page=0：ChapterLoader 里 requestedPage = page ?: last_page_read，
-                                // 传 0 会强制从第 1 页开始，且不删除历史记录。
-                                context.startActivity(
-                                    ReaderActivity.newIntent(context, choiceBook.rep.mangaId, choiceBook.rep.chapterId, 0),
-                                )
-                            }
-                            .padding(vertical = 14.dp),
-                    )
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { readChoiceFor = null }) {
-                    Text(composeStringResource(R.string.local_history_cancel))
-                }
-            },
-        )
     }
 }
 
@@ -5090,11 +5001,11 @@ private fun BookmarksTabLocal(refreshTick: Int) {
                     subtitle = chapterText,
                     fileSize = stat.size,
                     dateTime = stat.modified,
-                    lastPageRead = b.lastPageRead,
+                    lastPageRead = b.bookmarkPage,
                     totalPages = totalPages,
                     coverUri = coverUri,
                     onClick = {
-                        context.startActivity(ReaderActivity.newIntent(context, b.mangaId, b.chapterId))
+                        context.startActivity(ReaderActivity.newIntent(context, b.mangaId, b.chapterId, b.bookmarkPage.toInt()))
                     },
                     moreMenu = { dismiss ->
                         DropdownMenuItem(
