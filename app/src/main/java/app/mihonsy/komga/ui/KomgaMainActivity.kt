@@ -781,12 +781,7 @@ private fun KomgaMainScreen(
                             TextButton(
                                 onClick = {
                                     showManageAccessDialog = false
-                                    context.startActivity(
-                                        Intent(
-                                            Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION,
-                                            Uri.parse("package:" + context.packageName),
-                                        ),
-                                    )
+                                    launchManageAllFilesAccess(context)
                                 },
                             ) { Text("去授权") }
                         },
@@ -3216,6 +3211,28 @@ private fun SettingsCategoryDialog(
     }
 }
 
+/** 跳转到「所有文件访问权限」设置页。
+ *  关键修复：用 BuildConfig.APPLICATION_ID 拼 package Uri，避免 context.packageName 在某些 Context 包装下为空
+ *  导致 dat=package: 为空、系统找不到对应 Activity 而抛 ActivityNotFoundException 崩溃（一加/Android16 实测）。
+ *  若设备（部分 OEM）无该 Action 的 Activity，则兜底跳应用详情页；整体 try/catch 防崩。 */
+private fun launchManageAllFilesAccess(context: android.content.Context) {
+    val pkg = BuildConfig.APPLICATION_ID
+    val manageIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
+        data = Uri.parse("package:$pkg")
+    }
+    runCatching {
+        if (manageIntent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(manageIntent)
+        } else {
+            context.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$pkg")
+                },
+            )
+        }
+    }
+}
+
 /** 本地存储设置：所有文件访问权限（MANAGE_EXTERNAL_STORAGE）授权入口 + 漫画真实路径根状态。
  *  仅此页是 Komga 用户可达的授权入口（Mihon 的"数据存储"页在 Komga 模式下不暴露）。 */
 @Composable
@@ -3236,13 +3253,7 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             icon = Icons.Outlined.Storage,
             onPreferenceClick = {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    runCatching {
-                        context.startActivity(
-                            Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
-                                data = Uri.parse("package:${context.packageName}")
-                            },
-                        )
-                    }
+                    launchManageAllFilesAccess(context)
                 }
             },
         )

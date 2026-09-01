@@ -3,9 +3,9 @@ package eu.kanade.tachiyomi.crash
 import android.content.Intent
 import android.os.Bundle
 import androidx.core.view.WindowCompat
+import app.mihonsy.komga.ui.KomgaLauncherActivity
 import eu.kanade.presentation.crash.CrashScreen
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
-import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.util.view.setComposeContent
 
 class CrashActivity : BaseActivity() {
@@ -21,7 +21,11 @@ class CrashActivity : BaseActivity() {
                 exception = exception,
                 onRestartClick = {
                     finishAffinity()
-                    startActivity(Intent(this@CrashActivity, MainActivity::class.java))
+                    startActivity(
+                        Intent(this@CrashActivity, KomgaLauncherActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                        },
+                    )
                 },
             )
         }
