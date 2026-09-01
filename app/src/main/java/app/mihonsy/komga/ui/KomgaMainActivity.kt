@@ -1,8 +1,10 @@
 package app.mihonsy.komga.ui
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.Settings
 import android.content.res.Configuration
 import coil3.ImageLoader
 import android.content.Context
@@ -199,6 +201,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import uy.kohesive.injekt.api.get
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Storage
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.util.system.openInBrowser
@@ -373,6 +376,19 @@ private fun KomgaMainScreen(
     LaunchedEffect(Unit) {
         storagePreferences.localSourceRoot.changes().collect { localDir = computeLocalDir() }
         storagePreferences.localBrowseRealPath.changes().collect { localDir = computeLocalDir() }
+    }
+
+    // SY --> Komiho: 首次需要选择本地目录时，若尚未授予 MANAGE_EXTERNAL_STORAGE，
+    // 先弹授权提示对话框，而不是直接静默走 SAF；用户选「使用 SAF」才维持原流程。
+    var showManageAccessDialog by remember { mutableStateOf(false) }
+    fun requestLocalFolder() {
+        val authorized =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+        if (authorized) {
+            pickLocalFolder.launch(null)
+        } else {
+            showManageAccessDialog = true
+        }
     }
     // SY <--
     // SY <--
@@ -619,7 +635,7 @@ private fun KomgaMainScreen(
                     }
                     // 本地来源：提供「更改目录」入口（否则选错目录后无法在 Komiho 内改回）。
                     if (currentSource == AppSource.Local) {
-                        androidx.compose.material3.IconButton(onClick = { pickLocalFolder.launch(null) }) {
+                        androidx.compose.material3.IconButton(onClick = { requestLocalFolder() }) {
                             Icon(
                                 imageVector = Icons.Filled.FolderOpen,
                                 contentDescription = composeStringResource(R.string.local_change_folder),
@@ -741,7 +757,7 @@ private fun KomgaMainScreen(
                     // SY --> Komiho P0: 浏览 tab（本地 / SMB / WebDAV 共用）
                     MainTab.Browse -> LocalSourceTab(
                         localDir = localDir,
-                        onPickFolder = { pickLocalFolder.launch(null) },
+                        onPickFolder = { requestLocalFolder() },
                     )
                     // SY --> Komiho: 本地模式历史 / 书签 tab。
                     MainTab.History -> HistoryTabLocal(refreshTick = refreshTick)
@@ -749,6 +765,42 @@ private fun KomgaMainScreen(
                     // SY <--
                     MainTab.Settings -> SettingsTab(context)
                 }
+                // SY --> Komiho: 首次选目录授权提示（未授予 MANAGE_EXTERNAL_STORAGE 时先弹，
+                // 用户选「使用 SAF」才继续原 SAF 选目录流程，行为不退化）。
+                if (showManageAccessDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showManageAccessDialog = false },
+                        title = { Text("需要所有文件访问权限") },
+                        text = {
+                            Text(
+                                "为更快、稳定地访问本地漫画，建议授予「所有文件访问权限」。" +
+                                    "你也可以选择继续使用系统目录选择器（SAF）来授权本地目录。",
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showManageAccessDialog = false
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION,
+                                            Uri.parse("package:" + context.packageName),
+                                        ),
+                                    )
+                                },
+                            ) { Text("去授权") }
+                        },
+                        dismissButton = {
+                            TextButton(
+                                onClick = {
+                                    showManageAccessDialog = false
+                                    pickLocalFolder.launch(null)
+                                },
+                            ) { Text("使用 SAF") }
+                        },
+                    )
+                }
+                // SY <--
             }
         }
     }
@@ -3009,6 +3061,7 @@ private fun SettingsTab(context: android.content.Context) {
     var showServer by remember { mutableStateOf(false) }
     var showReaderSettings by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
+    var showLocalStorage by remember { mutableStateOf(false) }
 
     // MihonSY 风格：分类行列表，点击进入子页面（不再平铺展开全部选项）。
     Column(
@@ -3039,6 +3092,12 @@ private fun SettingsTab(context: android.content.Context) {
             subtitle = runCatching { prefs.connection().baseUrl }.getOrDefault(""),
             icon = Icons.Outlined.Cloud,
             onPreferenceClick = { showServer = true },
+        )
+        TextPreferenceWidget(
+            title = "本地存储",
+            subtitle = "所有文件访问权限 / 漫画真实路径",
+            icon = Icons.Outlined.Storage,
+            onPreferenceClick = { showLocalStorage = true },
         )
         TextPreferenceWidget(
             title = composeStringResource(R.string.settings_about),
@@ -3102,6 +3161,12 @@ private fun SettingsTab(context: android.content.Context) {
             title = composeStringResource(R.string.about),
         ) { padding -> KomgaAbout(Modifier.padding(padding), context) }
     }
+    if (showLocalStorage) {
+        SettingsCategoryDialog(
+            onDismiss = { showLocalStorage = false },
+            title = "本地存储",
+        ) { padding -> KomgaLocalStorageSettings(Modifier.padding(padding), context) }
+    }
     if (showReaderSettings) {
         Dialog(
             onDismissRequest = { showReaderSettings = false },
@@ -3148,6 +3213,49 @@ private fun SettingsCategoryDialog(
                 content = content,
             )
         }
+    }
+}
+
+/** 本地存储设置：所有文件访问权限（MANAGE_EXTERNAL_STORAGE）授权入口 + 漫画真实路径根状态。
+ *  仅此页是 Komga 用户可达的授权入口（Mihon 的"数据存储"页在 Komga 模式下不暴露）。 */
+@Composable
+private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.content.Context) {
+    val storagePrefs = remember { Injekt.get<StoragePreferences>() }
+    val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+    val realPath by storagePrefs.localBrowseRealPath.changes().collectAsState(initial = storagePrefs.localBrowseRealPath.get())
+    Column(
+        modifier = modifier.verticalScroll(rememberScrollState()),
+    ) {
+        TextPreferenceWidget(
+            title = "所有文件访问权限",
+            subtitle = if (hasAllFilesAccess) {
+                "已授权：本地浏览使用真实路径（列表/封面/阅读更快）"
+            } else {
+                "未授权：本地浏览使用 SAF。授权后可大幅提速"
+            },
+            icon = Icons.Outlined.Storage,
+            onPreferenceClick = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            },
+                        )
+                    }
+                }
+            },
+        )
+        TextPreferenceWidget(
+            title = "漫画根（真实路径）",
+            subtitle = if (realPath.isNotBlank()) {
+                realPath
+            } else {
+                "未设置：使用 SAF 授权目录（在本地浏览顶部点"设为漫画根"设置）"
+            },
+            icon = Icons.Filled.Folder,
+            onPreferenceClick = {},
+        )
     }
 }
 
