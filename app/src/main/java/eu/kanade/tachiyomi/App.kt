@@ -44,6 +44,10 @@ import eu.kanade.tachiyomi.core.security.PrivacyPreferences
 import eu.kanade.tachiyomi.crash.CrashActivity
 import eu.kanade.tachiyomi.crash.GlobalExceptionHandler
 import eu.kanade.tachiyomi.data.coil.BufferedSourceFetcher
+// SY --> Komiho: 本地封面（与 Komga 封面共用同一个 DiskCache 池与上限）
+import eu.kanade.tachiyomi.data.coil.LocalCoverFetcher
+import eu.kanade.tachiyomi.data.coil.LocalCoverKeyer
+// SY <--
 import eu.kanade.tachiyomi.data.coil.MangaCoverFetcher
 import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
 import eu.kanade.tachiyomi.data.coil.MangaKeyer
@@ -246,12 +250,16 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 add(MangaCoverFetcher.MangaFactory(callFactoryLazy))
                 // SY -->
                 add(PagePreviewFetcher.Factory(callFactoryLazy))
+                // Komiho: 本地（文件型来源）封面，与 Komga 封面共用同一个 DiskCache 池与上限
+                add(LocalCoverFetcher.Factory(context.applicationContext))
                 // SY <--
                 // Keyer
                 add(MangaCoverKeyer())
                 add(MangaKeyer())
                 // SY -->
                 add(PagePreviewKeyer())
+                // Komiho: 本地封面缓存键（uri + lastModified）
+                add(LocalCoverKeyer())
                 // SY <--
             }
 
@@ -261,12 +269,15 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     .build(),
             )
 
-            // SY: Komga cover disk cache. Decoded thumbnails persist across
+            // SY: Cover disk cache shared by Komga covers AND local (file-source)
+            // covers — both go through Coil, so one pool and one limit govern
+            // every preview image in the app. Decoded thumbnails persist across
             // screen changes and app restarts (LRU). Size comes from the
             // user's "cache limit" preference (default 100 MiB, max 500 MiB),
             // set under 书库 → 预览图. HTTP-level revalidation (etag/304) is
             // handled by NetworkHelper's OkHttp cache, so a changed server
-            // cover is picked up automatically.
+            // cover is picked up automatically. Local covers invalidate via
+            // lastModified in their cache key (see LocalCoverKeyer).
             val coverCacheLimit = app.mihonsy.komga.data.KomgaPreferences(context.applicationContext)
                 .coverCacheLimitBytes
             diskCache(
