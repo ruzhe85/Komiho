@@ -3217,18 +3217,25 @@ private fun SettingsCategoryDialog(
  *  若设备（部分 OEM）无该 Action 的 Activity，则兜底跳应用详情页；整体 try/catch 防崩。 */
 private fun launchManageAllFilesAccess(context: android.content.Context) {
     val pkg = BuildConfig.APPLICATION_ID
-    val manageIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
-        data = Uri.parse("package:$pkg")
-    }
-    runCatching {
-        if (manageIntent.resolveActivity(context.packageManager) != null) {
-            context.startActivity(manageIntent)
-        } else {
-            context.startActivity(
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.parse("package:$pkg")
-                },
-            )
+    // 不能用 resolveActivity 预判：API 30+ 包可见性过滤查不到系统设置组件，会误判走兜底页。
+    // startActivity 隐式跳转不受该过滤限制，直接按优先级逐个尝试即可。
+    val intents = listOf(
+        // 直达本应用的「所有文件访问」开关页
+        Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+            data = Uri.parse("package:$pkg")
+        },
+        // 部分 ROM 无上一 Action，退到所有应用的授权列表页
+        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+        // 最后兜底：应用详情页
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:$pkg")
+        },
+    )
+    for (intent in intents) {
+        try {
+            context.startActivity(intent)
+            return
+        } catch (_: Exception) {
         }
     }
 }
