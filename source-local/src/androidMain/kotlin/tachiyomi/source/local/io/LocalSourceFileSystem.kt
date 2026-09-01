@@ -29,6 +29,27 @@ actual class LocalSourceFileSystem(
                 return UniFile.fromFile(File(real))
             }
             if (real.isBlank()) {
+                // SAF→全权限自动迁移：旧 SAF 授权目录若是主存储（primary 卷 tree URI），
+                // 推导为真实路径直接沿用，免去「转全权限后必须重选目录」。
+                // 非主存储卷或解析失败时回落内部存储根。
+                val migrated = runCatching {
+                    val tree = storagePreferences.localSourceRoot.get()
+                    if (tree.isNotBlank()) {
+                        val docId = android.provider.DocumentsContract.getTreeDocumentId(
+                            Uri.parse(tree),
+                        )
+                        if (docId.startsWith("primary:")) {
+                            File(Environment.getExternalStorageDirectory(), docId.removePrefix("primary:"))
+                        } else {
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                }.getOrNull()
+                if (migrated != null && migrated.exists()) {
+                    return UniFile.fromFile(migrated)
+                }
                 return UniFile.fromFile(Environment.getExternalStorageDirectory())
             }
         }
