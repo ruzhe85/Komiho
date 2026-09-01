@@ -174,7 +174,6 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.download.KomgaDownloadStore
-import java.io.File
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.CollectionDto
 import app.mihonsy.komga.data.model.LibraryDto
@@ -357,19 +356,11 @@ private fun KomgaMainScreen(
     // 所选文件夹即漫画根目录：写入独立的 localSourceRoot 偏好（不再走
     // StorageManager 的 <base>/local，否则用户得先把漫画搬进 local/ 才能看）。
     val pickLocalFolder = SettingsDataScreen.storageLocationPicker(storagePreferences.localSourceRoot)
-    // SY --> Komiho: 真实路径模式——持有 MANAGE_EXTERNAL_STORAGE 且 localBrowseRealPath 非空时，
-    // 用 UniFile.fromFile 走真实文件系统（列表/封面/CBZ 阅读全走 File，快且避开 SAF 的 OEM 坑）；
-    // 已授权但未设根时从内部存储根开始浏览，供用户「设为漫画根」；否则维持 SAF tree URI（原行为）。
+    // SY --> Komiho: 真实路径模式——持有 MANAGE_EXTERNAL_STORAGE 时用 UniFile.fromFile
+    // 走真实文件系统（列表/封面/CBZ 阅读全走 File，快且避开 SAF 的 OEM 坑）；
+    // 规则统一收口在 LocalSourceFileSystem.getBaseDirectory()（浏览根与打开/阅读锚点同源，
+    // 曾因两处基准不一致导致授权后全部「找不到文件」），这里只做委托。
     fun computeLocalDir(): UniFile? {
-        val real = storagePreferences.localBrowseRealPath.get()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
-            if (real.isNotBlank() && File(real).exists()) {
-                return UniFile.fromFile(File(real))
-            }
-            if (real.isBlank()) {
-                return UniFile.fromFile(Environment.getExternalStorageDirectory())
-            }
-        }
         return localSourceFs.getBaseDirectory()
     }
     var localDir by remember { mutableStateOf(computeLocalDir()) }
@@ -406,6 +397,16 @@ private fun KomgaMainScreen(
     // the current tab across activity.recreate() — theme/language switches
     // in Settings would otherwise bounce back to the Home tab.
     var currentTab by rememberSaveable { mutableIntStateOf(MainTab.Home.ordinal) }
+
+    // SY --> Komiho: 历史/书签「打开文件位置」→ 应用内跳转：记住目标 chapterUrl（相对
+    // 本地根的路径），切到浏览 tab，由 LocalFileBrowser 消费后定位到所在目录；
+    // 不再调起系统文件管理器（SAF/真实路径两种模式下都能准确落到目录）。
+    var localBrowseNavRequest by remember { mutableStateOf<String?>(null) }
+    fun openLocalLocationInApp(chapterUrl: String) {
+        localBrowseNavRequest = chapterUrl
+        currentTab = MainTab.Browse.ordinal
+    }
+    // SY <--
 
     // SY --> Komiho P0: 全局来源切换。切换来源后底部导航会变（Komga 5 项 / 文件型 2 项），
     // 因此必须把 currentTab 重置为该来源下的第一个可见 tab，否则会指向被隐藏的 tab。
@@ -758,10 +759,18 @@ private fun KomgaMainScreen(
                     MainTab.Browse -> LocalSourceTab(
                         localDir = localDir,
                         onPickFolder = { requestLocalFolder() },
+                        navRequest = localBrowseNavRequest,
+                        onNavConsumed = { localBrowseNavRequest = null },
                     )
                     // SY --> Komiho: 本地模式历史 / 书签 tab。
-                    MainTab.History -> HistoryTabLocal(refreshTick = refreshTick)
-                    MainTab.Bookmarks -> BookmarksTabLocal(refreshTick = refreshTick)
+                    MainTab.History -> HistoryTabLocal(
+                        refreshTick = refreshTick,
+                        onOpenLocation = { openLocalLocationInApp(it) },
+                    )
+                    MainTab.Bookmarks -> BookmarksTabLocal(
+                        refreshTick = refreshTick,
+                        onOpenLocation = { openLocalLocationInApp(it) },
+                    )
                     // SY <--
                     MainTab.Settings -> SettingsTab(context)
                 }
@@ -3992,6 +4001,8 @@ private fun SourceSwitcher(
 private fun LocalSourceTab(
     localDir: UniFile?,
     onPickFolder: () -> Unit,
+    navRequest: String?,
+    onNavConsumed: () -> Unit,
 ) {
     if (localDir == null) {
         Column(
@@ -4027,7 +4038,11 @@ private fun LocalSourceTab(
     }
 
     // 目录已就绪：进入自研文件管理器（UI 参考 Material Files 的列表设计）。
-    LocalFileBrowser(base = localDir)
+    LocalFileBrowser(
+        base = localDir,
+        navRequest = navRequest,
+        onNavConsumed = onNavConsumed,
+    )
 }
 
 /** 本地文件浏览器可排序字段（名称 / 修改时间 / 大小）。复用书架 SortItem 的样式。 */
@@ -4189,7 +4204,11 @@ private fun fileTint(entry: LocalEntry): Color {
  *  [LibraryDisplayMode] + [SortItem]；选择记 [StoragePreferences] 持久化。
  *  点击图片/归档/目录分别在 reader 中整目录加载（reader 自动载入同目录全部图片），不另设「阅读此目录」按钮。 */
 @Composable
-private fun LocalFileBrowser(base: UniFile) {
+private fun LocalFileBrowser(
+    base: UniFile,
+    navRequest: String?,
+    onNavConsumed: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { Injekt.get<StoragePreferences>() }
@@ -4238,6 +4257,16 @@ private fun LocalFileBrowser(base: UniFile) {
     BackHandler(enabled = stack.isNotEmpty()) {
         stack = stack.dropLast(1)
     }
+
+    // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转：navRequest 为文件的相对路径，
+    // 定位到其所在目录（父目录栈）；目录不存在时 fold 兜底回落根目录。消费后置空。
+    LaunchedEffect(navRequest) {
+        if (navRequest != null) {
+            stack = navRequest.substringBeforeLast('/').split('/').filter { it.isNotBlank() }
+            onNavConsumed()
+        }
+    }
+    // SY <--
 
     // 统一点击行为：目录→下钻；归档/epub→直接读该文件；图片→读所在目录（reader 自动载入同目录全部图片）。
     val onItemOpen: (LocalEntry) -> Unit = { entry ->
@@ -4862,43 +4891,9 @@ private suspend fun countChapterPages(context: Context, url: String, file: UniFi
 // 目录与归档都能取到首图，且共用 Komga 的缓存池与上限。
 // SY <--
 
-/** 用系统文件管理器打开本卷所在目录（父目录）。chapterUrl 为相对本地根目录的路径。
- *  目录走 SAF tree-backed URI；SAF 没有真实文件路径，故失败时退化为 Toast 显示相对路径。 */
-private suspend fun openFileLocation(context: Context, chapterUrl: String) {
-    val parentRel = chapterUrl.substringBeforeLast('/')
-    val dir = withContext(Dispatchers.IO) {
-        if (parentRel.isBlank()) {
-            Injekt.get<LocalSourceFileSystem>().getBaseDirectory()
-        } else {
-            resolveLocalFile(parentRel)
-        }
-    }
-    val uri = dir?.uri
-    val intent = uri?.let {
-        Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(it, DocumentsContract.Document.MIME_TYPE_DIR)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-    }
-    withContext(Dispatchers.Main) {
-        if (intent != null) {
-            runCatching { context.startActivity(intent) }
-                .onFailure {
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.local_open_location_failed, chapterUrl),
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                }
-        } else {
-            Toast.makeText(
-                context,
-                context.getString(R.string.local_open_location_failed, chapterUrl),
-                Toast.LENGTH_SHORT,
-            ).show()
-        }
-    }
-}
+// SY --> Komiho: 「打开文件位置」已改为应用内跳转（openLocalLocationInApp → 浏览 tab
+// 定位所在目录），不再调起系统文件管理器，原 openFileLocation(ACTION_VIEW 目录) 移除。
+// SY <--
 
 /** 章节号格式化：整数不带小数（1.0 → 1），否则保留两位小数。 */
 private fun formatChapterNumber(n: Double): String =
@@ -5038,7 +5033,10 @@ private data class MergedBook(
 
 /** 历史 tab：按卷（chapterUrl）合并的最近阅读；3-dot 菜单提供「汇聚」与「删除记录」。 */
 @Composable
-private fun HistoryTabLocal(refreshTick: Int) {
+private fun HistoryTabLocal(
+    refreshTick: Int,
+    onOpenLocation: (String) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val historyRepo = remember { Injekt.get<HistoryRepository>() }
@@ -5124,7 +5122,8 @@ private fun HistoryTabLocal(refreshTick: Int) {
                         text = { Text(composeStringResource(R.string.local_open_file_location)) },
                         onClick = {
                             dismiss()
-                            scope.launch { openFileLocation(context, rep.chapterUrl) }
+                            // 应用内跳转：切到浏览 tab 并定位到本卷所在目录。
+                            onOpenLocation(rep.chapterUrl)
                         },
                     )
                 },
@@ -5136,7 +5135,10 @@ private fun HistoryTabLocal(refreshTick: Int) {
 
 /** 书签 tab：按页书签（一本书可多条），按书聚合一行，展开看多页；点页跳到该页，删除删对应书签。 */
 @Composable
-private fun BookmarksTabLocal(refreshTick: Int) {
+private fun BookmarksTabLocal(
+    refreshTick: Int,
+    onOpenLocation: (String) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val bookmarkRepo = remember { Injekt.get<BookmarkRepository>() }
@@ -5203,7 +5205,8 @@ private fun BookmarksTabLocal(refreshTick: Int) {
                                 text = { Text(composeStringResource(R.string.local_open_file_location)) },
                                 onClick = {
                                     dismiss()
-                                    scope.launch { openFileLocation(context, first.chapterUrl) }
+                                    // 应用内跳转：切到浏览 tab 并定位到本卷所在目录。
+                                    onOpenLocation(first.chapterUrl)
                                 },
                             )
                         },
