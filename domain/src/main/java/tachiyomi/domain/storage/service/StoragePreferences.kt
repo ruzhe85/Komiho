@@ -56,4 +56,15 @@ class StoragePreferences(
         Preference.appStateKey("local_browse_columns"),
         0,
     )
+
+    /**
+     * Komiho: 本地浏览「真实路径模式」的漫画根目录（真实文件系统路径，如
+     * `/storage/emulated/0/漫画`）。仅当持有 MANAGE_EXTERNAL_STORAGE 时生效；
+     * 为空则回退 SAF tree URI（localSourceRoot）。设值后本地列表/封面/CBZ 阅读
+     * 全走 UniFile.fromFile（File 直连），避开 SAF 跨进程读，显著提速。
+     */
+    val localBrowseRealPath: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("local_browse_real_path"),
+        "",
+    )
 }

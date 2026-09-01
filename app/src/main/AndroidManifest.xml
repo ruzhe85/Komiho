@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- Komiho: 真实路径模式（Android 11+）需所有文件访问权限，才能绕过 SAF 直接 File 访问漫画目录。 -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
     <!-- The following were inherited from the MihonSY fork and are not used
          by a LAN-only Komga client (storage / extension management / boot /
          query packages / notifications / locale). -->

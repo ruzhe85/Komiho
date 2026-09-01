@@ -1,6 +1,8 @@
 package app.mihonsy.komga.ui
 
 import android.content.Intent
+import android.os.Build
+import android.os.Environment
 import android.content.res.Configuration
 import coil3.ImageLoader
 import android.content.Context
@@ -352,13 +354,27 @@ private fun KomgaMainScreen(
     // 所选文件夹即漫画根目录：写入独立的 localSourceRoot 偏好（不再走
     // StorageManager 的 <base>/local，否则用户得先把漫画搬进 local/ 才能看）。
     val pickLocalFolder = SettingsDataScreen.storageLocationPicker(storagePreferences.localSourceRoot)
-    var localDir by remember { mutableStateOf(localSourceFs.getBaseDirectory()) }
-    // 目录偏好变更后同步状态。
-    LaunchedEffect(Unit) {
-        storagePreferences.localSourceRoot.changes().collect {
-            localDir = localSourceFs.getBaseDirectory()
+    // SY --> Komiho: 真实路径模式——持有 MANAGE_EXTERNAL_STORAGE 且 localBrowseRealPath 非空时，
+    // 用 UniFile.fromFile 走真实文件系统（列表/封面/CBZ 阅读全走 File，快且避开 SAF 的 OEM 坑）；
+    // 已授权但未设根时从内部存储根开始浏览，供用户「设为漫画根」；否则维持 SAF tree URI（原行为）。
+    fun computeLocalDir(): UniFile? {
+        val real = storagePreferences.localBrowseRealPath.get()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+            if (real.isNotBlank() && File(real).exists()) {
+                return UniFile.fromFile(File(real))
+            }
+            if (real.isBlank()) {
+                return UniFile.fromFile(Environment.getExternalStorageDirectory())
+            }
         }
+        return localSourceFs.getBaseDirectory()
     }
+    var localDir by remember { mutableStateOf(computeLocalDir()) }
+    LaunchedEffect(Unit) {
+        storagePreferences.localSourceRoot.changes().collect { localDir = computeLocalDir() }
+        storagePreferences.localBrowseRealPath.changes().collect { localDir = computeLocalDir() }
+    }
+    // SY <--
     // SY <--
 
     // Filter coming from the Series detail page (tap tag/genre/author → filter Library).
@@ -4059,6 +4075,11 @@ private fun LocalFileBrowser(base: UniFile) {
     var columnCount by remember { mutableStateOf(prefs.localBrowseColumns.get()) }
     var showOptions by remember { mutableStateOf(false) }
 
+    // SY --> Komiho: 真实路径模式 UI 状态（仅在持有 MANAGE_EXTERNAL_STORAGE 时显示「设为漫画根」）。
+    val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+    val realPath by prefs.localBrowseRealPath.changes().collectAsState(initial = prefs.localBrowseRealPath.get())
+    // SY <--
+
     // 相对路径栈：栈底为空串代表根目录，下钻时追加段名。每个条目的相对路径 =
     // (stack + 自身段名) 用 "/" 连接；chapter.url 就存这个相对路径，
     // 阅读时由 tree-backed 的 base.findFile(相对路径) 重建，散图目录才能正常列图。
@@ -4140,6 +4161,26 @@ private fun LocalFileBrowser(base: UniFile) {
                             text = seg,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
+                        )
+                    }
+                }
+            }
+            if (hasAllFilesAccess) {
+                val curPath = current.filePath
+                if (curPath != null) {
+                    IconButton(onClick = { prefs.localBrowseRealPath.set(curPath) }) {
+                        Icon(
+                            imageVector = Icons.Filled.CheckCircle,
+                            contentDescription = "设为漫画根",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                if (realPath.isNotBlank()) {
+                    IconButton(onClick = { prefs.localBrowseRealPath.set("") }) {
+                        Icon(
+                            imageVector = Icons.Filled.Clear,
+                            contentDescription = "清除真实路径根",
                         )
                     }
                 }
@@ -5023,7 +5064,13 @@ private fun BookmarksTabLocal(refreshTick: Int) {
                         totalPages = totalPages,
                         coverModel = coverModel,
                         onClick = {
-                            expanded = if (isExpanded) expanded - chapterId else expanded + chapterId
+                            // 单条书签直接跳转该页；多条才展开列表（避免 1 条还弹列表）
+                            if (bms.size == 1) {
+                                val bm = bms.first()
+                                context.startActivity(ReaderActivity.newIntent(context, bm.mangaId, chapterId, bm.page))
+                            } else {
+                                expanded = if (isExpanded) expanded - chapterId else expanded + chapterId
+                            }
                         },
                         moreMenu = { dismiss ->
                             DropdownMenuItem(

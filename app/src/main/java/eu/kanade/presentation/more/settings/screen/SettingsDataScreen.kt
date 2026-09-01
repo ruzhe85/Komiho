@@ -4,6 +4,9 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -121,6 +124,7 @@ object SettingsDataScreen : SearchableSettings {
 
         return listOf(
             getStorageLocationPref(storagePreferences = storagePreferences),
+            getAllFilesAccessPref(),
             Preference.PreferenceItem.InfoPreference(stringResource(MR.strings.pref_storage_location_info)),
 
             getBackupAndRestoreGroup(backupPreferences = backupPreferences),
@@ -197,6 +201,36 @@ object SettingsDataScreen : SearchableSettings {
             },
         )
     }
+
+    // SY --> Komiho: 真实路径模式授权入口（仅 Android 11+）。跳转系统设置页手动开启
+    // 「所有文件访问权限」；授权后本地浏览根会切到真实路径（见 KomgaMainActivity.computeLocalDir）。
+    @Composable
+    private fun getAllFilesAccessPref(): Preference.PreferenceItem.TextPreference {
+        val context = LocalContext.current
+        val granted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+        return Preference.PreferenceItem.TextPreference(
+            title = "所有文件访问权限",
+            subtitle = if (granted) {
+                "已授权：本地浏览使用真实路径（列表/封面/阅读更快）"
+            } else {
+                "未授权：本地浏览使用 SAF。授权后可大幅提速"
+            },
+            onClick = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    try {
+                        context.startActivity(
+                            Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            },
+                        )
+                    } catch (e: ActivityNotFoundException) {
+                        context.toast("无法打开系统设置")
+                    }
+                }
+            },
+        )
+    }
+    // SY <--
 
     @Composable
     private fun getBackupAndRestoreGroup(backupPreferences: BackupPreferences): Preference.PreferenceGroup {
