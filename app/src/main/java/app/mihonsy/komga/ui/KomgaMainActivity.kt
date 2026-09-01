@@ -370,28 +370,6 @@ private fun KomgaMainScreen(
         storagePreferences.localBrowseRealPath.changes().collect { localDir = computeLocalDir() }
     }
 
-    // SY --> Komiho: 首次需要选择本地目录时，若尚未授予 MANAGE_EXTERNAL_STORAGE，
-    // 先弹授权提示对话框，而不是直接静默走 SAF；用户选「使用 SAF」才维持原流程。
-    // 已授权时 SAF 选目录已无意义（真实路径模式下 localSourceRoot 被忽略）：改为切到
-    // 浏览 tab 引导用户进入目标文件夹后点「设为漫画根」，杜绝「选了却变根目录」。
-    var showManageAccessDialog by remember { mutableStateOf(false) }
-    fun requestLocalFolder() {
-        val authorized =
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
-        if (authorized) {
-            currentTab = MainTab.Browse.ordinal
-            Toast.makeText(
-                context,
-                "已授予所有文件访问权限：请浏览到目标文件夹后点顶部「设为漫画根」",
-                Toast.LENGTH_LONG,
-            ).show()
-        } else {
-            showManageAccessDialog = true
-        }
-    }
-    // SY <--
-    // SY <--
-
     // Filter coming from the Series detail page (tap tag/genre/author → filter Library).
     // Driven reactively by filterSignal so taps arriving via onNewIntent (when this
     // Activity instance is reused) actually apply. (Previously captured once with
@@ -413,6 +391,28 @@ private fun KomgaMainScreen(
     fun openLocalLocationInApp(chapterUrl: String) {
         localBrowseNavRequest = chapterUrl
         currentTab = MainTab.Browse.ordinal
+    }
+    // SY <--
+
+    // SY --> Komiho: 首次需要选择本地目录时，若尚未授予 MANAGE_EXTERNAL_STORAGE，
+    // 先弹授权提示对话框，而不是直接静默走 SAF；用户选「使用 SAF」才维持原流程。
+    // 已授权时 SAF 选目录已无意义（真实路径模式下 localSourceRoot 被忽略）：改为切到
+    // 浏览 tab 引导用户进入目标文件夹后点「设为漫画根」，杜绝「选了却变根目录」。
+    // （声明在 currentTab 之后：局部函数不能前向引用。）
+    var showManageAccessDialog by remember { mutableStateOf(false) }
+    fun requestLocalFolder() {
+        val authorized =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+        if (authorized) {
+            currentTab = MainTab.Browse.ordinal
+            Toast.makeText(
+                context,
+                "已授予所有文件访问权限：请浏览到目标文件夹后点顶部「设为漫画根」",
+                Toast.LENGTH_LONG,
+            ).show()
+        } else {
+            showManageAccessDialog = true
+        }
     }
     // SY <--
 
