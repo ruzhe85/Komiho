@@ -1805,12 +1805,13 @@ private fun LibraryTab(
             } else {
                 // M3.20: the display mode drives BOTH the auto column density
                 // (Adaptive min size) AND the grid spacing. This way 紧凑网格 /
-                // 舒适网格 always has a visible effect — even when the user pins
+                // 松散网格 always has a visible effect — even when the user pins
                 // a fixed column count via the slider (columns > 0, where the
                 // Adaptive min size is ignored and the two modes would otherwise
                 // render identically).
                 val isCompact = displayMode == LibraryDisplayMode.CompactGrid
-                val adaptiveMin = if (isCompact) 96.dp else 168.dp
+                // 松散网格用 128.dp：手机窄屏（~360dp）至少 2 列；168.dp 在窄屏只够 1 列（"1 行 1 本书"）。
+                val adaptiveMin = if (isCompact) 96.dp else 128.dp
                 val hSpace = if (isCompact) 4.dp else 8.dp
                 val vSpace = if (isCompact) 6.dp else 12.dp
                 val cells = if (columns > 0) {
@@ -2950,7 +2951,8 @@ private fun EmbeddedSearch(
             } else {
                 // 与库 tab 完全一致的显示模式：compact/comfortable 间距 + 自适应或固定列数
                 val isCompact = displayMode == LibraryDisplayMode.CompactGrid
-                val adaptiveMin = if (isCompact) 96.dp else 168.dp
+                // 松散网格用 128.dp：手机窄屏至少 2 列（168.dp 窄屏只够 1 列）。
+                val adaptiveMin = if (isCompact) 96.dp else 128.dp
                 val hSpace = if (isCompact) 4.dp else 8.dp
                 val vSpace = if (isCompact) 6.dp else 12.dp
                 val cells = if (columns > 0) {
@@ -4054,6 +4056,7 @@ private fun LocalFileBrowser(base: UniFile) {
     var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.localBrowseDisplayMode.get())) }
     var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.localBrowseSort.get())) }
     var showCover by remember { mutableStateOf(prefs.localBrowseShowCover.get()) }
+    var columnCount by remember { mutableStateOf(prefs.localBrowseColumns.get()) }
     var showOptions by remember { mutableStateOf(false) }
 
     // 相对路径栈：栈底为空串代表根目录，下钻时追加段名。每个条目的相对路径 =
@@ -4082,7 +4085,7 @@ private fun LocalFileBrowser(base: UniFile) {
     }
 
     // 封面改为网格格子「可见时懒加载」（见 LocalFileGridItem）：进入目录不再批量预取全部
-    // 封面，避免点目录/滚动突发卡顿；列表模式完全不解码封面。
+    // 封面，避免点目录/滚动突发卡顿；列表模式仅在开启「显示封面」时按需解码（替代 icon）。
 
     // 返回键回上一层；已在根目录时不拦截，交还外层（回 Home）。
     BackHandler(enabled = stack.isNotEmpty()) {
@@ -4163,6 +4166,7 @@ private fun LocalFileBrowser(base: UniFile) {
                     items(entries, key = { it.uni.uri.toString() }) { file ->
                         FileRow(
                             entry = file,
+                            showCover = showCover,
                             clickable = isItemClickable(file),
                             onOpen = { onItemOpen(file) },
                         )
@@ -4174,10 +4178,11 @@ private fun LocalFileBrowser(base: UniFile) {
                 // 网格模式复用 Komga 书架的 Adaptive 列密度 + 间距逻辑（仅列表/紧凑网格两种）。
                 val isCompact = displayMode != LibraryDisplayMode.List
                 val adaptiveMin = if (isCompact) 96.dp else 168.dp
+                val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = adaptiveMin)
                 val gridState = rememberLazyGridState()
                 LazyVerticalGrid(
                     state = gridState,
-                    columns = GridCells.Adaptive(minSize = adaptiveMin),
+                    columns = cells,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 8.dp),
                     verticalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 12.dp),
@@ -4203,14 +4208,17 @@ private fun LocalFileBrowser(base: UniFile) {
         onDisplayModeChange = { displayMode = it; prefs.localBrowseDisplayMode.set(it.prefValue) },
         showCover = showCover,
         onShowCoverChange = { showCover = it; prefs.localBrowseShowCover.set(it) },
+        columnCount = columnCount,
+        onColumnChange = { columnCount = it; prefs.localBrowseColumns.set(it) },
         sort = sort,
         onSortModeChange = { sort = it; prefs.localBrowseSort.set(it.toPref()) },
     )
 }
 
-/** 文件/目录一行（列表模式）。可点性由调用方按「目录/归档/图片」决定。 */
+/** 文件/目录一行（列表模式）。可点性由调用方按「目录/归档/图片」决定。
+ *  开启「显示封面」时，左侧 icon 改为封面缩略图（走 Coil 全局缓存，取不到回落 icon）。 */
 @Composable
-private fun FileRow(entry: LocalEntry, clickable: Boolean, onOpen: () -> Unit) {
+private fun FileRow(entry: LocalEntry, showCover: Boolean, clickable: Boolean, onOpen: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -4218,7 +4226,12 @@ private fun FileRow(entry: LocalEntry, clickable: Boolean, onOpen: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(fileIcon(entry), contentDescription = null, tint = fileTint(entry))
+        LocalCoverThumb(
+            entry = entry,
+            showCover = showCover,
+            modifier = Modifier.size(width = 40.dp, height = 56.dp),
+            iconSize = 24.dp,
+        )
         Spacer(Modifier.width(12.dp))
         Text(
             text = entry.name,
@@ -4229,9 +4242,43 @@ private fun FileRow(entry: LocalEntry, clickable: Boolean, onOpen: () -> Unit) {
     }
 }
 
+/** 本地条目封面/图标统一渲染：showCover 开时显示封面缩略图（Coil + 全局 DiskCache），
+ *  加载中或取不到封面时回落到文件图标。列表与网格共用，保证两种模式封面行为一致。 */
+@Composable
+private fun LocalCoverThumb(
+    entry: LocalEntry,
+    showCover: Boolean,
+    modifier: Modifier = Modifier,
+    iconSize: Dp,
+) {
+    val fallback: @Composable () -> Unit = {
+        Icon(
+            fileIcon(entry),
+            contentDescription = null,
+            tint = fileTint(entry),
+            modifier = Modifier.size(iconSize),
+        )
+    }
+    if (showCover) {
+        val context = LocalContext.current
+        SubcomposeAsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(LocalCoverData(entry.uni, entry.lastModified))
+                .build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier,
+            loading = fallback,
+            error = fallback,
+        )
+    } else {
+        fallback()
+    }
+}
+
 /** 网格模式一个格子：封面（开启且已懒加载到）直接显示，否则图标 + 名称。
  *  封面仅在格子挂载（即可见）时解码，离屏自动取消；命中内存缓存即时显示，
- *  因此进入目录/滚动都不会突发解码，列表模式完全不触发本函数。
+ *  因此进入目录/滚动都不会突发解码；列表模式走 [FileRow] + [LocalCoverThumb]（同样复用 Coil 缓存）。
  *  全部展示字段来自 [LocalEntry] 缓存，渲染期零 SAF 调用。 */
 @Composable
 private fun LocalFileGridItem(
@@ -4303,9 +4350,9 @@ private fun LocalFileGridItem(
 }
 
 /**
- * 本地浏览器显示选项：排序 + 显示模式 + 封面开关。
- * 复用书架成熟的 [SortItem] / [LibraryDisplayMode] / [TabbedDialog]，选择落地
- * [StoragePreferences]（即用户要求的「可持久化的设置项」）。
+ * 本地浏览器显示选项：排序 + 显示模式 + 封面开关 + 每行列数。
+ * 复用书架成熟的 [SortItem] / [LibraryDisplayMode] / [SliderItem] / [TabbedDialog]，
+ * 选择落地 [StoragePreferences]（即用户要求的「可持久化的设置项」）。
  */
 @Composable
 private fun LocalBrowseOptionsMenu(
@@ -4315,6 +4362,8 @@ private fun LocalBrowseOptionsMenu(
     onDisplayModeChange: (LibraryDisplayMode) -> Unit,
     showCover: Boolean,
     onShowCoverChange: (Boolean) -> Unit,
+    columnCount: Int,
+    onColumnChange: (Int) -> Unit,
     sort: LocalFileSort,
     onSortModeChange: (LocalFileSort) -> Unit,
 ) {
@@ -4368,6 +4417,20 @@ private fun LocalBrowseOptionsMenu(
                         checked = showCover,
                         onClick = { onShowCoverChange(!showCover) },
                     )
+                    if (displayMode != LibraryDisplayMode.List) {
+                        Spacer(Modifier.height(8.dp))
+                        SliderItem(
+                            value = columnCount,
+                            valueRange = 0..10,
+                            label = composeStringResource(R.string.pref_library_columns),
+                            valueString = if (columnCount > 0) {
+                                columnCount.toString()
+                            } else {
+                                composeStringResource(R.string.label_auto)
+                            },
+                            onChange = onColumnChange,
+                        )
+                    }
                 }
             }
         }
@@ -4858,8 +4921,10 @@ private fun HistoryTabLocal(refreshTick: Int) {
                 totalPages = totalPages,
                 coverModel = coverModel,
                 onClick = {
-                    // 直接续读（按历史恢复进度，不再弹选择框）
-                    context.startActivity(ReaderActivity.newIntent(context, rep.mangaId, rep.chapterId))
+                    // 直接续读：把历史记录的阅读页码作为 page 传入，绕过 ChapterLoader/ReaderViewModel
+                    // 里「已读章节跳过 last_page_read 恢复」的 !read 守卫（图片文件夹整本=1 章，看完即 read=true，
+                    // 否则会固定跳回第一页）。page 为 0-based，与 rep.lastPageRead 一致。
+                    context.startActivity(ReaderActivity.newIntent(context, rep.mangaId, rep.chapterId, rep.lastPageRead.toInt()))
                 },
                 moreMenu = { dismiss ->
                     DropdownMenuItem(

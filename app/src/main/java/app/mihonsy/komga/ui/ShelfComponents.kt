@@ -126,10 +126,11 @@ fun SeriesShelf(
         }
     } else {
         // The display mode drives BOTH the auto column density AND the grid
-        // spacing, so 紧凑网格 / 舒适网格 always has a visible effect — even
+        // spacing, so 紧凑网格 / 松散网格 always has a visible effect — even
         // with a fixed column count (where the Adaptive min size is ignored).
         val isCompact = mode == LibraryDisplayMode.CompactGrid
-        val minSize = if (isCompact) 96.dp else 168.dp
+        // 松散网格用 128.dp：手机窄屏至少 2 列（168.dp 窄屏只够 1 列）。
+        val minSize = if (isCompact) 96.dp else 128.dp
         val hSpace = if (isCompact) 4.dp else 8.dp
         val vSpace = if (isCompact) 6.dp else 12.dp
         val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
@@ -297,7 +298,8 @@ fun BookShelf(
             // Display mode drives density + spacing (see SeriesShelf above),
             // so the mode choice is always visible regardless of the slider.
             val isCompact = mode == LibraryDisplayMode.CompactGrid
-            val minSize = if (isCompact) 96.dp else 168.dp
+            // 松散网格用 128.dp：手机窄屏至少 2 列（168.dp 窄屏只够 1 列）。
+            val minSize = if (isCompact) 96.dp else 128.dp
             val hSpace = if (isCompact) 4.dp else 8.dp
             val vSpace = if (isCompact) 6.dp else 12.dp
             val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
