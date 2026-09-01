@@ -4251,14 +4251,6 @@ private fun LocalCoverThumb(
     modifier: Modifier = Modifier,
     iconSize: Dp,
 ) {
-    val fallback: @Composable () -> Unit = {
-        Icon(
-            fileIcon(entry),
-            contentDescription = null,
-            tint = fileTint(entry),
-            modifier = Modifier.size(iconSize),
-        )
-    }
     if (showCover) {
         val context = LocalContext.current
         SubcomposeAsyncImage(
@@ -4268,12 +4260,23 @@ private fun LocalCoverThumb(
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = modifier,
-            loading = fallback,
-            error = fallback,
+            loading = { LocalCoverFallback(entry, iconSize) },
+            error = { LocalCoverFallback(entry, iconSize) },
         )
     } else {
-        fallback()
+        LocalCoverFallback(entry, iconSize)
     }
+}
+
+/** 本地条目回落图标（目录/归档/单图/CBZ 取不到封面，或列表未开封面时显示）。 */
+@Composable
+private fun LocalCoverFallback(entry: LocalEntry, iconSize: Dp) {
+    Icon(
+        fileIcon(entry),
+        contentDescription = null,
+        tint = fileTint(entry),
+        modifier = Modifier.size(iconSize),
+    )
 }
 
 /** 网格模式一个格子：封面（开启且已懒加载到）直接显示，否则图标 + 名称。
