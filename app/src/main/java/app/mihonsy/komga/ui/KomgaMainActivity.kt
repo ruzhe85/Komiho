@@ -372,12 +372,19 @@ private fun KomgaMainScreen(
 
     // SY --> Komiho: 首次需要选择本地目录时，若尚未授予 MANAGE_EXTERNAL_STORAGE，
     // 先弹授权提示对话框，而不是直接静默走 SAF；用户选「使用 SAF」才维持原流程。
+    // 已授权时 SAF 选目录已无意义（真实路径模式下 localSourceRoot 被忽略）：改为切到
+    // 浏览 tab 引导用户进入目标文件夹后点「设为漫画根」，杜绝「选了却变根目录」。
     var showManageAccessDialog by remember { mutableStateOf(false) }
     fun requestLocalFolder() {
         val authorized =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
         if (authorized) {
-            pickLocalFolder.launch(null)
+            currentTab = MainTab.Browse.ordinal
+            Toast.makeText(
+                context,
+                "已授予所有文件访问权限：请浏览到目标文件夹后点顶部「设为漫画根」",
+                Toast.LENGTH_LONG,
+            ).show()
         } else {
             showManageAccessDialog = true
         }
@@ -3279,7 +3286,7 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             subtitle = if (realPath.isNotBlank()) {
                 realPath
             } else {
-                "未设置：使用 SAF 授权目录（在本地浏览顶部点「设为漫画根」设置）"
+                "未设置：在本地浏览进入目标文件夹后点顶部「设为漫画根」"
             },
             icon = Icons.Filled.Folder,
             onPreferenceClick = {},
@@ -5202,6 +5209,22 @@ private fun BookmarksTabLocal(
                             }
                         },
                         moreMenu = { dismiss ->
+                            // 单条书签点击即跳阅读器、永不展开，删除入口只能放这里；
+                            // 多条的删除在展开列表内逐条进行。
+                            if (bms.size == 1) {
+                                DropdownMenuItem(
+                                    text = { Text(composeStringResource(R.string.reader_bookmark_remove)) },
+                                    onClick = {
+                                        dismiss()
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                runCatching { bookmarkRepo.removeBookmark(bms.first().id) }
+                                            }
+                                            load()
+                                        }
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(composeStringResource(R.string.local_open_file_location)) },
                                 onClick = {
