@@ -73,7 +73,7 @@ class LocalCoverFetcher(
                     }
                 }
             }
-            file.extension.equals("epub", ignoreCase = true) -> null
+            file.name?.endsWith("epub", ignoreCase = true) == true -> null
             ImageUtil.isImage(file.name) -> decodeSampled({ file.openInputStream() }, MAX_PX)
             else -> null
         }
