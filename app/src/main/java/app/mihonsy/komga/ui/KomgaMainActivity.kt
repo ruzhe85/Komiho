@@ -4179,7 +4179,7 @@ private fun LocalFileBrowser(base: UniFile) {
                 if (realPath.isNotBlank()) {
                     IconButton(onClick = { prefs.localBrowseRealPath.set("") }) {
                         Icon(
-                            imageVector = Icons.Filled.Clear,
+                            imageVector = Icons.Filled.Close,
                             contentDescription = "清除真实路径根",
                         )
                     }
