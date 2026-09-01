@@ -50,4 +50,10 @@ class StoragePreferences(
         Preference.appStateKey("local_browse_show_cover"),
         false,
     )
+
+    /** Komiho: 本地文件浏览器网格模式每行列数（0 = 自动 Adaptive 列密度）。 */
+    val localBrowseColumns: Preference<Int> = preferenceStore.getInt(
+        Preference.appStateKey("local_browse_columns"),
+        0,
+    )
 }
