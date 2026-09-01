@@ -51,6 +51,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
+// SY --> Komiho: 本地封面（走 Coil，与 Komga 共用 DiskCache）
+import eu.kanade.tachiyomi.data.coil.LocalCoverData
+// SY <--
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.WindowInsets
@@ -225,15 +228,9 @@ import tachiyomi.core.common.storage.extension
 import tachiyomi.core.common.storage.nameWithoutExtension
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 // SY --> Komiho 本地浏览器：显示模式 + 排序 + 封面
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.style.TextAlign
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import mihon.core.common.archive.archiveReader
-import java.io.ByteArrayInputStream
-import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Collections
 import java.util.LinkedHashMap
@@ -293,7 +290,7 @@ class KomgaMainActivity : KomgaBaseActivity() {
  *
  * 分两类：
  *  - Komga：库/系列语义，底部导航为 Home / Library / Lists / Downloads / Settings
- *  - 文件型来源：文件夹浏览语义，底部导航为 Browse / Settings
+ *  - 文件型来源：文件夹浏览语义，底部导航为 Browse / History / Bookmarks / Settings
  *
  * 文件型来源（本地、未来的 SMB / WebDAV）**共用** Browse tab，因此底部导航
  * 的数量恒定，不会随来源增加而膨胀成 8 个 tab。
@@ -317,9 +314,9 @@ private enum class MainTab(
     Library(R.string.tab_library, Icons.Filled.Book, komgaOnly = true),
     Lists(R.string.tab_lists, Icons.AutoMirrored.Filled.List, komgaOnly = true),
     Downloads(R.string.tab_downloads, Icons.Filled.Download, komgaOnly = true),
-    // 本地文件浏览器：常驻一级 tab（不依赖来源切换，不挂书架）。
+    // 本地文件浏览器：仅文件型来源可见（Komga 来源下不显示，避免库/系列语义混入本地文件夹浏览）。
     // SMB / WebDAV 落地后各自独立成 tab，或在此下扩展。
-    Browse(R.string.tab_browse, Icons.Filled.Folder),
+    Browse(R.string.tab_browse, Icons.Filled.Folder, fileOnly = true),
     // SY --> Komiho: 本地模式历史 / 书签 tab（fileOnly，仅文件型来源下出现）。
     History(R.string.tab_history, Icons.Filled.History, fileOnly = true),
     Bookmarks(R.string.tab_bookmarks, Icons.Filled.Bookmark, fileOnly = true),
@@ -4246,15 +4243,6 @@ private fun LocalFileGridItem(
     val context = LocalContext.current
     val isDir = entry.isDirectory
     val isArchive = entry.isArchive
-    val uriKey = entry.uni.uri.toString()
-    var cover by remember(uriKey) { mutableStateOf(localCoverCache[uriKey]) }
-
-    // 懒加载：仅可见格子才解码；并发由 coverDispatcher 限 4，离屏取消。
-    LaunchedEffect(uriKey, showCover) {
-        if (!showCover) { cover = null; return@LaunchedEffect }
-        localCoverCache[uriKey]?.let { cover = it; return@LaunchedEffect }
-        cover = withContext(coverDispatcher) { loadCoverBitmap(context, entry.uni, 360) }
-    }
 
     Column(
         modifier = Modifier
@@ -4266,14 +4254,34 @@ private fun LocalFileGridItem(
             modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
             contentAlignment = Alignment.Center,
         ) {
-            val coverBitmap = cover
-            if (showCover && coverBitmap != null) {
-                Image(
-                    bitmap = coverBitmap.asImageBitmap(),
+            if (showCover) {
+                // SY --> Komiho: 本地封面改走 Coil，与 Komga 共用全局 DiskCache（同一个上限）。
+                // 缓存键含 lastModified，文件换封面后自动失效；取不到封面则退回文件图标。
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(LocalCoverData(entry.uni, entry.lastModified))
+                        .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
+                    loading = {
+                        Icon(
+                            fileIcon(entry),
+                            contentDescription = null,
+                            tint = fileTint(entry),
+                            modifier = Modifier.size(if (isDir || isArchive) 56.dp else 40.dp),
+                        )
+                    },
+                    error = {
+                        Icon(
+                            fileIcon(entry),
+                            contentDescription = null,
+                            tint = fileTint(entry),
+                            modifier = Modifier.size(if (isDir || isArchive) 56.dp else 40.dp),
+                        )
+                    },
                 )
+                // SY <--
             } else {
                 Icon(
                     fileIcon(entry),
@@ -4366,73 +4374,9 @@ private fun LocalBrowseOptionsMenu(
     }
 }
 
-/** 封面位图内存缓存：避免网格/列表切换、滚动回看时重复解码造成卡顿。键为文件 uri。 */
-private val localCoverCache =
-    Collections.synchronizedMap(LinkedHashMap<String, Bitmap>(64, 0.75f, true))
-private const val LOCAL_COVER_CACHE_MAX = 96
-
-/** 限定并发度，避免进入网格时一次性并行解码大量封面导致掉帧。 */
-private val coverDispatcher = Dispatchers.IO.limitedParallelism(4)
-
-/**
- * 最佳努力取封面位图：目录取首张图；归档取首张图条目（读入内存后解码，避免
- * archiveReader 的 PFD 被 .use 提前关闭后二次开档读 mmap 引发的 native 闪退）；
- * 单图直接用。结果进内存缓存，失败返回 null。
- */
-private suspend fun loadCoverBitmap(context: android.content.Context, file: UniFile, maxPx: Int): Bitmap? {
-    val key = file.uri.toString()
-    localCoverCache[key]?.let { return it }
-    return withContext(coverDispatcher) {
-        runCatching {
-            val bmp = when {
-                file.isDirectory -> file.listFiles().orEmpty()
-                    .firstOrNull { it.isFile && ImageUtil.isImage(it.name) }
-                    ?.let { decodeSampled({ it.openInputStream() }, maxPx) }
-                Archive.isSupported(file) -> file.archiveReader(context).use { reader ->
-                    val name = reader.useEntries { seq ->
-                        seq.firstOrNull { ImageUtil.isImage(it.name) }?.name
-                    }
-                    if (name == null) {
-                        null
-                    } else {
-                        reader.getInputStream(name)?.use { stream ->
-                            val bytes = stream.readBytes()
-                            decodeSampled({ ByteArrayInputStream(bytes) }, maxPx)
-                        }
-                    }
-                }
-                file.extension.equals("epub", true) -> null
-                ImageUtil.isImage(file.name) -> decodeSampled({ file.openInputStream() }, maxPx)
-                else -> null
-            }
-            bmp?.let {
-                synchronized(localCoverCache) {
-                    while (localCoverCache.size >= LOCAL_COVER_CACHE_MAX) {
-                        val eldest = localCoverCache.keys.firstOrNull() ?: break
-                        localCoverCache.remove(eldest)
-                    }
-                    localCoverCache[key] = it
-                }
-            }
-            bmp
-        }.getOrNull()
-    }
-}
-
-/** 两次 decode：先读边界算 inSampleSize，再采样解码；open 提供可重开的输入流。 */
-private fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? {
-    open()?.use { first ->
-        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeStream(first, null, opts)
-        if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
-        val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
-        open()?.use { second ->
-            val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
-            return BitmapFactory.decodeStream(second, null, opts2)
-        }
-    }
-    return null
-}
+// SY --> Komiho: 本地封面的解码与缓存已迁入 LocalCoverFetcher（走 Coil），
+// 与 Komga 封面共用同一个 DiskCache 池与上限；这里不再保留手写解码和进程内 bitmap 缓存。
+// SY <--
 
 /**
  * 打开一个本地条目（目录/归档/epub）为「一本」：按 LocalSource 约定建一条
@@ -4680,21 +4624,10 @@ private suspend fun countChapterPages(context: Context, url: String, file: UniFi
     return n
 }
 
-/** 尝试提取章节封面 URI：目录取第一张图片；归档/EPUB 暂不提取。 */
-private fun resolveCoverUri(file: UniFile?): String? {
-    if (file == null) return null
-    return when {
-        file.isDirectory -> {
-            file.listFiles()
-                ?.filter { !it.isDirectory && ImageUtil.isImage(it.name) }
-                ?.sortedWith { a, b -> a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty()) }
-                ?.firstOrNull()
-                ?.uri
-                ?.toString()
-        }
-        else -> null
-    }
-}
+// SY --> Komiho: resolveCoverUri 已移除——它只认目录，归档/EPUB 直接返回 null
+//（压缩文件因此一直没有封面）。历史 / 书签 / 浏览 tab 现在统一走 LocalCoverFetcher，
+// 目录与归档都能取到首图，且共用 Komga 的缓存池与上限。
+// SY <--
 
 /** 用系统文件管理器打开本卷所在目录（父目录）。chapterUrl 为相对本地根目录的路径。
  *  目录走 SAF tree-backed URI；SAF 没有真实文件路径，故失败时退化为 Toast 显示相对路径。 */
@@ -4749,7 +4682,8 @@ private fun LocalFileRow(
     dateTime: Long,
     lastPageRead: Long,
     totalPages: Int,
-    coverUri: String?,
+    /** 封面请求体：[LocalCoverData]（本地卷，归档可拆包取首图）或封面 URL 字符串。 */
+    coverModel: Any?,
     onClick: () -> Unit,
     moreMenu: @Composable (dismiss: () -> Unit) -> Unit,
 ) {
@@ -4774,9 +4708,9 @@ private fun LocalFileRow(
             color = MaterialTheme.colorScheme.surfaceVariant,
             modifier = Modifier.size(56.dp, 74.dp),
         ) {
-            if (coverUri != null) {
+            if (coverModel != null) {
                 SubcomposeAsyncImage(
-                    model = ImageRequest.Builder(context).data(coverUri).build(),
+                    model = ImageRequest.Builder(context).data(coverModel).build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -4903,8 +4837,13 @@ private fun HistoryTabLocal(refreshTick: Int) {
             val totalPages by produceState(initialValue = 0, key1 = file) {
                 value = countChapterPages(context, rep.chapterUrl, file)
             }
-            val coverUri = remember(file) { resolveCoverUri(file) } ?: rep.thumbnailUrl?.takeIf { it.isNotBlank() }
             val stat = remember(rep.chapterUrl, file) { getFileStat(rep.chapterUrl, file) }
+            // SY --> Komiho: 封面改走 LocalCoverFetcher（与 Komga 共用缓存池）。
+            // 旧的 resolveCoverUri 只认目录，归档/EPUB 一直没封面；现在归档可拆包取首图。
+            val coverModel: Any? = remember(file, stat.modified) {
+                file?.let { LocalCoverData(it, stat.modified) } ?: rep.thumbnailUrl?.takeIf { it.isNotBlank() }
+            }
+            // SY <--
             // 标题取「卷名」（章节名 / chapterUrl 末段），而非系列名；副标题展示系列名 + 最近阅读时间。
             val volumeTitle = rep.chapterName.ifBlank { rep.chapterUrl.substringAfterLast('/') }
             val subtitle = listOf(rep.mangaTitle, formatRelativeTime(rep.readAt)).filter { it.isNotBlank() }.joinToString(" · ")
@@ -4917,7 +4856,7 @@ private fun HistoryTabLocal(refreshTick: Int) {
                 dateTime = stat.modified,
                 lastPageRead = rep.lastPageRead,
                 totalPages = totalPages,
-                coverUri = coverUri,
+                coverModel = coverModel,
                 onClick = {
                     // 直接续读（按历史恢复进度，不再弹选择框）
                     context.startActivity(ReaderActivity.newIntent(context, rep.mangaId, rep.chapterId))
@@ -4996,8 +4935,12 @@ private fun BookmarksTabLocal(refreshTick: Int) {
                     val totalPages by produceState(initialValue = 0, key1 = file) {
                         value = countChapterPages(context, first.chapterUrl, file)
                     }
-                    val coverUri = remember(file) { resolveCoverUri(file) } ?: first.thumbnailUrl?.takeIf { it.isNotBlank() }
                     val stat = remember(first.chapterUrl, file) { getFileStat(first.chapterUrl, file) }
+                    // SY --> Komiho: 同上，封面走 LocalCoverFetcher（归档也能拆包取首图）
+                    val coverModel: Any? = remember(file, stat.modified) {
+                        file?.let { LocalCoverData(it, stat.modified) } ?: first.thumbnailUrl?.takeIf { it.isNotBlank() }
+                    }
+                    // SY <--
                     val chapterText = if (first.chapterNumber >= 0) "第 ${formatChapterNumber(first.chapterNumber)} 话" else first.chapterName
                     val isExpanded = expanded.contains(chapterId)
                     val firstPage = bms.minOf { it.page }
@@ -5010,7 +4953,7 @@ private fun BookmarksTabLocal(refreshTick: Int) {
                         dateTime = stat.modified,
                         lastPageRead = firstPage.toLong(),
                         totalPages = totalPages,
-                        coverUri = coverUri,
+                        coverModel = coverModel,
                         onClick = {
                             expanded = if (isExpanded) expanded - chapterId else expanded + chapterId
                         },
