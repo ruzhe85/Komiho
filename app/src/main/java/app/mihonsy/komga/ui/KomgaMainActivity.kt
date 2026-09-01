@@ -3251,7 +3251,7 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             subtitle = if (realPath.isNotBlank()) {
                 realPath
             } else {
-                "未设置：使用 SAF 授权目录（在本地浏览顶部点"设为漫画根"设置）"
+                "未设置：使用 SAF 授权目录（在本地浏览顶部点「设为漫画根」设置）"
             },
             icon = Icons.Filled.Folder,
             onPreferenceClick = {},
