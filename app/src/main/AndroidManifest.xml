@@ -16,6 +16,11 @@
     <!-- Komiho: 真实路径模式（Android 11+）需所有文件访问权限，才能绕过 SAF 直接 File 访问漫画目录。 -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
+    <!-- 存储运行时权限组：部分 ROM（ColorOS 等）的「权限管理」只有对声明了存储权限的 app
+         才显示「存储 → 允许管理所有文件」入口；只声明 MANAGE 的话入口不出现（对齐
+         ComicScreen：仅声明 WRITE_EXTERNAL_STORAGE 即可见）。授权判定仍走 MANAGE。 -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
     <!-- The following were inherited from the MihonSY fork and are not used
          by a LAN-only Komga client (storage / extension management / boot /
          query packages / notifications / locale). -->
