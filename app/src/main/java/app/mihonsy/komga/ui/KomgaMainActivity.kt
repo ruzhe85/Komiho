@@ -367,7 +367,6 @@ private fun KomgaMainScreen(
     var localDir by remember { mutableStateOf(computeLocalDir()) }
     LaunchedEffect(Unit) {
         storagePreferences.localSourceRoot.changes().collect { localDir = computeLocalDir() }
-        storagePreferences.localBrowseRealPath.changes().collect { localDir = computeLocalDir() }
     }
 
     // Filter coming from the Series detail page (tap tag/genre/author → filter Library).
@@ -396,8 +395,8 @@ private fun KomgaMainScreen(
 
     // SY --> Komiho: 首次需要选择本地目录时，若尚未授予 MANAGE_EXTERNAL_STORAGE，
     // 先弹授权提示对话框，而不是直接静默走 SAF；用户选「使用 SAF」才维持原流程。
-    // 已授权时 SAF 选目录已无意义（真实路径模式下 localSourceRoot 被忽略）：改为切到
-    // 浏览 tab 引导用户进入目标文件夹后点「设为漫画根」，杜绝「选了却变根目录」。
+    // 已授权时 SAF 选目录已无意义（浏览根恒为内部存储、localSourceRoot 被忽略）：改为切到
+    // 浏览 tab 并提示全盘可达，杜绝「选了却变根目录」。
     // （声明在 currentTab 之后：局部函数不能前向引用。）
     var showManageAccessDialog by remember { mutableStateOf(false) }
     fun requestLocalFolder() {
@@ -407,7 +406,7 @@ private fun KomgaMainScreen(
             currentTab = MainTab.Browse.ordinal
             Toast.makeText(
                 context,
-                "已授予所有文件访问权限：请浏览到目标文件夹后点顶部「设为漫画根」",
+                "已授予所有文件访问权限：浏览根为内部存储，可全盘切换目录",
                 Toast.LENGTH_LONG,
             ).show()
         } else {
@@ -643,7 +642,8 @@ private fun KomgaMainScreen(
                         }
                     }
                     // 本地来源：提供「更改目录」入口（否则选错目录后无法在 Komiho 内改回）。
-                    if (currentSource == AppSource.Local) {
+                    // 仅 Browse tab：历史/书签/设置等 tab 与目录无关，挂上去只会误导。
+                    if (currentSource == AppSource.Local && currentTabEnum == MainTab.Browse) {
                         androidx.compose.material3.IconButton(onClick = { requestLocalFolder() }) {
                             Icon(
                                 imageVector = Icons.Filled.FolderOpen,
@@ -3106,8 +3106,8 @@ private fun SettingsTab(context: android.content.Context) {
             onPreferenceClick = { showServer = true },
         )
         TextPreferenceWidget(
-            title = "本地存储",
-            subtitle = "所有文件访问权限 / 漫画真实路径",
+            title = "存储",
+            subtitle = "所有文件访问权限",
             icon = Icons.Outlined.Storage,
             onPreferenceClick = { showLocalStorage = true },
         )
@@ -3176,7 +3176,7 @@ private fun SettingsTab(context: android.content.Context) {
     if (showLocalStorage) {
         SettingsCategoryDialog(
             onDismiss = { showLocalStorage = false },
-            title = "本地存储",
+            title = "存储",
         ) { padding -> KomgaLocalStorageSettings(Modifier.padding(padding), context) }
     }
     if (showReaderSettings) {
@@ -3257,13 +3257,11 @@ private fun launchManageAllFilesAccess(context: android.content.Context) {
     }
 }
 
-/** 本地存储设置：所有文件访问权限（MANAGE_EXTERNAL_STORAGE）授权入口 + 漫画真实路径根状态。
+/** 存储设置：所有文件访问权限（MANAGE_EXTERNAL_STORAGE）授权入口。
  *  仅此页是 Komga 用户可达的授权入口（Mihon 的"数据存储"页在 Komga 模式下不暴露）。 */
 @Composable
 private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.content.Context) {
-    val storagePrefs = remember { Injekt.get<StoragePreferences>() }
     val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
-    val realPath by storagePrefs.localBrowseRealPath.changes().collectAsState(initial = storagePrefs.localBrowseRealPath.get())
     Column(
         modifier = modifier.verticalScroll(rememberScrollState()),
     ) {
@@ -3280,16 +3278,6 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                     launchManageAllFilesAccess(context)
                 }
             },
-        )
-        TextPreferenceWidget(
-            title = "漫画根（真实路径）",
-            subtitle = if (realPath.isNotBlank()) {
-                realPath
-            } else {
-                "未设置：在本地浏览进入目标文件夹后点顶部「设为漫画根」"
-            },
-            icon = Icons.Filled.Folder,
-            onPreferenceClick = {},
         )
     }
 }
@@ -4228,14 +4216,15 @@ private fun LocalFileBrowser(
     var columnCount by remember { mutableStateOf(prefs.localBrowseColumns.get()) }
     var showOptions by remember { mutableStateOf(false) }
 
-    // SY --> Komiho: 真实路径模式 UI 状态（仅在持有 MANAGE_EXTERNAL_STORAGE 时显示「设为漫画根」）。
+    // SY --> Komiho: 真实路径模式标记（持有 MANAGE_EXTERNAL_STORAGE 时列目录走 UniFile 直读）。
     val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
-    val realPath by prefs.localBrowseRealPath.changes().collectAsState(initial = prefs.localBrowseRealPath.get())
     // SY <--
 
     // 相对路径栈：栈底为空串代表根目录，下钻时追加段名。每个条目的相对路径 =
     // (stack + 自身段名) 用 "/" 连接；chapter.url 就存这个相对路径，
     // 阅读时由 tree-backed 的 base.findFile(相对路径) 重建，散图目录才能正常列图。
+    // 全权限模式下 base 恒为内部存储根，面包屑显示 内部存储/…/目标 的完整路径，
+    // 点任意一段即可切换目录；不再记忆「起始目录」，每次进入都从内部存储根开始。
     var stack by remember(base) { mutableStateOf<List<String>>(emptyList()) }
     val current = remember(base, stack) {
         if (stack.isEmpty()) base
@@ -4251,8 +4240,14 @@ private fun LocalFileBrowser(
     LaunchedEffect(current, sort) {
         loading = true
         val list = withContext(Dispatchers.IO) {
-            listLocalEntries(context, base, current, stack.isEmpty())
-                .sortedWith(localEntryComparator(sort))
+            // 真实路径模式：base.uri 是 file:// 而非 SAF tree URI，走 DocumentsContract
+            // 必定抛异常再回退，白白多一次失败 IPC；直接列 UniFile 元数据。
+            val raw = if (hasAllFilesAccess) {
+                fallbackList(current)
+            } else {
+                listLocalEntries(context, base, current, stack.isEmpty())
+            }
+            raw.sortedWith(localEntryComparator(sort))
         }
         entries = list
         loading = false
@@ -4308,7 +4303,13 @@ private fun LocalFileBrowser(
             ) {
                 TextButton(onClick = { stack = emptyList() }) {
                     Text(
-                        text = base.name.orEmpty().ifBlank { composeStringResource(R.string.local_root_label) },
+                        // 全权限模式下 base 是内部存储根（/storage/emulated/0），name 会是 "0"，
+                        // 直接显示毫无意义——改显示「内部存储」，下面按真实路径分段展开。
+                        text = if (hasAllFilesAccess) {
+                            "内部存储"
+                        } else {
+                            base.name.orEmpty().ifBlank { composeStringResource(R.string.local_root_label) }
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                     )
@@ -4324,26 +4325,6 @@ private fun LocalFileBrowser(
                             text = seg,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
-                        )
-                    }
-                }
-            }
-            if (hasAllFilesAccess) {
-                val curPath = current.filePath
-                if (curPath != null) {
-                    IconButton(onClick = { prefs.localBrowseRealPath.set(curPath) }) {
-                        Icon(
-                            imageVector = Icons.Filled.CheckCircle,
-                            contentDescription = "设为漫画根",
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-                if (realPath.isNotBlank()) {
-                    IconButton(onClick = { prefs.localBrowseRealPath.set("") }) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = "清除真实路径根",
                         )
                     }
                 }
