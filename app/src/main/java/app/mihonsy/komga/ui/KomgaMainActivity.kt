@@ -564,6 +564,9 @@ private fun KomgaMainScreen(
         }
     }
 
+    // SY --> Komiho: 历史 tab「清除历史」dialog 开关（按钮挂在 TopAppBar，状态提到本层）。
+    var localHistoryClearOpen by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             val currentTabEnum = MainTab.entries[currentTab]
@@ -676,6 +679,15 @@ private fun KomgaMainScreen(
                             Icon(
                                 imageVector = Icons.Filled.FolderOpen,
                                 contentDescription = composeStringResource(R.string.local_change_folder),
+                            )
+                        }
+                    }
+                    // 本地来源 + 历史 tab：顶栏删除图标 = 清除历史（按时间范围批量删除，无文字）。
+                    if (currentSource == AppSource.Local && currentTabEnum == MainTab.History) {
+                        androidx.compose.material3.IconButton(onClick = { localHistoryClearOpen = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = composeStringResource(R.string.local_history_clear),
                             )
                         }
                     }
@@ -803,6 +815,8 @@ private fun KomgaMainScreen(
                     MainTab.History -> HistoryTabLocal(
                         refreshTick = refreshTick,
                         onOpenLocation = { openLocalLocationInApp(it) },
+                        clearOpen = localHistoryClearOpen,
+                        onClearOpenChange = { localHistoryClearOpen = it },
                     )
                     MainTab.Bookmarks -> BookmarksTabLocal(
                         refreshTick = refreshTick,
@@ -5151,6 +5165,8 @@ private data class MergedBook(
 private fun HistoryTabLocal(
     refreshTick: Int,
     onOpenLocation: (String) -> Unit,
+    clearOpen: Boolean,
+    onClearOpenChange: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -5175,27 +5191,7 @@ private fun HistoryTabLocal(
         return
     }
 
-    // 顶部操作栏：清除历史（按时间范围批量删除本地阅读记录）。
-    var showClearDialog by remember { mutableStateOf(false) }
-
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { showClearDialog = true }) {
-                Icon(
-                    imageVector = Icons.Filled.Delete,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(composeStringResource(R.string.local_history_clear))
-            }
-        }
-
-        LazyColumn(Modifier.fillMaxSize().weight(1f)) {
+    LazyColumn(Modifier.fillMaxSize()) {
             items(merged, key = { it.chapterUrl }) { book ->
             val rep = book.rep
             val file by produceState<UniFile?>(initialValue = null, key1 = rep.chapterUrl) {
@@ -5267,13 +5263,12 @@ private fun HistoryTabLocal(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
-    }
 
-    if (showClearDialog) {
+    if (clearOpen) {
         ClearHistoryDialog(
-            onDismiss = { showClearDialog = false },
+            onDismiss = { onClearOpenChange(false) },
             onConfirm = { range ->
-                showClearDialog = false
+                onClearOpenChange(false)
                 scope.launch {
                     withContext(Dispatchers.IO) {
                         if (range == ClearRange.ALL) {
