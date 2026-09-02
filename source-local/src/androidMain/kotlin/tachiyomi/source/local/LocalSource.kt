@@ -138,11 +138,13 @@ actual class LocalSource(
             .map { mangaDir ->
                 async {
                     SManga.create().apply {
+                        // SY --> Komiho: url 统一为真实绝对路径，使 SAF / 全权限两模式互认。
+                        val url = fileSystem.realPathOf(mangaDir) ?: mangaDir.name.orEmpty()
+                        this.url = url
                         title = mangaDir.name.orEmpty()
-                        url = mangaDir.name.orEmpty()
 
                         // Try to find the cover
-                        coverManager.find(mangaDir.name.orEmpty())?.let {
+                        coverManager.find(url)?.let {
                             thumbnail_url = it.uri.toString()
                         }
                     }
@@ -369,7 +371,9 @@ actual class LocalSource(
             .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) }
             .map { chapterFile ->
                 SChapter.create().apply {
-                    url = "${manga.url}/${chapterFile.name}"
+                    // SY --> Komiho: chapter.url 也用真实绝对路径（与 manga.url 同源），
+                    // 跨模式续读才能定位到同一文件。
+                    url = fileSystem.realPathOf(chapterFile) ?: "${manga.url}/${chapterFile.name}"
                     name = if (chapterFile.isDirectory) {
                         chapterFile.name
                     } else {
@@ -414,17 +418,10 @@ actual class LocalSource(
 
     fun getFormat(chapter: SChapter): Format {
         try {
-            // SY --> Komiho: 按 '/' 逐段下钻，支持根目录下任意层级
-            // （原实现仅认 base/<系列>/<章节> 两级）。向后兼容两级结构。
-            val segs = chapter.url.split('/')
-            var file = fileSystem.getBaseDirectory()
+            // SY --> Komiho: chapter.url 已是真实绝对路径，直接映射到当前根下的 UniFile。
+            val file = fileSystem.resolveUnderBase(chapter.url)
                 ?: throw Exception(context.stringResource(MR.strings.chapter_not_found))
-            for (seg in segs) {
-                if (seg.isBlank()) continue
-                file = file.findFile(seg) ?: throw Exception(context.stringResource(MR.strings.chapter_not_found))
-            }
             return Format.valueOf(file)
-            // SY <--
         } catch (e: Format.UnknownFormatException) {
             throw Exception(context.stringResource(MR.strings.local_invalid_format))
         } catch (e: Exception) {

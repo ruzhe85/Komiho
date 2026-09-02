@@ -56,4 +56,17 @@ class StoragePreferences(
         Preference.appStateKey("local_browse_columns"),
         0,
     )
+
+    /**
+     * Komiho: 本地浏览的**存储卷根**（真实路径，如 `/storage/1234-5678`）。
+     * 仅当持有 MANAGE_EXTERNAL_STORAGE 时生效，空串 = 内部存储根。
+     * 注意：这里只能是「卷根」（内部存储 / SD 卡），不能是任意子目录——否则
+     * 面包屑之上无路可走，等于把全盘权限关进笼子（原「漫画根」的教训）。
+     * 存的路径不存在（SD 卡拔出）时由 [tachiyomi.source.local.io.LocalSourceFileSystem]
+     * 回落到内部存储根。
+     */
+    val localBrowseRootPath: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("local_browse_root_path"),
+        "",
+    )
 }

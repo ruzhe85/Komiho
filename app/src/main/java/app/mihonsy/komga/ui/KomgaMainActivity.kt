@@ -163,6 +163,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -365,9 +366,34 @@ private fun KomgaMainScreen(
         return localSourceFs.getBaseDirectory()
     }
     var localDir by remember { mutableStateOf(computeLocalDir()) }
+    // 授权状态翻转（去系统设置授予/撤销 MANAGE_EXTERNAL_STORAGE 后返回）→ 重新计算根目录，
+    // LocalFileBrowser 的 base 随之变化、stack 重置，自动刷新到根目录（修「点授权必须重启」）。
+    var permTick by remember { mutableStateOf(0) }
+    var lastPermState by remember {
+        mutableStateOf(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val now = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+                if (now != lastPermState) {
+                    lastPermState = now
+                    permTick++
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     LaunchedEffect(Unit) {
         storagePreferences.localSourceRoot.changes().collect { localDir = computeLocalDir() }
     }
+    // 存储卷根（内部存储 / SD 卡）切换：只改「卷」，不改深层目录，切换后回到新卷的根。
+    LaunchedEffect(Unit) {
+        storagePreferences.localBrowseRootPath.changes().collect { localDir = computeLocalDir() }
+    }
+    LaunchedEffect(permTick) { localDir = computeLocalDir() }
 
     // Filter coming from the Series detail page (tap tag/genre/author → filter Library).
     // Driven reactively by filterSignal so taps arriving via onNewIntent (when this
@@ -388,7 +414,9 @@ private fun KomgaMainScreen(
     // 不再调起系统文件管理器（SAF/真实路径两种模式下都能准确落到目录）。
     var localBrowseNavRequest by remember { mutableStateOf<String?>(null) }
     fun openLocalLocationInApp(chapterUrl: String) {
-        localBrowseNavRequest = chapterUrl
+        // chapterUrl 已是真实绝对路径；LocalFileBrowser 的 navRequest 按「相对当前根的路径」消费，
+        // 这里转成相对段（不在当前根下时退化为原值，落到根目录）。
+        localBrowseNavRequest = localSourceFs.relativeFromBase(chapterUrl) ?: chapterUrl
         currentTab = MainTab.Browse.ordinal
     }
     // SY <--
@@ -406,7 +434,7 @@ private fun KomgaMainScreen(
             currentTab = MainTab.Browse.ordinal
             Toast.makeText(
                 context,
-                "已授予所有文件访问权限：浏览根为内部存储，可全盘切换目录",
+                "已授予所有文件访问权限：浏览根为内部存储，可全盘切换；有 SD 卡时点面包屑旁的箭头切换存储",
                 Toast.LENGTH_LONG,
             ).show()
         } else {
@@ -767,6 +795,7 @@ private fun KomgaMainScreen(
                     MainTab.Browse -> LocalSourceTab(
                         localDir = localDir,
                         onPickFolder = { requestLocalFolder() },
+                        onSelectRoot = { storagePreferences.localBrowseRootPath.set(it) },
                         navRequest = localBrowseNavRequest,
                         onNavConsumed = { localBrowseNavRequest = null },
                     )
@@ -3997,6 +4026,7 @@ private fun SourceSwitcher(
 private fun LocalSourceTab(
     localDir: UniFile?,
     onPickFolder: () -> Unit,
+    onSelectRoot: (String) -> Unit,
     navRequest: String?,
     onNavConsumed: () -> Unit,
 ) {
@@ -4036,6 +4066,7 @@ private fun LocalSourceTab(
     // 目录已就绪：进入自研文件管理器（UI 参考 Material Files 的列表设计）。
     LocalFileBrowser(
         base = localDir,
+        onSelectRoot = onSelectRoot,
         navRequest = navRequest,
         onNavConsumed = onNavConsumed,
     )
@@ -4199,15 +4230,30 @@ private fun fileTint(entry: LocalEntry): Color {
  *  显示模式（列表/网格）与排序（名称/修改时间/大小，含方向）复用 Komga 书架成熟的
  *  [LibraryDisplayMode] + [SortItem]；选择记 [StoragePreferences] 持久化。
  *  点击图片/归档/目录分别在 reader 中整目录加载（reader 自动载入同目录全部图片），不另设「阅读此目录」按钮。 */
+
+/** 存储卷根的显示名：内部存储 →「内部存储」，其余（SD 卡）→「SD 卡（卷名）」。 */
+private fun storageRootLabel(rootPath: String): String {
+    if (rootPath.isBlank()) return "内部存储"
+    val canonical = runCatching { File(rootPath).canonicalPath }.getOrNull() ?: rootPath
+    val primary = runCatching { Environment.getExternalStorageDirectory().canonicalPath }.getOrNull()
+    return if (primary != null && canonical == primary) {
+        "内部存储"
+    } else {
+        "SD 卡（${rootPath.trimEnd('/').substringAfterLast('/')}）"
+    }
+}
+
 @Composable
 private fun LocalFileBrowser(
     base: UniFile,
+    onSelectRoot: (String) -> Unit,
     navRequest: String?,
     onNavConsumed: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { Injekt.get<StoragePreferences>() }
+    val fs = remember { Injekt.get<LocalSourceFileSystem>() }
 
     // 显示模式 / 排序 / 封面：从偏好读取并持久化（与书架一致，记设置）。
     var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.localBrowseDisplayMode.get())) }
@@ -4218,6 +4264,17 @@ private fun LocalFileBrowser(
 
     // SY --> Komiho: 真实路径模式标记（持有 MANAGE_EXTERNAL_STORAGE 时列目录走 UniFile 直读）。
     val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+    // 存储卷根列表（内部存储 + SD 卡…）：仅全权限模式下列得出；多于 1 个时面包屑根旁出现切换箭头。
+    val storageRoots = remember(hasAllFilesAccess) {
+        if (hasAllFilesAccess) fs.getStorageRoots() else emptyList()
+    }
+    var rootMenuOpen by remember { mutableStateOf(false) }
+    // 当前卷的真实路径（file:// URI 的 path，统一取 canonical 以便与卷列表比较；SAF 模式用不到）。
+    val currentRootPath by remember(base, hasAllFilesAccess) {
+        val raw = if (hasAllFilesAccess) base.uri.path ?: "" else ""
+        val resolved = if (raw.isBlank()) "" else runCatching { File(raw).canonicalPath }.getOrDefault(raw)
+        mutableStateOf(resolved)
+    }
     // SY <--
 
     // 相对路径栈：栈底为空串代表根目录，下钻时追加段名。每个条目的相对路径 =
@@ -4286,6 +4343,10 @@ private fun LocalFileBrowser(
     val isItemClickable: (LocalEntry) -> Boolean =
         { it.isDirectory || it.isArchive || it.isImage }
 
+    // 只显示「可读文件（图片）+ 压缩包 + 目录」：其余文件（txt/apk/pdf 等）对漫画阅读器无意义，
+    // 直接过滤掉，避免列表塞满不可读条目。目录始终保留以便下钻导航。
+    val visibleEntries = entries.filter { it.isDirectory || it.isArchive || it.isImage }
+
     Column(Modifier.fillMaxSize()) {
         // 顶栏：面包屑（可点跳层）+ 显示选项 Tune 按钮。
         Row(
@@ -4301,18 +4362,52 @@ private fun LocalFileBrowser(
                     .padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 面包屑根：全权限模式下 base 是卷根（内部存储 name 会是 "0"），
+                // 显示「内部存储 / SD 卡（卷名）」；多于一个卷时可下拉切换。
                 TextButton(onClick = { stack = emptyList() }) {
                     Text(
-                        // 全权限模式下 base 是内部存储根（/storage/emulated/0），name 会是 "0"，
-                        // 直接显示毫无意义——改显示「内部存储」，下面按真实路径分段展开。
                         text = if (hasAllFilesAccess) {
-                            "内部存储"
+                            storageRootLabel(currentRootPath)
                         } else {
                             base.name.orEmpty().ifBlank { composeStringResource(R.string.local_root_label) }
                         },
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                     )
+                }
+                if (storageRoots.size > 1) {
+                    Box {
+                        IconButton(onClick = { rootMenuOpen = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.ArrowDropDown,
+                                contentDescription = "切换存储",
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = rootMenuOpen,
+                            onDismissRequest = { rootMenuOpen = false },
+                        ) {
+                            storageRoots.forEach { path ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = storageRootLabel(path),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    },
+                                    onClick = {
+                                        rootMenuOpen = false
+                                        if (path == currentRootPath) {
+                                            stack = emptyList()
+                                        } else {
+                                            onSelectRoot(path)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
                 stack.forEachIndexed { index, seg ->
                     Text(
@@ -4340,7 +4435,7 @@ private fun LocalFileBrowser(
         // 列目录内容。
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            entries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            visibleEntries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = composeStringResource(R.string.local_empty_dir),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -4348,7 +4443,7 @@ private fun LocalFileBrowser(
             }
             displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(Modifier.fillMaxSize()) {
-                    items(entries, key = { it.uni.uri.toString() }) { file ->
+                    items(visibleEntries, key = { it.uni.uri.toString() }) { file ->
                         FileRow(
                             entry = file,
                             showCover = showCover,
@@ -4373,7 +4468,7 @@ private fun LocalFileBrowser(
                     verticalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(entries, key = { it.uni.uri.toString() }) { file ->
+                    items(visibleEntries, key = { it.uni.uri.toString() }) { file ->
                         LocalFileGridItem(
                             entry = file,
                             showCover = showCover,
@@ -4631,47 +4726,30 @@ private fun LocalBrowseOptionsMenu(
 
 /**
  * 打开一个本地条目（目录/归档/epub）为「一本」：按 LocalSource 约定建一条
- * 不进书架（favorite=false）的临时 Manga+Chapter（url = 相对根目录的路径），
- * 再启动现有 [ReaderActivity]。reader 的本地加载管线按 chapter.url 自动定位
- * 文件并解码，Lanczos 等增强随 reader 自带。失败时在 UI 提示原因。
+ * 不进书架（favorite=false）的临时 Manga+Chapter。manga.url / chapter.url 统一为
+ * 真实绝对路径（canonical），使 SAF 与全权限（MANAGE）两种模式对同一物理文件得到相同标识，
+ * 书签/历史即可互认。再启动现有 [ReaderActivity]，reader 本地管线按 chapter.url 定位文件并解码，
+ * Lanczos 等增强随 reader 自带。失败时在 UI 提示原因。
  */
 private suspend fun openLocalFile(context: android.content.Context, file: UniFile, relPath: String) {
     try {
         val (mangaId, chapterId) = withContext(Dispatchers.IO) {
             val fs = Injekt.get<LocalSourceFileSystem>()
-            val base = fs.getBaseDirectory()
-                ?: throw Exception("本地根目录未设置，请先在设置里选择文件夹")
-            // 先按相对路径定位真实文件，确保存在。
-            var resolved = base
-            for (seg in relPath.split('/')) {
-                if (seg.isBlank()) continue
-                resolved = resolved.findFile(seg) ?: throw Exception("找不到文件：$relPath")
-            }
+            // 真实绝对路径（canonical）：同一物理文件在 SAF 与全权限（MANAGE）两种模式下路径一致，
+            // 作为 manga.url / chapter.url 即可让书签/历史跨模式互认。
+            val canonicalFile = fs.realPathOf(file)
+                ?: throw Exception("找不到文件：$relPath")
             val isArchive = file.isLocalArchive() || file.extension.equals("epub", true)
-            // 书籍（用于建 manga）的相对路径：归档/epub 取父目录，目录/散图取父目录
-            // （卷目录的上一层=系列）。bookRelPath 对两种类型都是「父目录」相对路径。
-            val bookRelPath = relPath.substringBeforeLast('/', "")
-            // 父目录（系列层）：归档的 bookRelPath 已是父目录；目录型 relPath 是卷目录路径，
-            // 其 substringBeforeLast 也是父目录。提前算好供两分支共用（标题 + 兄弟章节扫描）。
-            val parentRel = bookRelPath
-            var parentDir = base
-            for (seg in parentRel.split('/')) {
-                if (seg.isBlank()) continue
-                parentDir = parentDir.findFile(seg) ?: throw Exception("找不到父目录：$parentRel")
-            }
-            val seriesTitle = parentDir.name.orEmpty()
-            // 标题取「系列（父目录）名」而非某个具体卷名：否则同系列复用同一 manga 时，
-            // 标题会停在首次打开的那一卷上、阅读器左上角跳变/被固定。
-            val title = when {
-                isArchive -> if (bookRelPath.isEmpty()) file.name.orEmpty() else bookRelPath.substringAfterLast('/')
-                else -> seriesTitle.ifEmpty { file.name.orEmpty() }
-            }
-            // manga.url 必须「全局唯一」：不同根目录（重新选择目录）或不同类型（散图目录
-            // vs 同名的归档父目录）若只用相对路径做 url，会撞上旧 manga，导致阅读器章节列表
-            // 显示「历史记录/之前选过的目录」。这里把「根 treeUri + 类型 + 相对路径」拼成
-            // 唯一键；章节 url 仍保持纯相对路径（reader 用它从 base 重建文件，不能带前缀）。
-            val rootMarker = base.uri.toString()
-            val mangaUrl = "$rootMarker#${if (isArchive) "a" else "d"}#$bookRelPath"
+            // 书籍（系列）目录：归档/epub 取父目录，目录/散图取自身。
+            val bookDir = if (isArchive) canonicalFile.substringBeforeLast('/') else canonicalFile
+            // manga.url = 系列目录的真实绝对路径（全局唯一，且跨模式稳定）。
+            val mangaUrl = bookDir
+            val seriesTitle = bookDir.substringAfterLast('/').ifEmpty { file.name.orEmpty() }
+            // 标题取「系列（父目录）名」而非具体卷名：同系列复用同一 manga 时，阅读器左上角稳定显示系列名。
+            val title = seriesTitle
+            // 当前系列目录的 UniFile（扫描兄弟章节用）；解析失败即文件不在当前根下。
+            val bookDirUni = fs.resolveUnderBase(bookDir)
+                ?: throw Exception("找不到系列目录：$bookDir")
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
             val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
@@ -4693,16 +4771,14 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
             }
             val chapter = if (file.isLocalArchive() || file.extension.equals("epub", true)) {
                 // 归档/epub：把同目录所有归档/epub 都建成章节（去重），使阅读器能自动加载下一章。
-                // 按名称自然序插入，章节号经 ChapterRecognition 解析；manga.sorting=NUMBER，
-                // reader 按章节号升序排列 → 翻完当前卷自动续到下一卷。
-                // parentDir/seriesTitle 已在外层提前算好（与目录型共用），此处直接复用。
-                parentDir.listFiles().orEmpty().toList()
+                // 章节 url 用真实绝对路径（与 manga.url 同源），翻完当前卷自动续到下一卷。
+                bookDirUni.listFiles().orEmpty().toList()
                     .filter { it.isLocalArchive() || it.extension.equals("epub", true) }
                     .sortedWith { a, b ->
                         a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
                     }
                     .forEach { sib ->
-                        val url = if (bookRelPath.isEmpty()) sib.name.orEmpty() else "$bookRelPath/${sib.name}"
+                        val url = fs.realPathOf(sib) ?: "$bookDir/${sib.name}"
                         if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
                             chapterRepo.addAll(
                                 listOf(
@@ -4718,19 +4794,18 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                             )
                         }
                     }
-                chapterRepo.getChapterByUrlAndMangaId(relPath, manga.id!!)
-                    ?: error("当前文件未写入章节：$relPath")
+                chapterRepo.getChapterByUrlAndMangaId(canonicalFile, manga.id!!)
+                    ?: error("当前文件未写入章节：$canonicalFile")
             } else {
-                // 目录/散图：把父目录（系列）下所有子目录（卷/话）都建成章节，
-                // 使翻完当前卷能自动续到下一卷；章节号经 ChapterRecognition 解析，
-                // reader 按号升序排列。当前打开的卷（relPath 目录）是其中一章。
-                parentDir.listFiles().orEmpty().toList()
+                // 目录/散图：把系列目录下所有子目录（卷/话）都建成章节，使翻完当前卷自动续到下一卷；
+                // 章节 url 用真实绝对路径。当前打开的目录是其中一章。
+                bookDirUni.listFiles().orEmpty().toList()
                     .filter { it.isDirectory }
                     .sortedWith { a, b ->
                         a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
                     }
                     .forEach { sib ->
-                        val url = if (parentRel.isEmpty()) sib.name.orEmpty() else "$parentRel/${sib.name}"
+                        val url = fs.realPathOf(sib) ?: "$bookDir/${sib.name}"
                         if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
                             chapterRepo.addAll(
                                 listOf(
@@ -4746,14 +4821,14 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                             )
                         }
                     }
-                // 保底：当前卷（relPath 目录）若未被兄弟扫描覆盖（如无子目录的叶子散图目录），
+                // 保底：当前目录若未被兄弟扫描覆盖（如无子目录的叶子散图目录），
                 // 仍保留为单章节，避免读不了当前图。
-                chapterRepo.getChapterByUrlAndMangaId(relPath, manga.id!!)
+                chapterRepo.getChapterByUrlAndMangaId(canonicalFile, manga.id!!)
                     ?: chapterRepo.addAll(
                         listOf(
                             Chapter.create().copy(
                                 mangaId = manga.id!!,
-                                url = relPath,
+                                url = canonicalFile,
                                 name = title,
                                 chapterNumber = 1.0,
                             ),
@@ -4802,16 +4877,27 @@ private val pageCountCache = Collections.synchronizedMap(LinkedHashMap<String, I
 private data class FileStat(val size: Long, val modified: Long)
 private val fileStatCache = Collections.synchronizedMap(LinkedHashMap<String, FileStat>(1024, 0.75f, true))
 
-/** 从章节 URL（相对本地根目录的路径）重建真实的 tree-backed UniFile（带缓存）。 */
+/** 从章节 URL 重建真实的 UniFile（带缓存）。新格式为真实绝对路径，直接用
+ *  [LocalSourceFileSystem.resolveUnderBase] 映射到当前根；旧版相对路径（不含前导 '/'）
+ *  兜底按段下钻，保证升级前已存在的同模式书签/历史仍能打开（跨模式旧条目重开一次即迁移）。 */
 private fun resolveLocalFile(chapterUrl: String): UniFile? {
     fileResolveCache[chapterUrl]?.let { return it }
-    val base = Injekt.get<LocalSourceFileSystem>().getBaseDirectory() ?: return null.also { fileResolveCache[chapterUrl] = null }
-    var current = base
-    for (seg in chapterUrl.split('/')) {
-        if (seg.isBlank()) continue
-        current = current.findFile(seg) ?: return null.also { fileResolveCache[chapterUrl] = null }
+    val fs = Injekt.get<LocalSourceFileSystem>()
+    val result = fs.resolveUnderBase(chapterUrl) ?: run {
+        if (chapterUrl.startsWith('/')) {
+            null
+        } else {
+            // 兼容旧版相对路径
+            val base = fs.getBaseDirectory() ?: return@run null
+            var cur = base
+            for (seg in chapterUrl.split('/')) {
+                if (seg.isBlank()) continue
+                cur = cur.findFile(seg) ?: return@run null
+            }
+            cur
+        }
     }
-    return current.also { fileResolveCache[chapterUrl] = it }
+    return result.also { fileResolveCache[chapterUrl] = it }
 }
 
 /** 文件元信息（大小/修改时间），带缓存，避免重复 SAF IPC。file 未解析时不缓存（避免陈旧 0）。 */
