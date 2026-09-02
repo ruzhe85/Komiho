@@ -28,6 +28,12 @@
     <string name="local_history_empty">暂无阅读记录</string>
     <string name="local_bookmarks_empty">暂无书签</string>
     <string name="local_history_delete">删除记录</string>
+    <string name="local_history_clear">清除历史</string>
+    <string name="local_history_clear_range">清除时间范围</string>
+    <string name="local_history_clear_1d">最近1天</string>
+    <string name="local_history_clear_1w">最近1周</string>
+    <string name="local_history_clear_1m">最近1月</string>
+    <string name="local_history_clear_all">全部</string>
     <string name="local_history_cancel">取消</string>
     <string name="local_bookmark_remove">取消书签</string>
     <string name="local_open_file_location">打开文件位置</string>

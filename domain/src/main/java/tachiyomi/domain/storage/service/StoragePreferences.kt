@@ -69,4 +69,15 @@ class StoragePreferences(
         Preference.appStateKey("local_browse_root_path"),
         "",
     )
+
+    /**
+     * Komiho: 全权限模式下「记住上次访问路径」——最后一次浏览所在的**完整目录路径**
+     * （canonical，如 `/storage/emulated/0/漫画/某漫画`）。空串 = 尚未访问过（首次启用，
+     * 浏览落在根目录）。仅全权限模式使用：进浏览 tab 时恢复到该目录（含跨卷自动切换）；
+     * 每次下钻/面包屑跳层都会刷新此值。SAF 模式不写此值（两种模式的路径语义不同）。
+     */
+    val localBrowseLastPath: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("local_browse_last_path"),
+        "",
+    )
 }

@@ -4281,12 +4281,50 @@ private fun LocalFileBrowser(
     // (stack + 自身段名) 用 "/" 连接；chapter.url 就存这个相对路径，
     // 阅读时由 tree-backed 的 base.findFile(相对路径) 重建，散图目录才能正常列图。
     // 全权限模式下 base 恒为内部存储根，面包屑显示 内部存储/…/目标 的完整路径，
-    // 点任意一段即可切换目录；不再记忆「起始目录」，每次进入都从内部存储根开始。
+    // 点任意一段即可切换目录；全权限模式下进浏览 tab 默认恢复到上次访问目录（见下方 restoreStackForBase）。
     var stack by remember(base) { mutableStateOf<List<String>>(emptyList()) }
     val current = remember(base, stack) {
         if (stack.isEmpty()) base
         else stack.fold(base) { dir, seg -> dir.findFile(seg) ?: base }
     }
+
+    // SY --> Komiho: 全权限模式「记住上次访问路径」——除首次启用（localBrowseLastPath 为空
+    // → 落在根目录），默认恢复到最后一次访问的目录；若上次路径在别的存储卷，自动切到那卷。
+    // 仅在 base（卷）变化时触发：用户手动下钻/面包屑跳层只改 stack，不重跑，避免与导航打架。
+    fun restoreStackForBase() {
+        if (!hasAllFilesAccess) { stack = emptyList(); return }
+        val last = prefs.localBrowseLastPath.get()
+        if (last.isBlank()) { stack = emptyList(); return } // 首次启用 → 根
+        val baseRp = fs.realPathOf(base) ?: return
+        val canonical = runCatching { File(last).canonicalPath }.getOrNull() ?: return
+        val underCurrent = canonical.startsWith(baseRp) &&
+            (canonical.length == baseRp.length || canonical[baseRp.length] == '/')
+        if (underCurrent) {
+            val rel = canonical.removePrefix(baseRp).trim('/')
+            stack = rel.split('/').filter { it.isNotBlank() }
+        } else {
+            // 不在当前卷：切到 lastPath 所属卷（localBrowseRootPath 变→父层重算 base→本块重跑→落正确目录）。
+            val target = storageRoots.firstOrNull { root ->
+                val rc = runCatching { File(root).canonicalPath }.getOrNull() ?: return@firstOrNull false
+                canonical.startsWith(rc) && (canonical.length == rc.length || canonical[rc.length] == '/')
+            }
+            if (target != null && target != baseRp) onSelectRoot(target)
+            stack = emptyList()
+        }
+    }
+    LaunchedEffect(base) { restoreStackForBase() }
+    // SY <--
+
+    // SY --> Komiho: 统一导航入口——改栈并（全权限模式）记最后一次访问目录的完整路径，
+    // 供下次进浏览 tab 恢复。手动下钻/面包屑/返回键/打开文件位置都走这里。
+    fun navigateTo(newStack: List<String>) {
+        stack = newStack
+        if (hasAllFilesAccess) {
+            val dir = newStack.fold(base) { d, seg -> d.findFile(seg) ?: d }
+            fs.realPathOf(dir)?.let { prefs.localBrowseLastPath.set(it) }
+        }
+    }
+    // SY <--
 
     var entries by remember { mutableStateOf<List<LocalEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -4315,14 +4353,14 @@ private fun LocalFileBrowser(
 
     // 返回键回上一层；已在根目录时不拦截，交还外层（回 Home）。
     BackHandler(enabled = stack.isNotEmpty()) {
-        stack = stack.dropLast(1)
+        navigateTo(stack.dropLast(1))
     }
 
     // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转：navRequest 为文件的相对路径，
     // 定位到其所在目录（父目录栈）；目录不存在时 fold 兜底回落根目录。消费后置空。
     LaunchedEffect(navRequest) {
         if (navRequest != null) {
-            stack = navRequest.substringBeforeLast('/').split('/').filter { it.isNotBlank() }
+            navigateTo(navRequest.substringBeforeLast('/').split('/').filter { it.isNotBlank() })
             onNavConsumed()
         }
     }
@@ -4331,7 +4369,7 @@ private fun LocalFileBrowser(
     // 统一点击行为：目录→下钻；归档/epub→直接读该文件；图片→读所在目录（reader 自动载入同目录全部图片）。
     val onItemOpen: (LocalEntry) -> Unit = { entry ->
         when {
-            entry.isDirectory -> stack = stack + entry.name
+            entry.isDirectory -> navigateTo(stack + entry.name)
             entry.isArchive -> scope.launch {
                 openLocalFile(context, entry.uni, (stack + entry.name).joinToString("/"))
             }
@@ -4363,11 +4401,11 @@ private fun LocalFileBrowser(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // 面包屑根：全权限模式下 base 是卷根（内部存储 name 会是 "0"），
-                // 显示「内部存储 / SD 卡（卷名）」；多于一个卷时可下拉切换。
-                TextButton(onClick = { stack = emptyList() }) {
+                // 显示完整真实路径（如 /storage/emulated/0）；多于一个卷时可下拉切换。
+                TextButton(onClick = { navigateTo(emptyList()) }) {
                     Text(
                         text = if (hasAllFilesAccess) {
-                            storageRootLabel(currentRootPath)
+                            currentRootPath.ifBlank { storageRootLabel(currentRootPath) }
                         } else {
                             base.name.orEmpty().ifBlank { composeStringResource(R.string.local_root_label) }
                         },
@@ -4399,9 +4437,11 @@ private fun LocalFileBrowser(
                                     onClick = {
                                         rootMenuOpen = false
                                         if (path == currentRootPath) {
-                                            stack = emptyList()
+                                            navigateTo(emptyList())
                                         } else {
+                                            // 手动切卷：记卷根为 lastPath，避免恢复逻辑又跳回旧卷。
                                             onSelectRoot(path)
+                                            if (hasAllFilesAccess) prefs.localBrowseLastPath.set(path)
                                         }
                                     },
                                 )
@@ -4415,7 +4455,7 @@ private fun LocalFileBrowser(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    TextButton(onClick = { stack = stack.take(index + 1) }) {
+                    TextButton(onClick = { navigateTo(stack.take(index + 1)) }) {
                         Text(
                             text = seg,
                             style = MaterialTheme.typography.bodySmall,
@@ -5134,8 +5174,29 @@ private fun HistoryTabLocal(
         LocalEmptyHint(Icons.Filled.History, composeStringResource(R.string.local_history_empty))
         return
     }
-    LazyColumn(Modifier.fillMaxSize()) {
-        items(merged, key = { it.chapterUrl }) { book ->
+
+    // 顶部操作栏：清除历史（按时间范围批量删除本地阅读记录）。
+    var showClearDialog by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { showClearDialog = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(composeStringResource(R.string.local_history_clear))
+            }
+        }
+
+        LazyColumn(Modifier.fillMaxSize().weight(1f)) {
+            items(merged, key = { it.chapterUrl }) { book ->
             val rep = book.rep
             val file by produceState<UniFile?>(initialValue = null, key1 = rep.chapterUrl) {
                 value = withContext(Dispatchers.IO) { resolveLocalFile(rep.chapterUrl) }
@@ -5206,6 +5267,74 @@ private fun HistoryTabLocal(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
+    }
+
+    if (showClearDialog) {
+        ClearHistoryDialog(
+            onDismiss = { showClearDialog = false },
+            onConfirm = { range ->
+                showClearDialog = false
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        if (range == ClearRange.ALL) {
+                            historyRepo.deleteAllHistory()
+                        } else {
+                            val cutoff = System.currentTimeMillis() - range.millis
+                            items.filter { (it.readAt?.time ?: 0L) >= cutoff }
+                                .forEach { historyRepo.resetHistory(it.id) }
+                        }
+                    }
+                }
+            },
+        )
+    }
+}
+
+/** 清除历史的时间范围。millis = 从「现在」向前回溯的毫秒数；ALL 表示不限时间（清空全部）。 */
+private enum class ClearRange(val millis: Long) {
+    DAY(24L * 60 * 60 * 1000),
+    WEEK(7L * 24 * 60 * 60 * 1000),
+    MONTH(30L * 24 * 60 * 60 * 1000),
+    ALL(0L),
+}
+
+/** 清除历史对话框：时间范围选项竖排。 */
+@Composable
+private fun ClearHistoryDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (ClearRange) -> Unit,
+) {
+    val options = listOf(
+        R.string.local_history_clear_1d to ClearRange.DAY,
+        R.string.local_history_clear_1w to ClearRange.WEEK,
+        R.string.local_history_clear_1m to ClearRange.MONTH,
+        R.string.local_history_clear_all to ClearRange.ALL,
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(composeStringResource(R.string.local_history_clear_range)) },
+        text = {
+            Column {
+                options.forEach { (labelRes, range) ->
+                    TextButton(
+                        onClick = { onConfirm(range) },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = composeStringResource(labelRes),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(composeStringResource(R.string.local_history_cancel))
+            }
+        },
+    )
 }
 
 /** 书签 tab：按页书签（一本书可多条），按书聚合一行，展开看多页；点页跳到该页，删除删对应书签。 */
