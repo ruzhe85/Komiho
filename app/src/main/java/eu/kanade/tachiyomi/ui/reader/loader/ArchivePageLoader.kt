@@ -59,11 +59,11 @@ internal class ArchivePageLoader(private val reader: ArchiveReader) : PageLoader
 
     override var isLocal: Boolean = true
 
-    override suspend fun getPages(): List<ReaderPage> = reader.useEntries { entries ->
-        // SY -->
+    override suspend fun getPages(): List<ReaderPage> =
         if (readerPreferences.archiveReaderMode.get() == ReaderPreferences.ArchiveReaderMode.CACHE_TO_DISK) {
-            return DirectoryPageLoader(UniFile.fromFile(tmpDir)!!).getPages()
-        }
+            // SY --> CACHE_TO_DISK 模式直接走磁盘临时目录，无需打开归档（也避免非局部 return 依赖 inline）
+            DirectoryPageLoader(UniFile.fromFile(tmpDir)!!).getPages()
+        } else reader.useEntries { entries ->
         // SY <--
         entries
             .filter { it.isFile && ImageUtil.isImage(it.name) { reader.getInputStream(it.name)!! } }
