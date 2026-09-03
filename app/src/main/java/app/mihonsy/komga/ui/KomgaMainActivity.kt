@@ -55,7 +55,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
-// SY --> Komiho: 本地封面（走 Coil，与 Komga 共用 DiskCache）
+// SY --> Komiho: 本地封面（走 Coil，自带 filesDir/komiho_local_covers 缓存，与 Komga 缓存隔离）
 import eu.kanade.tachiyomi.data.coil.LocalCoverData
 // SY <--
 import androidx.compose.foundation.BorderStroke
@@ -4639,7 +4639,7 @@ private fun LocalFileGridItem(
             contentAlignment = Alignment.Center,
         ) {
             if (showCover) {
-                // SY --> Komiho: 本地封面改走 Coil，与 Komga 共用全局 DiskCache（同一个上限）。
+                // SY --> Komiho: 本地封面自带 filesDir/komiho_local_covers 缓存（与 Komga 缓存隔离）。
                 // 缓存键含 lastModified，文件换封面后自动失效；取不到封面则退回文件图标。
                 SubcomposeAsyncImage(
                     model = ImageRequest.Builder(context)
@@ -4774,8 +4774,8 @@ private fun LocalBrowseOptionsMenu(
     }
 }
 
-// SY --> Komiho: 本地封面的解码与缓存已迁入 LocalCoverFetcher（走 Coil），
-// 与 Komga 封面共用同一个 DiskCache 池与上限；这里不再保留手写解码和进程内 bitmap 缓存。
+// SY --> Komiho: 本地封面的解码与缓存已迁入 LocalCoverFetcher（自带 filesDir 缓存，
+// 与 Komga 缓存隔离）；这里不再保留手写解码和进程内 bitmap 缓存。
 // SY <--
 
 /**

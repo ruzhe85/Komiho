@@ -25,17 +25,20 @@ import java.security.MessageDigest
 import kotlin.math.max
 
 /**
- * 本地（文件型来源）封面的 Coil 取图器 —— 让本地浏览 tab 复用全局 Coil DiskCache，
- * 与 Komga 封面**共用同一个缓存池、同一个上限**（见 `App.kt` 的 `komga_covers`）。
+ * 本地（文件型来源）封面的 Coil 取图器 —— 自带独立文件级缓存（`filesDir/komiho_local_covers/`），
+ * **不再与 Komga 共用全局 Coil DiskCache**（komga_covers）。两路缓存完全隔离。
  *
- * 与 Komga 封面的差异：本地没有"封面 URL"，封面来源有三类——
- * 目录取首张图、归档（CBZ/ZIP）取首张图条目、单图文件本身；epub 无封面。
+ * 与 Komga 封面的差异：
+ *  - 缓存隔离：本地封面落 `filesDir`（自管、跨冷启动稳定），Komga 封面走 HTTP + 全局
+ *    Coil DiskCache（cacheDir/komga_covers，受 coverCacheLimitBytes 上限控制，0 = 实时模式关缓存）。
+ *    两者互不挤占、互不 LRU 淘汰。
+ *  - 数据来源：本地没有"封面 URL"，封面来源有三类——
+ *    目录取首张图、归档（CBZ/ZIP）取首张图条目、单图文件本身；epub 无封面。
  *
- * 落盘策略：**先采样再压缩**（450px / JPEG q80，约 40–70KB/张）。
- * 本地归档里的首图原图常在 1–3MB，若按原图落盘，几百张就会吃满共享上限并
- * LRU 掉 Komga 封面，因此这里主动降采样后再交给 Coil 缓存。
+ * 落盘策略：**先采样再压缩**（450px / JPEG q80，约 40–70KB/张）。降采样只为控制
+ * `filesDir` 缓存体积，与 Komga 共享池无关（已分离）。
  */
-// SY --> Komiho: 本地封面缓存（与 Komga 共用全局 Coil DiskCache）
+// SY --> Komiho: 本地封面自带 filesDir 缓存，与 Komga 封面缓存隔离
 class LocalCoverFetcher(
     private val context: Context,
     private val data: LocalCoverData,
@@ -152,7 +155,7 @@ class LocalCoverFetcher(
 
     companion object {
         // 主流客户端的封面缩略图档位：封面格子实际显示尺寸远小于此，450px 足够；
-        // 配 q80 单张约 40–70KB，共享缓存池能装上千张而不挤掉 Komga 封面。
+        // 配 q80 单张约 40–70KB，本地缓存（komiho_local_covers）能装上千张而不占 Komga 共享池。
         private const val MAX_PX = 450
         private const val JPEG_QUALITY = 80
     }
@@ -165,8 +168,9 @@ data class LocalCoverData(
 )
 
 /**
- * 缓存键含 lastModified：本地文件换了封面后 key 变化 → 自动重新解码，
- * 旧条目交给 DiskCache 的 LRU 自然淘汰，无需手动清缓存。
+ * 缓存键含 lastModified：本地文件换了封面后 key 变化 → 命中新文件、旧 sha256 文件
+ * 留在 filesDir 成为孤儿（无自动 LRU 淘汰）。如需回收空间可清 komiho_local_covers 目录，
+ * 不影响 Komga 缓存。
  */
 class LocalCoverKeyer : Keyer<LocalCoverData> {
     override fun key(data: LocalCoverData, options: Options): String {
