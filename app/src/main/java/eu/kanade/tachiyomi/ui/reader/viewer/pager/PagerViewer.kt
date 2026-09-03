@@ -102,7 +102,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         pager.isVisible = false // Don't layout the pager yet
         pager.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         pager.isFocusable = false
-        pager.offscreenPageLimit = 3
+        // SY: 离屏缓冲 = 2（前后各 2 页）。3 虽更压黑屏但并发解码页数翻倍，
+        // 配合 ArchivePageLoader 去掉全局 Mutex 后启动/跳转已明显提速，2 在黑屏与
+        // 速度间取更均衡的点。条页模式沿用 extraLayoutSpace 预加载，不受此控制。
+        pager.offscreenPageLimit = 2
         pager.id = R.id.reader_pager
         pager.adapter = adapter
         pager.addOnPageChangeListener(pagerListener)

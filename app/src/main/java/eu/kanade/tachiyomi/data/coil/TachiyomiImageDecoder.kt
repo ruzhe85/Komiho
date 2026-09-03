@@ -47,15 +47,37 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                     ?.getCoverStream()
             }
         }
-        val decoder = resources.sourceOrNull()?.use {
-            coverStream.use { coverStream ->
-                ImageDecoder.newInstance(coverStream ?: it.inputStream(), options.cropBorders, displayProfile)
+        // 封面归档特例：封面来自另一归档，按其流解码、不重试（流关闭后无法复读）。
+        if (coverStream != null) {
+            val decoder = resources.sourceOrNull()?.use { _ ->
+                coverStream.use { cs -> ImageDecoder.newInstance(cs, options.cropBorders, displayProfile) }
             }
+            check(decoder != null && decoder.width > 0 && decoder.height > 0) { "Failed to initialize decoder" }
+            return decodeWith(decoder)
         }
+        // 普通页：先把整页字节读入内存一次，native 解码器初始化偶发失败（大跳页时页面被回收、
+        // 流被提前关闭导致头解析失败）时，用同一份字节重建流重试一次，避免闪「解码失败」错误层。
+        val bytes = resources.sourceOrNull()?.use { it.readByteArray() }
+        var decoder: ImageDecoder? = null
+        for (attempt in 0..1) {
+            decoder = runCatching {
+                bytes?.inputStream()?.let { ImageDecoder.newInstance(it, options.cropBorders, displayProfile) }
+            }.getOrNull()
+            if (decoder != null && decoder.width > 0 && decoder.height > 0) break
+            decoder?.recycle()
+            decoder = null
+        }
+        check(decoder != null && decoder.width > 0 && decoder.height > 0) { "Failed to initialize decoder" }
         // SY <--
 
-        check(decoder != null && decoder.width > 0 && decoder.height > 0) { "Failed to initialize decoder" }
+        return decodeWith(decoder!!)
+    }
 
+    /**
+     * 拿到已初始化的 [decoder] 后，完成采样 / 解码 / 增强 / 硬件位图转换，返回结果。
+     * 封面归档特例与普通页共用此逻辑。
+     */
+    private fun decodeWith(decoder: ImageDecoder): DecodeResult {
         val srcWidth = decoder.width
         val srcHeight = decoder.height
 
