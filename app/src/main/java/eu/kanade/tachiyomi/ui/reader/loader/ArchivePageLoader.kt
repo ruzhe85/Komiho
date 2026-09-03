@@ -92,13 +92,15 @@ internal class ArchivePageLoader(private val reader: ArchiveReader) : PageLoader
                 val imageBytes by lazy { runBlocking { imageBytesDeferred?.await() } }
                 // SY <--
                 ReaderPage(i).apply {
-                    // MihonSY fix (Phase2): 直接把 archive 条目流交给解码器（native 会整本读），
-                    // 不再先在 Kotlin 层把整页字节读进内存再交给 native 二次读——省一份内存、
-                    // 去掉全局锁排队。每个 stream() 调用各自 new 一个 ArchiveInputStream，
-                    // 底层走 FileChannel 定位读（线程安全），并发预取互不干扰。
+                    // MihonSY fix (Phase2): 每页把条目字节读进独立 ByteArray 再交给解码器，
+                    // 解码器拿到的是独立内存流（不被页面回收关闭），彻底规避「大跳页时页面被回收
+                    // → 底层 archive 流被关闭 → native 解析头失败闪错误行」；也避免把实时
+                    // ArchiveInputStream 直接交给 native 解码（多页并发读同一 zip handle 曾导致
+                    // native 崩溃）。去全局 Mutex 后，并发 getInputStream+readBytes 由 FileChannel
+                    // 定位读保证线程安全，不再排队，启动/跳转回到正常速度。
                     stream = {
                         imageBytes?.copyOf()?.inputStream()
-                            ?: reader.getInputStream(entry.name)!!
+                            ?: reader.getInputStream(entry.name)!!.buffered().use { it.readBytes() }.inputStream()
                     }
                     // SY <--
                     status = Page.State.Ready
