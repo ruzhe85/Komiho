@@ -40,6 +40,8 @@ import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
+import eu.kanade.tachiyomi.util.storage.CbzCrypto
+import mihon.core.common.archive.ArchivePasswordException
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
@@ -154,6 +156,11 @@ class ReaderViewModel @JvmOverloads constructor(
 
     private val mutableState = MutableStateFlow(State())
     val state = mutableState.asStateFlow()
+
+    // SY --> Komiho: 加密本密码输入：暂存待重载章节与起始页
+    private var archivePasswordChapter: ReaderChapter? = null
+    private var archivePasswordPage: Int? = null
+    // SY <--
 
     private val eventChannel = Channel<Event>()
     val eventFlow = eventChannel.receiveAsFlow()
@@ -432,6 +439,12 @@ class ReaderViewModel @JvmOverloads constructor(
                 if (e is CancellationException) {
                     throw e
                 }
+                // SY --> 加密本缺密码：暂存待重载章节，交上层弹密码框（不当致命错误）
+                if (e is ArchivePasswordException) {
+                    archivePasswordChapter = chapterList.firstOrNull { chapterId == it.chapter.id }
+                    archivePasswordPage = page
+                }
+                // SY <--
                 Result.failure(e)
             }
         }
@@ -1263,6 +1276,30 @@ class ReaderViewModel @JvmOverloads constructor(
         mutableState.update { it.copy(dialog = null) }
     }
 
+    // SY --> Komiho: 加密本密码输入
+    fun openArchivePasswordDialog() {
+        mutableState.update { it.copy(dialog = Dialog.ArchivePassword) }
+    }
+
+    fun submitArchivePassword(password: String) {
+        CbzCrypto.setPassword(password)
+        val chapter = archivePasswordChapter ?: return
+        mutableState.update { it.copy(dialog = null) }
+        viewModelScope.launchIO {
+            try {
+                loadChapter(loader!!, chapter, archivePasswordPage)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                if (e is ArchivePasswordException) {
+                    mutableState.update { it.copy(dialog = Dialog.ArchivePassword(wrongPassword = e.wrongPassword)) }
+                    return@launchIO
+                }
+                logcat(LogPriority.ERROR, e)
+            }
+        }
+    }
+    // SY <--
+
     fun setBrightnessOverlayValue(value: Int) {
         mutableState.update { it.copy(brightnessOverlayValue = value) }
     }
@@ -1657,6 +1694,12 @@ class ReaderViewModel @JvmOverloads constructor(
             val page: ReaderPage/* SY --> */,
             val extraPage: ReaderPage? = null, /* SY <-- */
         ) : Dialog
+
+        // SY --> Komiho: 加密归档密码输入对话框
+        data class ArchivePassword(
+            val wrongPassword: Boolean = false,
+        ) : Dialog
+        // SY <--
 
         // SY -->
         data object AutoScrollHelp : Dialog

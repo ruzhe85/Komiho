@@ -14,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mihon.core.common.archive.ArchiveReader
+import mihon.core.common.archive.ArchivePasswordException
 import tachiyomi.core.common.util.system.ImageUtil
 import uy.kohesive.injekt.injectLazy
 import java.io.File
@@ -31,11 +32,16 @@ internal class ArchivePageLoader(private val reader: ArchiveReader) : PageLoader
     }
 
     init {
-        reader.wrongPassword?.let { wrongPassword ->
-            if (wrongPassword) {
-                error("Incorrect archive password")
+        // SY --> 加密本：缺密码 / 密码错误时抛异常，交由阅读器弹密码输入框
+        if (reader.encrypted) {
+            if (reader.wrongPassword == true) {
+                throw ArchivePasswordException(wrongPassword = true)
+            }
+            if (reader.wrongPassword == null) {
+                throw ArchivePasswordException(wrongPassword = false)
             }
         }
+        // SY <--
         if (readerPreferences.archiveReaderMode.get() == ReaderPreferences.ArchiveReaderMode.CACHE_TO_DISK) {
             tmpDir.mkdirs()
             reader.useEntries { entries ->

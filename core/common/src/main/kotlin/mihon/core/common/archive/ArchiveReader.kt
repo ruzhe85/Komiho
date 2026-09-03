@@ -5,6 +5,7 @@ import android.os.ParcelFileDescriptor
 import android.system.Os
 import android.system.OsConstants
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import me.zhanghai.android.libarchive.ArchiveException
 import tachiyomi.core.common.storage.openFileDescriptor
 import java.io.Closeable
@@ -73,11 +74,14 @@ class ArchiveReader : Closeable {
         try {
             while (true) {
                 val entry = archive.getNextEntry() ?: break
-                if (entry.isEncrypted) {
-                    encrypted = true
+            if (entry.isEncrypted) {
+                encrypted = true
+                // SY: 仅在已设置全局密码时才校验对错，否则交由上层弹密码框（避免无密码时空抛）
+                if (CbzCrypto.isPasswordSet()) {
                     isPasswordIncorrect(entry.name)
-                    break
                 }
+                break
+            }
             }
         } catch (e: ArchiveException) {
             archive.close()
@@ -118,3 +122,11 @@ fun UniFile.archiveReader(context: Context): ArchiveReader {
     }
     return openFileDescriptor(context, "r").use { ArchiveReader(it) }
 }
+
+// SY -->
+/**
+ * 加密归档缺少密码 / 密码错误时抛出，上层据此在阅读器内弹密码输入对话框。
+ * [wrongPassword]=true 表示已输入过但密码不正确。
+ */
+class ArchivePasswordException(val wrongPassword: Boolean = false) : Exception()
+// SY <--

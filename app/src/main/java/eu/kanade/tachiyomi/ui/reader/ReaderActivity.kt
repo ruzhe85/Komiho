@@ -24,11 +24,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +42,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardActions
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.getSystemService
 import androidx.core.graphics.Insets
@@ -84,6 +91,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
+import mihon.core.common.archive.ArchivePasswordException
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
@@ -233,7 +241,13 @@ class ReaderActivity : BaseActivity() {
                 if (!initResult.getOrDefault(false)) {
                     val exception = initResult.exceptionOrNull() ?: IllegalStateException("Unknown err")
                     withUIContext {
-                        setInitialChapterError(exception)
+                        // SY --> 加密本缺密码：弹输入框而非关闭阅读器
+                        if (exception is ArchivePasswordException) {
+                            viewModel.openArchivePasswordDialog()
+                        } else {
+                            setInitialChapterError(exception)
+                        }
+                        // SY <--
                     }
                 }
             }
@@ -393,6 +407,64 @@ class ReaderActivity : BaseActivity() {
                     hasExtraPage = (state.dialog as? ReaderViewModel.Dialog.PageActions)?.extraPage != null,
                 )
             }
+
+            // SY --> Komiho: 加密归档密码输入框
+            is ReaderViewModel.Dialog.ArchivePassword -> {
+                val wrongPassword = (state.dialog as ReaderViewModel.Dialog.ArchivePassword).wrongPassword
+                var password by remember { mutableStateOf("") }
+                AlertDialog(
+                    onDismissRequest = {
+                        viewModel.closeDialog()
+                        finish()
+                    },
+                    title = { Text(stringResource(MR.strings.archive_password_prompt)) },
+                    text = {
+                        Column {
+                            if (wrongPassword) {
+                                Text(
+                                    stringResource(MR.strings.password_incorrect),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            OutlinedTextField(
+                                value = password,
+                                onValueChange = { password = it },
+                                label = { Text(stringResource(MR.strings.password_label)) },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(
+                                    autoCorrect = false,
+                                    imeAction = ImeAction.Done,
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        if (password.isNotBlank()) viewModel.submitArchivePassword(password)
+                                    },
+                                ),
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = password.isNotBlank(),
+                            onClick = { viewModel.submitArchivePassword(password) },
+                        ) {
+                            Text(stringResource(MR.strings.action_ok))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.closeDialog()
+                                finish()
+                            },
+                        ) {
+                            Text(stringResource(MR.strings.action_cancel))
+                        }
+                    },
+                )
+            }
+            // SY <--
 
             is ReaderViewModel.Dialog.ChapterList -> {
                 var chapters by remember {
