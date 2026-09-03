@@ -11,8 +11,6 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import mihon.core.common.archive.ArchiveReader
 import mihon.core.common.archive.ArchivePasswordException
 import tachiyomi.core.common.util.system.ImageUtil
@@ -24,7 +22,10 @@ import java.io.File
  */
 internal class ArchivePageLoader(private val reader: ArchiveReader) : PageLoader() {
     // SY -->
-    private val mutex = Mutex()
+    // 移除全局 Mutex：LocalRandomAccessSource 已改用 FileChannel 定位读（线程安全），
+    // 每个 ArchiveInputStream 自带独立 libarchive handle + callback state，并发读同一 zip
+    // 不再踩共享游标崩溃。串行化只会让当前页排在队列尾、拖慢启动/跳转，且是「大跳页
+    // 解码失败」的诱因（等待期间页面被回收→流被提前关闭→native 解析头失败）。
     private val context: Application by injectLazy()
     private val readerPreferences: ReaderPreferences by injectLazy()
     private val tmpDir = File(context.externalCacheDir, "reader_${reader.archiveHashCode}").also {
@@ -80,10 +81,8 @@ internal class ArchivePageLoader(private val reader: ArchiveReader) : PageLoader
                     when (readerPreferences.archiveReaderMode.get()) {
                         ReaderPreferences.ArchiveReaderMode.LOAD_INTO_MEMORY -> {
                             CoroutineScope(Dispatchers.IO).async {
-                                mutex.withLock {
-                                    reader.getInputStream(entry.name)!!.buffered().use { stream ->
-                                        stream.readBytes()
-                                    }
+                                reader.getInputStream(entry.name)!!.buffered().use { stream ->
+                                    stream.readBytes()
                                 }
                             }
                         }
@@ -93,22 +92,13 @@ internal class ArchivePageLoader(private val reader: ArchiveReader) : PageLoader
                 val imageBytes by lazy { runBlocking { imageBytesDeferred?.await() } }
                 // SY <--
                 ReaderPage(i).apply {
-                    // MihonSY fix: CBZ-backed pages used to hand out the raw zip
-                    // entry stream (reader.getInputStream) without holding the mutex.
-                    // With enhancement on, Coil decodes asynchronously on a thread
-                    // pool while the reader preloads the next page — several threads
-                    // then read the SAME zip file descriptor concurrently, which
-                    // crashes the app (native). Read the entry into a private
-                    // ByteArray under the mutex and return a standalone memory
-                    // stream: concurrency-safe AND a clean standard-image stream
-                    // for the enhancement decoder.
+                    // MihonSY fix (Phase2): 直接把 archive 条目流交给解码器（native 会整本读），
+                    // 不再先在 Kotlin 层把整页字节读进内存再交给 native 二次读——省一份内存、
+                    // 去掉全局锁排队。每个 stream() 调用各自 new 一个 ArchiveInputStream，
+                    // 底层走 FileChannel 定位读（线程安全），并发预取互不干扰。
                     stream = {
                         imageBytes?.copyOf()?.inputStream()
-                            ?: runBlocking {
-                                mutex.withLock {
-                                    reader.getInputStream(entry.name)!!.buffered().use { it.readBytes() }
-                                }
-                            }.inputStream()
+                            ?: reader.getInputStream(entry.name)!!
                     }
                     // SY <--
                     status = Page.State.Ready
