@@ -114,11 +114,12 @@ class ArchiveReader : Closeable {
 
 fun UniFile.archiveReader(context: Context): ArchiveReader {
     val path = filePath
-    if (!path.isNullOrEmpty()) {
-        // SY --> Phase2: 真实文件走 LocalRandomAccessSource 回调路径，真机验证 libarchive seek 架构；
-        //             SAF / content uri 仍走原 mmap 路径，行为不变
+    // SY --> Phase2: 真实文件（uri.scheme == "file"）走 LocalRandomAccessSource 回调路径，
+    // 真机验证 libarchive seek 架构；content uri（SAF / 系统文件选择器）一律走原 mmap 路径。
+    // 关键：SAF 在 scoped storage 下只能经 content resolver 访问，filePath 虽能解码出真实路径，
+    // 但直接 RandomAccessFile(File) 打开会 EACCES；不可仅凭 filePath 非空就走回调路径。
+    if (uri?.scheme == "file" && !path.isNullOrEmpty()) {
         return ArchiveReader(LocalRandomAccessSource(File(path)))
-        // SY <--
     }
     return openFileDescriptor(context, "r").use { ArchiveReader(it) }
 }
