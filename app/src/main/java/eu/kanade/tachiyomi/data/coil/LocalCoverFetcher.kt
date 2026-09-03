@@ -19,7 +19,9 @@ import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.source.local.io.Archive
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
+import java.security.MessageDigest
 import kotlin.math.max
 
 /**
@@ -40,8 +42,17 @@ class LocalCoverFetcher(
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult {
-        val bytes = readCoverBytes()
-            ?: throw IllegalStateException("Local cover unavailable: ${data.file.uri}")
+        // 自带一层确定性的文件级磁盘缓存：命中直接返回已落盘的 450px JPEG，
+        // 跳过解包/解码，冷启动与跨重启均秒显。缓存落在 filesDir（AOSP 下 filesDir
+        // 跨冷启动默认保留，不会像共享的全局 Coil DiskCache 那样被 LRU/低存储回收
+        // 导致每次冷启动重新解包全部本地封面转圈几秒）。
+        val bytes = cachedCoverBytes()
+            ?: run {
+                val b = readCoverBytes()
+                    ?: throw IllegalStateException("Local cover unavailable: ${data.file.uri}")
+                writeCoverCache(b)
+                b
+            }
         return SourceFetchResult(
             source = ImageSource(
                 source = Buffer().write(bytes),
@@ -50,6 +61,37 @@ class LocalCoverFetcher(
             mimeType = "image/jpeg",
             dataSource = DataSource.DISK,
         )
+    }
+
+    /** 缓存键：uri + lastModified（文件被替换后 lastModified 变化 → 自动失效）。 */
+    private val cacheKey: String get() = "${data.file.uri};${data.lastModified}"
+
+    private fun cacheFile(): File {
+        val dir = File(context.filesDir, "komiho_local_covers").apply { mkdirs() }
+        return File(dir, sha256(cacheKey) + ".jpg")
+    }
+
+    /** 命中（文件存在且非空）则读取；否则返回 null 让上层解包并回填。 */
+    private fun cachedCoverBytes(): ByteArray? {
+        val f = cacheFile()
+        if (f.isFile && f.length() > 0) {
+            return runCatching { f.readBytes() }.getOrNull()
+        }
+        return null
+    }
+
+    private fun writeCoverCache(bytes: ByteArray) {
+        runCatching {
+            val f = cacheFile()
+            val tmp = File(f.parentFile, f.nameWithoutExtension + ".tmp")
+            tmp.writeBytes(bytes)
+            if (tmp.renameTo(f)) tmp.delete() else { tmp.copyTo(f, overwrite = true); tmp.delete() }
+        }
+    }
+
+    private fun sha256(s: String): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        return md.digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 
     private fun readCoverBytes(): ByteArray? {
