@@ -102,10 +102,12 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         pager.isVisible = false // Don't layout the pager yet
         pager.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         pager.isFocusable = false
-        // SY: 离屏缓冲 = 2（前后各 2 页）。去掉 ArchivePageLoader 全局 Mutex 后，
-        // 并发解码已无锁排队瓶颈；实测 3 仍偏慢，降到 2 提速更明显，黑屏仅在极快滑动偶现。
-        // 条页模式沿用 extraLayoutSpace 预加载，不受此控制。
-        pager.offscreenPageLimit = 2
+        // SY: 离屏缓冲 = 1（前后各 1 页）。流畅度由「并发解码密度」决定而非 Mutex：
+        // offscreen 越高，ViewPager 同时撑起的页面越多，5000×2400 整页解码+Lanczos 增强
+        // 并发打满 CPU/GC 导致掉帧。降回 1 恢复最早顺滑感；独立的 ByteArray 内存流已
+        // 根治大跳页「解码失败」错误与活 archive 流崩溃，不会随 offscreen 变化复发。
+        // 代价：极快连翻可能偶现黑屏（同最早，但无 Mutex 拖慢会比最早轻）。条页模式不变。
+        pager.offscreenPageLimit = 1
         pager.id = R.id.reader_pager
         pager.adapter = adapter
         pager.addOnPageChangeListener(pagerListener)
