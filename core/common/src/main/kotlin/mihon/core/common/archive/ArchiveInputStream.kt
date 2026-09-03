@@ -45,8 +45,9 @@ class ArchiveInputStream private constructor(
                 Archive.readOpenMemoryUnsafe(archive, buffer, mmapSize)
             } else {
                 val state = CallbackState(source!!)
-                Archive.readOpen2(archive, state, OPEN_CALLBACK, ReadCallback(state), SKIP_CALLBACK, CLOSE_CALLBACK)
+                // readSetSeekCallback 必须在 readOpen2 之前调用（archive 仍处 state 'new'）
                 Archive.readSetSeekCallback(archive, SeekCallback(state))
+                Archive.readOpen2(archive, state, OPEN_CALLBACK, ReadCallback(state), SKIP_CALLBACK, CLOSE_CALLBACK)
             }
             // SY <--
         } catch (e: ArchiveException) {
