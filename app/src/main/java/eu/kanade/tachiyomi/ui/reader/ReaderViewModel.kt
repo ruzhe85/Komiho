@@ -1278,7 +1278,7 @@ class ReaderViewModel @JvmOverloads constructor(
 
     // SY --> Komiho: 加密本密码输入
     fun openArchivePasswordDialog() {
-        mutableState.update { it.copy(dialog = Dialog.ArchivePassword) }
+        mutableState.update { it.copy(dialog = Dialog.ArchivePassword()) }
     }
 
     fun submitArchivePassword(password: String) {

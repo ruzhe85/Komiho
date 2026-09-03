@@ -134,6 +134,9 @@
     <string name="action_apply">Apply</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_ok">OK</string>
+    <string name="archive_password_prompt">This archive is encrypted. Enter the password to open it.</string>
+    <string name="password_incorrect">Incorrect password</string>
+    <string name="password_label">Password</string>
     <string name="action_cancel_all">Cancel all</string>
     <string name="cancel_all_for_series">Cancel all for this series</string>
     <string name="action_sort">Sort</string>
