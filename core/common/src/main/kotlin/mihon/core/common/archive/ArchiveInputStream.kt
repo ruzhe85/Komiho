@@ -10,7 +10,16 @@ import kotlin.concurrent.Volatile
 import kotlin.math.min
 import mihon.core.common.archive.ArchiveEntry as MihonArchiveEntry
 
-class ArchiveInputStream : InputStream() {
+// 私有主构造：mode 0 = mmap 内存块（本地 SAF / content uri），1 = RandomAccessSource 回调（Local/WebDAV/SMB 真随机访问）
+// SY -->
+class ArchiveInputStream private constructor(
+    private val mode: Int,
+    private val buffer: Long,
+    private val mmapSize: Long,
+    private val source: RandomAccessSource?,
+    encrypted: Boolean,
+) : InputStream() {
+    // SY <--
 
     private val lock = Any()
 
@@ -21,44 +30,37 @@ class ArchiveInputStream : InputStream() {
 
     private val oneByteBuffer = ByteBuffer.allocateDirect(1)
 
+    init {
+        try {
+            // SY -->
+            if (encrypted) {
+                Archive.readAddPassphrase(archive, CbzCrypto.getDecryptedPasswordCbz())
+            }
+            // SY <--
+            Archive.setCharset(archive, Charsets.UTF_8.name().toByteArray())
+            Archive.readSupportFilterAll(archive)
+            Archive.readSupportFormatAll(archive)
+            // SY -->
+            if (mode == 0) {
+                Archive.readOpenMemoryUnsafe(archive, buffer, mmapSize)
+            } else {
+                val state = CallbackState(source!!)
+                Archive.readOpen2(archive, state, OPEN_CALLBACK, ReadCallback(state), SKIP_CALLBACK, CLOSE_CALLBACK)
+                Archive.readSetSeekCallback(archive, SeekCallback(state))
+            }
+            // SY <--
+        } catch (e: ArchiveException) {
+            close()
+            throw e
+        }
+    }
+
     // 内存映射（本地 mmap）构造器
-    constructor(buffer: Long, size: Long, encrypted: Boolean) : this() {
-        openMemory(buffer, size, encrypted)
-    }
+    constructor(buffer: Long, size: Long, encrypted: Boolean) : this(0, buffer, size, null, encrypted)
 
-    // 回调式（RandomAccessSource）构造器：Local / WebDAV / SMB 共用，真正随机访问
-    constructor(source: RandomAccessSource, encrypted: Boolean) : this() {
-        openCallback(CallbackState(source), encrypted)
-    }
-
-    private fun openMemory(buffer: Long, size: Long, encrypted: Boolean) {
-        try {
-            if (encrypted) Archive.readAddPassphrase(archive, CbzCrypto.getDecryptedPasswordCbz())
-            Archive.setCharset(archive, Charsets.UTF_8.name().toByteArray())
-            Archive.readSupportFilterAll(archive)
-            Archive.readSupportFormatAll(archive)
-            Archive.readOpenMemoryUnsafe(archive, buffer, size)
-        } catch (e: ArchiveException) {
-            close()
-            throw e
-        }
-    }
-
+    // 回调式（RandomAccessSource）构造器：Local / WebDAV / SMB 共用，真正随机访问，不整本 mmap
     // SY -->
-    private fun openCallback(state: CallbackState, encrypted: Boolean) {
-        try {
-            if (encrypted) Archive.readAddPassphrase(archive, CbzCrypto.getDecryptedPasswordCbz())
-            Archive.setCharset(archive, Charsets.UTF_8.name().toByteArray())
-            Archive.readSupportFilterAll(archive)
-            Archive.readSupportFormatAll(archive)
-            // 让 libarchive 通过回调从 RandomAccessSource 任意偏移拉数据（含 EOCD / 中央目录）
-            Archive.readOpen2(archive, state, OPEN_CALLBACK, ReadCallback(state), SKIP_CALLBACK, CLOSE_CALLBACK)
-            Archive.readSetSeekCallback(archive, SeekCallback(state))
-        } catch (e: ArchiveException) {
-            close()
-            throw e
-        }
-    }
+    constructor(source: RandomAccessSource, encrypted: Boolean) : this(1, 0, 0, source, encrypted)
     // SY <--
 
     private fun read(buffer: ByteBuffer) {
@@ -137,7 +139,8 @@ class ArchiveInputStream : InputStream() {
                 SEEK_SET -> offset
                 SEEK_CUR -> st.position + offset
                 SEEK_END -> st.source.size + offset
-                else -> throw ArchiveException("Invalid whence: $whence")
+                // libarchive 只会传 0/1/2，非法值防御性报错
+                else -> error("Invalid whence: $whence")
             }
             return st.position
         }
