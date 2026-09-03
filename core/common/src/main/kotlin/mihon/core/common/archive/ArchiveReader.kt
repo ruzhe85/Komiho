@@ -47,7 +47,7 @@ class ArchiveReader : Closeable {
         if (address != null) ArchiveInputStream(address, size, encrypted)
         else ArchiveInputStream(source!!, encrypted)
 
-    inline fun <T> useEntries(block: (Sequence<ArchiveEntry>) -> T): T =
+    fun <T> useEntries(block: (Sequence<ArchiveEntry>) -> T): T =
         newStream(encrypted).use { block(generateSequence { it.getNextEntry() }) }
 
     fun getInputStream(entryName: String): InputStream? {
