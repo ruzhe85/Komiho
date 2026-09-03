@@ -719,6 +719,9 @@
     <string name="pref_double_tap_zoom">双击放大</string>
     <string name="pref_update_only_in_release_period">预测下次更新时间</string>
     <string name="action_ok">确定</string>
+    <string name="archive_password_prompt">该压缩包已加密，请输入密码打开。</string>
+    <string name="password_incorrect">密码错误</string>
+    <string name="password_label">密码</string>
     <string name="track_delete_title">要删除 %s 的记录吗？</string>
     <string name="track_delete_remote_text">同时删除 %s 上的数据</string>
     <string name="track_delete_text">将会在本地删除进度记录的关联。</string>

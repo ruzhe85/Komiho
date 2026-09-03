@@ -46,9 +46,6 @@
     <string name="no_libraries">No libraries</string>
     <string name="select_library_hint">Select a library from the top bar</string>
     <string name="cancel">Cancel</string>
-    <string name="archive_password_prompt">Archive password</string>
-    <string name="password_incorrect">Incorrect password</string>
-    <string name="password_label">Password</string>
     <string name="delete">Delete</string>
     <string name="confirm_delete_title">Confirm delete</string>
     <string name="confirm_delete_message">Delete the %1$s "%2$s"? This cannot be undone.</string>
