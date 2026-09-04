@@ -4,6 +4,7 @@ import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.util.zip.DataFormatException
 import java.util.zip.Inflater
 import java.util.zip.InflaterInputStream
 import javax.crypto.Cipher
@@ -241,10 +242,13 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
     /**
      * 构造期密码校验。
      * - AES：读 salt+2 比对 passVer —— PBKDF2 派生值比对，确定性判定，无随机性。
-     * - ZipCrypto：先读 12B 加密头校验字节（1/256 误判率）；通过后若 CD CRC 可信
-     *   （bit3 未置位）且条目不大，再**整条下载解密解压**比对 CRC32 —— 误判率 1/2^32，
-     *   与本地 libarchive checkEncryptionStatus 同等可靠。错密码必须在构造期被拦截，
-     *   否则流入读页期后只报页面错误、无法弹密码框（渲染层不感知密码异常）。
+     * - ZipCrypto：先读 12B 加密头校验字节（1/256 误判率）；通过后若条目不大再整条
+     *   下载解密验证：
+     *   - CD CRC 可信（bit3 未置位）→ 解压后比对 CRC32（1/2^32）；
+     *   - bit3 置位（CD CRC 不可信，data descriptor 存 CRC）→ 解压整条验 deflate 结构
+     *     （错密码解出的随机数据几乎必然 DataFormatException，可靠性远超 1 字节校验）。
+     *   错密码必须在构造期被拦截，否则流入读页期后只报页面错误、无法弹密码框
+     *   （渲染层不感知密码异常）。仅 bit3+STORED（流式存储加密，极罕见）仍依赖 12B。
      */
     private fun validatePassword(entry: CdEntry): Boolean {
         val dataStart = locateData(entry)
@@ -262,31 +266,39 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
             for (i in 0..11) plain[i] = zc.dec(head[i])
             if ((plain[11].toInt() and 0xFF) != entry.checkByte) return false
 
-            // 增强：CD CRC 可信且条目不大 → 整条验证，消除 1/256 误判（错密码漏到读页期）
-            if (!entry.useTimeCheckByte && entry.crc != 0L && entry.uncompSize in 1..UNCOMP_VALIDATE_LIMIT) {
+            // 增强：条目不大 → 整条验证，消除 1/256 误判（错密码漏到读页期）。
+            // bit3+STORED（CD CRC 不可信且无 deflate 结构可验）不进此分支，退回 12B 校验字节。
+            val canValidate = entry.uncompSize in 1..UNCOMP_VALIDATE_LIMIT &&
+                (!entry.useTimeCheckByte || entry.method == METHOD_DEFLATED)
+            if (canValidate) {
                 val full = readFully(dataStart, entry.compSize.toInt())
                 for (i in 12 until full.size) full[i] = zc.dec(full[i])
-                val crc32 = java.util.zip.CRC32()
-                when (entry.method) {
-                    METHOD_STORED -> crc32.update(full, 12, full.size - 12)
-                    METHOD_DEFLATED -> {
-                        val inf = Inflater(true)
-                        try {
-                            inf.setInput(full, 12, full.size - 12)
-                            val buf = ByteArray(64 * 1024)
-                            var total = 0L
-                            while (!inf.finished()) {
-                                val n = inf.inflate(buf)
-                                if (n == 0 && inf.needsInput()) throw IOException("deflate 数据截断（${entry.name}）")
-                                crc32.update(buf, 0, n)
-                                total += n
-                            }
-                        } finally {
-                            inf.end()
-                        }
-                    }
+                val needCrc = !entry.useTimeCheckByte // CD CRC 可信时才比对
+                if (entry.method == METHOD_STORED) {
+                    val crc32 = java.util.zip.CRC32()
+                    crc32.update(full, 12, full.size - 12)
+                    return crc32.value == entry.crc
                 }
-                return crc32.value == entry.crc
+                // DEFLATED：一次解压。解压失败（DataFormatException/截断）= 解密数据非合法
+                // deflate 流 = 密码错误；CD CRC 可信则再比对 CRC32（1/2^32）
+                val crc32 = java.util.zip.CRC32()
+                val inf = Inflater(true)
+                try {
+                    inf.setInput(full, 12, full.size - 12)
+                    val buf = ByteArray(64 * 1024)
+                    while (!inf.finished()) {
+                        val n = try {
+                            inf.inflate(buf)
+                        } catch (e: DataFormatException) {
+                            0 // 解密失败产物不是合法 deflate 流 → 密码错误
+                        }
+                        if (n == 0) return false
+                        crc32.update(buf, 0, n)
+                    }
+                } finally {
+                    inf.end()
+                }
+                return !needCrc || crc32.value == entry.crc
             }
             true
         }
