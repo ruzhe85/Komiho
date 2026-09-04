@@ -80,4 +80,26 @@ class StoragePreferences(
         Preference.appStateKey("local_browse_last_path"),
         "",
     )
+
+    // SY --> Komiho Phase3: WebDAV 测试直连配置（Phase 3 最小切片）。
+    // 仅用于验证 HTTP Range 远程随机访问，正式的连接管理（多连接/加密存储）在 Phase 4；
+    // 密码暂存明文，Phase 4 迁移到加密存储。
+    /** WebDAV 测试 CBZ/ZIP 的完整 http(s) URL（不含 `webdav:` 前缀）。 */
+    val webdavTestUrl: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("webdav_test_url"),
+        "",
+    )
+
+    /** WebDAV 测试用户名（可空 = 匿名）。 */
+    val webdavTestUser: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("webdav_test_user"),
+        "",
+    )
+
+    /** WebDAV 测试密码（可空 = 匿名）。Phase 3 暂存明文，Phase 4 加密。 */
+    val webdavTestPass: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("webdav_test_pass"),
+        "",
+    )
+    // SY <--
 }

@@ -12,6 +12,8 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import mihon.core.common.archive.ArchiveReader
+import mihon.core.common.archive.WebDavRandomAccessSource
 import mihon.core.common.archive.archiveReader
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
@@ -20,9 +22,12 @@ import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MergedMangaReference
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.LocalSource
 import tachiyomi.source.local.io.Format
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 /**
  * Loader used to retrieve the [PageLoader] for a given chapter.
@@ -134,6 +139,9 @@ class ChapterLoader(
                             is Format.Directory -> DirectoryPageLoader(format.file)
                             is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
                             is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
+                            // SY --> Komiho Phase3: WebDAV 远程随机访问（HTTP Range + libarchive seek 回调）
+                            is Format.RemoteArchive -> ArchivePageLoader(ArchiveReader(webDavSource(format.remoteUrl)))
+                            // SY <--
                         }
                     }
                     else -> error(context.stringResource(MR.strings.loader_not_implemented_error))
@@ -152,6 +160,9 @@ class ChapterLoader(
                     is Format.Directory -> DirectoryPageLoader(format.file)
                     is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
                     is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
+                    // SY --> Komiho Phase3: WebDAV 远程随机访问（HTTP Range + libarchive seek 回调）
+                    is Format.RemoteArchive -> ArchivePageLoader(ArchiveReader(webDavSource(format.remoteUrl)))
+                    // SY <--
                 }
             }
             // SY --> KomihoV2: 整本 CBZ 已下载时本地优先
@@ -175,4 +186,18 @@ class ChapterLoader(
             else -> error(context.stringResource(MR.strings.loader_not_implemented_error))
         }
     }
+
+    // SY --> Komiho Phase3: 由 `webdav:https://...` 章节 url 构造远程随机访问源。
+    // 凭据取 Phase3 测试配置（StoragePreferences，正式连接管理在 Phase 4）；
+    // 服务器不支持 Range 时整本缓存回退目录 cacheDir/webdav_fallback。
+    private fun webDavSource(remoteUrl: String): WebDavRandomAccessSource {
+        val prefs = Injekt.get<StoragePreferences>()
+        return WebDavRandomAccessSource(
+            url = remoteUrl.removePrefix(WebDavRandomAccessSource.URL_PREFIX),
+            username = prefs.webdavTestUser.get().ifBlank { null },
+            password = prefs.webdavTestPass.get().ifBlank { null },
+            fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
+        )
+    }
+    // SY <--
 }

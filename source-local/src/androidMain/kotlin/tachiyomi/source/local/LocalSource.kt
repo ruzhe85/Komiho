@@ -19,6 +19,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromStream
 import logcat.LogPriority
 import mihon.core.common.archive.ZipWriter
+import mihon.core.common.archive.WebDavRandomAccessSource
 import mihon.core.common.archive.archiveReader
 import nl.adaptivity.xmlutil.core.AndroidXmlReader
 import nl.adaptivity.xmlutil.serialization.XML
@@ -417,6 +418,12 @@ actual class LocalSource(
     override suspend fun getPageList(chapter: SChapter): List<Page> = throw UnsupportedOperationException("Unused")
 
     fun getFormat(chapter: SChapter): Format {
+        // SY --> Komiho Phase3: WebDAV 远程归档章节（`webdav:` 前缀）不进本地文件系统解析，
+        // 交由 ChapterLoader 构造 WebDavRandomAccessSource 走 HTTP Range 随机访问。
+        if (chapter.url.startsWith(WebDavRandomAccessSource.URL_PREFIX)) {
+            return Format.RemoteArchive(chapter.url)
+        }
+        // SY <--
         try {
             // SY --> Komiho: chapter.url 已是真实绝对路径，直接映射到当前根下的 UniFile。
             val file = fileSystem.resolveUnderBase(chapter.url)
@@ -463,6 +470,9 @@ actual class LocalSource(
                         entry?.let { coverManager.update(manga, epub.getInputStream(it)!!) }
                     }
                 }
+                // SY --> Komiho Phase3: 远程封面 Phase 4 再做（不为封面拉远程数据）
+                is Format.RemoteArchive -> null
+                // SY <--
             }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "Error updating cover for ${manga.title}" }
