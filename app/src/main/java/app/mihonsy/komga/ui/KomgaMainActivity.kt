@@ -181,6 +181,7 @@ import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
+import app.mihonsy.komga.data.webdav.WebDavCoverCache
 import app.mihonsy.komga.data.webdav.WebDavEntry
 import app.mihonsy.komga.data.webdav.WebDavPropfind
 import java.io.File
@@ -5871,8 +5872,11 @@ private fun HistoryTabLocal(
             val stat = remember(rep.chapterUrl, file) { getFileStat(rep.chapterUrl, file) }
             // SY --> Komiho: 封面改走 LocalCoverFetcher（与 Komga 共用缓存池）。
             // 旧的 resolveCoverUri 只认目录，归档/EPUB 一直没封面；现在归档可拆包取首图。
-            val coverModel: Any? = remember(file, stat.modified) {
-                file?.let { LocalCoverData(it, stat.modified) } ?: rep.thumbnailUrl?.takeIf { it.isNotBlank() }
+            // WebDAV 章节（无本地文件）→ 读打开时「顺便」生成的封面缓存（无则占位图标）。
+            val coverModel: Any? = remember(file, stat.modified, queryTick) {
+                file?.let { LocalCoverData(it, stat.modified) }
+                    ?: rep.thumbnailUrl?.takeIf { it.isNotBlank() }
+                    ?: WebDavCoverCache.existingCoverFile(context, rep.chapterUrl)
             }
             // SY <--
             // 标题取「卷名」（章节名 / chapterUrl 末段），而非系列名；副标题展示系列名。
@@ -6059,9 +6063,13 @@ private fun BookmarksTabLocal(
                             ?: ChapterPageCountMemo.get(first.chapterUrl)
                     }
                     val stat = remember(first.chapterUrl, file) { getFileStat(first.chapterUrl, file) }
-                    // SY --> Komiho: 同上，封面走 LocalCoverFetcher（归档也能拆包取首图）
-                    val coverModel: Any? = remember(file, stat.modified) {
-                        file?.let { LocalCoverData(it, stat.modified) } ?: first.thumbnailUrl?.takeIf { it.isNotBlank() }
+                    // SY --> Komiho: 同上，封面走 LocalCoverFetcher（归档也能拆包取首图）；
+                    // WebDAV 章节 → 打开时「顺便」生成的封面缓存（queryTick 在 remember key 里，
+                    // 阅读器回来 ON_RESUME 复查时刚生成的封面即可上屏）。
+                    val coverModel: Any? = remember(file, stat.modified, resumeTick) {
+                        file?.let { LocalCoverData(it, stat.modified) }
+                            ?: first.thumbnailUrl?.takeIf { it.isNotBlank() }
+                            ?: WebDavCoverCache.existingCoverFile(context, first.chapterUrl)
                     }
                     // SY <--
                     val chapterText = if (first.chapterNumber >= 0) {

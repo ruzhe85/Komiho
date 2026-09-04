@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
+import app.mihonsy.komga.data.webdav.WebDavCoverCache
 import app.mihonsy.komga.source.KomgaSource
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
@@ -213,6 +214,10 @@ class ChapterLoader(
     // 构造期解析失败（非 ZIP / 不支持的压缩方法等）→ 回落 libarchive 回调路径，行为不回退。
     private fun webDavArchiveHandle(remoteUrl: String): ArchiveHandle {
         val source = webDavSource(remoteUrl)
+        // SY --> Komiho Phase4: 顺便生成历史/书签封面——缓存缺失时后台拉首图落盘
+        // （独立连接、失败静默、成功后历史/书签行零请求显示，见 WebDavCoverCache）。
+        WebDavCoverCache.generateAsync(context, remoteUrl)
+        // SY <--
         return try {
             WebDavZipReader(source)
         } catch (e: Exception) {
