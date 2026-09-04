@@ -50,6 +50,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
@@ -64,6 +65,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.ChevronRight
@@ -152,6 +154,7 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -301,20 +304,44 @@ class KomgaMainActivity : KomgaBaseActivity() {
 }
 
 /**
- * Komiho P0: 内容来源。由顶部的来源切换 chip 选择，决定底部导航与内容区。
+ * Komiho Phase4: 内容来源。由顶栏标题位的来源切换按钮（[SourceSwitchButton]）选择，
+ * 决定底部导航与内容区。
  *
  * 分两类：
  *  - Komga：库/系列语义，底部导航为 Home / Library / Lists / Downloads / Settings
  *  - 文件型来源：文件夹浏览语义，底部导航为 Browse / History / Bookmarks / Settings
  *
- * 文件型来源（本地、未来的 SMB / WebDAV）**共用** Browse tab，因此底部导航
+ * 文件型来源（本地、WebDAV、未来的 SMB）**共用** Browse tab，因此底部导航
  * 的数量恒定，不会随来源增加而膨胀成 8 个 tab。
  */
-private enum class AppSource(@StringRes val labelRes: Int, val isFileSource: Boolean) {
-    Komga(R.string.source_komga, isFileSource = false),
-    Local(R.string.tab_local, isFileSource = true),
-    // SMB / WebDAV：对应来源实现落地后再在此登记，未实现的不显示 chip。
+// SY --> Komiho Phase4: 来源条目（全局首页顶栏切换，数据驱动）。Komga / 本地 内置，
+// WebDAV 每条连接一个条目；SMB 预留未实现不显示，未来落地后在 [buildSourceEntries] 登记。
+private enum class SourceKind(val typeLabel: String) {
+    Komga("Komga"),
+    WebDav("WebDAV"),
+    Smb("SMB"),
+    Local("本地"),
     ;
+
+    val isFileSource: Boolean get() = this != Komga
+}
+
+private data class SourceEntry(val id: String, val kind: SourceKind, val name: String)
+
+private const val SOURCE_ID_KOMGA = "komga"
+private const val SOURCE_ID_LOCAL = "local"
+private const val SOURCE_ID_WEBDAV_PREFIX = "webdav:"
+
+/** 来源菜单排序：优先级 Komga > WebDAV > SMB（本地内置排最后），同级按名称升序。 */
+private fun buildSourceEntries(): List<SourceEntry> {
+    val entries = mutableListOf(
+        SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, "Komga"),
+    )
+    WebDavConnectionStore.all()
+        .sortedBy { it.displayName().lowercase() }
+        .forEach { entries.add(SourceEntry(SOURCE_ID_WEBDAV_PREFIX + it.id, SourceKind.WebDav, it.displayName())) }
+    entries.add(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, "本地"))
+    return entries
 }
 
 private enum class MainTab(
@@ -339,9 +366,9 @@ private enum class MainTab(
     Settings(R.string.tab_settings, Icons.Filled.Settings),
     ;
 
-    fun visibleFor(source: AppSource): Boolean = when {
-        komgaOnly -> !source.isFileSource
-        fileOnly -> source.isFileSource
+    fun visibleFor(isFileSource: Boolean): Boolean = when {
+        komgaOnly -> !isFileSource
+        fileOnly -> isFileSource
         else -> true
     }
 
@@ -364,6 +391,7 @@ private fun KomgaMainScreen(
     // 它已处理 takePersistableUriPermission 与写入偏好）。
     val localSourceFs = remember { Injekt.get<LocalSourceFileSystem>() }
     val storagePreferences = remember { Injekt.get<StoragePreferences>() }
+    val scope = rememberCoroutineScope()
     // 所选文件夹即漫画根目录：写入独立的 localSourceRoot 偏好（不再走
     // StorageManager 的 <base>/local，否则用户得先把漫画搬进 local/ 才能看）。
     val pickLocalFolder = SettingsDataScreen.storageLocationPicker(storagePreferences.localSourceRoot)
@@ -452,14 +480,20 @@ private fun KomgaMainScreen(
     }
     // SY <--
 
-    // SY --> Komiho P0: 全局来源切换。切换来源后底部导航会变（Komga 5 项 / 文件型 2 项），
-    // 因此必须把 currentTab 重置为该来源下的第一个可见 tab，否则会指向被隐藏的 tab。
-    var currentSourceOrdinal by rememberSaveable { mutableIntStateOf(AppSource.Komga.ordinal) }
-    val currentSource = AppSource.entries[currentSourceOrdinal]
-    val visibleTabs = remember(currentSource) {
-        MainTab.entries.filter { it.visibleFor(currentSource) }
+    // SY --> Komiho Phase4: 全局来源切换（数据驱动）。Komga / 本地 内置，WebDAV 每连接一条；
+    // 切换后底部导航变化（Komga 5 项 / 文件型 4 项），currentTab 必须重置为该来源第一个可见 tab。
+    // 选中来源持久化到 browseSourceId，重启回到上次来源；连接被删等失效场景回落 Komga。
+    var sourceVersion by remember { mutableIntStateOf(0) }
+    val sourceEntries = remember(sourceVersion) { buildSourceEntries() }
+    var currentSourceId by remember {
+        mutableStateOf(storagePreferences.browseSourceId.get().ifBlank { SOURCE_ID_KOMGA })
     }
-    // 恢复/切换后兜底：当前 tab 若不在可见集合内（如枚举变更），回落到第一个可见 tab。
+    val currentSourceEntry = sourceEntries.firstOrNull { it.id == currentSourceId } ?: sourceEntries.first()
+    val currentIsFileSource = currentSourceEntry.kind.isFileSource
+    val visibleTabs = remember(currentIsFileSource) {
+        MainTab.entries.filter { it.visibleFor(currentIsFileSource) }
+    }
+    // 恢复/切换后兜底：当前 tab 若不在可见集合内（如来源切换/连接被删），回落到第一个可见 tab。
     LaunchedEffect(visibleTabs) {
         if (visibleTabs.none { it.ordinal == currentTab }) {
             currentTab = visibleTabs.first().ordinal
@@ -467,11 +501,14 @@ private fun KomgaMainScreen(
     }
     // 注：不在此处重置 searchOpen ——下方 LaunchedEffect(currentTab) 已负责，
     // 且切换来源必定改变 currentTab（两类来源的首个可见 tab 不同）。
-    fun selectSource(source: AppSource) {
-        if (source.ordinal == currentSourceOrdinal) return
-        currentSourceOrdinal = source.ordinal
-        currentTab = MainTab.entries.first { it.visibleFor(source) }.ordinal
+    fun selectSource(entry: SourceEntry) {
+        if (entry.id == currentSourceId) return
+        currentSourceId = entry.id
+        storagePreferences.browseSourceId.set(entry.id)
+        currentTab = MainTab.entries.first { it.visibleFor(entry.kind.isFileSource) }.ordinal
     }
+    // 「添加来源」/ 连接管理对话框（WebDavFlowDialog，新增/编辑/删除全在里面）。
+    var showSourceManager by remember { mutableStateOf(false) }
     // SY <--
 
     // Refresh counter: bumped by tab re-tap and by Activity onResume (returning
@@ -536,7 +573,7 @@ private fun KomgaMainScreen(
         if (!filterPair?.first.isNullOrBlank() && !filterPair?.second.isNullOrBlank()) {
             // SY --> Komiho P0: 过滤数据来自 Komga 系列页，先切回 Komga 来源；
             // 否则若当前停在文件型来源，会跳到一个被隐藏的 Library tab。
-            currentSourceOrdinal = AppSource.Komga.ordinal
+            selectSource(SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, "Komga"))
             // SY <--
             currentTab = MainTab.Library.ordinal
         }
@@ -581,14 +618,24 @@ private fun KomgaMainScreen(
             val currentTabEnum = MainTab.entries[currentTab]
             TopAppBar(
                 title = {
-                    if (currentTabEnum == MainTab.Library) {
-                        LibrarySelector(
-                            libraries = libraries,
-                            selectedLibraryId = selectedLibraryId,
-                            onSelect = { selectedLibraryId = it },
+                    when {
+                        // Komga 来源 + Library tab：选库下拉仍是标题（库语义内切换）。
+                        currentTabEnum == MainTab.Library && !currentIsFileSource -> {
+                            LibrarySelector(
+                                libraries = libraries,
+                                selectedLibraryId = selectedLibraryId,
+                                onSelect = { selectedLibraryId = it },
+                            )
+                        }
+                        // 设置页与来源无关，显示页名。
+                        currentTabEnum == MainTab.Settings -> Text(MainTab.entries[currentTab].labelText())
+                        // 其余全部 tab：标题位 = 来源切换按钮（Phase4 全局首页形态）。
+                        else -> SourceSwitchButton(
+                            current = currentSourceEntry,
+                            entries = sourceEntries,
+                            onSelect = ::selectSource,
+                            onAddSource = { showSourceManager = true },
                         )
-                    } else {
-                        Text(MainTab.entries[currentTab].labelText())
                     }
                 },
                 actions = {
@@ -669,8 +716,8 @@ private fun KomgaMainScreen(
                             )
                         }
                     }
-                    // SY --> Komiho P0: 搜索是 Komga 语义，文件型来源下直接隐藏。
-                    if (currentSource == AppSource.Komga &&
+                    // SY --> Komiho Phase4: 搜索是 Komga 语义，文件型来源（本地/WebDAV/SMB）下不显示。
+                    if (!currentIsFileSource &&
                         currentTabEnum != MainTab.Settings &&
                         currentTabEnum != MainTab.Downloads
                     ) {
@@ -683,7 +730,7 @@ private fun KomgaMainScreen(
                     }
                     // 本地来源：提供「更改目录」入口（否则选错目录后无法在 Komiho 内改回）。
                     // 仅 Browse tab：历史/书签/设置等 tab 与目录无关，挂上去只会误导。
-                    if (currentSource == AppSource.Local && currentTabEnum == MainTab.Browse) {
+                    if (currentSourceEntry.kind == SourceKind.Local && currentTabEnum == MainTab.Browse) {
                         androidx.compose.material3.IconButton(onClick = { requestLocalFolder() }) {
                             Icon(
                                 imageVector = Icons.Filled.FolderOpen,
@@ -692,7 +739,7 @@ private fun KomgaMainScreen(
                         }
                     }
                     // 本地来源 + 历史 tab：顶栏删除图标 = 清除历史（按时间范围批量删除，无文字）。
-                    if (currentSource == AppSource.Local && currentTabEnum == MainTab.History) {
+                    if (currentSourceEntry.kind == SourceKind.Local && currentTabEnum == MainTab.History) {
                         androidx.compose.material3.IconButton(onClick = { localHistoryClearOpen = true }) {
                             Icon(
                                 imageVector = Icons.Filled.Delete,
@@ -729,15 +776,8 @@ private fun KomgaMainScreen(
                 .padding(padding)
                 .fillMaxSize(),
         ) {
-            // SY --> Komiho P0: 全局来源切换 chip。
-            // 只渲染已实现的来源；SMB / WebDAV 落地后在此自动出现，底部导航不变。
-            // 设置页与来源无关，不显示；只有一种来源时切换无意义，同样不显示。
-            if (MainTab.entries[currentTab] != MainTab.Settings && AppSource.entries.size > 1) {
-                SourceSwitcher(
-                    current = currentSource,
-                    onSelect = ::selectSource,
-                )
-            }
+            // SY --> Komiho Phase4: 旧来源切换 chip 已移除——来源切换升级为顶栏标题位的
+            // 「来源按钮 + 下拉菜单」（SourceSwitchButton），设置页除外。
             // SY <--
             // Search field expands below the title row when the icon is tapped.
             if (searchOpen) {
@@ -812,14 +852,44 @@ private fun KomgaMainScreen(
                                 }
                         },
                     )
-                    // SY --> Komiho P0: 浏览 tab（本地 / SMB / WebDAV 共用）
-                    MainTab.Browse -> LocalSourceTab(
-                        localDir = localDir,
-                        onPickFolder = { requestLocalFolder() },
-                        onSelectRoot = { storagePreferences.localBrowseRootPath.set(it) },
-                        navRequest = localBrowseNavRequest,
-                        onNavConsumed = { localBrowseNavRequest = null },
-                    )
+                    // SY --> Komiho Phase4: 浏览 tab 按当前来源分派（本地 / WebDAV；SMB 落地后接入）。
+                    MainTab.Browse -> when (currentSourceEntry.kind) {
+                        SourceKind.Local -> LocalSourceTab(
+                            localDir = localDir,
+                            onPickFolder = { requestLocalFolder() },
+                            onSelectRoot = { storagePreferences.localBrowseRootPath.set(it) },
+                            navRequest = localBrowseNavRequest,
+                            onNavConsumed = { localBrowseNavRequest = null },
+                        )
+
+                        SourceKind.WebDav -> {
+                            // runBlocking 读 DataStore 较重，按（选中来源, 来源版本）记忆，不随滚动重组反复读。
+                            val conn = remember(currentSourceId, sourceVersion) {
+                                WebDavConnectionStore.all()
+                                    .firstOrNull { it.id == currentSourceId.removePrefix(SOURCE_ID_WEBDAV_PREFIX) }
+                            }
+                            if (conn == null) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        "该 WebDAV 连接不存在，请从顶栏重新选择来源",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            } else {
+                                WebDavBrowsePane(
+                                    conn = conn,
+                                    onOpenFile = { fileUrl ->
+                                        scope.launch { openWebDavTestFile(context, storagePreferences, conn, fileUrl) }
+                                    },
+                                )
+                            }
+                        }
+
+                        // SMB 未实现；Komga 不会出现（Browse 仅文件型来源可见）。
+                        else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("该来源暂未支持", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                     // SY --> Komiho: 本地模式历史 / 书签 tab。
                     MainTab.History -> HistoryTabLocal(
                         refreshTick = refreshTick,
@@ -834,6 +904,24 @@ private fun KomgaMainScreen(
                     // SY <--
                     MainTab.Settings -> SettingsTab(context)
                 }
+                // SY --> Komiho Phase4: 「添加来源」= WebDAV 连接管理对话框（新增/编辑/删除）。
+                // 关闭后重建来源菜单（sourceVersion++）；当前选中的连接被删时回落 Komga。
+                if (showSourceManager) {
+                    WebDavFlowDialog(
+                        onDismiss = {
+                            showSourceManager = false
+                            sourceVersion++
+                            // 用关闭后的最新来源列表校验（sourceEntries 还是旧快照）。
+                            if (currentSourceId != SOURCE_ID_KOMGA &&
+                                currentSourceId != SOURCE_ID_LOCAL &&
+                                buildSourceEntries().none { it.id == currentSourceId }
+                            ) {
+                                selectSource(SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, "Komga"))
+                            }
+                        },
+                    )
+                }
+                // SY <--
                 // SY --> Komiho: 首次选目录授权提示（未授予 MANAGE_EXTERNAL_STORAGE 时先弹，
                 // 用户选「使用 SAF」才继续原 SAF 选目录流程，行为不退化）。
                 if (showManageAccessDialog) {
@@ -4088,29 +4176,97 @@ private suspend fun checkForKomihoUpdate(context: android.content.Context, onFin
 
 // ---------- Local source tab (P0) ----------
 
+/** 来源条目圆点颜色（按类型固定，与来源预览图一致）。 */
+@Composable
+private fun sourceDotColor(kind: SourceKind) = when (kind) {
+    SourceKind.Komga -> Color(0xFF7F77DD)
+    SourceKind.WebDav -> Color(0xFFEF9F27)
+    SourceKind.Smb -> Color(0xFF378ADD)
+    SourceKind.Local -> Color(0xFF1D9E75)
+}
+
 /**
- * 全局来源切换 chip：Komga / 本地 /（SMB、WebDAV 落地后自动出现）。
- *
- * 只渲染 [AppSource] 中**已登记**的来源；未实现的来源不会登记进枚举，
- * 因此不会出现「点了没反应」的死 UI。
+ * 全局来源切换按钮（顶栏标题位）：`● 来源名 ▾`，下拉菜单列出全部来源条目
+ * （圆点 + 名称 + 类型副标题 + 当前项 ✓），底部「＋ 添加来源」打开连接管理。
+ * 排序与可见性由 [buildSourceEntries] 决定（未添加的来源不显示）。
  */
 @Composable
-private fun SourceSwitcher(
-    current: AppSource,
-    onSelect: (AppSource) -> Unit,
+private fun SourceSwitchButton(
+    current: SourceEntry,
+    entries: List<SourceEntry>,
+    onSelect: (SourceEntry) -> Unit,
+    onAddSource: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        AppSource.entries.forEach { source ->
-            FilterChip(
-                selected = source == current,
-                onClick = { onSelect(source) },
-                label = { Text(composeStringResource(source.labelRes)) },
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.medium)
+                .clickable { open = true }
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(sourceDotColor(current.kind)),
+            )
+            Text(
+                text = current.name,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = "切换来源")
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+        ) {
+            entries.forEach { entry ->
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(sourceDotColor(entry.kind)),
+                            )
+                            Column {
+                                Text(entry.name, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    entry.kind.typeLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    },
+                    trailingIcon = {
+                        if (entry.id == current.id) {
+                            Icon(Icons.Filled.Check, contentDescription = "当前来源")
+                        }
+                    },
+                    onClick = {
+                        open = false
+                        onSelect(entry)
+                    },
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("添加来源") },
+                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                onClick = {
+                    open = false
+                    onAddSource()
+                },
             )
         }
     }
@@ -4369,9 +4525,6 @@ private fun LocalFileBrowser(
     var showCover by remember { mutableStateOf(prefs.localBrowseShowCover.get()) }
     var columnCount by remember { mutableStateOf(prefs.localBrowseColumns.get()) }
     var showOptions by remember { mutableStateOf(false) }
-    // SY --> Komiho Phase4: 本地 / WebDAV 一体化浏览：Browse tab 内顶部 tab 切换，SMB 落地后扩展第三段
-    var webDavPane by rememberSaveable { mutableStateOf(false) }
-    // SY <--
 
     // SY --> Komiho: 真实路径模式标记（持有 MANAGE_EXTERNAL_STORAGE 时列目录走 UniFile 直读）。
     val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
@@ -4497,21 +4650,6 @@ private fun LocalFileBrowser(
     val visibleEntries = entries.filter { it.isDirectory || it.isArchive || it.isImage }
 
     Column(Modifier.fillMaxSize()) {
-        // SY --> Komiho Phase4: 本地 / WebDAV 一体化浏览：顶部 tab 切换（数据层同挂 LocalSource，仅 UI 区分）
-        TabRow(selectedTabIndex = if (webDavPane) 1 else 0) {
-            Tab(selected = !webDavPane, onClick = { webDavPane = false }, text = { Text("本地") })
-            Tab(selected = webDavPane, onClick = { webDavPane = true }, text = { Text("WebDAV") })
-        }
-        // SY <--
-        if (webDavPane) {
-            WebDavBrowsePane(
-                prefs = prefs,
-                onOpenFile = { conn, fileUrl ->
-                    scope.launch { openWebDavTestFile(context, prefs, conn, fileUrl) }
-                },
-            )
-            return@Column
-        }
         // 顶栏：面包屑（可点跳层）+ 显示选项 Tune 按钮。
         Row(
             modifier = Modifier
@@ -5172,24 +5310,20 @@ private fun WebDavConnectionEditDialog(
     )
 }
 
-/** WebDAV 浏览页（Phase4 一体化）：内嵌在 Browse tab 的「WebDAV」段，全屏目录浏览。
- *  顶部为连接切换下拉 + 管理连接入口；PROPFIND Depth-1 逐级下钻，点归档直接打开。
- *  服务器不支持 PROPFIND（或想跳转任意文件）时切「手动输入路径」兜底。 */
+/** WebDAV 浏览页（Phase4 全局首页形态）：挂在 Browse tab 下，连接由顶栏来源按钮决定。
+ *  PROPFIND Depth-1 逐级下钻，点归档直接打开；服务器不支持 PROPFIND（或想跳转任意文件）
+ *  时切「手动输入路径」兜底。连接管理在顶栏「添加来源」入口（WebDavFlowDialog）。 */
 @Composable
 private fun WebDavBrowsePane(
-    prefs: StoragePreferences,
-    onOpenFile: (conn: WebDavConnection, fileUrl: String) -> Unit,
+    conn: WebDavConnection,
+    onOpenFile: (fileUrl: String) -> Unit,
 ) {
-    var connections by remember { mutableStateOf(WebDavConnectionStore.all()) }
-    var selected by remember { mutableStateOf(connections.firstOrNull()) }
-    var showManage by remember { mutableStateOf(false) }
-    var connMenuOpen by remember { mutableStateOf(false) }
-    var dirUrl by remember { mutableStateOf(selected?.baseUrl.orEmpty()) }
+    var dirUrl by remember(conn.id) { mutableStateOf(conn.baseUrl) }
     var entries by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var manual by remember { mutableStateOf(false) }
-    var manualUrl by remember { mutableStateOf(prefs.webdavTestUrl.get()) }
+    var manualUrl by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
     fun load(conn: WebDavConnection, dir: String) {
@@ -5206,57 +5340,14 @@ private fun WebDavBrowsePane(
         }
     }
 
-    LaunchedEffect(selected?.id) {
-        val conn = selected ?: return@LaunchedEffect
+    // 连接实例变化（首次进入 / 编辑保存）时重载根目录。手动输入态一并退出。
+    LaunchedEffect(conn) {
         manual = false
         load(conn, conn.baseUrl)
     }
 
     Column(Modifier.fillMaxSize()) {
-        // 顶栏：连接切换下拉 + 管理连接。
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                TextButton(onClick = { connMenuOpen = true }) {
-                    Text(
-                        text = selected?.displayName() ?: "选择连接",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "切换连接")
-                }
-                DropdownMenu(
-                    expanded = connMenuOpen,
-                    onDismissRequest = { connMenuOpen = false },
-                ) {
-                    connections.forEach { conn ->
-                        DropdownMenuItem(
-                            text = { Text(conn.displayName()) },
-                            onClick = {
-                                connMenuOpen = false
-                                if (conn.id != selected?.id) selected = conn
-                            },
-                        )
-                    }
-                }
-            }
-            TextButton(onClick = { showManage = true }) { Text("管理连接") }
-        }
-
-        val conn = selected
         when {
-            conn == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    "还没有 WebDAV 连接，先「管理连接」新增。",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
             manual -> Column(Modifier.fillMaxSize().padding(16.dp)) {
                 OutlinedTextField(
                     value = manualUrl,
@@ -5273,7 +5364,7 @@ private fun WebDavBrowsePane(
                 )
                 TextButton(onClick = { manual = false }) { Text("返回目录浏览") }
                 TextButton(
-                    onClick = { onOpenFile(conn, manualUrl) },
+                    onClick = { onOpenFile(manualUrl) },
                     enabled = manualUrl.isNotBlank(),
                 ) { Text(composeStringResource(R.string.action_ok)) }
             }
@@ -5334,7 +5425,7 @@ private fun WebDavBrowsePane(
                                         style = MaterialTheme.typography.bodyMedium,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { onOpenFile(conn, e.url) }
+                                            .clickable { onOpenFile(e.url) }
                                             .padding(horizontal = 16.dp, vertical = 10.dp),
                                     )
                                 }
@@ -5355,16 +5446,6 @@ private fun WebDavBrowsePane(
                 }
             }
         }
-    }
-
-    if (showManage) {
-        WebDavFlowDialog(
-            onDismiss = {
-                showManage = false
-                connections = WebDavConnectionStore.all()
-                if (connections.none { it.id == selected?.id }) selected = connections.firstOrNull()
-            },
-        )
     }
 }
 
