@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
 import app.mihonsy.komga.source.KomgaSource
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.chapter.interactor.SetReadStatus
@@ -879,6 +880,10 @@ class ReaderViewModel @JvmOverloads constructor(
 
         if (!incognitoMode && page.status !is Page.State.Error) {
             readerChapter.chapter.last_page_read = pageIndex
+
+            // SY --> Komiho: 进程内回填章节总页数（WebDAV 等远程章节的历史/书签进度展示用）
+            readerChapter.pages?.let { ChapterPageCountMemo.put(readerChapter.chapter.url, it.size) }
+            // SY <--
 
             // MihonSY: while reading, sync partial page progress to Komga (throttled).
             // Komga records "read to page N" per book, so mid-chapter progress is kept in
