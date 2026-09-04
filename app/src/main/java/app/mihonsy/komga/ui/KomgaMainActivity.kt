@@ -175,6 +175,7 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.download.KomgaDownloadStore
+import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import java.io.File
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.CollectionDto
@@ -4566,12 +4567,13 @@ private fun LocalFileBrowser(
         WebDavTestDialog(
             initialUrl = prefs.webdavTestUrl.get(),
             initialUser = prefs.webdavTestUser.get(),
-            initialPass = prefs.webdavTestPass.get(),
+            initialPass = WebDavCredentialCrypto.decryptStored(prefs.webdavTestPass.get()),
             onDismiss = { showWebDavDialog = false },
             onOpen = { url, user, pass ->
                 showWebDavDialog = false
                 prefs.webdavTestUser.set(user.trim())
-                prefs.webdavTestPass.set(pass)
+                // Phase4：密码加密落盘（enc1: 前缀），历史明文下次读取仍兼容
+                prefs.webdavTestPass.set(WebDavCredentialCrypto.encrypt(pass))
                 scope.launch { openWebDavTestFile(context, prefs, url) }
             },
         )

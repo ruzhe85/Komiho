@@ -5,6 +5,7 @@ import java.io.File
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import app.mihonsy.komga.data.download.KomgaDownloadStore
+import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.source.KomgaSource
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
@@ -198,7 +199,8 @@ class ChapterLoader(
         return WebDavRandomAccessSource(
             url = remoteUrl.removePrefix(WebDavRandomAccessSource.URL_PREFIX),
             username = prefs.webdavTestUser.get().ifBlank { null },
-            password = prefs.webdavTestPass.get().ifBlank { null },
+            // Phase4：密码已加密落盘（enc1: 前缀），历史明文透传（下次保存自动加密）
+            password = WebDavCredentialCrypto.decryptStored(prefs.webdavTestPass.get()).ifBlank { null },
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
         )
     }
