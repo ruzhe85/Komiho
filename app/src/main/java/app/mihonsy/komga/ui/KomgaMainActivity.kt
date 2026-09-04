@@ -5274,8 +5274,39 @@ private fun WebDavBrowsePane(
             runCatching { java.net.URI(conn.baseUrl).host }.getOrNull() ?: "WebDAV"
         }
     }
-    var trail by remember(conn.id) { mutableStateOf(listOf(rootLabel to conn.baseUrl)) }
+    var trail by remember(conn.id) {
+        // SY: 恢复该连接最后访问的目录（切来源/切 tab/重启后不重置到根目录）。
+        // 只存 URL 栈（显示名从 URL 尾段解码重建）；不匹配当前连接 baseUrl 的记录丢弃。
+        val savedUrls = prefs.webdavBrowseLastPaths.get()
+            .lines()
+            .firstOrNull { it.substringBefore(' ') == conn.id }
+            ?.substringAfter(' ', "")
+            ?.split('\u001F')
+            ?.filter { it.startsWith(conn.baseUrl) && it.length > conn.baseUrl.length }
+            .orEmpty()
+        mutableStateOf(
+            listOf(rootLabel to conn.baseUrl) + savedUrls.map { url ->
+                val name = runCatching { java.net.URLDecoder.decode(url.substringAfterLast('/'), "UTF-8") }
+                    .getOrNull() ?: url.substringAfterLast('/')
+                name to url
+            },
+        )
+    }
     val dirUrl = trail.last().second
+
+    // SY: 目录变化即记忆（按连接一行存储，其余连接记录保留）。
+    LaunchedEffect(trail) {
+        val saved = trail.drop(1).joinToString("\u001F") { it.second }
+        prefs.webdavBrowseLastPaths.set(
+            prefs.webdavBrowseLastPaths.get()
+                .lines()
+                .filter { it.isNotBlank() && it.substringBefore(' ') != conn.id }
+                .plus(if (saved.isEmpty()) null else "${conn.id} $saved")
+                .filterNotNull()
+                .joinToString("\n"),
+        )
+    }
+    // SY <--
 
     var entries by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
