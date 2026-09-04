@@ -5963,9 +5963,11 @@ private fun HistoryTabLocal(
     }
 }
 
-/** 清除历史的时间范围。millis = 从「现在」向前回溯的毫秒数；ALL 表示不限时间（清空全部）。 */
+/** 清除历史的时间范围（选项语义：清除该时间点**之前**的记录，保留最近一段）。
+ *  millis = 从「现在」向前回溯的毫秒数；ALL 表示不限时间（清空全部）。 */
 private enum class ClearRange(val millis: Long) {
     DAY(24L * 60 * 60 * 1000),
+    THREE_DAYS(3L * 24 * 60 * 60 * 1000),
     WEEK(7L * 24 * 60 * 60 * 1000),
     MONTH(30L * 24 * 60 * 60 * 1000),
     ALL(0L),
@@ -5979,6 +5981,7 @@ private fun ClearHistoryDialog(
 ) {
     val options = listOf(
         R.string.local_history_clear_1d to ClearRange.DAY,
+        R.string.local_history_clear_3d to ClearRange.THREE_DAYS,
         R.string.local_history_clear_1w to ClearRange.WEEK,
         R.string.local_history_clear_1m to ClearRange.MONTH,
         R.string.local_history_clear_all to ClearRange.ALL,

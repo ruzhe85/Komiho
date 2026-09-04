@@ -30,9 +30,10 @@
     <string name="local_history_delete">删除记录</string>
     <string name="local_history_clear">清除历史</string>
     <string name="local_history_clear_range">清除时间范围</string>
-    <string name="local_history_clear_1d">最近1天</string>
-    <string name="local_history_clear_1w">最近1周</string>
-    <string name="local_history_clear_1m">最近1月</string>
+    <string name="local_history_clear_1d">24小时前</string>
+    <string name="local_history_clear_3d">3天前</string>
+    <string name="local_history_clear_1w">1周前</string>
+    <string name="local_history_clear_1m">1月前</string>
     <string name="local_history_clear_all">全部</string>
     <string name="local_history_cancel">取消</string>
     <string name="local_bookmark_remove">取消书签</string>
