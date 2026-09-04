@@ -71,9 +71,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
@@ -84,7 +82,6 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Image
@@ -249,7 +246,6 @@ import tachiyomi.core.common.storage.nameWithoutExtension
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 // SY --> Komiho 本地浏览器：显示模式 + 排序 + 封面
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import mihon.core.common.archive.archiveReader
 import java.text.SimpleDateFormat
@@ -319,8 +315,8 @@ class KomgaMainActivity : KomgaBaseActivity() {
  */
 // SY --> Komiho Phase4: 来源条目（全局首页顶栏切换，数据驱动）。本地是唯一内置来源、固定置顶；
 // Komga 需已添加服务器连接才出现；WebDAV 每条连接一个条目；SMB 预留未实现不显示，
-// 未来落地后在 [buildSourceEntries] 登记。
-private enum class SourceKind(val typeLabel: String) {
+// 未来落地后在 [buildSourceEntries] 登记。（internal：AddSourceFlow.kt 的 sourceIcon 共用。）
+internal enum class SourceKind(val typeLabel: String) {
     Komga("Komga"),
     WebDav("WebDAV"),
     Smb("SMB"),
@@ -525,8 +521,8 @@ private fun KomgaMainScreen(
         storagePreferences.browseSourceId.set(entry.id)
         currentTab = MainTab.entries.first { it.visibleFor(entry.kind.isFileSource) }.ordinal
     }
-    // 「添加来源」/ 连接管理对话框（WebDavFlowDialog，新增/编辑/删除全在里面）。
-    var showSourceManager by remember { mutableStateOf(false) }
+    // 「添加来源」全屏流程（AddSourceFlow：类型选择 → 各类型表单页）。
+    var showAddSource by remember { mutableStateOf(false) }
     // SY <--
 
     // Refresh counter: bumped by tab re-tap and by Activity onResume (returning
@@ -653,12 +649,8 @@ private fun KomgaMainScreen(
                         else -> SourceSwitchButton(
                             current = currentSourceEntry,
                             entries = sourceEntries,
-                            komgaAdded = komgaConnected,
                             onSelect = ::selectSource,
-                            onAddSource = { showSourceManager = true },
-                            onAddKomga = {
-                                context.startActivity(Intent(context, KomgaConnectActivity::class.java))
-                            },
+                            onAddSource = { showAddSource = true },
                         )
                     }
                 },
@@ -928,14 +920,20 @@ private fun KomgaMainScreen(
                     // SY <--
                     MainTab.Settings -> SettingsTab(context)
                 }
-                // SY --> Komiho Phase4: 「添加来源」= WebDAV 连接管理对话框（新增/编辑/删除）。
-                // 关闭后重建来源菜单（sourceVersion++）；当前选中的连接被删时回落本地
-                // （本地是唯一必然存在的来源；Komga 现同为可添加来源，走 onAddKomga）。
-                if (showSourceManager) {
-                    WebDavFlowDialog(
+                // SY --> Komiho Phase4: 「添加来源」全屏流程（类型选择 / 表单 / 删除确认全在内）。
+                // 关闭后重建来源菜单（sourceVersion++）、复查 Komga 连接状态；
+                // 当前选中的来源被删等失效场景回落本地。
+                if (showAddSource) {
+                    AddSourceFlow(
+                        prefs = prefs,
+                        manageTick = permTick,
+                        localDir = localDir,
+                        onPickLocalFolder = { pickLocalFolder.launch(null) },
+                        onManageAccess = { launchManageAllFilesAccess(context) },
                         onDismiss = {
-                            showSourceManager = false
+                            showAddSource = false
                             sourceVersion++
+                            komgaConnected = prefs.hasConnection()
                             // 用关闭后的最新来源列表校验（sourceEntries 还是旧快照）。
                             if (buildSourceEntries(prefs.hasConnection()).none { it.id == currentSourceId }) {
                                 selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, "本地"))
@@ -4198,28 +4196,18 @@ private suspend fun checkForKomihoUpdate(context: android.content.Context, onFin
 
 // ---------- Local source tab (P0) ----------
 
-/** 来源条目小图标（按类型固定，替代早前的彩色圆点）。 */
-private fun sourceIcon(kind: SourceKind): ImageVector = when (kind) {
-    SourceKind.Komga -> Icons.Filled.Dns
-    SourceKind.WebDav -> Icons.Filled.CloudQueue
-    SourceKind.Smb -> Icons.Filled.Lan
-    SourceKind.Local -> Icons.Filled.Folder
-}
-
 /**
  * 全局来源切换按钮（顶栏标题位）：`图标 来源名 ▾`，下拉菜单列出全部来源条目
- * （类型图标 + 名称 + 类型副标题 + 当前项 ✓），底部「添加 Komga / 添加 WebDAV /
- * 添加 SMB（未支持）」入口；Komga 已添加时隐藏对应入口。
+ * （类型图标 + 名称 + 类型副标题 + 当前项 ✓），底部「＋ 添加来源」打开全屏添加流程
+ * （[AddSourceFlow]，见 AddSourceFlow.kt）。
  * 排序与可见性由 [buildSourceEntries] 决定（未添加的来源不显示）。
  */
 @Composable
 private fun SourceSwitchButton(
     current: SourceEntry,
     entries: List<SourceEntry>,
-    komgaAdded: Boolean,
     onSelect: (SourceEntry) -> Unit,
     onAddSource: () -> Unit,
-    onAddKomga: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -4284,29 +4272,13 @@ private fun SourceSwitchButton(
                 )
             }
             HorizontalDivider()
-            if (!komgaAdded) {
-                DropdownMenuItem(
-                    text = { Text("添加 Komga") },
-                    leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    onClick = {
-                        open = false
-                        onAddKomga()
-                    },
-                )
-            }
             DropdownMenuItem(
-                text = { Text("添加 WebDAV") },
+                text = { Text("添加来源") },
                 leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
                 onClick = {
                     open = false
                     onAddSource()
                 },
-            )
-            DropdownMenuItem(
-                text = { Text("添加 SMB（暂未支持）") },
-                enabled = false,
-                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                onClick = {},
             )
         }
     }
@@ -5191,168 +5163,10 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
     }
 }
 
-// SY --> Komiho Phase4: WebDAV 连接管理 + 文件打开（D3.A：沿用原测试入口升级）。
-// Phase4：浏览正文移入 Browse tab 的 WebDavBrowsePane（一体化 tab 切换），
-// 本对话框仅承担连接管理（新增/编辑/删除）。
-
-/** WebDAV 连接管理对话框：连接列表 + 新增/编辑，两态互斥切换。 */
-@Composable
-private fun WebDavFlowDialog(
-    onDismiss: () -> Unit,
-) {
-    var connections by remember { mutableStateOf(WebDavConnectionStore.all()) }
-    var editing by remember { mutableStateOf<WebDavConnection?>(null) }
-    var creating by remember { mutableStateOf(false) }
-
-    when {
-        creating || editing != null -> WebDavConnectionEditDialog(
-            connection = editing,
-            onDismiss = {
-                creating = false
-                editing = null
-            },
-            onSave = { name, baseUrl, user, pass ->
-                val target = editing
-                if (target == null) {
-                    WebDavConnectionStore.add(name, baseUrl, user, pass)
-                } else {
-                    WebDavConnectionStore.update(target.id, name, baseUrl, user, pass)
-                }
-                connections = WebDavConnectionStore.all()
-                creating = false
-                editing = null
-            },
-        )
-
-        else -> AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("WebDAV 连接") },
-            text = {
-                Column {
-                    if (connections.isEmpty()) {
-                        Text(
-                            "还没有连接，先「新增连接」填好服务器与凭据；\n" +
-                                "Phase3 的测试配置会自动迁移为「默认连接」。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .verticalScroll(rememberScrollState())
-                                .weight(1f, fill = false),
-                        ) {
-                            connections.forEach { conn ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(conn.displayName(), style = MaterialTheme.typography.titleMedium)
-                                        Text(
-                                            conn.baseUrl,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                    TextButton(onClick = { editing = conn }) { Text("编辑") }
-                                    TextButton(onClick = {
-                                        WebDavConnectionStore.remove(conn.id)
-                                        connections = WebDavConnectionStore.all()
-                                    }) { Text("删除") }
-                                }
-                            }
-                        }
-                        Text(
-                            "浏览与打开在浏览页选择连接后进行",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { creating = true }) { Text("新增连接") }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.action_cancel)) }
-            },
-        )
-    }
-}
-
-/** 连接新增/编辑对话框。编辑时密码留空 = 不修改旧密码。 */
-@Composable
-private fun WebDavConnectionEditDialog(
-    connection: WebDavConnection?,
-    onDismiss: () -> Unit,
-    onSave: (name: String, baseUrl: String, user: String, pass: String) -> Unit,
-) {
-    var name by remember { mutableStateOf(connection?.name.orEmpty()) }
-    var baseUrl by remember { mutableStateOf(connection?.baseUrl.orEmpty()) }
-    var user by remember { mutableStateOf(connection?.user.orEmpty()) }
-    var pass by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (connection == null) "新增 WebDAV 连接" else "编辑连接") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("名称（如 115 / NAS 局域网）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    label = { Text("Base URL（如 https://host:10007/QNAP2）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = user,
-                    onValueChange = { user = it },
-                    label = { Text("用户名（可空 = 匿名）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = pass,
-                    onValueChange = { pass = it },
-                    label = {
-                        Text(if (connection == null) "密码（可空 = 匿名）" else "密码（留空 = 不修改）")
-                    },
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    "凭据经 Keystore 加密后落盘，不会明文保存。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onSave(name, baseUrl, user, pass) },
-                enabled = baseUrl.isNotBlank(),
-            ) { Text(composeStringResource(R.string.action_save)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.action_cancel)) }
-        },
-    )
-}
 
 /** WebDAV 浏览页（Phase4 全局首页形态）：挂在 Browse tab 下，连接由顶栏来源按钮决定。
  *  PROPFIND Depth-1 逐级下钻，点归档直接打开；服务器不支持 PROPFIND（或想跳转任意文件）
- *  时切「手动输入路径」兜底。连接管理在顶栏「添加来源」入口（WebDavFlowDialog）。 */
+ *  时切「手动输入路径」兜底。连接管理在顶栏「添加来源」全屏流程（AddSourceFlow）。 */
 @Composable
 private fun WebDavBrowsePane(
     conn: WebDavConnection,
