@@ -102,5 +102,14 @@ class StoragePreferences(
         Preference.appStateKey("webdav_test_pass"),
         "",
     )
+
+    /**
+     * WebDAV 整本缓存（rar/7z 强制回退等）磁盘上限，字节。默认 1GB，可调 200MB~4GB
+     * （设置-存储滑条，200MB 一档）。超限按 lastModified LRU 淘汰（WebDavRandomAccessSource）。
+     */
+    val webdavCacheMaxBytes: Preference<Long> = preferenceStore.getLong(
+        Preference.appStateKey("webdav_cache_max_bytes"),
+        1024L * 1024 * 1024,
+    )
     // SY <--
 }

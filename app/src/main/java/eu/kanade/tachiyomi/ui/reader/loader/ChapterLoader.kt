@@ -26,9 +26,12 @@ import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MergedMangaReference
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.LocalSource
 import tachiyomi.source.local.io.Format
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 /**
  * Loader used to retrieve the [PageLoader] for a given chapter.
@@ -191,7 +194,8 @@ class ChapterLoader(
     // SY --> Komiho Phase4: 由 `webdav:` 章节 url 构造远程随机访问源。
     // 凭据按章节 URL 双格式解析（D2.A）：新格式 `webdav://<connId>/<URL>` 按 connId 精确取，
     // 旧格式 `webdav:<URL>` 回落 baseUrl 最长前缀匹配的连接（历史章节不改 DB）。
-    // 服务器不支持 Range 时整本缓存回退目录 cacheDir/webdav_fallback。
+    // 服务器不支持 Range 时整本缓存回退目录 cacheDir/webdav_fallback；
+    // 磁盘上限设置-存储可调（webdavCacheMaxBytes，默认 1GB），超限 LRU 淘汰。
     private fun webDavSource(remoteUrl: String): WebDavRandomAccessSource {
         val credentials = WebDavConnectionStore.credentialsFor(remoteUrl)
         return WebDavRandomAccessSource(
@@ -199,6 +203,7 @@ class ChapterLoader(
             username = credentials?.first?.ifBlank { null },
             password = credentials?.second?.ifBlank { null },
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
+            cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
         )
     }
 

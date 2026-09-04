@@ -41,6 +41,8 @@ class WebDavRandomAccessSource(
     username: String? = null,
     password: String? = null,
     private val fallbackCacheDir: File? = null,
+    /** 整本缓存磁盘上限（字节）：超限按 lastModified LRU 淘汰；0/负数 = 不限。设置-存储可调。 */
+    private val cacheMaxBytes: Long = Long.MAX_VALUE,
 ) : RandomAccessSource {
 
     /** 规范化后的请求 URL（宽容中文/空格等未编码字符，逐段百分号编码补齐）。 */
@@ -193,17 +195,20 @@ class WebDavRandomAccessSource(
 
     /**
      * 整本缓存落盘（rar/7z 强制回退路径）：文件名 = URL hash + 扩展名，跨会话复用——
-     * 已存在完整缓存则跳过下载（重新打开同一卷零流量）。先落 `.part` 临时文件、
-     * 完成后原子改名，避免中断留下半包被误用。缓存随系统清理 cacheDir，不主动管理。
+     * 已存在完整缓存则跳过下载（重新打开同一卷零流量，命中时刷新 lastModified 作 LRU 依据）。
+     * 先落 `.part` 临时文件、完成后原子改名，避免中断留下半包被误用。
+     * 磁盘缓存目录受 [cacheMaxBytes] 预算约束，超限淘汰最旧文件。
      */
     private fun ensureFallbackFile(): File {
         val dir = fallbackCacheDir ?: throw IOException("WebDAV 整本缓存需要回退缓存目录")
         dir.mkdirs()
         val file = fallbackFile(dir)
         if (file.exists() && file.length() > 0L) {
+            file.setLastModified(System.currentTimeMillis())
             logcat(LogPriority.DEBUG) { "[WebDav] 命中整本缓存，跳过下载: ${file.name}" }
             return file
         }
+        enforceCacheBudget(dir, keepName = file.name)
         val tmp = File(dir, file.name + ".part")
         val call = client.newCall(newRequestBuilder().build())
         currentCall = call
@@ -224,8 +229,33 @@ class WebDavRandomAccessSource(
             tmp.delete()
             throw IOException("整本缓存落盘失败: ${file.name}")
         }
+        // 新文件计入后若仍超预算，先淘汰别的（不含本次文件，下次打开再自然轮转）
+        enforceCacheBudget(dir, keepName = file.name)
         logcat(LogPriority.DEBUG) { "[WebDav] 整本缓存完成: ${file.name} (${file.length()} B)" }
         return file
+    }
+
+    /**
+     * 磁盘缓存预算（LRU）：目录内 `webdav_*` 完整文件（排除 .part 与 [keepName]）按
+     * lastModified 从旧到新淘汰，直到总量回到 [cacheMaxBytes] 内。0/负数 = 不限。
+     * 正被打开章节占用的文件在 Linux 下删除无碍（句柄存活期仍可读）。
+     */
+    private fun enforceCacheBudget(dir: File, keepName: String) {
+        if (cacheMaxBytes <= 0L) return
+        val files = dir.listFiles { f -> f.isFile && f.name.startsWith("webdav_") && !f.name.endsWith(".part") }
+            ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= cacheMaxBytes) return
+        files.filter { it.name != keepName }
+            .sortedBy { it.lastModified() }
+            .forEach { victim ->
+                if (total <= cacheMaxBytes) return
+                val len = victim.length()
+                if (victim.delete()) {
+                    total -= len
+                    logcat(LogPriority.DEBUG) { "[WebDav] 磁盘缓存超限，淘汰: ${victim.name} ($len B)" }
+                }
+            }
     }
 
     /** 整本缓存的稳定文件名：URL hash（8 位 hex）+ 远程扩展名（缺省 bin）。 */

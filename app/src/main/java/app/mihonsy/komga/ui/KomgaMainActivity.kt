@@ -3307,10 +3307,27 @@ private fun launchManageAllFilesAccess(context: android.content.Context) {
 }
 
 /** 存储设置：所有文件访问权限（MANAGE_EXTERNAL_STORAGE）授权入口。
- *  仅此页是 Komga 用户可达的授权入口（Mihon 的"数据存储"页在 Komga 模式下不暴露）。 */
+ *  仅此页是 Komga 用户可达的授权入口（Mihon 的"数据存储"页在 Komga 模式下不暴露）。
+ *  Phase4-②：新增 WebDAV 整本缓存管理（上限滑条 200MB~4GB / 当前占用 / 清除缓存）。 */
 @Composable
 private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.content.Context) {
     val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+    val storagePrefs = remember { Injekt.get<StoragePreferences>() }
+    val webdavCacheDir = remember { File(context.cacheDir, "webdav_fallback") }
+    var cacheMaxMb by remember {
+        mutableStateOf(storagePrefs.webdavCacheMaxBytes.get() / (1024f * 1024f))
+    }
+    var usageBytes by remember { mutableStateOf(0L) }
+    var usageTick by remember { mutableStateOf(0) }
+    LaunchedEffect(usageTick) {
+        usageBytes = withContext(Dispatchers.IO) {
+            webdavCacheDir.listFiles()
+                ?.filter { it.isFile && it.name.startsWith("webdav_") && !it.name.endsWith(".part") }
+                ?.sumOf { it.length() }
+                ?: 0L
+        }
+    }
+    val scope = rememberCoroutineScope()
     Column(
         modifier = modifier.verticalScroll(rememberScrollState()),
     ) {
@@ -3328,7 +3345,75 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 }
             },
         )
+
+        // SY --> Komiho Phase4-②: WebDAV 整本缓存（rar/7z 强制回退）管理
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                "WebDAV 整本缓存",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                "rar/7z 远程压缩包打开时整本缓存到本地（zip/cbz 不占用）；" +
+                    "超过上限自动淘汰最旧，降低上限后在下一次下载时生效。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "上限：" + formatCacheSize((cacheMaxMb * 1024f * 1024f).toLong()),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Slider(
+                value = cacheMaxMb,
+                onValueChange = { cacheMaxMb = it },
+                onValueChangeFinished = {
+                    storagePrefs.webdavCacheMaxBytes.set((cacheMaxMb * 1024f * 1024f).toLong())
+                },
+                valueRange = 200f..4000f,
+                steps = 18, // 200MB 一档：200..4000 共 20 档
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "200 MB — 4 GB，200 MB 一档（默认 1 GB）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "当前占用：" + formatCacheSize(usageBytes),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        val freed = withContext(Dispatchers.IO) {
+                            val total = webdavCacheDir.listFiles()?.sumOf { it.length() } ?: 0L
+                            webdavCacheDir.listFiles()?.forEach { it.delete() }
+                            total
+                        }
+                        usageTick++
+                        android.widget.Toast.makeText(
+                            context,
+                            "已清除 WebDAV 缓存（" + formatCacheSize(freed) + "）",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                },
+                enabled = usageBytes > 0L,
+            ) {
+                Text("清除缓存")
+            }
+        }
+        // SY <--
     }
+}
+
+/** 缓存大小人类可读格式（GB 两位小数 / MB 一位小数）。 */
+private fun formatCacheSize(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> String.format("%.2f GB", bytes / 1073741824.0)
+    bytes >= 1L shl 20 -> String.format("%.1f MB", bytes / 1048576.0)
+    bytes >= 1L shl 10 -> String.format("%.1f KB", bytes / 1024.0)
+    else -> "$bytes B"
 }
 
 @Composable
