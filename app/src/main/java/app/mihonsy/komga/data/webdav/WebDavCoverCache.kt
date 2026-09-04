@@ -3,6 +3,7 @@ package app.mihonsy.komga.data.webdav
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import logcat.LogPriority
 import logcat.logcat
 import mihon.core.common.archive.ArchiveHandle
@@ -44,7 +45,8 @@ object WebDavCoverCache {
         val fullUrl = runCatching { WebDavConnectionStore.extractFullUrl(chapterUrl) }.getOrNull()
         if (fullUrl.isNullOrBlank()) return null
         val dir = File(context.filesDir, DIR).apply { mkdirs() }
-        return File(dir, sha256(fullUrl) + ".jpg")
+        // v2 前缀：封面口径修正（存储序→自然序）后旧缓存内容可能是错误页面，直接作废重生成。
+        return File(dir, "v2-" + sha256(fullUrl) + ".jpg")
     }
 
     /** 已生成的封面文件（历史/书签行用；null = 显示占位图标，不发请求）。 */
@@ -97,8 +99,14 @@ object WebDavCoverCache {
             // 加密包：无密码（null）或密码错误（true）时首图读不出来，直接放弃
             //（阅读器会弹密码框，输对后下次打开自然能生成）。
             if (h.encrypted && h.wrongPassword != false) return
+            // 「首页」必须与阅读器同一口径：zip 条目的存储顺序 ≠ 阅读顺序（1,10,11,2…），
+            // 须按 ArchivePageLoader 同款自然排序（2.jpg < 10.jpg）取第一个图片条目。
             val firstName = runCatching {
-                h.useEntries { seq -> seq.firstOrNull { ImageUtil.isImage(it.name) }?.name }
+                h.useEntries { seq ->
+                    seq.filter { it.isFile && ImageUtil.isImage(it.name) }
+                        .sortedWith { f1, f2 -> f1.name.compareToCaseInsensitiveNaturalOrder(f2.name) }
+                        .firstOrNull()?.name
+                }
             }.getOrNull() ?: return
             val raw = runCatching {
                 h.getInputStream(firstName)?.use { it.readBytes() }
