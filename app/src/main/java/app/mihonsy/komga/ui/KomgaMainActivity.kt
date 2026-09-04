@@ -125,6 +125,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -4366,8 +4368,8 @@ private fun LocalFileBrowser(
     var showCover by remember { mutableStateOf(prefs.localBrowseShowCover.get()) }
     var columnCount by remember { mutableStateOf(prefs.localBrowseColumns.get()) }
     var showOptions by remember { mutableStateOf(false) }
-    // SY --> Komiho Phase3: WebDAV 测试直连入口（正式浏览/连接管理在 Phase 4）
-    var showWebDavDialog by remember { mutableStateOf(false) }
+    // SY --> Komiho Phase4: 本地 / WebDAV 一体化浏览：Browse tab 内顶部 tab 切换，SMB 落地后扩展第三段
+    var webDavPane by rememberSaveable { mutableStateOf(false) }
     // SY <--
 
     // SY --> Komiho: 真实路径模式标记（持有 MANAGE_EXTERNAL_STORAGE 时列目录走 UniFile 直读）。
@@ -4494,6 +4496,21 @@ private fun LocalFileBrowser(
     val visibleEntries = entries.filter { it.isDirectory || it.isArchive || it.isImage }
 
     Column(Modifier.fillMaxSize()) {
+        // SY --> Komiho Phase4: 本地 / WebDAV 一体化浏览：顶部 tab 切换（数据层同挂 LocalSource，仅 UI 区分）
+        TabRow(selectedTabIndex = if (webDavPane) 1 else 0) {
+            Tab(selected = !webDavPane, onClick = { webDavPane = false }, text = { Text("本地") })
+            Tab(selected = webDavPane, onClick = { webDavPane = true }, text = { Text("WebDAV") })
+        }
+        // SY <--
+        if (webDavPane) {
+            WebDavBrowsePane(
+                prefs = prefs,
+                onOpenFile = { conn, fileUrl ->
+                    scope.launch { openWebDavTestFile(context, prefs, conn, fileUrl) }
+                },
+            )
+            return@Column
+        }
         // 顶栏：面包屑（可点跳层）+ 显示选项 Tune 按钮。
         Row(
             modifier = Modifier
@@ -4572,14 +4589,6 @@ private fun LocalFileBrowser(
                     }
                 }
             }
-            // SY --> Komiho Phase3: WebDAV 测试直连入口（填 URL 直接进 Reader 验证 Range 随机访问）
-            IconButton(onClick = { showWebDavDialog = true }) {
-                Icon(
-                    imageVector = Icons.Outlined.Cloud,
-                    contentDescription = "WebDAV 测试直连",
-                )
-            }
-            // SY <--
             IconButton(onClick = { showOptions = true }) {
                 Icon(
                     imageVector = Icons.Filled.Tune,
@@ -4649,19 +4658,6 @@ private fun LocalFileBrowser(
         sort = sort,
         onSortModeChange = { sort = it; prefs.localBrowseSort.set(it.toPref()) },
     )
-
-    // SY --> Komiho Phase4: WebDAV 连接管理 + 文件打开（PROPFIND 目录浏览随 Phase4-② 上线）
-    if (showWebDavDialog) {
-        WebDavFlowDialog(
-            initialUrl = prefs.webdavTestUrl.get(),
-            onDismiss = { showWebDavDialog = false },
-            onOpenFile = { conn, fileUrl ->
-                showWebDavDialog = false
-                scope.launch { openWebDavTestFile(context, prefs, conn, fileUrl) }
-            },
-        )
-    }
-    // SY <--
 }
 
 /** 文件/目录一行（列表模式）。可点性由调用方按「目录/归档/图片」决定。
@@ -5017,20 +5013,17 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
 }
 
 // SY --> Komiho Phase4: WebDAV 连接管理 + 文件打开（D3.A：沿用原测试入口升级）。
-// 三级流：连接列表（新增/编辑/删除）→ 点连接 → 打开文件（相对 base 路径或完整 URL）。
-// PROPFIND 目录浏览（Phase4-②）上线后，「打开文件」一步将被目录浏览替代。
+// Phase4：浏览正文移入 Browse tab 的 WebDavBrowsePane（一体化 tab 切换），
+// 本对话框仅承担连接管理（新增/编辑/删除）。
 
-/** WebDAV 流程对话框：连接列表 / 编辑 / 打开文件，三态互斥切换。 */
+/** WebDAV 连接管理对话框：连接列表 + 新增/编辑，两态互斥切换。 */
 @Composable
 private fun WebDavFlowDialog(
-    initialUrl: String,
     onDismiss: () -> Unit,
-    onOpenFile: (conn: WebDavConnection, fileUrl: String) -> Unit,
 ) {
     var connections by remember { mutableStateOf(WebDavConnectionStore.all()) }
     var editing by remember { mutableStateOf<WebDavConnection?>(null) }
     var creating by remember { mutableStateOf(false) }
-    var opening by remember { mutableStateOf<WebDavConnection?>(null) }
 
     when {
         creating || editing != null -> WebDavConnectionEditDialog(
@@ -5049,17 +5042,6 @@ private fun WebDavFlowDialog(
                 connections = WebDavConnectionStore.all()
                 creating = false
                 editing = null
-            },
-        )
-
-        opening != null -> WebDavBrowserDialog(
-            conn = opening!!,
-            initialUrl = initialUrl,
-            onDismiss = { opening = null },
-            onOpen = { fileUrl ->
-                val conn = opening!!
-                opening = null
-                onOpenFile(conn, fileUrl)
             },
         )
 
@@ -5085,7 +5067,6 @@ private fun WebDavFlowDialog(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { opening = conn }
                                         .padding(vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
@@ -5108,7 +5089,7 @@ private fun WebDavFlowDialog(
                             }
                         }
                         Text(
-                            "点连接打开文件",
+                            "浏览与打开在浏览页选择连接后进行",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -5190,24 +5171,27 @@ private fun WebDavConnectionEditDialog(
     )
 }
 
-/** WebDAV 目录浏览对话框（Phase4-②）：PROPFIND Depth-1 逐级下钻，点归档直接打开。
+/** WebDAV 浏览页（Phase4 一体化）：内嵌在 Browse tab 的「WebDAV」段，全屏目录浏览。
+ *  顶部为连接切换下拉 + 管理连接入口；PROPFIND Depth-1 逐级下钻，点归档直接打开。
  *  服务器不支持 PROPFIND（或想跳转任意文件）时切「手动输入路径」兜底。 */
 @Composable
-private fun WebDavBrowserDialog(
-    conn: WebDavConnection,
-    initialUrl: String,
-    onDismiss: () -> Unit,
-    onOpen: (fileUrl: String) -> Unit,
+private fun WebDavBrowsePane(
+    prefs: StoragePreferences,
+    onOpenFile: (conn: WebDavConnection, fileUrl: String) -> Unit,
 ) {
-    var dirUrl by remember { mutableStateOf(conn.baseUrl) }
+    var connections by remember { mutableStateOf(WebDavConnectionStore.all()) }
+    var selected by remember { mutableStateOf(connections.firstOrNull()) }
+    var showManage by remember { mutableStateOf(false) }
+    var connMenuOpen by remember { mutableStateOf(false) }
+    var dirUrl by remember { mutableStateOf(selected?.baseUrl.orEmpty()) }
     var entries by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    var loading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var manual by remember { mutableStateOf(false) }
-    var manualUrl by remember { mutableStateOf(initialUrl) }
+    var manualUrl by remember { mutableStateOf(prefs.webdavTestUrl.get()) }
     val scope = rememberCoroutineScope()
 
-    fun load(dir: String) {
+    fun load(conn: WebDavConnection, dir: String) {
         loading = true
         errorText = null
         scope.launch {
@@ -5220,74 +5204,128 @@ private fun WebDavBrowserDialog(
             loading = false
         }
     }
-    LaunchedEffect(conn.id) { load(conn.baseUrl) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("浏览 — ${conn.displayName()}") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (manual) {
-                    OutlinedTextField(
-                        value = manualUrl,
-                        onValueChange = { manualUrl = it },
-                        label = { Text("CBZ/ZIP 路径或完整 URL") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+    LaunchedEffect(selected?.id) {
+        val conn = selected ?: return@LaunchedEffect
+        manual = false
+        load(conn, conn.baseUrl)
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        // 顶栏：连接切换下拉 + 管理连接。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                TextButton(onClick = { connMenuOpen = true }) {
                     Text(
-                        "支持相对 Base URL 的路径（如 /Comic/Z3.zip）或完整 http(s) URL；" +
-                            "同目录其余压缩包会一并建成章节（翻完自动续卷）。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    TextButton(onClick = { manual = false }) { Text("返回目录浏览") }
-                } else {
-                    Text(
-                        dirUrl.removePrefix(conn.baseUrl).ifBlank { "/" },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = selected?.displayName() ?: "选择连接",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (webDavParentUrl(dirUrl) != null) {
-                        Text(
-                            "上级目录",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clickable { webDavParentUrl(dirUrl)?.let { load(it) } }
-                                .padding(vertical = 4.dp),
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "切换连接")
+                }
+                DropdownMenu(
+                    expanded = connMenuOpen,
+                    onDismissRequest = { connMenuOpen = false },
+                ) {
+                    connections.forEach { conn ->
+                        DropdownMenuItem(
+                            text = { Text(conn.displayName()) },
+                            onClick = {
+                                connMenuOpen = false
+                                if (conn.id != selected?.id) selected = conn
+                            },
                         )
                     }
-                    when {
-                        loading -> Text("加载中…")
+                }
+            }
+            TextButton(onClick = { showManage = true }) { Text("管理连接") }
+        }
 
-                        errorText != null -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        val conn = selected
+        when {
+            conn == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    "还没有 WebDAV 连接，先「管理连接」新增。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            manual -> Column(Modifier.fillMaxSize().padding(16.dp)) {
+                OutlinedTextField(
+                    value = manualUrl,
+                    onValueChange = { manualUrl = it },
+                    label = { Text("CBZ/ZIP 路径或完整 URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "支持相对 Base URL 的路径（如 /Comic/Z3.zip）或完整 http(s) URL；" +
+                        "同目录其余压缩包会一并建成章节（翻完自动续卷）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { manual = false }) { Text("返回目录浏览") }
+                TextButton(
+                    onClick = { onOpenFile(conn, manualUrl) },
+                    enabled = manualUrl.isNotBlank(),
+                ) { Text(composeStringResource(R.string.action_ok)) }
+            }
+
+            else -> Column(Modifier.fillMaxSize()) {
+                Text(
+                    dirUrl.removePrefix(conn.baseUrl).ifBlank { "/" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+                when {
+                    loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+
+                    errorText != null -> Column(
+                        Modifier.fillMaxSize().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            "加载失败：$errorText",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        TextButton(onClick = { load(conn, dirUrl) }) { Text("重试") }
+                        TextButton(onClick = { manual = true }) { Text("手动输入路径") }
+                    }
+
+                    else -> {
+                        if (webDavParentUrl(dirUrl) != null) {
                             Text(
-                                "加载失败：$errorText",
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
+                                "上级目录",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .clickable { webDavParentUrl(dirUrl)?.let { load(conn, it) } }
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
                             )
-                            TextButton(onClick = { load(dirUrl) }) { Text("重试") }
-                            TextButton(onClick = { manual = true }) { Text("手动输入路径") }
                         }
-
-                        else -> Column(
-                            modifier = Modifier
-                                .verticalScroll(rememberScrollState())
-                                .weight(1f, fill = false),
-                        ) {
-                            val files = entries.filter { !it.isDir && it.isArchive }
-                            entries.forEach { e ->
+                        val files = entries.filter { !it.isDir && it.isArchive }
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            items(entries, key = { it.url }) { e ->
                                 when {
                                     e.isDir -> Text(
                                         e.name + "/",
                                         style = MaterialTheme.typography.bodyMedium,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { load(e.url) }
-                                            .padding(vertical = 8.dp),
+                                            .clickable { load(conn, e.url) }
+                                            .padding(horizontal = 16.dp, vertical = 10.dp),
                                     )
 
                                     e.isArchive -> Text(
@@ -5295,36 +5333,38 @@ private fun WebDavBrowserDialog(
                                         style = MaterialTheme.typography.bodyMedium,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { onOpen(e.url) }
-                                            .padding(vertical = 8.dp),
+                                            .clickable { onOpenFile(conn, e.url) }
+                                            .padding(horizontal = 16.dp, vertical = 10.dp),
                                     )
                                 }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             }
-                            if (files.isEmpty()) {
-                                Text(
-                                    "此目录没有压缩包（zip/cbz/rar/7z）",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                            if (files.isEmpty() && !loading) {
+                                item {
+                                    Text(
+                                        "此目录没有压缩包（zip/cbz/rar/7z）",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
-            if (manual) {
-                TextButton(onClick = { onOpen(manualUrl) }, enabled = manualUrl.isNotBlank()) {
-                    Text(composeStringResource(R.string.action_ok))
-                }
-            } else {
-                TextButton(onClick = { manual = true }) { Text("手动输入路径") }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.action_cancel)) }
-        },
-    )
+        }
+    }
+
+    if (showManage) {
+        WebDavFlowDialog(
+            onDismiss = {
+                showManage = false
+                connections = WebDavConnectionStore.all()
+                if (connections.none { it.id == selected?.id }) selected = connections.firstOrNull()
+            },
+        )
+    }
 }
 
 /** 取 URL 的父目录（origin 为止）；已在根返回 null。纯字符串处理，避免额外 import。 */
@@ -5335,6 +5375,13 @@ private fun webDavParentUrl(url: String): String? {
     val slash = trimmed.indexOf('/', schemeEnd + 3)
     if (slash < 0) return null
     return "${trimmed.substring(0, slash)}/"
+}
+
+/** 章节 URL → 来源标识（历史/书签共用存储，靠前缀区分展示）：webdav:/smb: 为远程来源，其余为本地路径。 */
+private fun chapterSourceLabel(chapterUrl: String): String = when {
+    chapterUrl.startsWith("webdav:") -> "WebDAV"
+    chapterUrl.startsWith("smb:") -> "SMB"
+    else -> "本地"
 }
 
 /** 打开 WebDAV 文件（Phase4-②）：manga = 远程目录（系列），同目录所有 zip/cbz 建成章节
@@ -5567,6 +5614,8 @@ private fun LocalFileRow(
     totalPages: Int,
     /** 封面请求体：[LocalCoverData]（本地卷，归档可拆包取首图）或封面 URL 字符串。 */
     coverModel: Any?,
+    /** 来源标识（本地/WebDAV/SMB）：历史/书签共用存储，行内以徽章区分。null = 不显示。 */
+    sourceBadge: String? = null,
     onClick: () -> Unit,
     moreMenu: @Composable (dismiss: () -> Unit) -> Unit,
 ) {
@@ -5612,7 +5661,7 @@ private fun LocalFileRow(
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            // 标题行：标题 + 右侧「⋯」按钮（并排）
+            // 标题行：标题 + 来源徽章 + 右侧「⋯」按钮（并排）
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = title,
@@ -5621,6 +5670,20 @@ private fun LocalFileRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (sourceBadge != null) {
+                    Spacer(Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                    ) {
+                        Text(
+                            text = sourceBadge,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                        )
+                    }
+                }
                 Box {
                     // 不用 IconButton：它强制 48dp 最小触摸尺寸，图标居中会让三点右端内缩 12dp，
                     // 与下方进度条右端对不齐。改用定宽 Box + 图标靠右对齐，视觉上与进度条右端齐平。
@@ -5741,6 +5804,7 @@ private fun HistoryTabLocal(
                 context = context,
                 title = volumeTitle,
                 subtitle = subtitle,
+                sourceBadge = chapterSourceLabel(rep.chapterUrl),
                 fileSize = stat.size,
                 dateTime = stat.modified,
                 lastPageRead = rep.lastPageRead,
@@ -5911,6 +5975,7 @@ private fun BookmarksTabLocal(
                         context = context,
                         title = first.mangaTitle,
                         subtitle = "$chapterText · ${bms.size} 个书签",
+                        sourceBadge = chapterSourceLabel(first.chapterUrl),
                         fileSize = stat.size,
                         dateTime = stat.modified,
                         lastPageRead = firstPage.toLong(),
