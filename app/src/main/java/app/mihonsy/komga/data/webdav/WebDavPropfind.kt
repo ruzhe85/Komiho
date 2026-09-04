@@ -19,8 +19,8 @@ import tachiyomi.core.common.util.system.logcat
 //
 // 复用 WebDavRandomAccessSource 的全局 OkHttpClient（连接池/线程池共享，防风控口径一致），
 // 对目录发 Depth-1 PROPFIND，解析 multistatus 得到子目录与归档列表。
-// 只列 zip/cbz：WebDAV 远程随机访问仅对 zip 高效（WebDavZipReader），
-// rar/7z 等会整本流式下载，不提供入口避免误用。
+// 列出 zip/cbz/rar/7z：zip/cbz 远程随机访问（每页流量 = 条目本身）；rar/7z 无随机
+// 访问能力，打开时由 WebDavRandomAccessSource 强制整本缓存到本地（Phase4-② 方案 B）。
 
 /** 目录浏览的一个条目。 */
 data class WebDavEntry(
@@ -30,19 +30,20 @@ data class WebDavEntry(
     /** 完整 http(s) URL（可直接用于 PROPFIND 下钻或作为章节文件 URL）。 */
     val url: String,
 ) {
-    /** 是否为支持的归档（zip/cbz）。 */
+    /** 是否为支持的归档。zip/cbz 走远程随机访问；rar/7z 打开时整本缓存到本地
+     *  （WebDavRandomAccessSource 强制回退，Phase4-② 方案 B）。 */
     val isArchive: Boolean =
         !isDir && name.substringAfterLast('.', "").lowercase() in ARCHIVE_EXTS
 
     private companion object {
-        val ARCHIVE_EXTS = setOf("zip", "cbz")
+        val ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7")
     }
 }
 
 object WebDavPropfind {
 
     /**
-     * 列出 [dirUrl] 的直接子项（Depth-1）。返回子目录 + 归档（zip/cbz），不含自身。
+     * 列出 [dirUrl] 的直接子项（Depth-1）。返回子目录 + 归档（zip/cbz/rar/7z），不含自身。
      * 目录在前、归档在后，各自按名称自然排序（Chapter2 < Chapter10）。
      * 失败抛异常（401/405/网络错误等），由调用方决定提示或兜底。
      */
