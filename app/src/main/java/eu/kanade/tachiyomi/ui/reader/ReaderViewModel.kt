@@ -1283,7 +1283,9 @@ class ReaderViewModel @JvmOverloads constructor(
 
     fun submitArchivePassword(password: String) {
         CbzCrypto.setPassword(password)
-        val chapter = archivePasswordChapter ?: return
+        // SY --> Komiho: 渲染期页面错误弹的密码框没有经过 init 暂存，兜底当前章
+        val chapter = archivePasswordChapter ?: getCurrentChapter() ?: return
+        // SY <--
         mutableState.update { it.copy(dialog = null) }
         viewModelScope.launchIO {
             try {

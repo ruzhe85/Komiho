@@ -1,6 +1,8 @@
 package mihon.core.common.archive
 
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -87,10 +89,18 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         }
         if (hasEncrypted) {
             wrongPassword = if (passwordBytes == null) {
+                logcat(LogPriority.INFO) { "[WebDavZip] 加密包无已存密码 → 弹框 entry=${parsed.third?.name}" }
                 null // 无密码 → 阅读器弹密码输入框
             } else {
                 // hasEncrypted=true 必有加密条目（parseCentralDirectory 保证），null 仅是穷尽性防御
-                validatePassword(parsed.third ?: throw WebDavZipUnsupportedException("内部错误：加密标记为真但无加密条目"))
+                val probe = parsed.third ?: throw WebDavZipUnsupportedException("内部错误：加密标记为真但无加密条目")
+                val ok = validatePassword(probe)
+                logcat(LogPriority.INFO) {
+                    "[WebDavZip] 密码校验=${if (ok) "通过" else "失败"} entry=${probe.name} " +
+                        "method=${probe.method} bit3=${probe.useTimeCheckByte} " +
+                        "compSize=${probe.compSize} uncompSize=${probe.uncompSize}"
+                }
+                !ok
             }
         }
     }
@@ -340,7 +350,12 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         for (i in raw.indices) raw[i] = zc.dec(raw[i])
         if ((raw[11].toInt() and 0xFF) != e.checkByte) {
             // 密码错（构造期校验漏网的 1/256）：抛密码异常而非普通 IO 错，语义正确，
-            // 用户重进阅读器时构造期整条验证会拦下并弹密码框
+            // 渲染层识别后直接弹密码框（submitArchivePassword 兜底当前章整章重载）
+            logcat(LogPriority.WARN) {
+                "[WebDavZip] 读页期 ZipCrypto 校验不符 name=${e.name} method=${e.method} " +
+                    "bit3=${e.useTimeCheckByte} checkByte=${e.checkByte} " +
+                    "plain=${raw[11].toInt() and 0xFF} compSize=${e.compSize}"
+            }
             throw ArchivePasswordException(wrongPassword = true)
         }
         return raw.copyOfRange(12, raw.size)
@@ -365,6 +380,11 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         if ((derived[2 * keyLen].toInt() and 0xFF) != (storedVer.first and 0xFF) ||
             (derived[2 * keyLen + 1].toInt() and 0xFF) != (storedVer.second and 0xFF)
         ) {
+            logcat(LogPriority.WARN) {
+                "[WebDavZip] 读页期 AES passVer 不符 name=${e.name} strength=${e.aesStrength} " +
+                    "stored=(${storedVer.first and 0xFF},${storedVer.second and 0xFF}) " +
+                    "derived=(${derived[2 * keyLen].toInt() and 0xFF},${derived[2 * keyLen + 1].toInt() and 0xFF})"
+            }
             throw ArchivePasswordException(wrongPassword = true)
         }
 

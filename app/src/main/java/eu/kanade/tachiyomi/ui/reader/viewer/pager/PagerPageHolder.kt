@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.view.LayoutInflater
 import androidx.core.view.isVisible
 import eu.kanade.presentation.util.formattedMessage
+import mihon.core.common.archive.ArchivePasswordException
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
@@ -438,11 +439,20 @@ class PagerPageHolder(
     }
 
     private fun showErrorLayout(error: Throwable?): ReaderErrorBinding {
+        // SY --> Komiho: 渲染期密码异常（WebDAV 加密包构造期漏网/密码被换）→ 直接弹密码框，
+        // 输对后 submitArchivePassword 会整章重载，错误占位随之消失
+        if (error is ArchivePasswordException) {
+            viewer.activity.viewModel.openArchivePasswordDialog()
+        }
         if (errorLayout == null) {
             errorLayout = ReaderErrorBinding.inflate(LayoutInflater.from(context), this, true)
             errorLayout?.actionRetry?.viewer = viewer
             errorLayout?.actionRetry?.setOnClickListener {
-                page.chapter.pageLoader?.retryPage(page)
+                if (error is ArchivePasswordException) {
+                    viewer.activity.viewModel.openArchivePasswordDialog()
+                } else {
+                    page.chapter.pageLoader?.retryPage(page)
+                }
             }
         }
 
