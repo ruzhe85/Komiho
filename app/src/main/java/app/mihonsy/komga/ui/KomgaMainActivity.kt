@@ -175,7 +175,8 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.download.KomgaDownloadStore
-import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
+import app.mihonsy.komga.data.webdav.WebDavConnection
+import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import java.io.File
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.CollectionDto
@@ -238,7 +239,6 @@ import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import mihon.core.common.archive.WebDavRandomAccessSource
 import mihon.core.common.archive.archiveReader
 import java.text.SimpleDateFormat
 import java.util.Collections
@@ -4562,19 +4562,14 @@ private fun LocalFileBrowser(
         onSortModeChange = { sort = it; prefs.localBrowseSort.set(it.toPref()) },
     )
 
-    // SY --> Komiho Phase3: WebDAV 测试直连对话框
+    // SY --> Komiho Phase4: WebDAV 连接管理 + 文件打开（PROPFIND 目录浏览随 Phase4-② 上线）
     if (showWebDavDialog) {
-        WebDavTestDialog(
+        WebDavFlowDialog(
             initialUrl = prefs.webdavTestUrl.get(),
-            initialUser = prefs.webdavTestUser.get(),
-            initialPass = WebDavCredentialCrypto.decryptStored(prefs.webdavTestPass.get()),
             onDismiss = { showWebDavDialog = false },
-            onOpen = { url, user, pass ->
+            onOpenFile = { conn, fileUrl ->
                 showWebDavDialog = false
-                prefs.webdavTestUser.set(user.trim())
-                // Phase4：密码加密落盘（enc1: 前缀），历史明文下次读取仍兼容
-                prefs.webdavTestPass.set(WebDavCredentialCrypto.encrypt(pass))
-                scope.launch { openWebDavTestFile(context, prefs, url) }
+                scope.launch { openWebDavTestFile(context, prefs, conn, fileUrl) }
             },
         )
     }
@@ -4933,60 +4928,211 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
     }
 }
 
-// SY --> Komiho Phase3: WebDAV 测试直连（最小切片）——填完整 CBZ/ZIP URL 直接建临时
-// Manga+Chapter（挂 LocalSource.ID，历史/书签自动可用）并进 Reader；ChapterLoader 侧
-// 对 `webdav:` 章节构造 WebDavRandomAccessSource 走 HTTP Range 随机访问，不整本下载。
-// 正式的连接管理 / PROPFIND 目录浏览 / 远程封面在 Phase 4。
+// SY --> Komiho Phase4: WebDAV 连接管理 + 文件打开（D3.A：沿用原测试入口升级）。
+// 三级流：连接列表（新增/编辑/删除）→ 点连接 → 打开文件（相对 base 路径或完整 URL）。
+// PROPFIND 目录浏览（Phase4-②）上线后，「打开文件」一步将被目录浏览替代。
 
-/** WebDAV 测试直连对话框：URL + 可空 Basic Auth 凭据。URL/凭据持久化到 [StoragePreferences]（密码 Phase 3 暂存明文）。 */
+/** WebDAV 流程对话框：连接列表 / 编辑 / 打开文件，三态互斥切换。 */
 @Composable
-private fun WebDavTestDialog(
+private fun WebDavFlowDialog(
     initialUrl: String,
-    initialUser: String,
-    initialPass: String,
     onDismiss: () -> Unit,
-    onOpen: (url: String, user: String, pass: String) -> Unit,
+    onOpenFile: (conn: WebDavConnection, fileUrl: String) -> Unit,
 ) {
-    var url by remember { mutableStateOf(initialUrl) }
-    var user by remember { mutableStateOf(initialUser) }
-    var pass by remember { mutableStateOf(initialPass) }
+    var connections by remember { mutableStateOf(WebDavConnectionStore.all()) }
+    var editing by remember { mutableStateOf<WebDavConnection?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    var opening by remember { mutableStateOf<WebDavConnection?>(null) }
+
+    when {
+        creating || editing != null -> WebDavConnectionEditDialog(
+            connection = editing,
+            onDismiss = {
+                creating = false
+                editing = null
+            },
+            onSave = { name, baseUrl, user, pass ->
+                val target = editing
+                if (target == null) {
+                    WebDavConnectionStore.add(name, baseUrl, user, pass)
+                } else {
+                    WebDavConnectionStore.update(target.id, name, baseUrl, user, pass)
+                }
+                connections = WebDavConnectionStore.all()
+                creating = false
+                editing = null
+            },
+        )
+
+        opening != null -> WebDavOpenFileDialog(
+            conn = opening!!,
+            initialUrl = initialUrl,
+            onDismiss = { opening = null },
+            onOpen = { fileUrl ->
+                val conn = opening!!
+                opening = null
+                onOpenFile(conn, fileUrl)
+            },
+        )
+
+        else -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("WebDAV 连接") },
+            text = {
+                Column {
+                    if (connections.isEmpty()) {
+                        Text(
+                            "还没有连接，先「新增连接」填好服务器与凭据；\n" +
+                                "Phase3 的测试配置会自动迁移为「默认连接」。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .verticalScroll(rememberScrollState())
+                                .weight(1f, fill = false),
+                        ) {
+                            connections.forEach { conn ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { opening = conn }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(conn.displayName(), style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            conn.baseUrl,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    TextButton(onClick = { editing = conn }) { Text("编辑") }
+                                    TextButton(onClick = {
+                                        WebDavConnectionStore.remove(conn.id)
+                                        connections = WebDavConnectionStore.all()
+                                    }) { Text("删除") }
+                                }
+                            }
+                        }
+                        Text(
+                            "点连接打开文件",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { creating = true }) { Text("新增连接") }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.action_cancel)) }
+            },
+        )
+    }
+}
+
+/** 连接新增/编辑对话框。编辑时密码留空 = 不修改旧密码。 */
+@Composable
+private fun WebDavConnectionEditDialog(
+    connection: WebDavConnection?,
+    onDismiss: () -> Unit,
+    onSave: (name: String, baseUrl: String, user: String, pass: String) -> Unit,
+) {
+    var name by remember { mutableStateOf(connection?.name.orEmpty()) }
+    var baseUrl by remember { mutableStateOf(connection?.baseUrl.orEmpty()) }
+    var user by remember { mutableStateOf(connection?.user.orEmpty()) }
+    var pass by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("WebDAV 测试直连") },
+        title = { Text(if (connection == null) "新增 WebDAV 连接" else "编辑连接") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    label = { Text("CBZ/ZIP 完整 URL（http/https）") },
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("名称（如 115 / NAS 局域网）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text("Base URL（如 https://host:10007/QNAP2）") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = user,
                     onValueChange = { user = it },
-                    label = { Text("用户名（可空）") },
+                    label = { Text("用户名（可空 = 匿名）") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = pass,
                     onValueChange = { pass = it },
-                    label = { Text("密码（可空）") },
-                    singleLine = true,
+                    label = {
+                        Text(if (connection == null) "密码（可空 = 匿名）" else "密码（留空 = 不修改）")
+                    },
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    "Phase 3 测试入口：按 HTTP Range 随机访问远程压缩包，不整本下载；" +
-                        "服务器不支持 Range 时自动整本缓存回退。",
+                    "凭据经 Keystore 加密后落盘，不会明文保存。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onOpen(url, user, pass) }, enabled = url.isNotBlank()) {
+            TextButton(
+                onClick = { onSave(name, baseUrl, user, pass) },
+                enabled = baseUrl.isNotBlank(),
+            ) { Text(composeStringResource(R.string.action_save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.action_cancel)) }
+        },
+    )
+}
+
+/** 打开文件对话框：输入相对 base 的路径（`/Comic/Z3.zip`）或完整 http(s) URL。 */
+@Composable
+private fun WebDavOpenFileDialog(
+    conn: WebDavConnection,
+    initialUrl: String,
+    onDismiss: () -> Unit,
+    onOpen: (fileUrl: String) -> Unit,
+) {
+    var url by remember { mutableStateOf(initialUrl) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("打开文件 — ${conn.displayName()}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("CBZ/ZIP 路径或完整 URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "支持相对 Base URL 的路径（如 /Comic/Z3.zip）或完整 http(s) URL；" +
+                        "按 HTTP Range 随机访问，不整本下载。PROPFIND 目录浏览随下一版上线。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onOpen(url) }, enabled = url.isNotBlank()) {
                 Text(composeStringResource(R.string.action_ok))
             }
         },
@@ -4996,14 +5142,15 @@ private fun WebDavTestDialog(
     )
 }
 
-/** 打开 WebDAV 测试文件：校验/规范化 URL → 建临时 Manga+Chapter（复用同目录 manga 去重）→ ReaderActivity。 */
+/** 打开 WebDAV 文件：解析 URL（相对/绝对）→ 建临时 Manga+Chapter（`webdav://<connId>/<URL>` 新格式）→ ReaderActivity。 */
 private suspend fun openWebDavTestFile(
     context: android.content.Context,
     prefs: StoragePreferences,
+    conn: WebDavConnection,
     rawUrl: String,
 ) {
     try {
-        val httpUrl = rawUrl.trim().removePrefix(WebDavRandomAccessSource.URL_PREFIX)
+        val httpUrl = WebDavConnectionStore.resolveFileUrl(conn, rawUrl)
         if (!httpUrl.startsWith("http://") && !httpUrl.startsWith("https://")) {
             throw Exception("URL 须以 http:// 或 https:// 开头")
         }
@@ -5011,9 +5158,9 @@ private suspend fun openWebDavTestFile(
         if (fileName.isBlank()) throw Exception("URL 缺少文件名")
         val decodedName = runCatching { java.net.URLDecoder.decode(fileName, "UTF-8") }.getOrDefault(fileName)
         val title = decodedName.substringBeforeLast('.').ifBlank { fileName }
-        // manga.url = 远程目录（同一远程目录的多个归档同属一个系列，翻完自动续卷的扩展留 Phase 4）
+        // manga.url = 远程目录（同一远程目录的多个归档同属一个系列，翻完自动续卷随 Phase4-② 目录浏览做）
         val mangaUrl = httpUrl.substringBeforeLast('/')
-        val chapterUrl = WebDavRandomAccessSource.URL_PREFIX + httpUrl
+        val chapterUrl = WebDavConnectionStore.toChapterUrl(conn.id, httpUrl)
         prefs.webdavTestUrl.set(httpUrl)
         val (mangaId, chapterId) = withContext(Dispatchers.IO) {
             val mangaRepo = Injekt.get<MangaRepository>()

@@ -5,7 +5,7 @@ import java.io.File
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import app.mihonsy.komga.data.download.KomgaDownloadStore
-import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
+import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.source.KomgaSource
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
@@ -26,12 +26,9 @@ import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MergedMangaReference
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.service.SourceManager
-import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.LocalSource
 import tachiyomi.source.local.io.Format
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 /**
  * Loader used to retrieve the [PageLoader] for a given chapter.
@@ -191,16 +188,16 @@ class ChapterLoader(
         }
     }
 
-    // SY --> Komiho Phase3: 由 `webdav:https://...` 章节 url 构造远程随机访问源。
-    // 凭据取 Phase3 测试配置（StoragePreferences，正式连接管理在 Phase 4）；
+    // SY --> Komiho Phase4: 由 `webdav:` 章节 url 构造远程随机访问源。
+    // 凭据按章节 URL 双格式解析（D2.A）：新格式 `webdav://<connId>/<URL>` 按 connId 精确取，
+    // 旧格式 `webdav:<URL>` 回落 baseUrl 最长前缀匹配的连接（历史章节不改 DB）。
     // 服务器不支持 Range 时整本缓存回退目录 cacheDir/webdav_fallback。
     private fun webDavSource(remoteUrl: String): WebDavRandomAccessSource {
-        val prefs = Injekt.get<StoragePreferences>()
+        val credentials = WebDavConnectionStore.credentialsFor(remoteUrl)
         return WebDavRandomAccessSource(
-            url = remoteUrl.removePrefix(WebDavRandomAccessSource.URL_PREFIX),
-            username = prefs.webdavTestUser.get().ifBlank { null },
-            // Phase4：密码已加密落盘（enc1: 前缀），历史明文透传（下次保存自动加密）
-            password = WebDavCredentialCrypto.decryptStored(prefs.webdavTestPass.get()).ifBlank { null },
+            url = WebDavConnectionStore.extractFullUrl(remoteUrl),
+            username = credentials?.first?.ifBlank { null },
+            password = credentials?.second?.ifBlank { null },
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
         )
     }
