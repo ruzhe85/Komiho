@@ -241,7 +241,7 @@
 
     <!-- SY: Komiho 新增來源流程 -->
     <string name="addsrc_back_cd">返回</string>
-    <string name="addsrc_title">新增來源</string>
+    <string name="addsrc_title">來源管理</string>
     <string name="addsrc_select_type">選擇來源類型</string>
     <string name="addsrc_type_local">本地</string>
     <string name="addsrc_smb_unsupported">暫未支援</string>
@@ -288,7 +288,7 @@
 
     <!-- SY: Komiho 主介面來源切換 / 本地瀏覽 / 儲存 / 下載 -->
     <string name="source_local">本地</string>
-    <string name="source_add">新增來源</string>
+    <string name="source_add">來源管理</string>
     <string name="source_switch_cd">切換來源</string>
     <string name="source_unsupported">該來源暫未支援</string>
     <string name="source_webdav_missing">該 WebDAV 連線不存在，請從頂欄重新選擇來源</string>

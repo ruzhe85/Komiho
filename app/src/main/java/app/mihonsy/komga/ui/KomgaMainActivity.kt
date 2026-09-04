@@ -533,7 +533,7 @@ private fun KomgaMainScreen(
         storagePreferences.browseSourceId.set(entry.id)
         currentTab = MainTab.entries.first { it.visibleFor(entry.kind.isFileSource) }.ordinal
     }
-    // 「添加来源」全屏流程（AddSourceFlow：类型选择 → 各类型表单页）。
+    // 「来源管理」全屏流程（AddSourceFlow：类型选择 → 各类型表单页）。
     var showAddSource by remember { mutableStateOf(false) }
     // SY <--
 
@@ -626,10 +626,11 @@ private fun KomgaMainScreen(
     // non-Home tab back to Home. A selected library no longer traps back.
     // SY --> Komiho P0: 返回目标改为「当前来源的第一个可见 tab」。
     // 文件型来源下 Home 是隐藏 tab，硬编码 Home 会让返回键在浏览页失效。
+    // 来源管理流程（AddSourceFlow）打开时由它自己的 BackHandler 接管返回键，这里让位。
     val firstTabOrdinal = visibleTabs.first().ordinal
     // SY <--
-    val interceptBack = searchOpen || shelfMenuOpen ||
-        (isRootActivity && currentTab != firstTabOrdinal)
+    val interceptBack = !showAddSource && (searchOpen || shelfMenuOpen ||
+        (isRootActivity && currentTab != firstTabOrdinal))
     BackHandler(enabled = interceptBack) {
         when {
             searchOpen -> searchOpen = false
@@ -643,7 +644,10 @@ private fun KomgaMainScreen(
 
     Scaffold(
         topBar = {
-            val currentTabEnum = MainTab.entries[currentTab]
+            // 来源管理流程（AddSourceFlow）为全屏 overlay：打开时隐藏顶栏/底栏，
+            // 避免 overlay 只盖住内容区而顶栏来源按钮仍可点。
+            if (!showAddSource) {
+                val currentTabEnum = MainTab.entries[currentTab]
             TopAppBar(
                 title = {
                     when {
@@ -778,24 +782,27 @@ private fun KomgaMainScreen(
                     // SY <--
                 },
             )
+            }
         },
         bottomBar = {
             // Icon-only tabs: a compact bar — the default 80dp NavigationBar
             // leaves large empty areas above/below the icons.
-            NavigationBar(modifier = Modifier.height(60.dp)) {
-                // SY --> Komiho P0: 只渲染当前来源下可见的 tab。
-                visibleTabs.forEach { tab ->
-                    NavigationBarItem(
-                        selected = currentTab == tab.ordinal,
-                        onClick = {
-                            // 点击 tab（含重复点击当前 tab）触发刷新。
-                            if (currentTab == tab.ordinal) refreshSignal.update { it + 1 } else currentTab = tab.ordinal
-                        },
-                        icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
-                        label = null,
-                    )
+            if (!showAddSource) {
+                NavigationBar(modifier = Modifier.height(60.dp)) {
+                    // SY --> Komiho P0: 只渲染当前来源下可见的 tab。
+                    visibleTabs.forEach { tab ->
+                        NavigationBarItem(
+                            selected = currentTab == tab.ordinal,
+                            onClick = {
+                                // 点击 tab（含重复点击当前 tab）触发刷新。
+                                if (currentTab == tab.ordinal) refreshSignal.update { it + 1 } else currentTab = tab.ordinal
+                            },
+                            icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
+                            label = null,
+                        )
+                    }
+                    // SY <--
                 }
-                // SY <--
             }
         },
     ) { padding ->
@@ -932,7 +939,7 @@ private fun KomgaMainScreen(
                     // SY <--
                     MainTab.Settings -> SettingsTab(context)
                 }
-                // SY --> Komiho Phase4: 「添加来源」全屏流程（类型选择 / 表单 / 删除确认全在内）。
+                // SY --> Komiho Phase4: 「来源管理」全屏流程（类型选择 / 表单 / 删除确认全在内）。
                 // 关闭后重建来源菜单（sourceVersion++）、复查 Komga 连接状态；
                 // 当前选中的来源被删等失效场景回落本地。
                 if (showAddSource) {
@@ -4212,7 +4219,7 @@ private suspend fun checkForKomihoUpdate(context: android.content.Context, onFin
 
 /**
  * 全局来源切换按钮（顶栏标题位）：`图标 来源名 ▾`，下拉菜单列出全部来源条目
- * （类型图标 + 名称 + 类型副标题 + 当前项 ✓），底部「＋ 添加来源」打开全屏添加流程
+ * （类型图标 + 名称 + 类型副标题 + 当前项 ✓），底部「来源管理」打开全屏管理流程
  * （[AddSourceFlow]，见 AddSourceFlow.kt）。
  * 排序与可见性由 [buildSourceEntries] 决定（未添加的来源不显示）。
  */
@@ -5180,7 +5187,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
 
 /** WebDAV 浏览页（Phase4 全局首页形态）：挂在 Browse tab 下，连接由顶栏来源按钮决定。
  *  PROPFIND Depth-1 逐级下钻，点归档直接打开；服务器不支持 PROPFIND（或想跳转任意文件）
- *  时切「手动输入路径」兜底。连接管理在顶栏「添加来源」全屏流程（AddSourceFlow）。 */
+ *  时切「手动输入路径」兜底。连接管理在顶栏「来源管理」全屏流程（AddSourceFlow）。 */
 @Composable
 private fun WebDavBrowsePane(
     conn: WebDavConnection,

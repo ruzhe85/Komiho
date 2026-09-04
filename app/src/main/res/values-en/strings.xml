@@ -244,7 +244,7 @@
 
     <!-- SY: Komiho add source flow -->
     <string name="addsrc_back_cd">Back</string>
-    <string name="addsrc_title">Add source</string>
+    <string name="addsrc_title">Manage sources</string>
     <string name="addsrc_select_type">Choose a source type</string>
     <string name="addsrc_type_local">Local storage</string>
     <string name="addsrc_smb_unsupported">Not yet supported</string>
@@ -291,7 +291,7 @@
 
     <!-- SY: Komiho source switcher / local browse / storage / downloads -->
     <string name="source_local">Local storage</string>
-    <string name="source_add">Add source</string>
+    <string name="source_add">Manage sources</string>
     <string name="source_switch_cd">Switch source</string>
     <string name="source_unsupported">This source is not supported yet</string>
     <string name="source_webdav_missing">This WebDAV connection no longer exists. Pick a source from the top bar.</string>

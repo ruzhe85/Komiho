@@ -254,9 +254,9 @@
     <string name="marked_series_unread">已标记为未读</string>
 
 
-    <!-- SY: Komiho 添加来源流程（AddSourceFlow） -->
+    <!-- SY: Komiho 来源管理流程（AddSourceFlow） -->
     <string name="addsrc_back_cd">返回</string>
-    <string name="addsrc_title">添加来源</string>
+    <string name="addsrc_title">来源管理</string>
     <string name="addsrc_select_type">选择来源类型</string>
     <string name="addsrc_type_local">本地</string>
     <string name="addsrc_smb_unsupported">暂未支持</string>
@@ -303,7 +303,7 @@
 
     <!-- SY: Komiho 主界面来源切换 / 本地浏览 / 存储 / 下载 -->
     <string name="source_local">本地</string>
-    <string name="source_add">添加来源</string>
+    <string name="source_add">来源管理</string>
     <string name="source_switch_cd">切换来源</string>
     <string name="source_unsupported">该来源暂未支持</string>
     <string name="source_webdav_missing">该 WebDAV 连接不存在，请从顶栏重新选择来源</string>
