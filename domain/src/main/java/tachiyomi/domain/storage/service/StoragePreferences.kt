@@ -112,6 +112,26 @@ class StoragePreferences(
         1024L * 1024 * 1024,
     )
 
+    // SY --> Komiho Phase4: WebDAV 浏览器偏好（独立于本地浏览的 localBrowse*，互不影响）。
+    /** Komiho: WebDAV 浏览器显示模式（LIST / COMPACT_GRID / COMFORTABLE_GRID）。默认列表。 */
+    val webdavBrowseDisplayMode: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("webdav_browse_display_mode"),
+        "LIST",
+    )
+
+    /** Komiho: WebDAV 浏览器排序（`<字段>,<asc|desc>`），字段同本地浏览 [LocalFileSortBy]。默认名称升序。 */
+    val webdavBrowseSort: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("webdav_browse_sort"),
+        "name,asc",
+    )
+
+    /** Komiho: WebDAV 浏览器网格每行列数（0 = 自动 Adaptive 列密度）。 */
+    val webdavBrowseColumns: Preference<Int> = preferenceStore.getInt(
+        Preference.appStateKey("webdav_browse_columns"),
+        0,
+    )
+    // SY <--
+
     /** 全局首页当前选中的来源 id（"komga" / "local" / "webdav:<connId>"）。空 = 默认 Komga。 */
     val browseSourceId: Preference<String> = preferenceStore.getString(
         Preference.appStateKey("browse_source_id"),

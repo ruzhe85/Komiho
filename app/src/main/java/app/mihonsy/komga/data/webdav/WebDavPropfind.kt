@@ -29,6 +29,10 @@ data class WebDavEntry(
     val isDir: Boolean,
     /** 完整 http(s) URL（可直接用于 PROPFIND 下钻或作为章节文件 URL）。 */
     val url: String,
+    /** 字节数。服务器未返回（部分服务端不给目录/未知文件的长度）时为 0，仅用于「按大小」排序。 */
+    val size: Long = 0L,
+    /** 修改时间 epoch ms。服务器未返回或解析失败时为 0，仅用于「按修改时间」排序。 */
+    val lastModified: Long = 0L,
 ) {
     /** 是否为支持的归档。zip/cbz 走远程随机访问；rar/7z 打开时整本缓存到本地
      *  （WebDavRandomAccessSource 强制回退，Phase4-② 方案 B）。 */
@@ -51,7 +55,7 @@ object WebDavPropfind {
         withContext(Dispatchers.IO) {
             val dir = if (dirUrl.endsWith('/')) dirUrl else "$dirUrl/"
             val body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
-                "<d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/></d:prop></d:propfind>"
+                "<d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>"
             val builder = Request.Builder()
                 .url(WebDavRandomAccessSource.normalizeUrl(dir))
                 .header("Depth", "1")
@@ -81,14 +85,18 @@ object WebDavPropfind {
         val out = mutableListOf<WebDavEntry>()
         var href: String? = null
         var isDir = false
+        var contentLength: String? = null
+        var lastModifiedRaw: String? = null
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
             // 去掉 D:/d: 等命名空间前缀再比较
             when (event) {
                 XmlPullParser.START_TAG -> when (parser.name.substringAfter(':')) {
-                    "response" -> { href = null; isDir = false }
+                    "response" -> { href = null; isDir = false; contentLength = null; lastModifiedRaw = null }
                     "href" -> href = runCatching { parser.nextText() }.getOrNull()
                     "collection" -> isDir = true
+                    "getcontentlength" -> contentLength = runCatching { parser.nextText() }.getOrNull()
+                    "getlastmodified" -> lastModifiedRaw = runCatching { parser.nextText() }.getOrNull()
                 }
 
                 XmlPullParser.END_TAG -> if (parser.name.substringAfter(':') == "response") {
@@ -103,6 +111,8 @@ object WebDavPropfind {
                                     name = name,
                                     isDir = isDir,
                                     url = resolveHref(dirUrl, h),
+                                    size = contentLength?.trim()?.toLongOrNull() ?: 0L,
+                                    lastModified = parseHttpDate(lastModifiedRaw),
                                 )
                             }
                         }
@@ -116,6 +126,17 @@ object WebDavPropfind {
                 .thenComparator { a, b -> a.name.compareTo(b.name, ignoreCase = true) },
         )
         return out
+    }
+
+    /** 解析 HTTP 日期（RFC 1123，如 Sat, 07 Nov 2020 06:35:44 GMT）为 epoch ms；解析失败返回 0。 */
+    private fun parseHttpDate(v: String?): Long {
+        val raw = v?.trim().orEmpty()
+        if (raw.isEmpty()) return 0L
+        return runCatching {
+            java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("GMT")
+            }.parse(raw)?.time
+        }.getOrNull() ?: 0L
     }
 
     /** 从 href（路径绝对或完整 URL）取解码后的 path 部分。 */
