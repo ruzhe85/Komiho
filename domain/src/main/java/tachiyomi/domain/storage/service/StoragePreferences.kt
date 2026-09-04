@@ -111,5 +111,11 @@ class StoragePreferences(
         Preference.appStateKey("webdav_cache_max_bytes"),
         1024L * 1024 * 1024,
     )
+
+    /** 全局首页当前选中的来源 id（"komga" / "local" / "webdav:<connId>"）。空 = 默认 Komga。 */
+    val browseSourceId: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("browse_source_id"),
+        "",
+    )
     // SY <--
 }
