@@ -12,6 +12,7 @@ import coil3.fetch.SourceFetchResult
 import coil3.key.Keyer
 import coil3.request.Options
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import mihon.core.common.archive.archiveReader
 import okio.Buffer
 import okio.FileSystem
@@ -71,7 +72,8 @@ class LocalCoverFetcher(
 
     private fun cacheFile(): File {
         val dir = File(context.filesDir, "komiho_local_covers").apply { mkdirs() }
-        return File(dir, sha256(cacheKey) + ".jpg")
+        // v2 前缀：封面口径修正（存储/枚举序→自然序）后旧缓存内容可能是错误页面，直接作废重生成。
+        return File(dir, "v2-" + sha256(cacheKey) + ".jpg")
     }
 
     /** 命中（文件存在且非空）则读取；否则返回 null 让上层解包并回填。 */
@@ -99,13 +101,22 @@ class LocalCoverFetcher(
 
     private fun readCoverBytes(): ByteArray? {
         val file = data.file
+        // SY: 「首页」必须与阅读器同一口径——归档条目存储序 / listFiles 枚举序都是字典序
+        //（1,10,11,2…），阅读器按自然排序（2<10）阅读，直接取第一个会拿到错页当封面。
+        // 两分支统一：过滤可读图片后按 compareToCaseInsensitiveNaturalOrder 排序取第一。
         val bitmap = when {
             file.isDirectory -> file.listFiles().orEmpty()
-                .firstOrNull { it.isFile && ImageUtil.isImage(it.name) }
+                .filter { it.isFile && ImageUtil.isImage(it.name) }
+                .sortedWith { f1, f2 ->
+                    (f1.name ?: "").compareToCaseInsensitiveNaturalOrder(f2.name ?: "")
+                }
+                .firstOrNull()
                 ?.let { decodeSampled({ it.openInputStream() }, MAX_PX) }
             Archive.isSupported(file) -> file.archiveReader(context).use { reader ->
                 val name = reader.useEntries { seq ->
-                    seq.firstOrNull { ImageUtil.isImage(it.name) }?.name
+                    seq.filter { it.isFile && ImageUtil.isImage(it.name) }
+                        .sortedWith { f1, f2 -> f1.name.compareToCaseInsensitiveNaturalOrder(f2.name) }
+                        .firstOrNull()?.name
                 }
                 if (name == null) {
                     null
