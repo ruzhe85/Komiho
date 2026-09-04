@@ -5906,8 +5906,11 @@ private fun HistoryTabLocal(
 
     // SY --> Komiho: 阅读器返回后强制重查——阅读器的 last_page_read/last_read 写入是
     // 退读者侧异步落库，返回瞬间首查可能读到旧值；等一拍再查一次，保证进度/时间即时更新。
+    // 同时把列表滚回顶部：新记录按时间插在最上面，不回顶的话滚动位置停在原处，
+    // 用户要手动下拉才能看到刚更新的一条。
     var resumeTick by remember { mutableIntStateOf(0) }
     var queryTick by remember { mutableIntStateOf(0) }
+    val listState = rememberLazyListState()
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, e ->
@@ -5918,6 +5921,7 @@ private fun HistoryTabLocal(
     }
     LaunchedEffect(resumeTick) {
         if (resumeTick > 0) {
+            listState.scrollToItem(0)
             delay(600)
             queryTick++
         }
@@ -5944,7 +5948,7 @@ private fun HistoryTabLocal(
         return
     }
 
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), state = listState) {
             items(merged, key = { it.chapterUrl }) { book ->
             val rep = book.rep
             val file by produceState<UniFile?>(initialValue = null, key1 = rep.chapterUrl) {
