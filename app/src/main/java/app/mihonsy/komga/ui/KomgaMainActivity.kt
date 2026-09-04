@@ -107,7 +107,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -4259,8 +4258,6 @@ private fun SourceSwitchButton(
             onDismissRequest = { open = false },
         ) {
             entries.forEach { entry ->
-                // 选中项 = 整行反色（inverseSurface 底 + inverseOnSurface 字），不用 ✓。
-                val selected = entry.id == current.id
                 DropdownMenuItem(
                     text = {
                         Row(
@@ -4271,19 +4268,16 @@ private fun SourceSwitchButton(
                                 imageVector = sourceIcon(entry.kind),
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text(entry.name, style = MaterialTheme.typography.bodyMedium)
                         }
                     },
-                    // 选中反色：material3 无 DropdownMenuItemDefaults，用 MenuDefaults.itemColors().copy。
-                    colors = if (selected) {
-                        MenuDefaults.itemColors().copy(
-                            containerColor = MaterialTheme.colorScheme.inverseSurface,
-                            textColor = MaterialTheme.colorScheme.inverseOnSurface,
-                            leadingIconColor = MaterialTheme.colorScheme.inverseOnSurface,
-                        )
-                    } else {
-                        MenuDefaults.itemColors()
+                    // 选中项右侧 ✓ 标记（反色方案已弃用——反色只保留在编辑表单的选择控件上）。
+                    trailingIcon = {
+                        if (entry.id == current.id) {
+                            Icon(Icons.Filled.Check, contentDescription = "当前来源")
+                        }
                     },
                     onClick = {
                         open = false
