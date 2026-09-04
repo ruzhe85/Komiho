@@ -174,12 +174,12 @@ class PagerPageHolder(
         try {
             val (source, isAnimated, background) = withIOContext {
                 streamFn().buffered(16).use { source ->
-                    // SY: 兜底快速失败——空流（章节回收竞态的另一种表现）直接报明确错误，
-                    // 不进解码器（ArchivePageLoader.readEntryBytes 已在读取层拦截，这里防其他 loader）。
-                    // 注意 streamFn() 是 java.io.InputStream，buffered(16) 得到的是 BufferedInputStream
-                    // 而非 okio BufferedSource：read() 返回 -1 即空流；首字节进缓冲区不丢，
-                    // 下游 readFrom(source) 照常读全量。
-                    check(source.read() != -1) { "页面流为空（章节可能已被回收关闭）——重载即恢复" }
+                    // SY（教训留档）：这里曾加 check(source.read() != -1) 判空，但
+                    // InputStream.read() 会消费掉首字节（BufferedInputStream 缓冲区是
+                    // 读取位置不是 peek），每张图片被吃掉第一个字节 → JPEG/PNG 头损坏
+                    // → 解码器嗅探失败 "No decoder found" → pager 全部页面渲染失败
+                    // （webtoon 无此行不受影响）。空流兜底已由读取层
+                    // ArchivePageLoader.readEntryBytes 承担，此处不再判空。
                     // SY -->
                     if (extraPage != null) {
                         streamFn2?.invoke()
