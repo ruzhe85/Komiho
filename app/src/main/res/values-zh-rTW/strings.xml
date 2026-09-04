@@ -238,4 +238,104 @@
     <string name="marked_series_read">已標記系列為已讀</string>
     <string name="marked_series_unread">已標記為未讀</string>
 
+
+    <!-- SY: Komiho 新增來源流程 -->
+    <string name="addsrc_back_cd">返回</string>
+    <string name="addsrc_title">新增來源</string>
+    <string name="addsrc_select_type">選擇來源類型</string>
+    <string name="addsrc_type_local">本地</string>
+    <string name="addsrc_smb_unsupported">暫未支援</string>
+    <string name="addsrc_smb_toast">SMB 暫未支援</string>
+    <string name="addsrc_delete_title">刪除來源</string>
+    <string name="addsrc_delete_msg">確定刪除「%1$s」？歷史與書籤記錄將保留。</string>
+    <string name="addsrc_edit_cd">編輯</string>
+    <string name="addsrc_delete_cd">刪除</string>
+    <string name="addsrc_name">來源名稱</string>
+    <string name="addsrc_name_hint_webdav">如：我的 WebDAV</string>
+    <string name="addsrc_name_hint_komga">如：我的 Komga</string>
+    <string name="addsrc_server">伺服器</string>
+    <string name="addsrc_port">連接埠</string>
+    <string name="addsrc_port_hint">(預設)</string>
+    <string name="addsrc_path">路徑</string>
+    <string name="addsrc_path_hint">/(根目錄)</string>
+    <string name="addsrc_account">帳戶</string>
+    <string name="addsrc_username_anon">使用者名稱（可空 = 匿名）</string>
+    <string name="addsrc_password_new">密碼（可空 = 匿名）</string>
+    <string name="addsrc_password_edit">密碼（留空 = 不修改）</string>
+    <string name="addsrc_password">密碼</string>
+    <string name="addsrc_show_password_cd">顯示密碼</string>
+    <string name="addsrc_hide_password_cd">隱藏密碼</string>
+    <string name="addsrc_keystore_note">憑證經 Keystore 加密後落盤，不會明文儲存。</string>
+    <string name="addsrc_test">測試連線</string>
+    <string name="addsrc_test_ok">連線正常</string>
+    <string name="addsrc_test_failed">連線失敗</string>
+    <string name="addsrc_auth_type">認證方式（二選一）</string>
+    <string name="addsrc_auth_basic">帳號密碼</string>
+    <string name="addsrc_username_email">使用者名稱 / 電子郵件</string>
+    <string name="addsrc_storage_perm">儲存管理權限</string>
+    <string name="addsrc_perm_granted">已授予所有檔案存取權限</string>
+    <string name="addsrc_perm_denied">未授予管理權限</string>
+    <string name="addsrc_perm_granted_desc">瀏覽根為內部儲存，可全盤切換儲存卷</string>
+    <string name="addsrc_perm_denied_desc">授權後直讀真實檔案系統，瀏覽更快、封面更穩</string>
+    <string name="addsrc_grant">去授權</string>
+    <string name="addsrc_saf_title">不想授權？使用 SAF</string>
+    <string name="addsrc_saf_desc">走系統檔案選擇器，無需特殊權限</string>
+    <string name="addsrc_saf">使用 SAF</string>
+    <string name="addsrc_root">漫畫根目錄</string>
+    <string name="addsrc_root_none">未選擇（點下方按鈕選擇）</string>
+    <string name="addsrc_pick_folder">選擇資料夾</string>
+    <string name="addsrc_local_note">本地為內建來源、始終存在；此頁僅用於管理權限與漫畫根目錄。</string>
+
+    <!-- SY: Komiho 主介面來源切換 / 本地瀏覽 / 儲存 / 下載 -->
+    <string name="source_local">本地</string>
+    <string name="source_add">新增來源</string>
+    <string name="source_switch_cd">切換來源</string>
+    <string name="source_unsupported">該來源暫未支援</string>
+    <string name="source_webdav_missing">該 WebDAV 連線不存在，請從頂欄重新選擇來源</string>
+    <string name="perm_dialog_title">需要所有檔案存取權限</string>
+    <string name="perm_dialog_body">為更快、穩定地存取本地漫畫，建議授予「所有檔案存取權限」。\n你也可以選擇繼續使用系統目錄選擇器（SAF）來授權本地目錄。</string>
+    <string name="perm_grant">去授權</string>
+    <string name="perm_use_saf">使用 SAF</string>
+    <string name="perm_granted_toast">已授予所有檔案存取權限：瀏覽根為內部儲存，可全盤切換；有 SD 卡時點麵包屑旁的箭頭切換儲存</string>
+    <string name="storage_title">儲存</string>
+    <string name="storage_all_files_access">所有檔案存取權限</string>
+    <string name="storage_perm_granted_desc">已授權：本地瀏覽使用真實路徑（列表/封面/閱讀更快）</string>
+    <string name="storage_perm_denied_desc">未授權：本地瀏覽使用 SAF。授權後可大幅提速</string>
+    <string name="storage_webdav_cache">WebDAV 整本快取</string>
+    <string name="storage_webdav_cache_desc">rar/7z 遠端壓縮包開啟時整本快取到本地（zip/cbz 不佔用）；\n超過上限自動淘汰最舊，降低上限後在下一次下載時生效。</string>
+    <string name="storage_cache_limit">上限：</string>
+    <string name="storage_cache_range">200 MB — 4 GB，200 MB 一檔（預設 1 GB）</string>
+    <string name="storage_cache_usage">目前佔用：</string>
+    <string name="storage_cache_cleared">已清除 WebDAV 快取（%1$s）</string>
+    <string name="storage_clear_cache">清除快取</string>
+    <string name="settings_cache_preview_none">0 M（不快取 / 即時預覽）</string>
+    <string name="settings_cache_preview">%1$d M（目前佔用約 %2$dM）</string>
+    <string name="update_check_failed">更新檢查失敗</string>
+    <string name="storage_switch_cd">切換儲存</string>
+    <string name="internal_storage">內部儲存</string>
+    <string name="sd_card_volume">SD 卡（%1$s）</string>
+    <string name="webdav_manual_label">CBZ/ZIP 路徑或完整 URL</string>
+    <string name="webdav_manual_hint">支援相對 Base URL 的路徑（如 /Comic/Z3.zip）或完整 http(s) URL；\n同目錄其餘壓縮包會一併建成章節（翻完自動續卷）。</string>
+    <string name="webdav_manual_back">返回目錄瀏覽</string>
+    <string name="webdav_manual_input">手動輸入路徑</string>
+    <string name="webdav_parent_dir">上層目錄</string>
+    <string name="webdav_empty_dir">此目錄沒有壓縮包（zip/cbz/rar/7z）</string>
+    <string name="webdav_url_not_http">URL 須以 http:// 或 https:// 開頭</string>
+    <string name="webdav_url_no_filename">URL 缺少檔名</string>
+    <string name="webdav_chapter_write_failed">章節寫入失敗</string>
+    <string name="dir_browse_failed">目錄瀏覽失敗</string>
+    <string name="file_not_found">找不到檔案：%1$s</string>
+    <string name="series_dir_not_found">找不到系列目錄：%1$s</string>
+    <string name="chapter_not_written">當前檔案未寫入章節：%1$s</string>
+    <string name="open_failed">開啟失敗：%1$s</string>
+    <string name="chapter_ordinal">第 %1$s 話</string>
+    <string name="bookmarks_count_subtitle">%1$s · %2$d 個書籤</string>
+    <string name="reader_page_num">第 %1$d 頁</string>
+    <string name="unknown_series">未知系列</string>
+    <string name="delete_series_title">刪除整個系列？</string>
+    <string name="delete_series_msg">將刪除「%1$s」全部 %2$d 本已下載內容，且無法復原。</string>
+    <string name="downloads_empty">還沒有下載的書</string>
+    <string name="downloads_empty_hint">在系列頁點「下載整個系列」即可離線保存</string>
+    <string name="download_progress">已下載 %1$d / %2$d</string>
+
 </resources>

@@ -38,6 +38,8 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lan
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -65,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -80,7 +83,12 @@ import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavPropfind
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.R
 import kotlinx.coroutines.launch
+
+/** 协议默认端口：HTTP=80 / HTTPS=443；切换协议时空端口或仍是另一协议默认值时自动填新默认。 */
+internal const val DEFAULT_PORT_HTTP = "80"
+internal const val DEFAULT_PORT_HTTPS = "443"
 
 /** 添加来源流程内的页面栈（简化为单层：表单页返回即回类型选择）。 */
 internal sealed interface AddSourceScreen {
@@ -143,14 +151,14 @@ internal fun AddSourceFlow(
                             if (screen == AddSourceScreen.TypeSelect) onDismiss() else screen = AddSourceScreen.TypeSelect
                         },
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = composeStringResource(R.string.addsrc_back_cd))
                     }
                     Text(
                         text = when (val s = screen) {
-                            AddSourceScreen.TypeSelect -> "添加来源"
+                            AddSourceScreen.TypeSelect -> composeStringResource(R.string.addsrc_title)
                             is AddSourceScreen.WebDav -> "WebDAV"
                             is AddSourceScreen.Komga -> "Komga"
-                            AddSourceScreen.Local -> "本地"
+                            AddSourceScreen.Local -> composeStringResource(R.string.addsrc_type_local)
                         },
                         style = MaterialTheme.typography.titleMedium,
                     )
@@ -202,8 +210,8 @@ internal fun AddSourceFlow(
     deleteKomga?.let { conn ->
         AlertDialog(
             onDismissRequest = { deleteKomga = null },
-            title = { Text("删除来源") },
-            text = { Text("确定删除「${connDisplayName(conn.name, conn.baseUrl)}」？历史与书签记录将保留。") },
+            title = { Text(composeStringResource(R.string.addsrc_delete_title)) },
+            text = { Text(composeStringResource(R.string.addsrc_delete_msg, connDisplayName(conn.name, conn.baseUrl))) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -217,10 +225,10 @@ internal fun AddSourceFlow(
                             listTick++
                         }
                     },
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                ) { Text(composeStringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteKomga = null }) { Text("取消") }
+                TextButton(onClick = { deleteKomga = null }) { Text(composeStringResource(R.string.cancel)) }
             },
         )
     }
@@ -229,8 +237,8 @@ internal fun AddSourceFlow(
     deleteWebDav?.let { conn ->
         AlertDialog(
             onDismissRequest = { deleteWebDav = null },
-            title = { Text("删除来源") },
-            text = { Text("确定删除「${conn.displayName()}」？历史与书签记录将保留。") },
+            title = { Text(composeStringResource(R.string.addsrc_delete_title)) },
+            text = { Text(composeStringResource(R.string.addsrc_delete_msg, conn.displayName())) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -238,10 +246,10 @@ internal fun AddSourceFlow(
                         WebDavConnectionStore.remove(conn.id)
                         listTick++
                     },
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                ) { Text(composeStringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteWebDav = null }) { Text("取消") }
+                TextButton(onClick = { deleteWebDav = null }) { Text(composeStringResource(R.string.cancel)) }
             },
         )
     }
@@ -268,7 +276,7 @@ private fun TypeSelectContent(
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Text(
-            "选择来源类型",
+            composeStringResource(R.string.addsrc_select_type),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -277,15 +285,13 @@ private fun TypeSelectContent(
         // 排序：本地 → Komga → WebDAV → SMB（与顶栏来源菜单一致）。
         TypeCard(
             leading = { TypeCardIcon(Icons.Filled.Folder) },
-            title = "本地",
-            subtitle = "手机存储",
+            title = composeStringResource(R.string.addsrc_type_local),
             onClick = { onSelect(AddSourceScreen.Local) },
         )
 
         TypeCard(
             leading = { TypeCardIcon(icon = null, letter = "K") },
             title = "Komga",
-            subtitle = "Komga 服务器",
             onClick = { onSelect(AddSourceScreen.Komga(null)) },
         )
         komgaConns.forEach { conn ->
@@ -299,7 +305,6 @@ private fun TypeSelectContent(
         TypeCard(
             leading = { TypeCardIcon(Icons.Filled.CloudQueue) },
             title = "WebDAV",
-            subtitle = "WebDAV 服务器",
             onClick = { onSelect(AddSourceScreen.WebDav(null)) },
         )
         webdavConns.forEach { conn ->
@@ -310,13 +315,14 @@ private fun TypeSelectContent(
             )
         }
 
+        val smbToast = composeStringResource(R.string.addsrc_smb_toast)
         TypeCard(
             leading = { TypeCardIcon(Icons.Filled.Lan) },
             title = "SMB",
-            subtitle = "Windows / NAS · 暂未支持",
             enabled = false,
+            trailingTag = composeStringResource(R.string.addsrc_smb_unsupported),
             onClick = {
-                android.widget.Toast.makeText(context, "SMB 暂未支持", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(context, smbToast, android.widget.Toast.LENGTH_SHORT).show()
             },
         )
     }
@@ -326,8 +332,8 @@ private fun TypeSelectContent(
 private fun TypeCard(
     leading: @Composable () -> Unit,
     title: String,
-    subtitle: String,
     enabled: Boolean = true,
+    trailingTag: String? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -355,10 +361,13 @@ private fun TypeCard(
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
+        }
+        if (trailingTag != null) {
             Text(
-                subtitle,
+                trailingTag,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 4.dp),
             )
         }
         Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -409,7 +418,7 @@ private fun AddedSourceRow(
         IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
             Icon(
                 Icons.Filled.Edit,
-                contentDescription = "编辑",
+                contentDescription = composeStringResource(R.string.addsrc_edit_cd),
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -417,7 +426,7 @@ private fun AddedSourceRow(
         IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
             Icon(
                 Icons.Filled.Delete,
-                contentDescription = "删除",
+                contentDescription = composeStringResource(R.string.addsrc_delete_cd),
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.error,
             )
@@ -463,26 +472,34 @@ private fun WebDavFormPage(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        FieldLabel("来源名称")
+        FieldLabel(composeStringResource(R.string.addsrc_name))
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
-            placeholder = { Text("如：我的 WebDAV") },
+            placeholder = { Text(composeStringResource(R.string.addsrc_name_hint_webdav)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
-        FieldLabel("服务器")
+        FieldLabel(composeStringResource(R.string.addsrc_server))
         Row(verticalAlignment = Alignment.CenterVertically) {
             SingleChoiceSegmentedButtonRow(Modifier.width(132.dp)) {
                 SegmentedButton(
                     selected = !useHttps,
-                    onClick = { useHttps = false },
+                    onClick = {
+                        // 切 HTTP：空端口或仍是 HTTPS 默认值 → 填 80；手动改过则不动。
+                        if (port.isBlank() || port.trim() == DEFAULT_PORT_HTTPS) port = DEFAULT_PORT_HTTP
+                        useHttps = false
+                    },
                     shape = SegmentedButtonDefaults.itemShape(0, 2),
                 ) { Text("HTTP", style = MaterialTheme.typography.bodySmall) }
                 SegmentedButton(
                     selected = useHttps,
-                    onClick = { useHttps = true },
+                    onClick = {
+                        // 切 HTTPS：空端口或仍是 HTTP 默认值 → 填 443；手动改过则不动。
+                        if (port.isBlank() || port.trim() == DEFAULT_PORT_HTTP) port = DEFAULT_PORT_HTTPS
+                        useHttps = true
+                    },
                     shape = SegmentedButtonDefaults.itemShape(1, 2),
                 ) { Text("HTTPS", style = MaterialTheme.typography.bodySmall) }
             }
@@ -496,29 +513,29 @@ private fun WebDavFormPage(
             )
         }
 
-        FieldLabel("端口")
+        FieldLabel(composeStringResource(R.string.addsrc_port))
         OutlinedTextField(
             value = port,
             onValueChange = { port = it.filter { c -> c.isDigit() } },
-            placeholder = { Text("5007（可空）") },
+            placeholder = { Text(composeStringResource(R.string.addsrc_port_hint)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
-        FieldLabel("路径")
+        FieldLabel(composeStringResource(R.string.addsrc_path))
         OutlinedTextField(
             value = path,
             onValueChange = { path = it },
-            placeholder = { Text("/（根目录）") },
+            placeholder = { Text(composeStringResource(R.string.addsrc_path_hint)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
-        FieldLabel("账户")
+        FieldLabel(composeStringResource(R.string.addsrc_account))
         OutlinedTextField(
             value = user,
             onValueChange = { user = it },
-            label = { Text("用户名（可空 = 匿名）") },
+            label = { Text(composeStringResource(R.string.addsrc_username_anon)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -526,19 +543,32 @@ private fun WebDavFormPage(
         OutlinedTextField(
             value = pass,
             onValueChange = { pass = it },
-            label = { Text(if (existing == null) "密码（可空 = 匿名）" else "密码（留空 = 不修改）") },
+            label = {
+                Text(
+                    if (existing == null) {
+                        composeStringResource(R.string.addsrc_password_new)
+                    } else {
+                        composeStringResource(R.string.addsrc_password_edit)
+                    },
+                )
+            },
             singleLine = true,
             visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
                 IconButton(onClick = { showPass = !showPass }) {
-                    Text(if (showPass) "隐藏" else "显示", style = MaterialTheme.typography.bodySmall)
+                    Icon(
+                        imageVector = if (showPass) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = composeStringResource(
+                            if (showPass) R.string.addsrc_hide_password_cd else R.string.addsrc_show_password_cd,
+                        ),
+                    )
                 }
             },
             modifier = Modifier.fillMaxWidth(),
         )
 
         Text(
-            "凭据经 Keystore 加密后落盘，不会明文保存。",
+            composeStringResource(R.string.addsrc_keystore_note),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 6.dp),
@@ -555,14 +585,16 @@ private fun WebDavFormPage(
                     // 编辑留空 = 沿用旧密码：直接带旧密文，decryptStored 兼容明文/密文两种形态。
                     passEnc = pass.ifBlank { existing?.passEnc.orEmpty() },
                 )
+                val okMsg = composeStringResource(R.string.addsrc_test_ok)
+                val failMsg = composeStringResource(R.string.addsrc_test_failed)
                 testing = true
                 testMsg = null
                 scope.launch {
                     testMsg = try {
                         WebDavPropfind.list(temp, temp.baseUrl)
-                        "连接正常"
+                        okMsg
                     } catch (e: Throwable) {
-                        e.message ?: "连接失败"
+                        e.message ?: failMsg
                     }
                     testing = false
                 }
@@ -574,13 +606,13 @@ private fun WebDavFormPage(
                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
             }
-            Text("测试连接")
+            Text(composeStringResource(R.string.addsrc_test))
         }
         testMsg?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (it == "连接正常") {
+                color = if (it == composeStringResource(R.string.addsrc_test_ok)) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.error
@@ -594,7 +626,7 @@ private fun WebDavFormPage(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onBack) { Text("取消") }
+            TextButton(onClick = onBack) { Text(composeStringResource(R.string.cancel)) }
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = {
@@ -607,7 +639,7 @@ private fun WebDavFormPage(
                     onSaved()
                 },
                 enabled = host.isNotBlank(),
-            ) { Text("保存") }
+            ) { Text(composeStringResource(R.string.action_save)) }
         }
     }
 }
@@ -659,26 +691,34 @@ private fun KomgaFormPage(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        FieldLabel("来源名称")
+        FieldLabel(composeStringResource(R.string.addsrc_name))
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
-            placeholder = { Text("如：我的 Komga") },
+            placeholder = { Text(composeStringResource(R.string.addsrc_name_hint_komga)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
-        FieldLabel("服务器")
+        FieldLabel(composeStringResource(R.string.addsrc_server))
         Row(verticalAlignment = Alignment.CenterVertically) {
             SingleChoiceSegmentedButtonRow(Modifier.width(132.dp)) {
                 SegmentedButton(
                     selected = !useHttps,
-                    onClick = { useHttps = false },
+                    onClick = {
+                        // 切 HTTP：空端口或仍是 HTTPS 默认值 → 填 80；手动改过则不动。
+                        if (port.isBlank() || port.trim() == DEFAULT_PORT_HTTPS) port = DEFAULT_PORT_HTTP
+                        useHttps = false
+                    },
                     shape = SegmentedButtonDefaults.itemShape(0, 2),
                 ) { Text("HTTP", style = MaterialTheme.typography.bodySmall) }
                 SegmentedButton(
                     selected = useHttps,
-                    onClick = { useHttps = true },
+                    onClick = {
+                        // 切 HTTPS：空端口或仍是 HTTP 默认值 → 填 443；手动改过则不动。
+                        if (port.isBlank() || port.trim() == DEFAULT_PORT_HTTP) port = DEFAULT_PORT_HTTPS
+                        useHttps = true
+                    },
                     shape = SegmentedButtonDefaults.itemShape(1, 2),
                 ) { Text("HTTPS", style = MaterialTheme.typography.bodySmall) }
             }
@@ -692,22 +732,22 @@ private fun KomgaFormPage(
             )
         }
 
-        FieldLabel("端口")
+        FieldLabel(composeStringResource(R.string.addsrc_port))
         OutlinedTextField(
             value = port,
             onValueChange = { port = it.filter { c -> c.isDigit() } },
-            placeholder = { Text("25600（可空）") },
+            placeholder = { Text(composeStringResource(R.string.addsrc_port_hint)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
-        FieldLabel("认证方式（二选一）")
+        FieldLabel(composeStringResource(R.string.addsrc_auth_type))
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(
                 selected = authType == KomgaAuthType.BASIC,
                 onClick = { authType = KomgaAuthType.BASIC },
                 shape = SegmentedButtonDefaults.itemShape(0, 2),
-            ) { Text("账号密码", style = MaterialTheme.typography.bodySmall) }
+            ) { Text(composeStringResource(R.string.addsrc_auth_basic), style = MaterialTheme.typography.bodySmall) }
             SegmentedButton(
                 selected = authType == KomgaAuthType.API_KEY,
                 onClick = { authType = KomgaAuthType.API_KEY },
@@ -720,7 +760,7 @@ private fun KomgaFormPage(
             OutlinedTextField(
                 value = username,
                 onValueChange = { username = it },
-                label = { Text("用户名 / 邮箱") },
+                label = { Text(composeStringResource(R.string.addsrc_username_email)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -728,12 +768,17 @@ private fun KomgaFormPage(
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
-                label = { Text("密码") },
+                label = { Text(composeStringResource(R.string.addsrc_password)) },
                 singleLine = true,
                 visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = { showPassword = !showPassword }) {
-                        Text(if (showPassword) "隐藏" else "显示", style = MaterialTheme.typography.bodySmall)
+                        Icon(
+                            imageVector = if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = composeStringResource(
+                                if (showPassword) R.string.addsrc_hide_password_cd else R.string.addsrc_show_password_cd,
+                            ),
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -753,14 +798,16 @@ private fun KomgaFormPage(
         OutlinedButton(
             onClick = {
                 val conn = buildConn()
+                val okMsg = composeStringResource(R.string.addsrc_test_ok)
+                val failMsg = composeStringResource(R.string.addsrc_test_failed)
                 testing = true
                 testMsg = null
                 scope.launch {
                     val result = KomgaApiClient(conn).testConnection()
                     testing = false
                     testMsg = result.fold(
-                        onSuccess = { "连接正常" },
-                        onFailure = { it.message ?: "连接失败" },
+                        onSuccess = { okMsg },
+                        onFailure = { it.message ?: failMsg },
                     )
                 }
             },
@@ -771,13 +818,13 @@ private fun KomgaFormPage(
                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
             }
-            Text("测试连接")
+            Text(composeStringResource(R.string.addsrc_test))
         }
         testMsg?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (it == "连接正常") {
+                color = if (it == composeStringResource(R.string.addsrc_test_ok)) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.error
@@ -791,7 +838,7 @@ private fun KomgaFormPage(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onBack) { Text("取消") }
+            TextButton(onClick = onBack) { Text(composeStringResource(R.string.cancel)) }
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = {
@@ -808,7 +855,7 @@ private fun KomgaFormPage(
                     }
                 },
                 enabled = host.isNotBlank(),
-            ) { Text("保存") }
+            ) { Text(composeStringResource(R.string.action_save)) }
         }
     }
 }
@@ -834,7 +881,7 @@ private fun LocalFormPage(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        FieldLabel("存储管理权限")
+        FieldLabel(composeStringResource(R.string.addsrc_storage_perm))
         Spacer(Modifier.height(6.dp))
         Row(
             modifier = Modifier
@@ -857,15 +904,19 @@ private fun LocalFormPage(
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (manageGranted) "已授予所有文件访问权限" else "未授予管理权限",
+                    if (manageGranted) {
+                        composeStringResource(R.string.addsrc_perm_granted)
+                    } else {
+                        composeStringResource(R.string.addsrc_perm_denied)
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                 )
                 Text(
                     if (manageGranted) {
-                        "浏览根为内部存储，可全盘切换存储卷"
+                        composeStringResource(R.string.addsrc_perm_granted_desc)
                     } else {
-                        "授权后直读真实文件系统，浏览更快、封面更稳"
+                        composeStringResource(R.string.addsrc_perm_denied_desc)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -875,7 +926,7 @@ private fun LocalFormPage(
                 Button(
                     onClick = onManageAccess,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                ) { Text("去授权") }
+                ) { Text(composeStringResource(R.string.addsrc_grant)) }
             }
         }
 
@@ -893,9 +944,9 @@ private fun LocalFormPage(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("不想授权？使用 SAF", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text(composeStringResource(R.string.addsrc_saf_title), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                     Text(
-                        "走系统文件选择器，无需特殊权限",
+                        composeStringResource(R.string.addsrc_saf_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -903,12 +954,12 @@ private fun LocalFormPage(
                 OutlinedButton(
                     onClick = onPickLocalFolder,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                ) { Text("使用 SAF") }
+                ) { Text(composeStringResource(R.string.addsrc_saf)) }
             }
 
-            FieldLabel("漫画根目录")
+            FieldLabel(composeStringResource(R.string.addsrc_root))
             Text(
-                text = localDir?.filePath ?: "未选择（点下方按钮选择）",
+                text = localDir?.filePath ?: composeStringResource(R.string.addsrc_root_none),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
@@ -923,12 +974,12 @@ private fun LocalFormPage(
             )
             Spacer(Modifier.height(10.dp))
             OutlinedButton(onClick = onPickLocalFolder, modifier = Modifier.fillMaxWidth()) {
-                Text("选择文件夹")
+                Text(composeStringResource(R.string.addsrc_pick_folder))
             }
         }
 
         Text(
-            "本地为内置来源、始终存在；此页仅用于管理权限与漫画根目录。",
+            composeStringResource(R.string.addsrc_local_note),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 14.dp),
@@ -939,7 +990,7 @@ private fun LocalFormPage(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            Button(onClick = onDone) { Text("完成") }
+            Button(onClick = onDone) { Text(composeStringResource(R.string.done)) }
         }
     }
 }

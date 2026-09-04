@@ -107,6 +107,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItemDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -316,11 +317,11 @@ class KomgaMainActivity : KomgaBaseActivity() {
 // SY --> Komiho Phase4: 来源条目（全局首页顶栏切换，数据驱动）。本地是唯一内置来源、固定置顶；
 // Komga 需已添加服务器连接才出现；WebDAV 每条连接一个条目；SMB 预留未实现不显示，
 // 未来落地后在 [buildSourceEntries] 登记。（internal：AddSourceFlow.kt 的 sourceIcon 共用。）
-internal enum class SourceKind(val typeLabel: String) {
-    Komga("Komga"),
-    WebDav("WebDAV"),
-    Smb("SMB"),
-    Local("本地"),
+internal enum class SourceKind {
+    Komga,
+    WebDav,
+    Smb,
+    Local,
     ;
 
     val isFileSource: Boolean get() = this != Komga
@@ -337,12 +338,12 @@ private const val SOURCE_ID_WEBDAV_PREFIX = "webdav:"
  * 同级按名称升序。未「添加」的来源不显示——Komga 仅在已配置服务器连接（[komgaConnected]）
  * 时出现，WebDAV 每条连接一条，SMB 未实现。
  */
-private fun buildSourceEntries(komgaConnected: Boolean): List<SourceEntry> {
+private fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, localName: String): List<SourceEntry> {
     val entries = mutableListOf(
-        SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, "本地"),
+        SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName),
     )
     if (komgaConnected) {
-        entries.add(SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, "Komga"))
+        entries.add(SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, komgaName))
     }
     WebDavConnectionStore.all()
         .sortedBy { it.displayName().lowercase() }
@@ -477,7 +478,7 @@ private fun KomgaMainScreen(
             currentTab = MainTab.Browse.ordinal
             Toast.makeText(
                 context,
-                "已授予所有文件访问权限：浏览根为内部存储，可全盘切换；有 SD 卡时点面包屑旁的箭头切换存储",
+                context.getString(R.string.perm_granted_toast),
                 Toast.LENGTH_LONG,
             ).show()
         } else {
@@ -494,7 +495,18 @@ private fun KomgaMainScreen(
     // Komga 是否已添加（有服务器连接）。onResume（refreshTick）时复查，覆盖从
     // KomgaConnectActivity 添加完连接返回的场景。
     var komgaConnected by remember { mutableStateOf(prefs.hasConnection()) }
-    val sourceEntries = remember(sourceVersion, komgaConnected) { buildSourceEntries(komgaConnected) }
+    val localName = composeStringResource(R.string.source_local)
+    // Komga 条目名 = 激活连接的来源名称（用户自定义，如「QNAP」），为空回落 host。
+    val komgaName = remember(sourceVersion, komgaConnected) {
+        if (komgaConnected) {
+            prefs.connection().let { c -> c.name.ifBlank { c.baseUrl.substringAfter("//").substringBefore("/") } }
+        } else {
+            ""
+        }
+    }
+    val sourceEntries = remember(sourceVersion, komgaConnected, komgaName, localName) {
+        buildSourceEntries(komgaConnected, komgaName, localName)
+    }
     var currentSourceId by remember {
         mutableStateOf(
             storagePreferences.browseSourceId.get().ifBlank {
@@ -863,7 +875,7 @@ private fun KomgaMainScreen(
                             runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                 .onFailure {
                                     android.widget.Toast.makeText(
-                                        context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                        context, context.getString(R.string.open_reader_failed, it.message), android.widget.Toast.LENGTH_LONG,
                                     ).show()
                                 }
                         },
@@ -887,7 +899,7 @@ private fun KomgaMainScreen(
                             if (conn == null) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Text(
-                                        "该 WebDAV 连接不存在，请从顶栏重新选择来源",
+                                        composeStringResource(R.string.source_webdav_missing),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
@@ -903,7 +915,7 @@ private fun KomgaMainScreen(
 
                         // SMB 未实现；Komga 不会出现（Browse 仅文件型来源可见）。
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("该来源暂未支持", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(composeStringResource(R.string.source_unsupported), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     // SY --> Komiho: 本地模式历史 / 书签 tab。
@@ -935,8 +947,8 @@ private fun KomgaMainScreen(
                             sourceVersion++
                             komgaConnected = prefs.hasConnection()
                             // 用关闭后的最新来源列表校验（sourceEntries 还是旧快照）。
-                            if (buildSourceEntries(prefs.hasConnection()).none { it.id == currentSourceId }) {
-                                selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, "本地"))
+                            if (buildSourceEntries(prefs.hasConnection(), "", "").none { it.id == currentSourceId }) {
+                                selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName))
                             }
                         },
                     )
@@ -947,11 +959,10 @@ private fun KomgaMainScreen(
                 if (showManageAccessDialog) {
                     AlertDialog(
                         onDismissRequest = { showManageAccessDialog = false },
-                        title = { Text("需要所有文件访问权限") },
+                        title = { Text(composeStringResource(R.string.perm_dialog_title)) },
                         text = {
                             Text(
-                                "为更快、稳定地访问本地漫画，建议授予「所有文件访问权限」。" +
-                                    "你也可以选择继续使用系统目录选择器（SAF）来授权本地目录。",
+                                composeStringResource(R.string.perm_dialog_body),
                             )
                         },
                         confirmButton = {
@@ -960,7 +971,7 @@ private fun KomgaMainScreen(
                                     showManageAccessDialog = false
                                     launchManageAllFilesAccess(context)
                                 },
-                            ) { Text("去授权") }
+                            ) { Text(composeStringResource(R.string.perm_grant)) }
                         },
                         dismissButton = {
                             TextButton(
@@ -968,7 +979,7 @@ private fun KomgaMainScreen(
                                     showManageAccessDialog = false
                                     pickLocalFolder.launch(null)
                                 },
-                            ) { Text("使用 SAF") }
+                            ) { Text(composeStringResource(R.string.perm_use_saf)) }
                         },
                     )
                 }
@@ -3266,8 +3277,8 @@ private fun SettingsTab(context: android.content.Context) {
             onPreferenceClick = { showServer = true },
         )
         TextPreferenceWidget(
-            title = "存储",
-            subtitle = "所有文件访问权限",
+            title = composeStringResource(R.string.storage_title),
+            subtitle = composeStringResource(R.string.storage_all_files_access),
             icon = Icons.Outlined.Storage,
             onPreferenceClick = { showLocalStorage = true },
         )
@@ -3336,7 +3347,7 @@ private fun SettingsTab(context: android.content.Context) {
     if (showLocalStorage) {
         SettingsCategoryDialog(
             onDismiss = { showLocalStorage = false },
-            title = "存储",
+            title = composeStringResource(R.string.storage_title),
         ) { padding -> KomgaLocalStorageSettings(Modifier.padding(padding), context) }
     }
     if (showReaderSettings) {
@@ -3443,11 +3454,11 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
         modifier = modifier.verticalScroll(rememberScrollState()),
     ) {
         TextPreferenceWidget(
-            title = "所有文件访问权限",
+            title = composeStringResource(R.string.storage_all_files_access),
             subtitle = if (hasAllFilesAccess) {
-                "已授权：本地浏览使用真实路径（列表/封面/阅读更快）"
+                composeStringResource(R.string.storage_perm_granted_desc)
             } else {
-                "未授权：本地浏览使用 SAF。授权后可大幅提速"
+                composeStringResource(R.string.storage_perm_denied_desc)
             },
             icon = Icons.Outlined.Storage,
             onPreferenceClick = {
@@ -3460,17 +3471,17 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
         // SY --> Komiho Phase4-②: WebDAV 整本缓存（rar/7z 强制回退）管理
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(
-                "WebDAV 整本缓存",
+                composeStringResource(R.string.storage_webdav_cache),
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                "rar/7z 远程压缩包打开时整本缓存到本地（zip/cbz 不占用）；" +
-                    "超过上限自动淘汰最旧，降低上限后在下一次下载时生效。",
+                composeStringResource(R.string.storage_webdav_cache_desc),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "上限：" + formatCacheSize((cacheMaxMb * 1024f * 1024f).toLong()),
+                composeStringResource(R.string.storage_cache_limit) +
+                    formatCacheSize((cacheMaxMb * 1024f * 1024f).toLong()),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 8.dp),
             )
@@ -3485,12 +3496,12 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "200 MB — 4 GB，200 MB 一档（默认 1 GB）",
+                composeStringResource(R.string.storage_cache_range),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "当前占用：" + formatCacheSize(usageBytes),
+                composeStringResource(R.string.storage_cache_usage) + formatCacheSize(usageBytes),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 8.dp),
             )
@@ -3505,14 +3516,14 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                         usageTick++
                         android.widget.Toast.makeText(
                             context,
-                            "已清除 WebDAV 缓存（" + formatCacheSize(freed) + "）",
+                            context.getString(R.string.storage_cache_cleared, formatCacheSize(freed)),
                             android.widget.Toast.LENGTH_SHORT,
                         ).show()
                     }
                 },
                 enabled = usageBytes > 0L,
             ) {
-                Text("清除缓存")
+                Text(composeStringResource(R.string.storage_clear_cache))
             }
         }
         // SY <--
@@ -3794,8 +3805,11 @@ private fun KomgaPreviewSettings(modifier: Modifier, context: android.content.Co
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    text = if (cacheLimitMb == 0) "0 M（不缓存 / 实时预览）"
-                    else "$cacheLimitMb M（当前占用约 ${cacheUsedMb}M）",
+                    text = if (cacheLimitMb == 0) {
+                        composeStringResource(R.string.settings_cache_preview_none)
+                    } else {
+                        composeStringResource(R.string.settings_cache_preview, cacheLimitMb, cacheUsedMb)
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -4188,7 +4202,7 @@ private suspend fun checkForKomihoUpdate(context: android.content.Context, onFin
             }
         }
     } catch (e: Exception) {
-        Toast.makeText(context, e.message ?: "更新检查失败", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, e.message ?: context.getString(R.string.update_check_failed), Toast.LENGTH_SHORT).show()
     } finally {
         onFinish()
     }
@@ -4231,13 +4245,15 @@ private fun SourceSwitchButton(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = "切换来源")
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = composeStringResource(R.string.source_switch_cd))
         }
         DropdownMenu(
             expanded = open,
             onDismissRequest = { open = false },
         ) {
             entries.forEach { entry ->
+                // 选中项 = 整行反色（inverseSurface 底 + inverseOnSurface 字），不用 ✓。
+                val selected = entry.id == current.id
                 DropdownMenuItem(
                     text = {
                         Row(
@@ -4248,22 +4264,18 @@ private fun SourceSwitchButton(
                                 imageVector = sourceIcon(entry.kind),
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            Column {
-                                Text(entry.name, style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    entry.kind.typeLabel,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                            Text(entry.name, style = MaterialTheme.typography.bodyMedium)
                         }
                     },
-                    trailingIcon = {
-                        if (entry.id == current.id) {
-                            Icon(Icons.Filled.Check, contentDescription = "当前来源")
-                        }
+                    colors = if (selected) {
+                        DropdownMenuItemDefaults.menuItemColors(
+                            containerColor = MaterialTheme.colorScheme.inverseSurface,
+                            textColor = MaterialTheme.colorScheme.inverseOnSurface,
+                            leadingIconColor = MaterialTheme.colorScheme.inverseOnSurface,
+                        )
+                    } else {
+                        DropdownMenuItemDefaults.menuItemColors()
                     },
                     onClick = {
                         open = false
@@ -4273,7 +4285,7 @@ private fun SourceSwitchButton(
             }
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("添加来源") },
+                text = { Text(composeStringResource(R.string.source_add)) },
                 leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
                 onClick = {
                     open = false
@@ -4508,14 +4520,16 @@ private fun fileTint(entry: LocalEntry): Color {
  *  点击图片/归档/目录分别在 reader 中整目录加载（reader 自动载入同目录全部图片），不另设「阅读此目录」按钮。 */
 
 /** 存储卷根的显示名：内部存储 →「内部存储」，其余（SD 卡）→「SD 卡（卷名）」。 */
+@Composable
 private fun storageRootLabel(rootPath: String): String {
-    if (rootPath.isBlank()) return "内部存储"
+    val internal = composeStringResource(R.string.internal_storage)
+    if (rootPath.isBlank()) return internal
     val canonical = runCatching { File(rootPath).canonicalPath }.getOrNull() ?: rootPath
     val primary = runCatching { Environment.getExternalStorageDirectory().canonicalPath }.getOrNull()
     return if (primary != null && canonical == primary) {
-        "内部存储"
+        internal
     } else {
-        "SD 卡（${rootPath.trimEnd('/').substringAfterLast('/')}）"
+        composeStringResource(R.string.sd_card_volume, rootPath.trimEnd('/').substringAfterLast('/'))
     }
 }
 
@@ -4694,7 +4708,7 @@ private fun LocalFileBrowser(
                         IconButton(onClick = { rootMenuOpen = true }) {
                             Icon(
                                 imageVector = Icons.Filled.ArrowDropDown,
-                                contentDescription = "切换存储",
+                                contentDescription = composeStringResource(R.string.storage_switch_cd),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -5054,7 +5068,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
             // 真实绝对路径（canonical）：同一物理文件在 SAF 与全权限（MANAGE）两种模式下路径一致，
             // 作为 manga.url / chapter.url 即可让书签/历史跨模式互认。
             val canonicalFile = fs.realPathOf(file)
-                ?: throw Exception("找不到文件：$relPath")
+                ?: throw Exception(context.getString(R.string.file_not_found, relPath))
             val isArchive = file.isLocalArchive() || file.extension.equals("epub", true)
             // 书籍（系列）目录：归档/epub 取父目录，目录/散图取自身。
             val bookDir = if (isArchive) canonicalFile.substringBeforeLast('/') else canonicalFile
@@ -5065,7 +5079,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
             val title = seriesTitle
             // 当前系列目录的 UniFile（扫描兄弟章节用）；解析失败即文件不在当前根下。
             val bookDirUni = fs.resolveUnderBase(bookDir)
-                ?: throw Exception("找不到系列目录：$bookDir")
+                ?: throw Exception(context.getString(R.string.series_dir_not_found, bookDir))
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
             val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
@@ -5111,7 +5125,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                         }
                     }
                 chapterRepo.getChapterByUrlAndMangaId(canonicalFile, manga.id!!)
-                    ?: error("当前文件未写入章节：$canonicalFile")
+                    ?: error(context.getString(R.string.chapter_not_written, canonicalFile))
             } else {
                 // 目录/散图：把系列目录下所有子目录（卷/话）都建成章节，使翻完当前卷自动续到下一卷；
                 // 章节 url 用真实绝对路径。当前打开的目录是其中一章。
@@ -5157,7 +5171,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
     } catch (e: Throwable) {
         android.widget.Toast.makeText(
             context,
-            "打开失败：${e.message}",
+            context.getString(R.string.open_failed, e.message),
             android.widget.Toast.LENGTH_LONG,
         ).show()
     }
@@ -5179,6 +5193,7 @@ private fun WebDavBrowsePane(
     var manual by remember { mutableStateOf(false) }
     var manualUrl by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val dirBrowseFailed = composeStringResource(R.string.dir_browse_failed)
 
     fun load(conn: WebDavConnection, dir: String) {
         loading = true
@@ -5188,7 +5203,7 @@ private fun WebDavBrowsePane(
                 entries = WebDavPropfind.list(conn, dir)
                 dirUrl = dir
             } catch (e: Throwable) {
-                errorText = e.message ?: "目录浏览失败"
+                errorText = e.message ?: dirBrowseFailed
             }
             loading = false
         }
@@ -5206,17 +5221,16 @@ private fun WebDavBrowsePane(
                 OutlinedTextField(
                     value = manualUrl,
                     onValueChange = { manualUrl = it },
-                    label = { Text("CBZ/ZIP 路径或完整 URL") },
+                    label = { Text(composeStringResource(R.string.webdav_manual_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    "支持相对 Base URL 的路径（如 /Comic/Z3.zip）或完整 http(s) URL；" +
-                        "同目录其余压缩包会一并建成章节（翻完自动续卷）。",
+                    composeStringResource(R.string.webdav_manual_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = { manual = false }) { Text("返回目录浏览") }
+                TextButton(onClick = { manual = false }) { Text(composeStringResource(R.string.webdav_manual_back)) }
                 TextButton(
                     onClick = { onOpenFile(manualUrl) },
                     enabled = manualUrl.isNotBlank(),
@@ -5242,18 +5256,18 @@ private fun WebDavBrowsePane(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Text(
-                            "加载失败：$errorText",
+                            composeStringResource(R.string.load_failed, errorText.orEmpty()),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        TextButton(onClick = { load(conn, dirUrl) }) { Text("重试") }
-                        TextButton(onClick = { manual = true }) { Text("手动输入路径") }
+                        TextButton(onClick = { load(conn, dirUrl) }) { Text(composeStringResource(R.string.retry)) }
+                        TextButton(onClick = { manual = true }) { Text(composeStringResource(R.string.webdav_manual_input)) }
                     }
 
                     else -> {
                         if (webDavParentUrl(dirUrl) != null) {
                             Text(
-                                "上级目录",
+                                composeStringResource(R.string.webdav_parent_dir),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier
@@ -5288,7 +5302,7 @@ private fun WebDavBrowsePane(
                             if (files.isEmpty() && !loading) {
                                 item {
                                     Text(
-                                        "此目录没有压缩包（zip/cbz/rar/7z）",
+                                        composeStringResource(R.string.webdav_empty_dir),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -5314,10 +5328,11 @@ private fun webDavParentUrl(url: String): String? {
 }
 
 /** 章节 URL → 来源标识（历史/书签共用存储，靠前缀区分展示）：webdav:/smb: 为远程来源，其余为本地路径。 */
+@Composable
 private fun chapterSourceLabel(chapterUrl: String): String = when {
     chapterUrl.startsWith("webdav:") -> "WebDAV"
     chapterUrl.startsWith("smb:") -> "SMB"
-    else -> "本地"
+    else -> composeStringResource(R.string.source_local)
 }
 
 /** 打开 WebDAV 文件（Phase4-②）：manga = 远程目录（系列），同目录所有 zip/cbz 建成章节
@@ -5332,10 +5347,10 @@ private suspend fun openWebDavTestFile(
     try {
         val httpUrl = WebDavConnectionStore.resolveFileUrl(conn, rawUrl)
         if (!httpUrl.startsWith("http://") && !httpUrl.startsWith("https://")) {
-            throw Exception("URL 须以 http:// 或 https:// 开头")
+            throw Exception(context.getString(R.string.webdav_url_not_http))
         }
         val fileName = httpUrl.substringAfterLast('/')
-        if (fileName.isBlank()) throw Exception("URL 缺少文件名")
+        if (fileName.isBlank()) throw Exception(context.getString(R.string.webdav_url_no_filename))
         val decodedName = runCatching { java.net.URLDecoder.decode(fileName, "UTF-8") }.getOrDefault(fileName)
         // manga.url = 远程目录（同一远程目录的多个归档同属一个系列）
         val mangaUrl = httpUrl.substringBeforeLast('/')
@@ -5396,14 +5411,14 @@ private suspend fun openWebDavTestFile(
                 }
             }
             val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
-                ?: error("章节写入失败")
+                ?: error(context.getString(R.string.webdav_chapter_write_failed))
             manga.id!! to chapter.id!!.toLong()
         }
         context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
     } catch (e: Throwable) {
         android.widget.Toast.makeText(
             context,
-            "打开失败：${e.message}",
+            context.getString(R.string.open_failed, e.message),
             android.widget.Toast.LENGTH_LONG,
         ).show()
     }
@@ -5939,14 +5954,18 @@ private fun BookmarksTabLocal(
                         file?.let { LocalCoverData(it, stat.modified) } ?: first.thumbnailUrl?.takeIf { it.isNotBlank() }
                     }
                     // SY <--
-                    val chapterText = if (first.chapterNumber >= 0) "第 ${formatChapterNumber(first.chapterNumber)} 话" else first.chapterName
+                    val chapterText = if (first.chapterNumber >= 0) {
+                        composeStringResource(R.string.chapter_ordinal, formatChapterNumber(first.chapterNumber))
+                    } else {
+                        first.chapterName
+                    }
                     val isExpanded = expanded.contains(chapterId)
                     val firstPage = bms.minOf { it.page }
 
                     LocalFileRow(
                         context = context,
                         title = first.mangaTitle,
-                        subtitle = "$chapterText · ${bms.size} 个书签",
+                        subtitle = composeStringResource(R.string.bookmarks_count_subtitle, chapterText, bms.size),
                         sourceBadge = chapterSourceLabel(first.chapterUrl),
                         fileSize = stat.size,
                         // 文件修改时间对远程章节无意义，行内改显最后阅读时间
@@ -6043,7 +6062,7 @@ private fun BookmarkPageRow(
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                text = "第 ${page + 1} 页",
+                text = composeStringResource(R.string.reader_page_num, page + 1),
                 style = MaterialTheme.typography.bodyMedium,
             )
             if (totalPages > 0) {
@@ -6103,6 +6122,7 @@ private fun DownloadsTab(
     var expanded by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pendingDeleteSeries by remember { mutableStateOf<DownloadedSeries?>(null) }
 
+    val unknownSeries = composeStringResource(R.string.unknown_series)
     fun load() {
         loading = true
         scope.launch {
@@ -6112,7 +6132,7 @@ private fun DownloadsTab(
             val result = grouped.mapNotNull { (_, entries) ->
                 val first = entries.first()
                 val seriesId = first.seriesId
-                val seriesName = first.seriesName.ifBlank { "未知系列" }
+                val seriesName = first.seriesName.ifBlank { unknownSeries }
                 // 单本下载可能没 series meta（旧数据），用章节数兜底；新下载单本也会存封面。
                 val meta = seriesId.takeIf { it.isNotBlank() }?.let { store.getSeriesMeta(it) }
                 // 封面来源：系列 meta 优先；单本下载没写 meta 但已存 _covers/<seriesId>.jpg，兜底读之。
@@ -6166,8 +6186,8 @@ private fun DownloadsTab(
     pendingDeleteSeries?.let { s ->
         AlertDialog(
             onDismissRequest = { pendingDeleteSeries = null },
-            title = { Text("删除整个系列？") },
-            text = { Text("将删除「${s.seriesName}」全部 ${s.chapters.size} 本已下载内容，且无法恢复。") },
+            title = { Text(composeStringResource(R.string.delete_series_title)) },
+            text = { Text(composeStringResource(R.string.delete_series_msg, s.seriesName, s.chapters.size)) },
             confirmButton = {
                 TextButton(onClick = {
                     val sId = s.seriesId
@@ -6177,9 +6197,9 @@ private fun DownloadsTab(
                         pendingDeleteSeries = null
                         load()
                     }
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(composeStringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { pendingDeleteSeries = null }) { Text("取消") } },
+            dismissButton = { TextButton(onClick = { pendingDeleteSeries = null }) { Text(composeStringResource(R.string.cancel)) } },
         )
     }
 
@@ -6197,13 +6217,13 @@ private fun DownloadsTab(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "还没有下载的书",
+                    text = composeStringResource(R.string.downloads_empty),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "在系列页点「下载整个系列」即可离线保存",
+                    text = composeStringResource(R.string.downloads_empty_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -6249,7 +6269,7 @@ private fun DownloadsTab(
                             Text(series.seriesName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                "已下载 ${series.chapters.size} / ${series.totalBooks}",
+                                composeStringResource(R.string.download_progress, series.chapters.size, series.totalBooks),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
