@@ -312,6 +312,7 @@ class WebtoonPageHolder(
                     page?.let { it.chapter.pageLoader?.retryPage(it) }
                 }
             }
+        }
 
         val imageUrl = page?.imageUrl
         errorLayout?.actionOpenInWebView?.isVisible = imageUrl != null
