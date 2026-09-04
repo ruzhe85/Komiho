@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import mihon.core.common.archive.ArchiveHandle
+import mihon.core.common.archive.ArchiveEntry
 import mihon.core.common.archive.ArchivePasswordException
 import tachiyomi.core.common.util.system.ImageUtil
 import uy.kohesive.injekt.injectLazy
@@ -81,9 +82,7 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
                     when (readerPreferences.archiveReaderMode.get()) {
                         ReaderPreferences.ArchiveReaderMode.LOAD_INTO_MEMORY -> {
                             CoroutineScope(Dispatchers.IO).async {
-                                reader.getInputStream(entry.name)!!.buffered().use { stream ->
-                                    stream.readBytes()
-                                }
+                                readEntryBytes(entry)
                             }
                         }
 
@@ -98,10 +97,10 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
                     // ArchiveInputStream 直接交给 native 解码（多页并发读同一 zip handle 曾导致
                     // native 崩溃）。去全局 Mutex 后，并发 getInputStream+readBytes 由 FileChannel
                     // 定位读保证线程安全，不再排队，启动/跳转回到正常速度。
-                    stream = {
-                        imageBytes?.copyOf()?.inputStream()
-                            ?: reader.getInputStream(entry.name)!!.buffered().use { it.readBytes() }.inputStream()
-                    }
+                    // 读取统一走 [readEntryBytes]：LOAD_INTO_MEMORY 用后台预读好的字节
+                    //（deferred 内部同样走防御），其余模式实时读；回收/空流/截断在读取层
+                    // 快速失败，不再把空字节交给解码器伪装成 "Failed to initialize decoder"。
+                    stream = { (imageBytes ?: readEntryBytes(entry)).copyOf().inputStream() }
                     // SY <--
                     status = Page.State.Ready
                 }
@@ -111,6 +110,26 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
 
     override suspend fun loadPage(page: ReaderPage) {
         check(!isRecycled)
+    }
+
+    /**
+     * SY: 读取单个条目的完整字节。竞态防御（治「Failed to initialize decoder」伪装案）：
+     * recycle() 会直接 close ArchiveHandle 且与页面 stream() 无互斥——快速翻页/大跳页/
+     * 换章时，读到一半流被关闭会得到截断字节、关闭后打开得到空流，InputStream.readBytes()
+     * 对两者都「合法返回」不抛异常，空/截断字节一路走到解码器才炸出失真的
+     * "Failed to initialize decoder"。这里在每个环节快速失败并抛出真实原因：
+     *  - loader 已回收 → check(!isRecycled)
+     *  - 条目取不到流 → 明确报条目名
+     *  - 读出空字节 → 明确报「流被回收关闭」
+     * 错误行显示真实原因后自动刷新（重绑定→重读）即恢复正常。
+     */
+    private fun readEntryBytes(entry: ArchiveEntry): ByteArray {
+        check(!isRecycled) { "页面读取时章节已被回收（翻页/换章竞态）——重载即恢复" }
+        val input = reader.getInputStream(entry.name)
+            ?: throw IllegalStateException("归档内取不到条目流：${entry.name}")
+        val bytes = input.buffered().use { it.readBytes() }
+        check(bytes.isNotEmpty()) { "条目读取为空（章节流已被回收关闭）：${entry.name}——重载即恢复" }
+        return bytes
     }
 
     override fun recycle() {

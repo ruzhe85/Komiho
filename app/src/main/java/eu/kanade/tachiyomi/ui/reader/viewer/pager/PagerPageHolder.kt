@@ -174,6 +174,9 @@ class PagerPageHolder(
         try {
             val (source, isAnimated, background) = withIOContext {
                 streamFn().buffered(16).use { source ->
+                    // SY: 兜底快速失败——空流（章节回收竞态的另一种表现）直接报明确错误，
+                    // 不进解码器（ArchivePageLoader.readEntryBytes 已在读取层拦截，这里防其他 loader）。
+                    check(source.request(1)) { "页面流为空（章节可能已被回收关闭）——重载即恢复" }
                     // SY -->
                     if (extraPage != null) {
                         streamFn2?.invoke()
