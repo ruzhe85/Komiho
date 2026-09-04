@@ -130,6 +130,15 @@ class StoragePreferences(
         Preference.appStateKey("webdav_browse_columns"),
         0,
     )
+
+    /**
+     * Komiho: WebDAV 浏览器最后访问目录（按连接记忆，切来源/重启后恢复，不重置到根）。
+     * 格式：每行 "connId<空格>url1(\u001F url2)*"（\u001F 为路径段分隔符，URL 编码后不会出现）。
+     */
+    val webdavBrowseLastPaths: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("webdav_browse_last_paths"),
+        "",
+    )
     // SY <--
 
     /** 全局首页当前选中的来源 id（"komga" / "local" / "webdav:<connId>"）。空 = 默认 Komga。 */
