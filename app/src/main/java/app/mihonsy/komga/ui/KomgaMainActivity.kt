@@ -90,7 +90,6 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.ViewList
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
@@ -4912,6 +4911,40 @@ private fun LocalCoverFallback(entry: LocalEntry, iconSize: Dp) {
     )
 }
 
+/** 无封面网格格子骨架：图标居中的 0.7 比例槽 + 两行居中名称。
+ *  本地网格未开封面时与 WebDAV 网格共用（封面形态仅本地有，见 [LocalFileGridItem]）。 */
+@Composable
+private fun FileGridCell(
+    name: String,
+    icon: ImageVector,
+    iconTint: Color,
+    iconSize: Dp,
+    clickable: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .then(if (clickable) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(iconSize))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = name,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
 /** 网格模式一个格子：封面（开启且已懒加载到）直接显示，否则图标 + 名称。
  *  封面仅在格子挂载（即可见）时解码，离屏自动取消；命中内存缓存即时显示，
  *  因此进入目录/滚动都不会突发解码；列表模式走 [FileRow] + [LocalCoverThumb]（同样复用 Coil 缓存）。
@@ -4927,53 +4960,59 @@ private fun LocalFileGridItem(
     val isDir = entry.isDirectory
     val isArchive = entry.isArchive
 
+    val iconSize = if (isDir || isArchive) 56.dp else 40.dp
+
+    // 未开封面：整体交给共用骨架 [FileGridCell]（自带点击/内边距，clickable=false 避免双重点击）。
+    if (!showCover) {
+        FileGridCell(
+            name = entry.name,
+            icon = fileIcon(entry),
+            iconTint = fileTint(entry),
+            iconSize = iconSize,
+            clickable = clickable,
+            onClick = onClick,
+        )
+        return
+    }
+
     Column(
         modifier = Modifier
             .then(if (clickable) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // SY --> Komiho: 本地封面自带 filesDir/komiho_local_covers 缓存（与 Komga 缓存隔离）。
+        // 缓存键含 lastModified，文件换封面后自动失效；取不到封面则退回文件图标。
         Box(
             modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
             contentAlignment = Alignment.Center,
         ) {
-            if (showCover) {
-                // SY --> Komiho: 本地封面自带 filesDir/komiho_local_covers 缓存（与 Komga 缓存隔离）。
-                // 缓存键含 lastModified，文件换封面后自动失效；取不到封面则退回文件图标。
-                SubcomposeAsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(LocalCoverData(entry.uni, entry.lastModified))
-                        .build(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    loading = {
-                        Icon(
-                            fileIcon(entry),
-                            contentDescription = null,
-                            tint = fileTint(entry),
-                            modifier = Modifier.size(if (isDir || isArchive) 56.dp else 40.dp),
-                        )
-                    },
-                    error = {
-                        Icon(
-                            fileIcon(entry),
-                            contentDescription = null,
-                            tint = fileTint(entry),
-                            modifier = Modifier.size(if (isDir || isArchive) 56.dp else 40.dp),
-                        )
-                    },
-                )
-                // SY <--
-            } else {
-                Icon(
-                    fileIcon(entry),
-                    contentDescription = null,
-                    tint = fileTint(entry),
-                    modifier = Modifier.size(if (isDir || isArchive) 56.dp else 40.dp),
-                )
-            }
+            SubcomposeAsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(LocalCoverData(entry.uni, entry.lastModified))
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                loading = {
+                    Icon(
+                        fileIcon(entry),
+                        contentDescription = null,
+                        tint = fileTint(entry),
+                        modifier = Modifier.size(iconSize),
+                    )
+                },
+                error = {
+                    Icon(
+                        fileIcon(entry),
+                        contentDescription = null,
+                        tint = fileTint(entry),
+                        modifier = Modifier.size(iconSize),
+                    )
+                },
+            )
         }
+        // SY <--
         Spacer(Modifier.height(4.dp))
         Text(
             text = entry.name,
@@ -5002,6 +5041,7 @@ private fun LocalBrowseOptionsMenu(
     onColumnChange: (Int) -> Unit,
     sort: LocalFileSort,
     onSortModeChange: (LocalFileSort) -> Unit,
+    showCoverEnabled: Boolean = true,
 ) {
     if (!expanded) return
     val tabTitles = listOf(
@@ -5048,11 +5088,14 @@ private fun LocalBrowseOptionsMenu(
                             )
                         }
                     }
-                    CheckboxItem(
-                        label = composeStringResource(R.string.local_browse_cover),
-                        checked = showCover,
-                        onClick = { onShowCoverChange(!showCover) },
-                    )
+                    // WebDAV 浏览传 showCoverEnabled=false 隐藏封面开关（防服务器风控）。
+                    if (showCoverEnabled) {
+                        CheckboxItem(
+                            label = composeStringResource(R.string.local_browse_cover),
+                            checked = showCover,
+                            onClick = { onShowCoverChange(!showCover) },
+                        )
+                    }
                     if (displayMode != LibraryDisplayMode.List) {
                         Spacer(Modifier.height(8.dp))
                         SliderItem(
@@ -5202,160 +5245,196 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
 
 
 /** WebDAV 浏览页（Phase4 全局首页形态）：挂在 Browse tab 下，连接由顶栏来源按钮决定。
- *  PROPFIND Depth-1 逐级下钻，点归档直接打开；服务器不支持 PROPFIND（或想跳转任意文件）
- *  时切「手动输入路径」兜底。连接管理在顶栏「来源管理」全屏流程（AddSourceFlow）。 */
+ *  UI 与本地文件浏览器同一套「列表模式」：面包屑（可点快速跳层）+ 列表/紧凑网格 +
+ *  排序/显示选项（Tune）。显示模式/排序/列数为独立偏好（webdav_browse_*），不与本地浏览互串；
+ *  为防 WebDAV 服务器风控：不提供封面缩略图，也不提供手输 URL 入口。 */
 @Composable
 private fun WebDavBrowsePane(
     conn: WebDavConnection,
     onOpenFile: (fileUrl: String) -> Unit,
 ) {
-    var dirUrl by remember(conn.id) { mutableStateOf(conn.baseUrl) }
+    val prefs = remember { Injekt.get<StoragePreferences>() }
+    val dirBrowseFailed = composeStringResource(R.string.dir_browse_failed)
+
+    // 显示模式 / 排序 / 列数：独立于本地浏览的偏好键持久化（用户要求「仅限当前模块」）。
+    var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.webdavBrowseDisplayMode.get())) }
+    var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.webdavBrowseSort.get())) }
+    var columnCount by remember { mutableStateOf(prefs.webdavBrowseColumns.get()) }
+    var showOptions by remember { mutableStateOf(false) }
+
+    // 面包屑栈：(显示名, 目录 URL)，首元素恒为根（连接名 / host）。与本地浏览的 stack 同构，
+    // 但存 URL 而非段名——WebDAV 路径带 % 编码，按段名重拼会有编码往返问题。
+    val rootLabel = remember(conn.id) {
+        conn.name.ifBlank {
+            runCatching { java.net.URI(conn.baseUrl).host }.getOrNull() ?: "WebDAV"
+        }
+    }
+    var trail by remember(conn.id) { mutableStateOf(listOf(rootLabel to conn.baseUrl)) }
+    val dirUrl = trail.last().second
+
     var entries by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
-    var manual by remember { mutableStateOf(false) }
-    var manualUrl by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-    val dirBrowseFailed = composeStringResource(R.string.dir_browse_failed)
+    var retryTick by remember { mutableIntStateOf(0) }
 
-    fun load(conn: WebDavConnection, dir: String) {
+    // 目录变化（下钻/面包屑跳层/返回）或重试时自动重载。
+    LaunchedEffect(dirUrl, retryTick) {
         loading = true
         errorText = null
-        scope.launch {
-            try {
-                entries = WebDavPropfind.list(conn, dir)
-                dirUrl = dir
-            } catch (e: Throwable) {
-                errorText = e.message ?: dirBrowseFailed
-            }
-            loading = false
+        try {
+            entries = WebDavPropfind.list(conn, dirUrl)
+        } catch (e: Throwable) {
+            errorText = e.message ?: dirBrowseFailed
         }
+        loading = false
     }
 
-    // 连接实例变化（首次进入 / 编辑保存）时重载根目录。手动输入态一并退出。
-    LaunchedEffect(conn) {
-        manual = false
-        load(conn, conn.baseUrl)
+    // 返回键回上一层；已在根目录时不拦截（交还外层）。
+    BackHandler(enabled = trail.size > 1) {
+        trail = trail.dropLast(1)
+    }
+
+    // 统一点击行为：目录 → 压栈下钻；归档 → 打开（同目录归档自动建为章节续读）。
+    val onItemOpen: (WebDavEntry) -> Unit = { e ->
+        if (e.isDir) trail = trail + (e.name to e.url) else onOpenFile(e.url)
+    }
+
+    // 只显示目录 + 可读归档（与本地浏览「过滤不可读文件」口径一致），排序走本地同款排序器。
+    val visible = remember(entries, sort) {
+        entries.filter { it.isDir || it.isArchive }.sortedWith(webDavEntryComparator(sort))
     }
 
     Column(Modifier.fillMaxSize()) {
-        when {
-            manual -> Column(Modifier.fillMaxSize().padding(16.dp)) {
-                OutlinedTextField(
-                    value = manualUrl,
-                    onValueChange = { manualUrl = it },
-                    label = { Text(composeStringResource(R.string.webdav_manual_label)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    composeStringResource(R.string.webdav_manual_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = { manual = false }) { Text(composeStringResource(R.string.webdav_manual_back)) }
-                TextButton(
-                    onClick = { onOpenFile(manualUrl) },
-                    enabled = manualUrl.isNotBlank(),
-                ) { Text(composeStringResource(R.string.action_ok)) }
-            }
-
-            else -> Column(Modifier.fillMaxSize()) {
-                Text(
-                    dirUrl.removePrefix(conn.baseUrl).ifBlank { "/" },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                )
-                when {
-                    loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-
-                    errorText != null -> Column(
-                        Modifier.fillMaxSize().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
+        // 顶栏：面包屑（可点跳层）+ 显示选项 Tune 按钮（与本地浏览一致）。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                trail.forEachIndexed { index, (name, _) ->
+                    if (index > 0) {
                         Text(
-                            composeStringResource(R.string.load_failed, errorText.orEmpty()),
-                            color = MaterialTheme.colorScheme.error,
+                            text = "/",
                             style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        TextButton(onClick = { load(conn, dirUrl) }) { Text(composeStringResource(R.string.retry)) }
-                        TextButton(onClick = { manual = true }) { Text(composeStringResource(R.string.webdav_manual_input)) }
                     }
+                    TextButton(onClick = { trail = trail.take(index + 1) }) {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            IconButton(onClick = { showOptions = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Tune,
+                    contentDescription = composeStringResource(R.string.display_mode_header),
+                )
+            }
+        }
 
-                    else -> {
-                        // 直接使用本地文件的列表模式：行渲染复用 [FileListRow]（图标槽 + 名称 + 分隔线），
-                        // 图标语义复用 fileKindIcon/fileKindTint；条目过滤与本地一致（目录 + 可读归档），
-                        // 排序对齐本地默认（目录优先 + 名称）。上级目录渲染为同样式的首行。
-                        val visible = entries
-                            .filter { it.isDir || it.isArchive }
-                            .sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
-                        val parent = webDavParentUrl(dirUrl)
-                        LazyColumn(Modifier.fillMaxSize()) {
-                            if (parent != null) {
-                                item(key = "webdav_parent") {
-                                    FileListRow(
-                                        name = composeStringResource(R.string.webdav_parent_dir),
-                                        clickable = true,
-                                        onOpen = { load(conn, parent) },
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.ArrowUpward,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(24.dp),
-                                        )
-                                    }
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                }
-                            }
-                            items(visible, key = { it.url }) { e ->
-                                FileListRow(
-                                    name = e.name,
-                                    clickable = true,
-                                    onOpen = {
-                                        if (e.isDir) load(conn, e.url) else onOpenFile(e.url)
-                                    },
-                                ) {
-                                    Icon(
-                                        fileKindIcon(e.isDir, e.isArchive),
-                                        contentDescription = null,
-                                        tint = fileKindTint(e.isDir, e.isArchive),
-                                        modifier = Modifier.size(24.dp),
-                                    )
-                                }
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            }
-                            if (visible.isEmpty() && !loading) {
-                                item {
-                                    Text(
-                                        composeStringResource(R.string.webdav_empty_dir),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                    )
-                                }
-                            }
-                        }
+        // 列目录内容（空目录提示已按要求去掉：非加载、无错误且无条目时留白）。
+        when {
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            errorText != null -> Column(
+                Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    composeStringResource(R.string.load_failed, errorText.orEmpty()),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { retryTick++ }) { Text(composeStringResource(R.string.retry)) }
+            }
+            visible.isEmpty() -> Box(Modifier.fillMaxSize())
+            displayMode == LibraryDisplayMode.List -> {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(visible, key = { it.url }) { e ->
+                        WebDavFileRow(entry = e, onOpen = { onItemOpen(e) })
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            }
+            else -> {
+                // 网格模式：与本地浏览同一套列密度逻辑（紧凑网格 96dp Adaptive）。
+                val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = 96.dp)
+                LazyVerticalGrid(
+                    columns = cells,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(visible, key = { it.url }) { e ->
+                        WebDavGridItem(entry = e, onClick = { onItemOpen(e) })
                     }
                 }
             }
         }
     }
+
+    LocalBrowseOptionsMenu(
+        expanded = showOptions,
+        onDismiss = { showOptions = false },
+        displayMode = displayMode,
+        onDisplayModeChange = { displayMode = it; prefs.webdavBrowseDisplayMode.set(it.prefValue) },
+        showCover = false,
+        onShowCoverChange = {},
+        showCoverEnabled = false,
+        columnCount = columnCount,
+        onColumnChange = { columnCount = it; prefs.webdavBrowseColumns.set(it) },
+        sort = sort,
+        onSortModeChange = { sort = it; prefs.webdavBrowseSort.set(it.toPref()) },
+    )
 }
 
-/** 取 URL 的父目录（origin 为止）；已在根返回 null。纯字符串处理，避免额外 import。 */
-private fun webDavParentUrl(url: String): String? {
-    val trimmed = url.trimEnd('/')
-    val schemeEnd = trimmed.indexOf("://")
-    if (schemeEnd < 0) return null
-    val slash = trimmed.indexOf('/', schemeEnd + 3)
-    if (slash < 0) return null
-    return "${trimmed.substring(0, slash)}/"
+/** WebDAV 列表模式一行：与本地 [FileRow] 共用 [FileListRow] 骨架与图标语义；无封面。 */
+@Composable
+private fun WebDavFileRow(entry: WebDavEntry, onOpen: () -> Unit) {
+    FileListRow(name = entry.name, clickable = true, onOpen = onOpen) {
+        Icon(
+            fileKindIcon(entry.isDir, entry.isArchive),
+            contentDescription = null,
+            tint = fileKindTint(entry.isDir, entry.isArchive),
+            modifier = Modifier.size(24.dp),
+        )
+    }
+}
+
+/** WebDAV 网格模式一格：与本地网格未开封面形态一致（图标居中 + 两行名称）。 */
+@Composable
+private fun WebDavGridItem(entry: WebDavEntry, onClick: () -> Unit) {
+    FileGridCell(
+        name = entry.name,
+        icon = fileKindIcon(entry.isDir, entry.isArchive),
+        iconTint = fileKindTint(entry.isDir, entry.isArchive),
+        iconSize = 56.dp,
+        clickable = true,
+        onClick = onClick,
+    )
+}
+
+/** WebDAV 条目排序：目录恒置顶，再按所选字段/方向（与本地浏览同一套 [LocalFileSort]/[LocalFileSortBy]）。 */
+private fun webDavEntryComparator(sort: LocalFileSort): Comparator<WebDavEntry> {
+    val dirFirst = compareBy<WebDavEntry> { !it.isDir }
+    val field: Comparator<WebDavEntry> = when (sort.sortBy) {
+        LocalFileSortBy.Name -> compareBy { it.name.lowercase() }
+        LocalFileSortBy.DateModified -> compareBy { it.lastModified }
+        LocalFileSortBy.Size -> compareBy { if (it.isDir) 0L else it.size }
+    }
+    return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
 }
 
 /** 章节 URL → 来源标识（历史/书签共用存储，靠前缀区分展示）：webdav:/smb: 为远程来源，其余为本地路径。 */
