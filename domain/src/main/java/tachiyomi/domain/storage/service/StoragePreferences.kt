@@ -81,22 +81,23 @@ class StoragePreferences(
         "",
     )
 
-    // SY --> Komiho Phase3: WebDAV 测试直连配置（Phase 3 最小切片）。
-    // 仅用于验证 HTTP Range 远程随机访问，正式的连接管理（多连接/加密存储）在 Phase 4；
-    // 密码暂存明文，Phase 4 迁移到加密存储。
-    /** WebDAV 测试 CBZ/ZIP 的完整 http(s) URL（不含 `webdav:` 前缀）。 */
+    // SY --> Komiho Phase3/4: WebDAV 配置。
+    // Phase4 起连接与凭据由 app.mihonsy.komga.data.webdav.WebDavConnectionStore 管理
+    // （webdav_connections_v1，密码经 Keystore 加密）；以下三项仅作 Phase3 遗留迁移源
+    // （首次进连接页自动转为「默认连接」后清空 user/pass），webdavTestUrl 另存「上次打开路径」。
+    /** WebDAV 测试 CBZ/ZIP 的完整 http(s) URL（不含 `webdav:` 前缀）。迁移后复用为上次打开路径。 */
     val webdavTestUrl: Preference<String> = preferenceStore.getString(
         Preference.appStateKey("webdav_test_url"),
         "",
     )
 
-    /** WebDAV 测试用户名（可空 = 匿名）。 */
+    /** WebDAV 测试用户名（可空 = 匿名）。仅 Phase3 遗留迁移用，迁移后清空。 */
     val webdavTestUser: Preference<String> = preferenceStore.getString(
         Preference.appStateKey("webdav_test_user"),
         "",
     )
 
-    /** WebDAV 测试密码（可空 = 匿名）。Phase 3 暂存明文，Phase 4 加密。 */
+    /** WebDAV 测试密码（可空 = 匿名）。Phase4 起新写入为 enc1: 加密形态；迁移后清空。 */
     val webdavTestPass: Preference<String> = preferenceStore.getString(
         Preference.appStateKey("webdav_test_pass"),
         "",
