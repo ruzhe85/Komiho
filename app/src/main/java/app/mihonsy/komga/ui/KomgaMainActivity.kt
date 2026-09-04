@@ -10,7 +10,6 @@ import coil3.ImageLoader
 import android.content.Context
 import android.os.Bundle
 import android.provider.DocumentsContract
-import android.text.format.DateUtils
 import android.widget.Toast
 import java.util.Date
 import kotlin.math.max
@@ -5553,16 +5552,6 @@ private fun formatDateTime(timeMs: Long): String {
     return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timeMs))
 }
 
-/** 相对阅读时间（如「3天前」），本地化由系统 DateUtils 处理。 */
-private fun formatRelativeTime(date: Date?): String {
-    if (date == null) return ""
-    return DateUtils.getRelativeTimeSpanString(
-        date.time,
-        System.currentTimeMillis(),
-        DateUtils.MINUTE_IN_MILLIS,
-    ).toString()
-}
-
 /** 统计本地章节总页数（目录直接数图片；归档/EPUB 用 ArchiveReader 数图片条目）。结果按 URL 缓存，避免滚动反复开档。file 未解析时不缓存（避免陈旧 0）。 */
 private suspend fun countChapterPages(context: Context, url: String, file: UniFile?): Int {
     if (file == null) return 0
@@ -5718,10 +5707,10 @@ private fun LocalFileRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(2.dp))
-            // 元信息行：文件大小（远程/未知时不显示）+ 最后阅读时间（历史/书签行传入，无记录不显示）
+            // 元信息行：文件大小（远程/未知时不显示）+ 阅读时间（历史/书签行传入，无记录不显示）
             val metaLine = listOfNotNull(
                 formatFileSize(fileSize).takeIf { fileSize > 0 },
-                formatDateTime(dateTime).takeIf { dateTime > 0 }?.let { "最后阅读 $it" },
+                formatDateTime(dateTime).takeIf { dateTime > 0 },
             ).joinToString(" · ")
             Text(
                 text = metaLine,
@@ -5826,9 +5815,9 @@ private fun HistoryTabLocal(
                 file?.let { LocalCoverData(it, stat.modified) } ?: rep.thumbnailUrl?.takeIf { it.isNotBlank() }
             }
             // SY <--
-            // 标题取「卷名」（章节名 / chapterUrl 末段），而非系列名；副标题展示系列名 + 最近阅读时间。
+            // 标题取「卷名」（章节名 / chapterUrl 末段），而非系列名；副标题展示系列名。
             val volumeTitle = rep.chapterName.ifBlank { rep.chapterUrl.substringAfterLast('/') }
-            val subtitle = listOf(rep.mangaTitle, formatRelativeTime(rep.readAt)).filter { it.isNotBlank() }.joinToString(" · ")
+            val subtitle = rep.mangaTitle
 
             LocalFileRow(
                 context = context,
