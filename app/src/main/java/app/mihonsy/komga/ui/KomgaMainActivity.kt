@@ -661,13 +661,16 @@ private fun KomgaMainScreen(
                         }
                         // 设置页与来源无关，显示页名。
                         currentTabEnum == MainTab.Settings -> Text(MainTab.entries[currentTab].labelText())
-                        // 其余全部 tab：标题位 = 来源切换按钮（Phase4 全局首页形态）。
-                        else -> SourceSwitchButton(
+                        // 来源切换（含「来源管理」入口）：Komga 首页 = Home tab，
+                        // 文件型来源（本地/WebDAV/SMB）首页 = Browse tab（无 Home tab）。
+                        // 其余 tab 标题位 = 页名。
+                        currentTabEnum == MainTab.Home || currentTabEnum == MainTab.Browse -> SourceSwitchButton(
                             current = currentSourceEntry,
                             entries = sourceEntries,
                             onSelect = ::selectSource,
                             onAddSource = { showAddSource = true },
                         )
+                        else -> Text(MainTab.entries[currentTab].labelText())
                     }
                 },
                 actions = {
@@ -770,8 +773,9 @@ private fun KomgaMainScreen(
                             )
                         }
                     }
-                    // 本地来源 + 历史 tab：顶栏删除图标 = 清除历史（按时间范围批量删除，无文字）。
-                    if (currentSourceEntry.kind == SourceKind.Local && currentTabEnum == MainTab.History) {
+                    // 历史 tab（本地/WebDAV/SMB 共用存储与展示）：顶栏删除图标 = 清除历史
+                    //（按时间范围批量删除，无文字）。历史 tab 为 fileOnly，Komga 来源下不存在。
+                    if (currentTabEnum == MainTab.History) {
                         androidx.compose.material3.IconButton(onClick = { localHistoryClearOpen = true }) {
                             Icon(
                                 imageVector = Icons.Filled.Delete,
