@@ -53,7 +53,16 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             }
         }
         // SY <--
-        check(decoder != null && decoder.width > 0 && decoder.height > 0) { "Failed to initialize decoder" }
+        // SY: newInstance 返回 null / 宽高 0 = 流为空或截断（0 字节流能合法通过 fetch 阶段）。
+        // 报错附上来源大小与常见原因：阅读页空流多为「章节回收竞态」，读取层
+        // （ArchivePageLoader.readEntryBytes）会抛出更明确的异常，这里通常是兜底；
+        // 若来源是文件且大小正常，则更像图片数据本身损坏。
+        check(decoder != null && decoder.width > 0 && decoder.height > 0) {
+            val srcDesc = runCatching { "file(${resources.file().toFile().length()}B)" }
+                .getOrElse { "stream" }
+            "Failed to initialize decoder: source=$srcDesc, size=${decoder?.width}x${decoder?.height}. " +
+                "流为空/截断或图片数据损坏（阅读页偶发+刷新即好=章节回收竞态，读取层会报明确原因）"
+        }
 
         return decodeWith(decoder!!)
     }
