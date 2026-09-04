@@ -500,8 +500,10 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
 
         private fun update(b: Int) {
             key0 = (CRC_TABLE[((key0 xor b.toLong()) and 0xFF).toInt()].toLong() xor (key0 ushr 8)) and 0xFFFFFFFFL
-            key1 = (key1 + (key0 and 0xFF) * 134775813L + 1) and 0xFFFFFFFFL
-            key2 = (CRC_TABLE[(((key2 ushr 24) xor key1) and 0xFF).toInt()].toLong() xor (key2 ushr 8)) and 0xFFFFFFFFL
+            // 与 libarchive trad_enc_update_keys 一致：(key1 + key0低字节) 整体乘 134775813 后 +1
+            key1 = ((key1 + (key0 and 0xFF)) * 134775813L + 1) and 0xFFFFFFFFL
+            // CRC 表索引用 key2 与 key1 高字节（此前两操作数写反，密钥派生全错、正确密码必失败）
+            key2 = (CRC_TABLE[((key2 xor (key1 ushr 24)) and 0xFF).toInt()].toLong() xor (key2 ushr 8)) and 0xFFFFFFFFL
         }
 
         fun dec(cipherByte: Byte): Byte {
