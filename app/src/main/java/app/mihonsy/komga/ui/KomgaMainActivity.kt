@@ -90,6 +90,7 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
@@ -4497,18 +4498,24 @@ private fun fallbackList(current: UniFile): List<LocalEntry> =
 private fun UniFile.isLocalArchive(): Boolean =
     !isDirectory && (Archive.isSupported(this) || extension.equals("epub", true))
 
-private fun fileIcon(entry: LocalEntry): ImageVector {
-    return when {
-        entry.isDirectory -> Icons.Filled.Folder
-        entry.isArchive -> Icons.Filled.Book
-        entry.isImage -> Icons.Filled.Image
-        else -> Icons.Filled.Description
-    }
+private fun fileIcon(entry: LocalEntry): ImageVector =
+    fileKindIcon(entry.isDirectory, entry.isArchive, entry.isImage)
+
+@Composable
+private fun fileTint(entry: LocalEntry): Color =
+    fileKindTint(entry.isDirectory, entry.isArchive)
+
+/** 按文件类型取图标：目录/归档/图片/其他。本地与 WebDAV 列表共用同一套图标语义。 */
+private fun fileKindIcon(isDirectory: Boolean, isArchive: Boolean, isImage: Boolean = false): ImageVector = when {
+    isDirectory -> Icons.Filled.Folder
+    isArchive -> Icons.Filled.Book
+    isImage -> Icons.Filled.Image
+    else -> Icons.Filled.Description
 }
 
 @Composable
-private fun fileTint(entry: LocalEntry): Color {
-    val isPlain = !entry.isDirectory && !entry.isArchive
+private fun fileKindTint(isDirectory: Boolean, isArchive: Boolean): Color {
+    val isPlain = !isDirectory && !isArchive
     return if (isPlain) {
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
     } else {
@@ -4831,6 +4838,25 @@ private fun LocalFileBrowser(
  *  开启「显示封面」时，左侧 icon 改为封面缩略图（走 Coil 全局缓存，取不到回落 icon）。 */
 @Composable
 private fun FileRow(entry: LocalEntry, showCover: Boolean, clickable: Boolean, onOpen: () -> Unit) {
+    FileListRow(name = entry.name, clickable = clickable, onOpen = onOpen) {
+        LocalCoverThumb(
+            entry = entry,
+            showCover = showCover,
+            modifier = Modifier.size(width = 40.dp, height = 56.dp),
+            iconSize = 24.dp,
+        )
+    }
+}
+
+/** 列表条目行骨架：本地浏览与 WebDAV 浏览共用同一「列表模式」视觉——
+ *  左侧图标/封面槽 + 单行名称（省略号）；底部分隔线由调用方在行后追加。 */
+@Composable
+private fun FileListRow(
+    name: String,
+    clickable: Boolean,
+    onOpen: () -> Unit,
+    leading: @Composable () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -4838,15 +4864,10 @@ private fun FileRow(entry: LocalEntry, showCover: Boolean, clickable: Boolean, o
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        LocalCoverThumb(
-            entry = entry,
-            showCover = showCover,
-            modifier = Modifier.size(width = 40.dp, height = 56.dp),
-            iconSize = 24.dp,
-        )
+        leading()
         Spacer(Modifier.width(12.dp))
         Text(
-            text = entry.name,
+            text = name,
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -5267,41 +5288,49 @@ private fun WebDavBrowsePane(
                     }
 
                     else -> {
-                        if (webDavParentUrl(dirUrl) != null) {
-                            Text(
-                                composeStringResource(R.string.webdav_parent_dir),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .clickable { webDavParentUrl(dirUrl)?.let { load(conn, it) } }
-                                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                            )
-                        }
-                        val files = entries.filter { !it.isDir && it.isArchive }
+                        // 直接使用本地文件的列表模式：行渲染复用 [FileListRow]（图标槽 + 名称 + 分隔线），
+                        // 图标语义复用 fileKindIcon/fileKindTint；条目过滤与本地一致（目录 + 可读归档），
+                        // 排序对齐本地默认（目录优先 + 名称）。上级目录渲染为同样式的首行。
+                        val visible = entries
+                            .filter { it.isDir || it.isArchive }
+                            .sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
+                        val parent = webDavParentUrl(dirUrl)
                         LazyColumn(Modifier.fillMaxSize()) {
-                            items(entries, key = { it.url }) { e ->
-                                when {
-                                    e.isDir -> Text(
-                                        e.name + "/",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { load(conn, e.url) }
-                                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                                    )
-
-                                    e.isArchive -> Text(
-                                        e.name,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { onOpenFile(e.url) }
-                                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            if (parent != null) {
+                                item(key = "webdav_parent") {
+                                    FileListRow(
+                                        name = composeStringResource(R.string.webdav_parent_dir),
+                                        clickable = true,
+                                        onOpen = { load(conn, parent) },
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.ArrowUpward,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                    }
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                }
+                            }
+                            items(visible, key = { it.url }) { e ->
+                                FileListRow(
+                                    name = e.name,
+                                    clickable = true,
+                                    onOpen = {
+                                        if (e.isDir) load(conn, e.url) else onOpenFile(e.url)
+                                    },
+                                ) {
+                                    Icon(
+                                        fileKindIcon(e.isDir, e.isArchive),
+                                        contentDescription = null,
+                                        tint = fileKindTint(e.isDir, e.isArchive),
+                                        modifier = Modifier.size(24.dp),
                                     )
                                 }
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             }
-                            if (files.isEmpty() && !loading) {
+                            if (visible.isEmpty() && !loading) {
                                 item {
                                     Text(
                                         composeStringResource(R.string.webdav_empty_dir),
