@@ -476,13 +476,13 @@ private fun WebDavFormPage(
         Row(verticalAlignment = Alignment.CenterVertically) {
             SingleChoiceSegmentedButtonRow(Modifier.width(132.dp)) {
                 SegmentedButton(
-                    checked = !useHttps,
-                    onCheckedChange = { if (it) useHttps = false },
+                    selected = !useHttps,
+                    onClick = { useHttps = false },
                     shape = SegmentedButtonDefaults.itemShape(0, 2),
                 ) { Text("HTTP", style = MaterialTheme.typography.bodySmall) }
                 SegmentedButton(
-                    checked = useHttps,
-                    onCheckedChange = { if (it) useHttps = true },
+                    selected = useHttps,
+                    onClick = { useHttps = true },
                     shape = SegmentedButtonDefaults.itemShape(1, 2),
                 ) { Text("HTTPS", style = MaterialTheme.typography.bodySmall) }
             }
@@ -672,13 +672,13 @@ private fun KomgaFormPage(
         Row(verticalAlignment = Alignment.CenterVertically) {
             SingleChoiceSegmentedButtonRow(Modifier.width(132.dp)) {
                 SegmentedButton(
-                    checked = !useHttps,
-                    onCheckedChange = { if (it) useHttps = false },
+                    selected = !useHttps,
+                    onClick = { useHttps = false },
                     shape = SegmentedButtonDefaults.itemShape(0, 2),
                 ) { Text("HTTP", style = MaterialTheme.typography.bodySmall) }
                 SegmentedButton(
-                    checked = useHttps,
-                    onCheckedChange = { if (it) useHttps = true },
+                    selected = useHttps,
+                    onClick = { useHttps = true },
                     shape = SegmentedButtonDefaults.itemShape(1, 2),
                 ) { Text("HTTPS", style = MaterialTheme.typography.bodySmall) }
             }
@@ -704,13 +704,13 @@ private fun KomgaFormPage(
         FieldLabel("认证方式（二选一）")
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(
-                checked = authType == KomgaAuthType.BASIC,
-                onCheckedChange = { if (it) authType = KomgaAuthType.BASIC },
+                selected = authType == KomgaAuthType.BASIC,
+                onClick = { authType = KomgaAuthType.BASIC },
                 shape = SegmentedButtonDefaults.itemShape(0, 2),
             ) { Text("账号密码", style = MaterialTheme.typography.bodySmall) }
             SegmentedButton(
-                checked = authType == KomgaAuthType.API_KEY,
-                onCheckedChange = { if (it) authType = KomgaAuthType.API_KEY },
+                selected = authType == KomgaAuthType.API_KEY,
+                onClick = { authType = KomgaAuthType.API_KEY },
                 shape = SegmentedButtonDefaults.itemShape(1, 2),
             ) { Text("API Key", style = MaterialTheme.typography.bodySmall) }
         }
