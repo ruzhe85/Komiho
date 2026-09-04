@@ -201,6 +201,9 @@ class WebDavRandomAccessSource(
         /** Range 块大小：1MB。比 libarchive 单次回调（256KB）大，摊薄请求数（防风控核心手段）。 */
         private const val READ_CHUNK = 1024 * 1024
 
+        /** 共享 OkHttpClient 访问器：app 层 PROPFIND 目录浏览等复用同一连接池（Phase4-②）。 */
+        fun sharedHttpClient(): OkHttpClient = sharedClient
+
         /** 块缓存字节上限（LRU）：约 16MB，覆盖多页并发解码的活跃窗口。 */
         private const val MAX_CACHE_BYTES = 16L * 1024 * 1024
 

@@ -43,7 +43,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -177,6 +176,8 @@ import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
+import app.mihonsy.komga.data.webdav.WebDavEntry
+import app.mihonsy.komga.data.webdav.WebDavPropfind
 import java.io.File
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.CollectionDto
@@ -215,6 +216,8 @@ import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.source.local.io.Archive
 import tachiyomi.source.local.io.LocalSourceFileSystem
 import tachiyomi.core.common.util.system.ImageUtil
+import tachiyomi.core.common.util.system.logcat
+import logcat.LogPriority
 import tachiyomi.source.local.LocalSource
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaUpdate
@@ -4964,7 +4967,7 @@ private fun WebDavFlowDialog(
             },
         )
 
-        opening != null -> WebDavOpenFileDialog(
+        opening != null -> WebDavBrowserDialog(
             conn = opening!!,
             initialUrl = initialUrl,
             onDismiss = { opening = null },
@@ -5102,38 +5105,135 @@ private fun WebDavConnectionEditDialog(
     )
 }
 
-/** 打开文件对话框：输入相对 base 的路径（`/Comic/Z3.zip`）或完整 http(s) URL。 */
+/** WebDAV 目录浏览对话框（Phase4-②）：PROPFIND Depth-1 逐级下钻，点归档直接打开。
+ *  服务器不支持 PROPFIND（或想跳转任意文件）时切「手动输入路径」兜底。 */
 @Composable
-private fun WebDavOpenFileDialog(
+private fun WebDavBrowserDialog(
     conn: WebDavConnection,
     initialUrl: String,
     onDismiss: () -> Unit,
     onOpen: (fileUrl: String) -> Unit,
 ) {
-    var url by remember { mutableStateOf(initialUrl) }
+    var dirUrl by remember { mutableStateOf(conn.baseUrl) }
+    var entries by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+    var manual by remember { mutableStateOf(false) }
+    var manualUrl by remember { mutableStateOf(initialUrl) }
+    val scope = rememberCoroutineScope()
+
+    fun load(dir: String) {
+        loading = true
+        errorText = null
+        scope.launch {
+            try {
+                entries = WebDavPropfind.list(conn, dir)
+                dirUrl = dir
+            } catch (e: Throwable) {
+                errorText = e.message ?: "目录浏览失败"
+            }
+            loading = false
+        }
+    }
+    LaunchedEffect(conn.id) { load(conn.baseUrl) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("打开文件 — ${conn.displayName()}") },
+        title = { Text("浏览 — ${conn.displayName()}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    label = { Text("CBZ/ZIP 路径或完整 URL") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    "支持相对 Base URL 的路径（如 /Comic/Z3.zip）或完整 http(s) URL；" +
-                        "按 HTTP Range 随机访问，不整本下载。PROPFIND 目录浏览随下一版上线。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (manual) {
+                    OutlinedTextField(
+                        value = manualUrl,
+                        onValueChange = { manualUrl = it },
+                        label = { Text("CBZ/ZIP 路径或完整 URL") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "支持相对 Base URL 的路径（如 /Comic/Z3.zip）或完整 http(s) URL；" +
+                            "同目录其余压缩包会一并建成章节（翻完自动续卷）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = { manual = false }) { Text("返回目录浏览") }
+                } else {
+                    Text(
+                        dirUrl.removePrefix(conn.baseUrl).ifBlank { "/" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (webDavParentUrl(dirUrl) != null) {
+                        Text(
+                            "上级目录",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clickable { webDavParentUrl(dirUrl)?.let { load(it) } }
+                                .padding(vertical = 4.dp),
+                        )
+                    }
+                    when {
+                        loading -> Text("加载中…")
+
+                        errorText != null -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "加载失败：$errorText",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            TextButton(onClick = { load(dirUrl) }) { Text("重试") }
+                            TextButton(onClick = { manual = true }) { Text("手动输入路径") }
+                        }
+
+                        else -> Column(
+                            modifier = Modifier
+                                .verticalScroll(rememberScrollState())
+                                .weight(1f, fill = false),
+                        ) {
+                            val files = entries.filter { !it.isDir && it.isArchive }
+                            entries.forEach { e ->
+                                when {
+                                    e.isDir -> Text(
+                                        e.name + "/",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { load(e.url) }
+                                            .padding(vertical = 8.dp),
+                                    )
+
+                                    e.isArchive -> Text(
+                                        e.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onOpen(e.url) }
+                                            .padding(vertical = 8.dp),
+                                    )
+                                }
+                            }
+                            if (files.isEmpty()) {
+                                Text(
+                                    "此目录没有 zip/cbz 压缩包",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onOpen(url) }, enabled = url.isNotBlank()) {
-                Text(composeStringResource(R.string.action_ok))
+            if (manual) {
+                TextButton(onClick = { onOpen(manualUrl) }, enabled = manualUrl.isNotBlank()) {
+                    Text(composeStringResource(R.string.action_ok))
+                }
+            } else {
+                TextButton(onClick = { manual = true }) { Text("手动输入路径") }
             }
         },
         dismissButton = {
@@ -5142,7 +5242,19 @@ private fun WebDavOpenFileDialog(
     )
 }
 
-/** 打开 WebDAV 文件：解析 URL（相对/绝对）→ 建临时 Manga+Chapter（`webdav://<connId>/<URL>` 新格式）→ ReaderActivity。 */
+/** 取 URL 的父目录（origin 为止）；已在根返回 null。纯字符串处理，避免额外 import。 */
+private fun webDavParentUrl(url: String): String? {
+    val trimmed = url.trimEnd('/')
+    val schemeEnd = trimmed.indexOf("://")
+    if (schemeEnd < 0) return null
+    val slash = trimmed.indexOf('/', schemeEnd + 3)
+    if (slash < 0) return null
+    return "${trimmed.substring(0, slash)}/"
+}
+
+/** 打开 WebDAV 文件（Phase4-②）：manga = 远程目录（系列），同目录所有 zip/cbz 建成章节
+ *  （翻完自动续卷，模式对齐 openLocalFile 的归档分支）。兄弟归档由 PROPFIND 现查，
+ *  浏览/手输同一路径；PROPFIND 失败时退化为仅当前文件成章，不影响本次打开。 */
 private suspend fun openWebDavTestFile(
     context: android.content.Context,
     prefs: StoragePreferences,
@@ -5157,9 +5269,11 @@ private suspend fun openWebDavTestFile(
         val fileName = httpUrl.substringAfterLast('/')
         if (fileName.isBlank()) throw Exception("URL 缺少文件名")
         val decodedName = runCatching { java.net.URLDecoder.decode(fileName, "UTF-8") }.getOrDefault(fileName)
-        val title = decodedName.substringBeforeLast('.').ifBlank { fileName }
-        // manga.url = 远程目录（同一远程目录的多个归档同属一个系列，翻完自动续卷随 Phase4-② 目录浏览做）
+        // manga.url = 远程目录（同一远程目录的多个归档同属一个系列）
         val mangaUrl = httpUrl.substringBeforeLast('/')
+        val seriesTitle = runCatching {
+            java.net.URLDecoder.decode(mangaUrl.substringAfterLast('/'), "UTF-8")
+        }.getOrDefault(mangaUrl.substringAfterLast('/')).ifBlank { decodedName }
         val chapterUrl = WebDavConnectionStore.toChapterUrl(conn.id, httpUrl)
         prefs.webdavTestUrl.set(httpUrl)
         val (mangaId, chapterId) = withContext(Dispatchers.IO) {
@@ -5171,30 +5285,50 @@ private suspend fun openWebDavTestFile(
                         Manga.create().copy(
                             source = LocalSource.ID,
                             url = mangaUrl,
-                            ogTitle = title,
+                            ogTitle = seriesTitle,
                             favorite = false,
                             chapterFlags = Manga.CHAPTER_SORTING_NUMBER,
                         ),
                     ),
                 ).first()
-            if (manga.ogTitle != title) {
-                mangaRepo.update(MangaUpdate(id = manga.id!!, title = title))
+            // 标题始终显示系列（目录）名：早期版本把归档名写进了标题，这里直接修正
+            if (manga.ogTitle != seriesTitle) {
+                mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
             }
-            var chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
-            if (chapter == null) {
-                chapterRepo.addAll(
-                    listOf(
-                        Chapter.create().copy(
-                            mangaId = manga.id!!,
-                            url = chapterUrl,
-                            name = title,
-                            chapterNumber = ChapterRecognition.parseChapterNumber(title, decodedName, -1.0),
+            // 同目录归档全部建成章节（去重），顺序 = PROPFIND 自然排序，翻完自动续卷
+            val siblings = runCatching {
+                WebDavPropfind.list(conn, mangaUrl).filter { it.isArchive }.map { it.url }
+            }.onFailure {
+                logcat(LogPriority.WARN) { "[WebDav] 章节扫描失败，仅打开当前文件: ${it.message}" }
+            }.getOrDefault(emptyList())
+            (siblings + httpUrl).distinct().forEach { fileHttpUrl ->
+                val url = WebDavConnectionStore.toChapterUrl(conn.id, fileHttpUrl)
+                if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                    val fn = fileHttpUrl.substringAfterLast('/')
+                    val decoded =
+                        runCatching { java.net.URLDecoder.decode(fn, "UTF-8") }.getOrDefault(fn)
+                    val name = decoded.substringBeforeLast('.').ifBlank { decoded }
+                    val parsed =
+                        ChapterRecognition.parseChapterNumber(seriesTitle, decoded, -1.0)
+                    chapterRepo.addAll(
+                        listOf(
+                            Chapter.create().copy(
+                                mangaId = manga.id!!,
+                                url = url,
+                                name = name,
+                                // 无编号的按列表序兜底（不在列表内的当前文件按第 1 个），保证排序稳定
+                                chapterNumber = if (parsed > 0) {
+                                    parsed
+                                } else {
+                                    siblings.indexOf(fileHttpUrl).coerceAtLeast(0) + 1.0
+                                },
+                            ),
                         ),
-                    ),
-                )
-                chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
-                    ?: error("章节写入失败")
+                    )
+                }
             }
+            val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                ?: error("章节写入失败")
             manga.id!! to chapter.id!!.toLong()
         }
         context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
