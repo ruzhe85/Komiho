@@ -453,16 +453,12 @@ private fun KomgaMainScreen(
     // in Settings would otherwise bounce back to the Home tab.
     var currentTab by rememberSaveable { mutableIntStateOf(MainTab.Home.ordinal) }
 
-    // SY --> Komiho: 历史/书签「打开文件位置」→ 应用内跳转：记住目标 chapterUrl（相对
-    // 本地根的路径），切到浏览 tab，由 LocalFileBrowser 消费后定位到所在目录；
-    // 不再调起系统文件管理器（SAF/真实路径两种模式下都能准确落到目录）。
+    // SY --> Komiho: 历史/书签「打开文件位置」→ 应用内跳转。navRequest 状态在此声明；
+    // 跳转函数 openLocationInApp 定义在 selectSource 之后（局部函数不能前向引用）：
+    // 本地条目 → 本地浏览 navRequest（相对当前根的路径）；WebDAV 条目 → 对应连接浏览
+    // 的 navRequest（目录 URL）。
     var localBrowseNavRequest by remember { mutableStateOf<String?>(null) }
-    fun openLocalLocationInApp(chapterUrl: String) {
-        // chapterUrl 已是真实绝对路径；LocalFileBrowser 的 navRequest 按「相对当前根的路径」消费，
-        // 这里转成相对段（不在当前根下时退化为原值，落到根目录）。
-        localBrowseNavRequest = localSourceFs.relativeFromBase(chapterUrl) ?: chapterUrl
-        currentTab = MainTab.Browse.ordinal
-    }
+    var webdavBrowseNavRequest by remember { mutableStateOf<String?>(null) }
     // SY <--
 
     // SY --> Komiho: 首次需要选择本地目录时，若尚未授予 MANAGE_EXTERNAL_STORAGE，
@@ -533,6 +529,37 @@ private fun KomgaMainScreen(
         storagePreferences.browseSourceId.set(entry.id)
         currentTab = MainTab.entries.first { it.visibleFor(entry.kind.isFileSource) }.ordinal
     }
+
+    // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转（按条目所属来源路由）：
+    // 本地条目 → 切到本地来源 + 浏览 tab 定位所在目录；
+    // WebDAV 条目 → 切到对应连接来源 + 浏览 tab 定位所在目录（此前 WebDAV 来源下点任何
+    // 条目都只会落在当前 WebDAV 浏览页，等于跳根目录）。
+    fun openLocationInApp(chapterUrl: String) {
+        if (chapterUrl.startsWith("webdav:")) {
+            val conn = if (chapterUrl.startsWith("webdav://")) {
+                // 新格式 webdav://<connId>/<URL>：connId 精确匹配
+                val connId = chapterUrl.removePrefix("webdav://").substringBefore('/')
+                WebDavConnectionStore.all().firstOrNull { it.id == connId }
+            } else {
+                // 旧格式 webdav:<URL>：baseUrl 最长前缀匹配
+                val fullUrl = WebDavConnectionStore.extractFullUrl(chapterUrl)
+                WebDavConnectionStore.all()
+                    .filter { fullUrl.startsWith(it.baseUrl) }
+                    .maxByOrNull { it.baseUrl.length }
+            } ?: return
+            // 定位目标 = 文件所在目录的完整 URL，由 WebDavBrowsePane 从 baseUrl 逐段重建路径栈。
+            webdavBrowseNavRequest = WebDavConnectionStore.extractFullUrl(chapterUrl).substringBeforeLast('/')
+            selectSource(SourceEntry(SOURCE_ID_WEBDAV_PREFIX + conn.id, SourceKind.WebDav, conn.displayName()))
+        } else {
+            // chapterUrl 已是真实绝对路径；LocalFileBrowser 的 navRequest 按「相对当前根的路径」消费，
+            // 这里转成相对段（不在当前根下时退化为原值，落到根目录）。
+            localBrowseNavRequest = localSourceFs.relativeFromBase(chapterUrl) ?: chapterUrl
+            selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName))
+        }
+        // selectSource 已把 tab 重置为该来源首个可见 tab（文件型即浏览）；同源早退时兜底直切。
+        currentTab = MainTab.Browse.ordinal
+    }
+    // SY <--
     // 「来源管理」全屏流程（AddSourceFlow：类型选择 → 各类型表单页）。
     var showAddSource by remember { mutableStateOf(false) }
     // SY <--
@@ -920,6 +947,9 @@ private fun KomgaMainScreen(
                                     onOpenFile = { fileUrl ->
                                         scope.launch { openWebDavTestFile(context, storagePreferences, conn, fileUrl) }
                                     },
+                                    // SY: 历史/书签「打开文件位置」跳转请求（目录 URL）。
+                                    navRequest = webdavBrowseNavRequest,
+                                    onNavConsumed = { webdavBrowseNavRequest = null },
                                 )
                             }
                         }
@@ -932,13 +962,13 @@ private fun KomgaMainScreen(
                     // SY --> Komiho: 本地模式历史 / 书签 tab。
                     MainTab.History -> HistoryTabLocal(
                         refreshTick = refreshTick,
-                        onOpenLocation = { openLocalLocationInApp(it) },
+                        onOpenLocation = { openLocationInApp(it) },
                         clearOpen = localHistoryClearOpen,
                         onClearOpenChange = { localHistoryClearOpen = it },
                     )
                     MainTab.Bookmarks -> BookmarksTabLocal(
                         refreshTick = refreshTick,
-                        onOpenLocation = { openLocalLocationInApp(it) },
+                        onOpenLocation = { openLocationInApp(it) },
                     )
                     // SY <--
                     MainTab.Settings -> SettingsTab(context)
@@ -5257,6 +5287,9 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
 private fun WebDavBrowsePane(
     conn: WebDavConnection,
     onOpenFile: (fileUrl: String) -> Unit,
+    // SY: 历史/书签「打开文件位置」跳转请求（目标目录的完整 URL，须在当前连接 baseUrl 之下）。
+    navRequest: String? = null,
+    onNavConsumed: () -> Unit = {},
 ) {
     val prefs = remember { Injekt.get<StoragePreferences>() }
     val dirBrowseFailed = composeStringResource(R.string.dir_browse_failed)
@@ -5293,6 +5326,24 @@ private fun WebDavBrowsePane(
         )
     }
     val dirUrl = trail.last().second
+
+    // SY: 历史/书签「打开文件位置」跳转消费——从 baseUrl 逐段重建路径栈定位到目标目录。
+    // 目标不在当前连接之下（理论不会发生，路由层已按连接选择来源）时忽略；目录已被移走时
+    // PROPFIND 报错，面包屑可跳回。
+    LaunchedEffect(navRequest) {
+        val target = navRequest ?: return@LaunchedEffect
+        onNavConsumed()
+        if (!target.startsWith(conn.baseUrl)) return@LaunchedEffect
+        var acc = conn.baseUrl.trimEnd('/')
+        val urls = target.removePrefix(conn.baseUrl).trim('/').split('/')
+            .filter { it.isNotBlank() }
+            .map { seg -> acc = "$acc/$seg"; acc }
+        trail = listOf(rootLabel to conn.baseUrl) + urls.map { url ->
+            val name = runCatching { java.net.URLDecoder.decode(url.substringAfterLast('/'), "UTF-8") }
+                .getOrNull() ?: url.substringAfterLast('/')
+            name to url
+        }
+    }
 
     // SY: 目录变化即记忆（按连接一行存储，其余连接记录保留）。
     LaunchedEffect(trail) {
@@ -5680,7 +5731,7 @@ private suspend fun countChapterPages(context: Context, url: String, file: UniFi
 // 目录与归档都能取到首图，且共用 Komga 的缓存池与上限。
 // SY <--
 
-// SY --> Komiho: 「打开文件位置」已改为应用内跳转（openLocalLocationInApp → 浏览 tab
+// SY --> Komiho: 「打开文件位置」已改为应用内跳转（openLocationInApp → 浏览 tab
 // 定位所在目录），不再调起系统文件管理器，原 openFileLocation(ACTION_VIEW 目录) 移除。
 // SY <--
 
