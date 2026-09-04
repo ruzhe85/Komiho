@@ -176,6 +176,7 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.download.KomgaDownloadStore
+import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavEntry
@@ -204,6 +205,7 @@ import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import uy.kohesive.injekt.api.get
 import androidx.compose.material.icons.outlined.Info
@@ -5716,8 +5718,13 @@ private fun LocalFileRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(2.dp))
+            // 元信息行：文件大小（远程/未知时不显示）+ 最后阅读时间（历史/书签行传入，无记录不显示）
+            val metaLine = listOfNotNull(
+                formatFileSize(fileSize).takeIf { fileSize > 0 },
+                formatDateTime(dateTime).takeIf { dateTime > 0 }?.let { "最后阅读 $it" },
+            ).joinToString(" · ")
             Text(
-                text = "${formatFileSize(fileSize)} · ${formatDateTime(dateTime)}",
+                text = metaLine,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -5760,7 +5767,28 @@ private fun HistoryTabLocal(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val historyRepo = remember { Injekt.get<HistoryRepository>() }
-    val items by remember(refreshTick) {
+
+    // SY --> Komiho: 阅读器返回后强制重查——阅读器的 last_page_read/last_read 写入是
+    // 退读者侧异步落库，返回瞬间首查可能读到旧值；等一拍再查一次，保证进度/时间即时更新。
+    var resumeTick by remember { mutableIntStateOf(0) }
+    var queryTick by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    LaunchedEffect(resumeTick) {
+        if (resumeTick > 0) {
+            delay(600)
+            queryTick++
+        }
+    }
+    // SY <--
+
+    val items by remember(refreshTick, queryTick) {
         historyRepo.getHistoryBySourceDetailed(LocalSource.ID)
     }.collectAsState(emptyList())
 
@@ -5786,8 +5814,10 @@ private fun HistoryTabLocal(
             val file by produceState<UniFile?>(initialValue = null, key1 = rep.chapterUrl) {
                 value = withContext(Dispatchers.IO) { resolveLocalFile(rep.chapterUrl) }
             }
-            val totalPages by produceState(initialValue = 0, key1 = file) {
-                value = countChapterPages(context, rep.chapterUrl, file)
+            val totalPages by produceState(initialValue = 0, key1 = file, key2 = rep.chapterUrl, key3 = queryTick) {
+                // 本地文件走磁盘计数；WebDAV 等远程章节无文件，取阅读器回填的内存备忘
+                value = file?.let { countChapterPages(context, rep.chapterUrl, it) }
+                    ?: ChapterPageCountMemo.get(rep.chapterUrl)
             }
             val stat = remember(rep.chapterUrl, file) { getFileStat(rep.chapterUrl, file) }
             // SY --> Komiho: 封面改走 LocalCoverFetcher（与 Komga 共用缓存池）。
@@ -5806,7 +5836,8 @@ private fun HistoryTabLocal(
                 subtitle = subtitle,
                 sourceBadge = chapterSourceLabel(rep.chapterUrl),
                 fileSize = stat.size,
-                dateTime = stat.modified,
+                // 文件修改时间对远程章节无意义，行内改显最后阅读时间
+                dateTime = rep.readAt?.time ?: 0L,
                 lastPageRead = rep.lastPageRead,
                 totalPages = totalPages,
                 coverModel = coverModel,
@@ -5945,7 +5976,22 @@ private fun BookmarksTabLocal(
             loading = false
         }
     }
-    LaunchedEffect(refreshTick) { load() }
+
+    // SY --> Komiho: 阅读器返回后强制重载——阅读进度写入是退读者侧异步落库，等一拍再查。
+    var resumeTick by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    LaunchedEffect(refreshTick, resumeTick) {
+        if (resumeTick > 0) delay(600)
+        load()
+    }
+    // SY <--
 
     when {
         loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -5958,8 +6004,10 @@ private fun BookmarksTabLocal(
                     val file by produceState<UniFile?>(initialValue = null, key1 = first.chapterUrl) {
                         value = withContext(Dispatchers.IO) { resolveLocalFile(first.chapterUrl) }
                     }
-                    val totalPages by produceState(initialValue = 0, key1 = file) {
-                        value = countChapterPages(context, first.chapterUrl, file)
+                    val totalPages by produceState(initialValue = 0, key1 = file, key2 = first.chapterUrl, key3 = resumeTick) {
+                        // 本地文件走磁盘计数；WebDAV 等远程章节无文件，取阅读器回填的内存备忘
+                        value = file?.let { countChapterPages(context, first.chapterUrl, it) }
+                            ?: ChapterPageCountMemo.get(first.chapterUrl)
                     }
                     val stat = remember(first.chapterUrl, file) { getFileStat(first.chapterUrl, file) }
                     // SY --> Komiho: 同上，封面走 LocalCoverFetcher（归档也能拆包取首图）
@@ -5977,7 +6025,8 @@ private fun BookmarksTabLocal(
                         subtitle = "$chapterText · ${bms.size} 个书签",
                         sourceBadge = chapterSourceLabel(first.chapterUrl),
                         fileSize = stat.size,
-                        dateTime = stat.modified,
+                        // 文件修改时间对远程章节无意义，行内改显最后阅读时间
+                        dateTime = first.lastRead?.time ?: 0L,
                         lastPageRead = firstPage.toLong(),
                         totalPages = totalPages,
                         coverModel = coverModel,

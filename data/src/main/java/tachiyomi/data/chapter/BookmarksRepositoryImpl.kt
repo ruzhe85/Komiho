@@ -13,7 +13,7 @@ class BookmarksRepositoryImpl(
 
     override suspend fun getBookmarksBySource(sourceId: Long): List<BookmarkItem> {
         return database.bookmarksQueries
-            .bookmarksBySource(sourceId) { id, chapterId, page, createdAt, mangaId, chapterName, chapterNumber, chapterUrl, mangaTitle, mangaUrl, thumbnailUrl ->
+            .bookmarksBySource(sourceId) { id, chapterId, page, createdAt, mangaId, chapterName, chapterNumber, chapterUrl, mangaTitle, mangaUrl, thumbnailUrl, lastRead ->
                 BookmarkItem(
                     id = id,
                     chapterId = chapterId,
@@ -26,6 +26,7 @@ class BookmarksRepositoryImpl(
                     mangaTitle = mangaTitle,
                     mangaUrl = mangaUrl,
                     thumbnailUrl = thumbnailUrl,
+                    lastRead = lastRead,
                 )
             }
             .awaitAsList()
