@@ -1,6 +1,10 @@
 package app.mihonsy.komga.ui
 
-// SY --> Komiho Phase4: 「添加来源」重做 —— 全屏流程，替代早前的「一源一菜单入口 + WebDavFlowDialog」。
+// SY --> Komiho Phase4: 「来源管理」重做 —— 全屏流程，替代早前的「一源一菜单入口 + WebDavFlowDialog」。
+// 注意：不是 Compose Dialog——Dialog 是独立窗口，系统返回键在 Dialog 层就被消费成
+// dismiss（onDismissRequest），内部的 BackHandler 收不到事件，编辑页按返回会直接
+// 退回主页。这里渲染为宿主组合内的全屏 overlay（顶栏/底栏由调用方在流程打开时隐藏），
+// BackHandler 与主界面同组合且后注册，返回键逐层回退：表单页 → 类型选择页 → 关闭流程。
 // 流程：类型选择页（本地 → Komga → WebDAV → SMB 卡片，各类型已添加来源列在卡片下方，
 // 编辑/删除为右侧图标按钮）→ 点卡片进对应表单页：
 //  - WebDAV 表单：来源名称 / 协议+服务器 / 端口 / 路径 / 账户 / 测试连接 / 取消·保存
@@ -73,8 +77,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaConnection
@@ -90,7 +92,7 @@ import kotlinx.coroutines.launch
 internal const val DEFAULT_PORT_HTTP = "80"
 internal const val DEFAULT_PORT_HTTPS = "443"
 
-/** 添加来源流程内的页面栈（简化为单层：表单页返回即回类型选择）。 */
+/** 来源管理流程内的页面栈（简化为单层：表单页返回即回类型选择）。 */
 internal sealed interface AddSourceScreen {
     data object TypeSelect : AddSourceScreen
     /** connId = null 新增，否则编辑该连接。 */
@@ -108,7 +110,8 @@ internal fun sourceIcon(kind: SourceKind): ImageVector = when (kind) {
 }
 
 /**
- * 全屏「添加来源」流程。由顶栏菜单「＋ 添加来源」打开。
+ * 全屏「来源管理」流程。由顶栏菜单「来源管理」打开（宿主组合内的全屏 overlay，
+ * 见文件头注释：为何不用 Dialog）。
  * @param manageTick 外层权限状态翻转计数（ON_RESUME 复查），用于本地页权限卡实时刷新。
  * @param onPickLocalFolder 触发外层 SAF 选目录 launcher（结果直接写 localSourceRoot 偏好）。
  * @param onManageAccess 跳系统「所有文件访问」设置页。
@@ -130,78 +133,75 @@ internal fun AddSourceFlow(
     var deleteKomga by remember { mutableStateOf<KomgaConnection?>(null) }
     var deleteWebDav by remember { mutableStateOf<WebDavConnection?>(null) }
 
-    BackHandler(enabled = screen != AddSourceScreen.TypeSelect) {
-        screen = AddSourceScreen.TypeSelect
+    // 返回键统一接管（本组合内后注册，优先于主界面的 BackHandler）：
+    // 表单页 → 类型选择页；类型选择页 → 关闭整个流程。
+    BackHandler {
+        if (screen == AddSourceScreen.TypeSelect) onDismiss() else screen = AddSourceScreen.TypeSelect
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = {
+                        if (screen == AddSourceScreen.TypeSelect) onDismiss() else screen = AddSourceScreen.TypeSelect
+                    },
                 ) {
-                    IconButton(
-                        onClick = {
-                            if (screen == AddSourceScreen.TypeSelect) onDismiss() else screen = AddSourceScreen.TypeSelect
-                        },
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = composeStringResource(R.string.addsrc_back_cd))
-                    }
-                    Text(
-                        text = when (val s = screen) {
-                            AddSourceScreen.TypeSelect -> composeStringResource(R.string.addsrc_title)
-                            is AddSourceScreen.WebDav -> "WebDAV"
-                            is AddSourceScreen.Komga -> "Komga"
-                            AddSourceScreen.Local -> composeStringResource(R.string.addsrc_type_local)
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = composeStringResource(R.string.addsrc_back_cd))
                 }
-                HorizontalDivider()
-                when (val s = screen) {
-                    AddSourceScreen.TypeSelect -> TypeSelectContent(
-                        prefs = prefs,
-                        listTick = listTick,
-                        onSelect = { screen = it },
-                        onRequestDeleteKomga = { deleteKomga = it },
-                        onRequestDeleteWebDav = { deleteWebDav = it },
-                    )
+                Text(
+                    text = when (val s = screen) {
+                        AddSourceScreen.TypeSelect -> composeStringResource(R.string.addsrc_title)
+                        is AddSourceScreen.WebDav -> "WebDAV"
+                        is AddSourceScreen.Komga -> "Komga"
+                        AddSourceScreen.Local -> composeStringResource(R.string.addsrc_type_local)
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            HorizontalDivider()
+            when (val s = screen) {
+                AddSourceScreen.TypeSelect -> TypeSelectContent(
+                    prefs = prefs,
+                    listTick = listTick,
+                    onSelect = { screen = it },
+                    onRequestDeleteKomga = { deleteKomga = it },
+                    onRequestDeleteWebDav = { deleteWebDav = it },
+                )
 
-                    is AddSourceScreen.WebDav -> WebDavFormPage(
-                        connId = s.connId,
-                        onBack = { screen = AddSourceScreen.TypeSelect },
-                        onSaved = {
-                            listTick++
-                            screen = AddSourceScreen.TypeSelect
-                        },
-                    )
+                is AddSourceScreen.WebDav -> WebDavFormPage(
+                    connId = s.connId,
+                    onBack = { screen = AddSourceScreen.TypeSelect },
+                    onSaved = {
+                        listTick++
+                        screen = AddSourceScreen.TypeSelect
+                    },
+                )
 
-                    is AddSourceScreen.Komga -> KomgaFormPage(
-                        prefs = prefs,
-                        connId = s.connId,
-                        onBack = { screen = AddSourceScreen.TypeSelect },
-                        onSavedInactive = {
-                            listTick++
-                            screen = AddSourceScreen.TypeSelect
-                        },
-                        // Komga 激活连接变化（新增 / 编辑激活项）→ 重启主界面重拉数据（沿用 M1 行为）。
-                        onActiveChanged = { restartMainFlow(context) },
-                    )
+                is AddSourceScreen.Komga -> KomgaFormPage(
+                    prefs = prefs,
+                    connId = s.connId,
+                    onBack = { screen = AddSourceScreen.TypeSelect },
+                    onSavedInactive = {
+                        listTick++
+                        screen = AddSourceScreen.TypeSelect
+                    },
+                    // Komga 激活连接变化（新增 / 编辑激活项）→ 重启主界面重拉数据（沿用 M1 行为）。
+                    onActiveChanged = { restartMainFlow(context) },
+                )
 
-                    AddSourceScreen.Local -> LocalFormPage(
-                        manageTick = manageTick,
-                        localDir = localDir,
-                        onPickLocalFolder = onPickLocalFolder,
-                        onManageAccess = onManageAccess,
-                        onDone = { listTick++; onDismiss() },
-                    )
-                }
+                AddSourceScreen.Local -> LocalFormPage(
+                    manageTick = manageTick,
+                    localDir = localDir,
+                    onPickLocalFolder = onPickLocalFolder,
+                    onManageAccess = onManageAccess,
+                    onDone = { listTick++; onDismiss() },
+                )
             }
         }
     }
