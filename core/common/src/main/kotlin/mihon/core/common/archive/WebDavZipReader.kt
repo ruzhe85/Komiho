@@ -31,7 +31,8 @@ import javax.crypto.spec.SecretKeySpec
 // - 密码复用 CbzCrypto 全局密码（与本地加密 CBZ 同源）。无密码时 encrypted=true +
 //   wrongPassword=null → 阅读器弹密码框；有密码时构造期用「加密头校验字节 / passVer」
 //   低成本校验（各读 12 / salt+2 字节），错密码 → wrongPassword=true → 弹框重输。
-//   （ZipCrypto 校验字节有 1/256 误判率，与 libarchive 行为一致。）
+//   （ZipCrypto 校验字节有 1/256 误判率 → 校验通过后若 CD CRC 可信且条目 ≤32MB 再整条
+//   下载解密解压比对 CRC32（1/2^32），错密码在打开期 100% 拦截弹框，不会漏到读页期。）
 //
 // - 线程安全：索引建好后只读不可变；每页独立的 InputStream；source 自身线程安全。
 // - 不支持的情况（非 ZIP、bzip2/zstd 等压缩方法、zip64 越界）在**构造期**抛
@@ -49,6 +50,11 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         // 实际压缩方法（AES 条目取 0x9901 extra 内的方法，其余取 CD method）
         val method: Int,
         val compSize: Long,
+        val uncompSize: Long,
+        // CD 的 CRC32（未压缩数据的 CRC；bit3 置位时不可信）
+        val crc: Long,
+        // bit3（data descriptor）置位：ZipCrypto 校验字节取 DOS time 高字节，且 CRC 不可信
+        val useTimeCheckByte: Boolean,
         val localOffset: Long,
         // ZipCrypto 校验字节：bit3(data descriptor) 置位用 DOS time 高字节，否则用 CRC 高字节
         val checkByte: Int,
@@ -135,6 +141,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         while (p + 46 <= cd.size && count < totalEntries) {
             if (cd.u32(p).toLong() != CDH_SIG.toLong()) break // 防御：目录损坏即停
             val flags = cd.u16(p + 8)
+            val useTimeCheckByte = flags and 0x0008 != 0 // bit3：CRC 存于 data descriptor，CD crc 不可信
             var method = cd.u16(p + 10)
             val crc = cd.u32(p + 14).toLong() and 0xFFFFFFFFL
             var compSize = cd.u32(p + 20).toLong() and 0xFFFFFFFFL
@@ -208,6 +215,9 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
                     encrypted = isEncrypted,
                     method = method,
                     compSize = compSize,
+                    uncompSize = uncompSize,
+                    crc = crc,
+                    useTimeCheckByte = useTimeCheckByte,
                     localOffset = localOffset,
                     checkByte = checkByte,
                     aesStrength = aesStrength,
@@ -228,7 +238,14 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
 
     // ---------------------------------------------------------------- 密码校验
 
-    /** 构造期低成本校验（ZipCrypto 读 12B 加密头；AES 读 salt+2 校验 passVer），不下载整条目。 */
+    /**
+     * 构造期密码校验。
+     * - AES：读 salt+2 比对 passVer —— PBKDF2 派生值比对，确定性判定，无随机性。
+     * - ZipCrypto：先读 12B 加密头校验字节（1/256 误判率）；通过后若 CD CRC 可信
+     *   （bit3 未置位）且条目不大，再**整条下载解密解压**比对 CRC32 —— 误判率 1/2^32，
+     *   与本地 libarchive checkEncryptionStatus 同等可靠。错密码必须在构造期被拦截，
+     *   否则流入读页期后只报页面错误、无法弹密码框（渲染层不感知密码异常）。
+     */
     private fun validatePassword(entry: CdEntry): Boolean {
         val dataStart = locateData(entry)
         return if (entry.aesStrength != 0) {
@@ -243,7 +260,35 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
             val zc = ZipCryptoCipher(passwordBytes!!)
             val plain = ByteArray(12)
             for (i in 0..11) plain[i] = zc.dec(head[i])
-            (plain[11].toInt() and 0xFF) == entry.checkByte
+            if ((plain[11].toInt() and 0xFF) != entry.checkByte) return false
+
+            // 增强：CD CRC 可信且条目不大 → 整条验证，消除 1/256 误判（错密码漏到读页期）
+            if (!entry.useTimeCheckByte && entry.crc != 0L && entry.uncompSize in 1..UNCOMP_VALIDATE_LIMIT) {
+                val full = readFully(dataStart, entry.compSize.toInt())
+                for (i in 12 until full.size) full[i] = zc.dec(full[i])
+                val crc32 = java.util.zip.CRC32()
+                when (entry.method) {
+                    METHOD_STORED -> crc32.update(full, 12, full.size - 12)
+                    METHOD_DEFLATED -> {
+                        val inf = Inflater(true)
+                        try {
+                            inf.setInput(full, 12, full.size - 12)
+                            val buf = ByteArray(64 * 1024)
+                            var total = 0L
+                            while (!inf.finished()) {
+                                val n = inf.inflate(buf)
+                                if (n == 0 && inf.needsInput()) throw IOException("deflate 数据截断（${entry.name}）")
+                                crc32.update(buf, 0, n)
+                                total += n
+                            }
+                        } finally {
+                            inf.end()
+                        }
+                    }
+                }
+                return crc32.value == entry.crc
+            }
+            true
         }
     }
 
@@ -282,7 +327,9 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         val zc = ZipCryptoCipher(passwordBytes!!)
         for (i in raw.indices) raw[i] = zc.dec(raw[i])
         if ((raw[11].toInt() and 0xFF) != e.checkByte) {
-            throw IOException("ZipCrypto 校验字节不符（密码错误或数据损坏）：${e.name}")
+            // 密码错（构造期校验漏网的 1/256）：抛密码异常而非普通 IO 错，语义正确，
+            // 用户重进阅读器时构造期整条验证会拦下并弹密码框
+            throw ArchivePasswordException(wrongPassword = true)
         }
         return raw.copyOfRange(12, raw.size)
     }
@@ -306,7 +353,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         if ((derived[2 * keyLen].toInt() and 0xFF) != (storedVer.first and 0xFF) ||
             (derived[2 * keyLen + 1].toInt() and 0xFF) != (storedVer.second and 0xFF)
         ) {
-            throw IOException("AES passVer 不符（密码错误）：${e.name}")
+            throw ArchivePasswordException(wrongPassword = true)
         }
 
         val mac = Mac.getInstance("HmacSHA1")
@@ -451,6 +498,8 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
 
     private companion object {
         const val TAIL_SIZE = 64 * 1024
+        // 构造期 ZipCrypto 整条验证的未压缩大小上限（超过则退回 12B 校验字节，1/256 漏网可接受）
+        const val UNCOMP_VALIDATE_LIMIT = 32L * 1024 * 1024
         const val METHOD_STORED = 0
         const val METHOD_DEFLATED = 8
 
