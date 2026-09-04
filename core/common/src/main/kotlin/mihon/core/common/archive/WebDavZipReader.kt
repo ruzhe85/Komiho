@@ -82,7 +82,8 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
             wrongPassword = if (passwordBytes == null) {
                 null // 无密码 → 阅读器弹密码输入框
             } else {
-                validatePassword(parsed.third)
+                // hasEncrypted=true 必有加密条目（parseCentralDirectory 保证），null 仅是穷尽性防御
+                validatePassword(parsed.third ?: throw WebDavZipUnsupportedException("内部错误：加密标记为真但无加密条目"))
             }
         }
     }
@@ -94,7 +95,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         val fileSize = source.size
 
         // 1. 拉尾部 64KB，找 EOCD（PK\005\006，从后往前扫以容忍注释）
-        val tailLen = minOf(TAIL_SIZE, fileSize).toInt()
+        val tailLen = minOf(TAIL_SIZE.toLong(), fileSize).toInt()
         val tail = readFully(fileSize - tailLen, tailLen)
         val eocdIdx = findSignature(tail, EOCD_SIG, fromEnd = true)
             ?: throw WebDavZipUnsupportedException("未找到 EOCD（不是 ZIP？）")
