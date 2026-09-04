@@ -176,7 +176,10 @@ class PagerPageHolder(
                 streamFn().buffered(16).use { source ->
                     // SY: 兜底快速失败——空流（章节回收竞态的另一种表现）直接报明确错误，
                     // 不进解码器（ArchivePageLoader.readEntryBytes 已在读取层拦截，这里防其他 loader）。
-                    check(source.request(1)) { "页面流为空（章节可能已被回收关闭）——重载即恢复" }
+                    // 注意 streamFn() 是 java.io.InputStream，buffered(16) 得到的是 BufferedInputStream
+                    // 而非 okio BufferedSource：read() 返回 -1 即空流；首字节进缓冲区不丢，
+                    // 下游 readFrom(source) 照常读全量。
+                    check(source.read() != -1) { "页面流为空（章节可能已被回收关闭）——重载即恢复" }
                     // SY -->
                     if (extraPage != null) {
                         streamFn2?.invoke()
