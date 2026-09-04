@@ -15,7 +15,7 @@ import okhttp3.Request
 /**
  * WebDAV（HTTP）远程随机读取源 —— [RandomAccessSource] 的远程实现。
  *
- * 原理：HTTP Range 请求（206 Partial Content）按 256KB 块拉数据，配合
+ * 原理：HTTP Range 请求（206 Partial Content）按 1MB 块拉数据，配合
  * [ArchiveInputStream] 的 libarchive Read/Seek/Skip 回调实现「远程随机访问 ZIP 内部条目」，
  * **不整本下载**。Reader / PageLoader / 缓存零感知（与 Local 同一抽象，符合实施方案核心思路）。
  *
@@ -23,9 +23,10 @@ import okhttp3.Request
  *   - `206` → 从 Content-Range 取文件总大小，启用随机访问；
  *   - `200` → 服务器不支持 Range：整本流式下载到 [fallbackCacheDir] 缓存文件，
  *     之后包装 [LocalRandomAccessSource] 按本地随机读（功能不崩，代价是全量下载）。
- * - 块缓冲：保留最近 [MAX_CACHED_CHUNKS] 个 256KB 块，多页并发解码时各页位置
- *   互不踩踏；缓冲未命中才发新的 Range 请求。块大小与 [ArchiveInputStream] 的
- *   READ_CHUNK 对齐（libarchive 每次回调要 256KB，一次 Range 恰好喂满一块，零浪费）。
+ * - 块缓冲：按字节上限 [MAX_CACHE_BYTES]（约 16MB）做 LRU，块大小 [READ_CHUNK]（1MB）。
+ *   大块摊薄请求数——对 115 这类按请求频次触发风控的服务器，每次 Range 拉得越多、
+ *   请求越少越安全；缓冲未命中才发新的 Range 请求。块大于单次读回调所需（256KB），
+ *   命中时部分返回即可，多页并发解码时各页位置互不踩踏。
  * - 线程安全：[ArchivePageLoader] 会并发解码多页共享同一 source（Phase 2 已验证），
  *   全部状态在 [lock] 内访问；每次请求独立 Call，close 时取消 in-flight 请求
  *   （本地 FileChannel 读不需要取消，网络阻塞读必须可打断）。
@@ -49,10 +50,9 @@ class WebDavRandomAccessSource(
             "Basic " + Base64.getEncoder().encodeToString(raw.toByteArray(Charsets.UTF_8))
         }
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    // 全局共享客户端（companion 懒加载）：连接池 / 线程池跨章节复用，
+    // 避免每个 source 各建一套造成握手风暴（115 风控对高频新建连接更敏感）。
+    private val client = sharedClient
 
     private val lock = Any()
 
@@ -64,8 +64,9 @@ class WebDavRandomAccessSource(
     private var total = -1L
     private var fallback: LocalRandomAccessSource? = null
 
-    /** 最近缓存的块（start inclusive / end exclusive），容量 [MAX_CACHED_CHUNKS]。 */
+    /** 最近缓存的块（start inclusive / end exclusive），字节总量上限 [MAX_CACHE_BYTES]。 */
     private val chunks = ArrayDeque<Chunk>()
+    private var cachedBytes = 0L
     private var currentCall: Call? = null
 
     private class Chunk(val start: Long, val bytes: ByteArray) {
@@ -98,7 +99,15 @@ class WebDavRandomAccessSource(
             val bytes = rangeGet(offset, end)
             if (bytes.isNotEmpty()) {
                 chunks.addLast(Chunk(offset, bytes))
-                while (chunks.size > MAX_CACHED_CHUNKS) chunks.removeFirst()
+                cachedBytes += bytes.size
+                // 按字节上限 LRU：从最旧块开始淘汰，直到总量回到预算内
+                while (cachedBytes > MAX_CACHE_BYTES && chunks.size > 1) {
+                    cachedBytes -= chunks.removeFirst().bytes.size
+                }
+                // 单块超预算（理论不可能，1MB << 16MB）时兜底丢弃
+                if (cachedBytes > MAX_CACHE_BYTES) {
+                    cachedBytes -= chunks.removeFirst().bytes.size
+                }
             }
             return bytes.copyOf(minOf(bytes.size, length))
         }
@@ -111,6 +120,7 @@ class WebDavRandomAccessSource(
             // 打断阻塞中的网络读（翻页跳页时旧请求立即失效，不占连接）
             currentCall?.cancel()
             chunks.clear()
+            cachedBytes = 0
             fallback?.close()
             fallback = null
         }
@@ -180,9 +190,19 @@ class WebDavRandomAccessSource(
         /** 章节 url 前缀：`webdav:` + 完整 http(s) URL（Phase 4 扩展为 `webdav://<connId>/<path>`）。 */
         const val URL_PREFIX = "webdav:"
 
-        // 与 ArchiveInputStream.READ_CHUNK 对齐
-        private const val READ_CHUNK = 256 * 1024
-        private const val MAX_CACHED_CHUNKS = 4
+        /** 全局共享 OkHttpClient：连接池/线程池跨所有 WebDAV 章节复用，降低新建连接频次。 */
+        private val sharedClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build()
+        }
+
+        /** Range 块大小：1MB。比 libarchive 单次回调（256KB）大，摊薄请求数（防风控核心手段）。 */
+        private const val READ_CHUNK = 1024 * 1024
+
+        /** 块缓存字节上限（LRU）：约 16MB，覆盖多页并发解码的活跃窗口。 */
+        private const val MAX_CACHE_BYTES = 16L * 1024 * 1024
 
         /** 宽容解析手输 URL：中文/空格等未编码字符按 UTF-8 百分号编码补齐后重建。 */
         fun normalizeUrl(raw: String): String {
