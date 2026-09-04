@@ -28,6 +28,13 @@
     <string name="local_bookmarks_empty">暫無書籤</string>
     <string name="local_history_delete">刪除紀錄</string>
     <string name="local_history_cancel">取消</string>
+    <string name="local_history_clear">清除歷史</string>
+    <string name="local_history_clear_range">清除時間範圍</string>
+    <string name="local_history_clear_1d">24小時前</string>
+    <string name="local_history_clear_3d">3天前</string>
+    <string name="local_history_clear_1w">1週前</string>
+    <string name="local_history_clear_1m">1月前</string>
+    <string name="local_history_clear_all">全部</string>
     <string name="local_bookmark_remove">取消書籤</string>
     <string name="local_open_file_location">開啟檔案位置</string>
     <string name="local_read_from_first">從頭閱讀</string>

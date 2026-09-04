@@ -28,6 +28,13 @@
     <string name="local_bookmarks_empty">No bookmarks</string>
     <string name="local_history_delete">Delete record</string>
     <string name="local_history_cancel">Cancel</string>
+    <string name="local_history_clear">Clear history</string>
+    <string name="local_history_clear_range">Clear time range</string>
+    <string name="local_history_clear_1d">24 hours ago</string>
+    <string name="local_history_clear_3d">3 days ago</string>
+    <string name="local_history_clear_1w">1 week ago</string>
+    <string name="local_history_clear_1m">1 month ago</string>
+    <string name="local_history_clear_all">All</string>
     <string name="local_bookmark_remove">Remove bookmark</string>
     <string name="local_open_file_location">Open file location</string>
     <string name="local_read_from_first">First page</string>
