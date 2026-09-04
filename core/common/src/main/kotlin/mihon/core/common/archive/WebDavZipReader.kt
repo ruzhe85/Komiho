@@ -278,7 +278,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
 
     /** ZipCrypto（传统 PKWARE）：密钥派生 + 校验字节验证 + 异或流解密，返回压缩数据明文。 */
     private fun decryptZipCrypto(e: CdEntry, raw: ByteArray): ByteArray {
-        if (raw.size < 12) throw IOException("条目数据过短（$entryName）")
+        if (raw.size < 12) throw IOException("条目数据过短（${e.name}）")
         val zc = ZipCryptoCipher(passwordBytes!!)
         for (i in raw.indices) raw[i] = zc.dec(raw[i])
         if ((raw[11].toInt() and 0xFF) != e.checkByte) {
@@ -441,7 +441,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
                 for (i in 0..255) {
                     var c = i
                     repeat(8) {
-                        c = if (c and 1 != 0) (c ushr 1) xor 0xEDB88320 else c ushr 1
+                        c = if (c and 1 != 0) (c ushr 1) xor 0xEDB88320.toInt() else c ushr 1
                     }
                     table[i] = c
                 }
