@@ -130,5 +130,6 @@ fun UniFile.archiveReader(context: Context): ArchiveReader {
  * 加密归档缺少密码 / 密码错误时抛出，上层据此在阅读器内弹密码输入对话框。
  * [wrongPassword]=true 表示已输入过但密码不正确。
  */
-class ArchivePasswordException(val wrongPassword: Boolean = false) : Exception()
+class ArchivePasswordException(val wrongPassword: Boolean = false) :
+    Exception(if (wrongPassword) "密码错误，请重新输入" else "此压缩包已加密，请输入密码")
 // SY <--
