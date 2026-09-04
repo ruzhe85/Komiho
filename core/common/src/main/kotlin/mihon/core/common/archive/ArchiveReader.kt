@@ -12,7 +12,8 @@ import java.io.Closeable
 import java.io.File
 import java.io.InputStream
 
-class ArchiveReader : Closeable {
+// SY --> Phase3: 实现 ArchiveHandle 窄接口，与 WebDavZipReader（远程 ZIP 直读路径）共用 ArchivePageLoader
+class ArchiveReader : ArchiveHandle {
 
     val size: Long
     private val address: Long?
@@ -35,12 +36,12 @@ class ArchiveReader : Closeable {
     }
 
     // SY -->
-    var encrypted: Boolean = false
+    override var encrypted: Boolean = false
         private set
-    var wrongPassword: Boolean? = null
+    override var wrongPassword: Boolean? = null
         private set
     // 每 reader 实例唯一（用于 ArchivePageLoader 建临时目录）；mmap 路径取 mmap 地址，回调路径取 source 实例哈希
-    val archiveHashCode: Int
+    override val archiveHashCode: Int
         get() = address?.hashCode() ?: source!!.hashCode()
     // SY <--
 
@@ -48,10 +49,10 @@ class ArchiveReader : Closeable {
         if (address != null) ArchiveInputStream(address, size, encrypted)
         else ArchiveInputStream(source!!, encrypted)
 
-    fun <T> useEntries(block: (Sequence<ArchiveEntry>) -> T): T =
+    override fun <T> useEntries(block: (Sequence<ArchiveEntry>) -> T): T =
         newStream(encrypted).use { block(generateSequence { it.getNextEntry() }) }
 
-    fun getInputStream(entryName: String): InputStream? {
+    override fun getInputStream(entryName: String): InputStream? {
         val archive = newStream(encrypted)
         try {
             while (true) {
