@@ -42,7 +42,7 @@ object WebDavCoverCache {
     /** 封面缓存文件（不管存在与否）；URL 解析失败返回 null。 */
     private fun coverFile(context: Context, chapterUrl: String): File? {
         val fullUrl = runCatching { WebDavConnectionStore.extractFullUrl(chapterUrl) }.getOrNull()
-        if (fullUrl.isBlank()) return null
+        if (fullUrl.isNullOrBlank()) return null
         val dir = File(context.filesDir, DIR).apply { mkdirs() }
         return File(dir, sha256(fullUrl) + ".jpg")
     }
