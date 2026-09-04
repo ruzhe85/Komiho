@@ -235,7 +235,9 @@ import tachiyomi.core.common.storage.nameWithoutExtension
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 // SY --> Komiho 本地浏览器：显示模式 + 排序 + 封面
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import mihon.core.common.archive.WebDavRandomAccessSource
 import mihon.core.common.archive.archiveReader
 import java.text.SimpleDateFormat
 import java.util.Collections
@@ -4275,6 +4277,9 @@ private fun LocalFileBrowser(
     var showCover by remember { mutableStateOf(prefs.localBrowseShowCover.get()) }
     var columnCount by remember { mutableStateOf(prefs.localBrowseColumns.get()) }
     var showOptions by remember { mutableStateOf(false) }
+    // SY --> Komiho Phase3: WebDAV 测试直连入口（正式浏览/连接管理在 Phase 4）
+    var showWebDavDialog by remember { mutableStateOf(false) }
+    // SY <--
 
     // SY --> Komiho: 真实路径模式标记（持有 MANAGE_EXTERNAL_STORAGE 时列目录走 UniFile 直读）。
     val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
@@ -4478,6 +4483,14 @@ private fun LocalFileBrowser(
                     }
                 }
             }
+            // SY --> Komiho Phase3: WebDAV 测试直连入口（填 URL 直接进 Reader 验证 Range 随机访问）
+            IconButton(onClick = { showWebDavDialog = true }) {
+                Icon(
+                    imageVector = Icons.Outlined.Cloud,
+                    contentDescription = "WebDAV 测试直连",
+                )
+            }
+            // SY <--
             IconButton(onClick = { showOptions = true }) {
                 Icon(
                     imageVector = Icons.Filled.Tune,
@@ -4547,6 +4560,23 @@ private fun LocalFileBrowser(
         sort = sort,
         onSortModeChange = { sort = it; prefs.localBrowseSort.set(it.toPref()) },
     )
+
+    // SY --> Komiho Phase3: WebDAV 测试直连对话框
+    if (showWebDavDialog) {
+        WebDavTestDialog(
+            initialUrl = prefs.webdavTestUrl.get(),
+            initialUser = prefs.webdavTestUser.get(),
+            initialPass = prefs.webdavTestPass.get(),
+            onDismiss = { showWebDavDialog = false },
+            onOpen = { url, user, pass ->
+                showWebDavDialog = false
+                prefs.webdavTestUser.set(user.trim())
+                prefs.webdavTestPass.set(pass)
+                scope.launch { openWebDavTestFile(context, prefs, url) }
+            },
+        )
+    }
+    // SY <--
 }
 
 /** 文件/目录一行（列表模式）。可点性由调用方按「目录/归档/图片」决定。
@@ -4900,6 +4930,134 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
         ).show()
     }
 }
+
+// SY --> Komiho Phase3: WebDAV 测试直连（最小切片）——填完整 CBZ/ZIP URL 直接建临时
+// Manga+Chapter（挂 LocalSource.ID，历史/书签自动可用）并进 Reader；ChapterLoader 侧
+// 对 `webdav:` 章节构造 WebDavRandomAccessSource 走 HTTP Range 随机访问，不整本下载。
+// 正式的连接管理 / PROPFIND 目录浏览 / 远程封面在 Phase 4。
+
+/** WebDAV 测试直连对话框：URL + 可空 Basic Auth 凭据。URL/凭据持久化到 [StoragePreferences]（密码 Phase 3 暂存明文）。 */
+@Composable
+private fun WebDavTestDialog(
+    initialUrl: String,
+    initialUser: String,
+    initialPass: String,
+    onDismiss: () -> Unit,
+    onOpen: (url: String, user: String, pass: String) -> Unit,
+) {
+    var url by remember { mutableStateOf(initialUrl) }
+    var user by remember { mutableStateOf(initialUser) }
+    var pass by remember { mutableStateOf(initialPass) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("WebDAV 测试直连") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("CBZ/ZIP 完整 URL（http/https）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = user,
+                    onValueChange = { user = it },
+                    label = { Text("用户名（可空）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = pass,
+                    onValueChange = { pass = it },
+                    label = { Text("密码（可空）") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Phase 3 测试入口：按 HTTP Range 随机访问远程压缩包，不整本下载；" +
+                        "服务器不支持 Range 时自动整本缓存回退。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onOpen(url, user, pass) }, enabled = url.isNotBlank()) {
+                Text(composeStringResource(R.string.action_ok))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(composeStringResource(R.string.action_cancel)) }
+        },
+    )
+}
+
+/** 打开 WebDAV 测试文件：校验/规范化 URL → 建临时 Manga+Chapter（复用同目录 manga 去重）→ ReaderActivity。 */
+private suspend fun openWebDavTestFile(
+    context: android.content.Context,
+    prefs: StoragePreferences,
+    rawUrl: String,
+) {
+    try {
+        val httpUrl = rawUrl.trim().removePrefix(WebDavRandomAccessSource.URL_PREFIX)
+        if (!httpUrl.startsWith("http://") && !httpUrl.startsWith("https://")) {
+            throw Exception("URL 须以 http:// 或 https:// 开头")
+        }
+        val fileName = httpUrl.substringAfterLast('/')
+        if (fileName.isBlank()) throw Exception("URL 缺少文件名")
+        val decodedName = runCatching { java.net.URLDecoder.decode(fileName, "UTF-8") }.getOrDefault(fileName)
+        val title = decodedName.substringBeforeLast('.').ifBlank { fileName }
+        // manga.url = 远程目录（同一远程目录的多个归档同属一个系列，翻完自动续卷的扩展留 Phase 4）
+        val mangaUrl = httpUrl.substringBeforeLast('/')
+        val chapterUrl = WebDavRandomAccessSource.URL_PREFIX + httpUrl
+        prefs.webdavTestUrl.set(httpUrl)
+        val (mangaId, chapterId) = withContext(Dispatchers.IO) {
+            val mangaRepo = Injekt.get<MangaRepository>()
+            val chapterRepo = Injekt.get<ChapterRepository>()
+            val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
+                ?: mangaRepo.insertNetworkManga(
+                    listOf(
+                        Manga.create().copy(
+                            source = LocalSource.ID,
+                            url = mangaUrl,
+                            ogTitle = title,
+                            favorite = false,
+                            chapterFlags = Manga.CHAPTER_SORTING_NUMBER,
+                        ),
+                    ),
+                ).first()
+            if (manga.ogTitle != title) {
+                mangaRepo.update(MangaUpdate(id = manga.id!!, title = title))
+            }
+            var chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+            if (chapter == null) {
+                chapterRepo.addAll(
+                    listOf(
+                        Chapter.create().copy(
+                            mangaId = manga.id!!,
+                            url = chapterUrl,
+                            name = title,
+                            chapterNumber = ChapterRecognition.parseChapterNumber(title, decodedName, -1.0),
+                        ),
+                    ),
+                )
+                chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                    ?: error("章节写入失败")
+            }
+            manga.id!! to chapter.id!!.toLong()
+        }
+        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
+    } catch (e: Throwable) {
+        android.widget.Toast.makeText(
+            context,
+            "打开失败：${e.message}",
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
+}
+// SY <--
 
 // SY --> Komiho: 本地模式「历史 / 书签」tab（章节级书签，复用现有 history / chapters.bookmark 表）。
 // 历史 = 最近阅读（按来源过滤）；书签 = 已加书签的章节。点列表项 → ReaderActivity 续读；
