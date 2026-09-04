@@ -6,10 +6,12 @@ import java.net.URLEncoder
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.Volatile
+import logcat.LogPriority
 import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import tachiyomi.core.common.util.system.logcat
 
 // SY --> Komiho Phase3
 /**
@@ -23,6 +25,8 @@ import okhttp3.Request
  *   - `206` → 从 Content-Range 取文件总大小，启用随机访问；
  *   - `200` → 服务器不支持 Range：整本流式下载到 [fallbackCacheDir] 缓存文件，
  *     之后包装 [LocalRandomAccessSource] 按本地随机读（功能不崩，代价是全量下载）。
+ *   - rar/7z 等 [FORCED_FALLBACK_EXTS] 格式：跳过探测直接整本缓存（这类格式无法
+ *     随机访问，反复从头扫等于流量爆炸；整本一次下载流量确定性最好，缓存跨会话复用）。
  * - 块缓冲：按字节上限 [MAX_CACHE_BYTES]（约 16MB）做 LRU，块大小 [READ_CHUNK]（1MB）。
  *   大块摊薄请求数——对 115 这类按请求频次触发风控的服务器，每次 Range 拉得越多、
  *   请求越少越安全；缓冲未命中才发新的 Range 请求。块大于单次读回调所需（256KB），
@@ -41,6 +45,18 @@ class WebDavRandomAccessSource(
 
     /** 规范化后的请求 URL（宽容中文/空格等未编码字符，逐段百分号编码补齐）。 */
     private val requestUrl = normalizeUrl(url)
+
+    /**
+     * rar/7z 等不支持随机访问的格式（Phase4-② 方案 B）：跳过 Range 探测，
+     * 打开时直接整本缓存到 [fallbackCacheDir] 后按本地读。
+     * 这类格式条目头与数据交错（7z 头部还压缩），远程「随机访问」等价于反复从头扫，
+     * 流量爆炸；一次性整本下载反而是流量确定性最好的方式（1× 文件大小，只慢一次）。
+     */
+    private val forceFallback = remoteExt() in FORCED_FALLBACK_EXTS
+
+    /** 远程文件扩展名（小写，已按 URL 规范化，query 已剥离）。 */
+    private fun remoteExt(): String =
+        requestUrl.substringBefore('?').substringAfterLast('/').substringAfterLast('.', "").lowercase()
 
     private val authHeader: String? =
         if (username.isNullOrEmpty() && password.isNullOrEmpty()) {
@@ -126,12 +142,20 @@ class WebDavRandomAccessSource(
         }
     }
 
-    /** 懒探测：一次 GET `Range: bytes=0-0` 同时完成「是否支持 Range」与「文件总大小」确认。 */
+    /** 懒探测：一次 GET `Range: bytes=0-0` 同时完成「是否支持 Range」与「文件总大小」确认。
+     *  [forceFallback]（rar/7z 等）跳过探测，直接整本缓存到本地再随机读。 */
     private fun ensureProbed() {
         if (probed) return
         synchronized(lock) {
             if (probed) return
             if (closed) throw IOException("WebDAV source closed")
+            if (forceFallback) {
+                val file = ensureFallbackFile()
+                fallback = LocalRandomAccessSource(file)
+                total = file.length()
+                probed = true
+                return
+            }
             val call = client.newCall(newRequestBuilder().header("Range", "bytes=0-0").build())
             currentCall = call
             try {
@@ -144,14 +168,18 @@ class WebDavRandomAccessSource(
                         total = resp.header("Content-Range")?.substringAfterLast('/')?.toLongOrNull()
                             ?: throw IOException("WebDAV 206 未返回 Content-Range: $requestUrl")
                     } else {
-                        // 不支持 Range：整本流式落盘 → 本地随机读回退（不崩，代价全量下载）
+                        // 不支持 Range：整本流式落盘（本次响应体即全量数据，直接消费）
+                        // → 本地随机读回退（不崩，代价全量下载）
                         val dir = fallbackCacheDir
                             ?: throw IOException("WebDAV 服务器不支持 Range，且未提供回退缓存目录")
                         dir.mkdirs()
-                        val file = File.createTempFile("webdav_fallback_", ".bin", dir)
+                        val file = fallbackFile(dir)
+                        val tmp = File(dir, file.name + ".part")
                         resp.body?.byteStream()?.use { input ->
-                            file.outputStream().use { output -> input.copyTo(output) }
+                            tmp.outputStream().use { output -> input.copyTo(output) }
                         } ?: throw IOException("WebDAV 空响应体: $requestUrl")
+                        if (file.exists()) file.delete()
+                        tmp.renameTo(file)
                         fallback = LocalRandomAccessSource(file)
                         total = file.length()
                     }
@@ -162,6 +190,47 @@ class WebDavRandomAccessSource(
             probed = true
         }
     }
+
+    /**
+     * 整本缓存落盘（rar/7z 强制回退路径）：文件名 = URL hash + 扩展名，跨会话复用——
+     * 已存在完整缓存则跳过下载（重新打开同一卷零流量）。先落 `.part` 临时文件、
+     * 完成后原子改名，避免中断留下半包被误用。缓存随系统清理 cacheDir，不主动管理。
+     */
+    private fun ensureFallbackFile(): File {
+        val dir = fallbackCacheDir ?: throw IOException("WebDAV 整本缓存需要回退缓存目录")
+        dir.mkdirs()
+        val file = fallbackFile(dir)
+        if (file.exists() && file.length() > 0L) {
+            logcat(LogPriority.DEBUG) { "[WebDav] 命中整本缓存，跳过下载: ${file.name}" }
+            return file
+        }
+        val tmp = File(dir, file.name + ".part")
+        val call = client.newCall(newRequestBuilder().build())
+        currentCall = call
+        try {
+            call.execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    throw IOException("WebDAV 下载失败 HTTP ${resp.code}: $requestUrl")
+                }
+                resp.body?.byteStream()?.use { input ->
+                    tmp.outputStream().use { output -> input.copyTo(output) }
+                } ?: throw IOException("WebDAV 空响应体: $requestUrl")
+            }
+        } finally {
+            currentCall = null
+        }
+        if (file.exists()) file.delete()
+        if (!tmp.renameTo(file)) {
+            tmp.delete()
+            throw IOException("整本缓存落盘失败: ${file.name}")
+        }
+        logcat(LogPriority.DEBUG) { "[WebDav] 整本缓存完成: ${file.name} (${file.length()} B)" }
+        return file
+    }
+
+    /** 整本缓存的稳定文件名：URL hash（8 位 hex）+ 远程扩展名（缺省 bin）。 */
+    private fun fallbackFile(dir: File): File =
+        File(dir, "webdav_" + String.format("%08x", requestUrl.hashCode()) + "." + remoteExt().ifBlank { "bin" })
 
     /** Range 读取 [start]..[endInclusive]（闭区间）。416 视作越界返回空（与契约一致）。 */
     private fun rangeGet(start: Long, endInclusive: Long): ByteArray {
@@ -206,6 +275,9 @@ class WebDavRandomAccessSource(
 
         /** 块缓存字节上限（LRU）：约 16MB，覆盖多页并发解码的活跃窗口。 */
         private const val MAX_CACHE_BYTES = 16L * 1024 * 1024
+
+        /** 这些扩展名的远程归档不支持随机访问，打开时整本缓存到本地（Phase4-② 方案 B）。 */
+        private val FORCED_FALLBACK_EXTS = setOf("rar", "cbr", "7z", "cb7")
 
         /** 宽容解析手输 URL：中文/空格等未编码字符按 UTF-8 百分号编码补齐后重建。 */
         fun normalizeUrl(raw: String): String {

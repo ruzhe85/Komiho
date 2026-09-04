@@ -5217,7 +5217,7 @@ private fun WebDavBrowserDialog(
                             }
                             if (files.isEmpty()) {
                                 Text(
-                                    "此目录没有 zip/cbz 压缩包",
+                                    "此目录没有压缩包（zip/cbz/rar/7z）",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
