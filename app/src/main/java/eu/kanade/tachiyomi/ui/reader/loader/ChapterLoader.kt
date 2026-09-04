@@ -12,8 +12,11 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import logcat.LogPriority
+import mihon.core.common.archive.ArchiveHandle
 import mihon.core.common.archive.ArchiveReader
 import mihon.core.common.archive.WebDavRandomAccessSource
+import mihon.core.common.archive.WebDavZipReader
 import mihon.core.common.archive.archiveReader
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
@@ -140,7 +143,7 @@ class ChapterLoader(
                             is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
                             is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
                             // SY --> Komiho Phase3: WebDAV 远程随机访问（HTTP Range + libarchive seek 回调）
-                            is Format.RemoteArchive -> ArchivePageLoader(ArchiveReader(webDavSource(format.remoteUrl)))
+                            is Format.RemoteArchive -> ArchivePageLoader(webDavArchiveHandle(format.remoteUrl))
                             // SY <--
                         }
                     }
@@ -161,7 +164,7 @@ class ChapterLoader(
                     is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
                     is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
                     // SY --> Komiho Phase3: WebDAV 远程随机访问（HTTP Range + libarchive seek 回调）
-                    is Format.RemoteArchive -> ArchivePageLoader(ArchiveReader(webDavSource(format.remoteUrl)))
+                    is Format.RemoteArchive -> ArchivePageLoader(webDavArchiveHandle(format.remoteUrl))
                     // SY <--
                 }
             }
@@ -198,6 +201,20 @@ class ChapterLoader(
             password = prefs.webdavTestPass.get().ifBlank { null },
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
         )
+    }
+
+    // SY --> Komiho Phase3（方案 A+C）：远程 ZIP 走纯 Kotlin 中央目录直读（每页流量=条目本身，
+    // 跳页 O(1)），彻底绕开 libarchive 逐条目迭代 × 256KB 放大（曾致每页流量 ≥ 整个文件）。
+    // 加密（ZipCrypto / WinZip AES）内建解密，密码复用 CbzCrypto 全局密码，走既有弹窗流程。
+    // 构造期解析失败（非 ZIP / 不支持的压缩方法等）→ 回落 libarchive 回调路径，行为不回退。
+    private fun webDavArchiveHandle(remoteUrl: String): ArchiveHandle {
+        val source = webDavSource(remoteUrl)
+        return try {
+            WebDavZipReader(source)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "WebDavZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
+            ArchiveReader(source)
+        }
     }
     // SY <--
 }

@@ -11,7 +11,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import mihon.core.common.archive.ArchiveReader
+import mihon.core.common.archive.ArchiveHandle
 import mihon.core.common.archive.ArchivePasswordException
 import tachiyomi.core.common.util.system.ImageUtil
 import uy.kohesive.injekt.injectLazy
@@ -20,7 +20,7 @@ import java.io.File
 /**
  * Loader used to load a chapter from an archive file.
  */
-internal class ArchivePageLoader(private val reader: ArchiveReader) : PageLoader() {
+internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader() {
     // SY -->
     // 移除全局 Mutex：LocalRandomAccessSource 已改用 FileChannel 定位读（线程安全），
     // 每个 ArchiveInputStream 自带独立 libarchive handle + callback state，并发读同一 zip
