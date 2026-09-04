@@ -241,4 +241,104 @@
     <string name="marked_series_read">Series marked as read</string>
     <string name="marked_series_unread">Series marked as unread</string>
 
+
+    <!-- SY: Komiho add source flow -->
+    <string name="addsrc_back_cd">Back</string>
+    <string name="addsrc_title">Add source</string>
+    <string name="addsrc_select_type">Choose a source type</string>
+    <string name="addsrc_type_local">Local storage</string>
+    <string name="addsrc_smb_unsupported">Not yet supported</string>
+    <string name="addsrc_smb_toast">SMB is not yet supported</string>
+    <string name="addsrc_delete_title">Delete source</string>
+    <string name="addsrc_delete_msg">Delete \"%1$s\"? History and bookmarks will be kept.</string>
+    <string name="addsrc_edit_cd">Edit</string>
+    <string name="addsrc_delete_cd">Delete</string>
+    <string name="addsrc_name">Source name</string>
+    <string name="addsrc_name_hint_webdav">e.g. My WebDAV</string>
+    <string name="addsrc_name_hint_komga">e.g. My Komga</string>
+    <string name="addsrc_server">Server</string>
+    <string name="addsrc_port">Port</string>
+    <string name="addsrc_port_hint">(default)</string>
+    <string name="addsrc_path">Path</string>
+    <string name="addsrc_path_hint">/ (root)</string>
+    <string name="addsrc_account">Account</string>
+    <string name="addsrc_username_anon">Username (optional = anonymous)</string>
+    <string name="addsrc_password_new">Password (optional = anonymous)</string>
+    <string name="addsrc_password_edit">Password (leave blank to keep)</string>
+    <string name="addsrc_password">Password</string>
+    <string name="addsrc_show_password_cd">Show password</string>
+    <string name="addsrc_hide_password_cd">Hide password</string>
+    <string name="addsrc_keystore_note">Credentials are encrypted with Android Keystore before storage.</string>
+    <string name="addsrc_test">Test connection</string>
+    <string name="addsrc_test_ok">Connection OK</string>
+    <string name="addsrc_test_failed">Connection failed</string>
+    <string name="addsrc_auth_type">Authentication (choose one)</string>
+    <string name="addsrc_auth_basic">Username &amp; password</string>
+    <string name="addsrc_username_email">Username / email</string>
+    <string name="addsrc_storage_perm">Storage management</string>
+    <string name="addsrc_perm_granted">All-files access granted</string>
+    <string name="addsrc_perm_denied">Management permission not granted</string>
+    <string name="addsrc_perm_granted_desc">Browse root is internal storage; switch volumes anywhere</string>
+    <string name="addsrc_perm_denied_desc">Grant to read the real filesystem directly: faster browsing, steadier covers</string>
+    <string name="addsrc_grant">Grant</string>
+    <string name="addsrc_saf_title">Prefer SAF?</string>
+    <string name="addsrc_saf_desc">Use the system file picker; no special permission needed</string>
+    <string name="addsrc_saf">Use SAF</string>
+    <string name="addsrc_root">Manga root folder</string>
+    <string name="addsrc_root_none">Not selected (tap the button below)</string>
+    <string name="addsrc_pick_folder">Choose folder</string>
+    <string name="addsrc_local_note">Local storage is built in and always available; this page manages permissions and the manga root only.</string>
+
+    <!-- SY: Komiho source switcher / local browse / storage / downloads -->
+    <string name="source_local">Local storage</string>
+    <string name="source_add">Add source</string>
+    <string name="source_switch_cd">Switch source</string>
+    <string name="source_unsupported">This source is not supported yet</string>
+    <string name="source_webdav_missing">This WebDAV connection no longer exists. Pick a source from the top bar.</string>
+    <string name="perm_dialog_title">All-files access recommended</string>
+    <string name="perm_dialog_body">For faster, steadier access to local manga, grant \"All-files access\".\nYou can also keep using the system folder picker (SAF) instead.</string>
+    <string name="perm_grant">Grant</string>
+    <string name="perm_use_saf">Use SAF</string>
+    <string name="perm_granted_toast">All-files access granted: browse root is internal storage. On SD-card devices, tap the arrow next to the breadcrumb to switch storage.</string>
+    <string name="storage_title">Storage</string>
+    <string name="storage_all_files_access">All-files access</string>
+    <string name="storage_perm_granted_desc">Granted: local browsing uses real paths (faster lists/covers/reading)</string>
+    <string name="storage_perm_denied_desc">Not granted: local browsing uses SAF. Granting speeds it up greatly</string>
+    <string name="storage_webdav_cache">WebDAV whole-file cache</string>
+    <string name="storage_webdav_cache_desc">rar/7z remote archives are cached whole when opened (zip/cbz use none);\noldest entries are evicted above the limit. Lowering the limit applies on next download.</string>
+    <string name="storage_cache_limit">Limit: </string>
+    <string name="storage_cache_range">200 MB – 4 GB, 200 MB steps (default 1 GB)</string>
+    <string name="storage_cache_usage">Used: </string>
+    <string name="storage_cache_cleared">WebDAV cache cleared (%1$s)</string>
+    <string name="storage_clear_cache">Clear cache</string>
+    <string name="settings_cache_preview_none">0 MB (no cache / live preview)</string>
+    <string name="settings_cache_preview">%1$d MB (about %2$d MB used)</string>
+    <string name="update_check_failed">Update check failed</string>
+    <string name="storage_switch_cd">Switch storage</string>
+    <string name="internal_storage">Internal storage</string>
+    <string name="sd_card_volume">SD card (%1$s)</string>
+    <string name="webdav_manual_label">CBZ/ZIP path or full URL</string>
+    <string name="webdav_manual_hint">Accepts paths relative to the base URL (e.g. /Comic/Z3.zip) or full http(s) URLs;\nother archives in the same folder become chapters (auto-continue on finish).</string>
+    <string name="webdav_manual_back">Back to folder browsing</string>
+    <string name="webdav_manual_input">Enter path manually</string>
+    <string name="webdav_parent_dir">Parent folder</string>
+    <string name="webdav_empty_dir">No archives (zip/cbz/rar/7z) in this folder</string>
+    <string name="webdav_url_not_http">URL must start with http:// or https://</string>
+    <string name="webdav_url_no_filename">URL is missing a file name</string>
+    <string name="webdav_chapter_write_failed">Failed to write chapters</string>
+    <string name="dir_browse_failed">Failed to browse folder</string>
+    <string name="file_not_found">File not found: %1$s</string>
+    <string name="series_dir_not_found">Series folder not found: %1$s</string>
+    <string name="chapter_not_written">Current file has no chapter: %1$s</string>
+    <string name="open_failed">Open failed: %1$s</string>
+    <string name="chapter_ordinal">Ch. %1$s</string>
+    <string name="bookmarks_count_subtitle">%1$s · %2$d bookmarks</string>
+    <string name="reader_page_num">Page %1$d</string>
+    <string name="unknown_series">Unknown series</string>
+    <string name="delete_series_title">Delete whole series?</string>
+    <string name="delete_series_msg">This deletes all %2$d downloaded items of \"%1$s\" and cannot be undone.</string>
+    <string name="downloads_empty">Nothing downloaded yet</string>
+    <string name="downloads_empty_hint">Tap \"Download whole series\" on a series page to save offline</string>
+    <string name="download_progress">Downloaded %1$d / %2$d</string>
+
 </resources>
