@@ -50,7 +50,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
@@ -72,6 +71,9 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
@@ -82,6 +84,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Image
@@ -314,8 +317,9 @@ class KomgaMainActivity : KomgaBaseActivity() {
  * 文件型来源（本地、WebDAV、未来的 SMB）**共用** Browse tab，因此底部导航
  * 的数量恒定，不会随来源增加而膨胀成 8 个 tab。
  */
-// SY --> Komiho Phase4: 来源条目（全局首页顶栏切换，数据驱动）。Komga / 本地 内置，
-// WebDAV 每条连接一个条目；SMB 预留未实现不显示，未来落地后在 [buildSourceEntries] 登记。
+// SY --> Komiho Phase4: 来源条目（全局首页顶栏切换，数据驱动）。本地是唯一内置来源、固定置顶；
+// Komga 需已添加服务器连接才出现；WebDAV 每条连接一个条目；SMB 预留未实现不显示，
+// 未来落地后在 [buildSourceEntries] 登记。
 private enum class SourceKind(val typeLabel: String) {
     Komga("Komga"),
     WebDav("WebDAV"),
@@ -332,15 +336,21 @@ private const val SOURCE_ID_KOMGA = "komga"
 private const val SOURCE_ID_LOCAL = "local"
 private const val SOURCE_ID_WEBDAV_PREFIX = "webdav:"
 
-/** 来源菜单排序：优先级 Komga > WebDAV > SMB（本地内置排最后），同级按名称升序。 */
-private fun buildSourceEntries(): List<SourceEntry> {
+/**
+ * 来源菜单排序：本地是唯一内置来源、固定置顶；其余按优先级 Komga > WebDAV > SMB，
+ * 同级按名称升序。未「添加」的来源不显示——Komga 仅在已配置服务器连接（[komgaConnected]）
+ * 时出现，WebDAV 每条连接一条，SMB 未实现。
+ */
+private fun buildSourceEntries(komgaConnected: Boolean): List<SourceEntry> {
     val entries = mutableListOf(
-        SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, "Komga"),
+        SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, "本地"),
     )
+    if (komgaConnected) {
+        entries.add(SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, "Komga"))
+    }
     WebDavConnectionStore.all()
         .sortedBy { it.displayName().lowercase() }
         .forEach { entries.add(SourceEntry(SOURCE_ID_WEBDAV_PREFIX + it.id, SourceKind.WebDav, it.displayName())) }
-    entries.add(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, "本地"))
     return entries
 }
 
@@ -480,13 +490,21 @@ private fun KomgaMainScreen(
     }
     // SY <--
 
-    // SY --> Komiho Phase4: 全局来源切换（数据驱动）。Komga / 本地 内置，WebDAV 每连接一条；
-    // 切换后底部导航变化（Komga 5 项 / 文件型 4 项），currentTab 必须重置为该来源第一个可见 tab。
-    // 选中来源持久化到 browseSourceId，重启回到上次来源；连接被删等失效场景回落 Komga。
+    // SY --> Komiho Phase4: 全局来源切换（数据驱动）。本地固定内置置顶，Komga 已连接才出现，
+    // WebDAV 每连接一条；切换后底部导航变化（Komga 5 项 / 文件型 4 项），currentTab 必须
+    // 重置为该来源第一个可见 tab。选中来源持久化到 browseSourceId，重启回到上次来源；
+    // 连接被删等失效场景回落本地（唯一必然存在的来源）。
     var sourceVersion by remember { mutableIntStateOf(0) }
-    val sourceEntries = remember(sourceVersion) { buildSourceEntries() }
+    // Komga 是否已添加（有服务器连接）。onResume（refreshTick）时复查，覆盖从
+    // KomgaConnectActivity 添加完连接返回的场景。
+    var komgaConnected by remember { mutableStateOf(prefs.hasConnection()) }
+    val sourceEntries = remember(sourceVersion, komgaConnected) { buildSourceEntries(komgaConnected) }
     var currentSourceId by remember {
-        mutableStateOf(storagePreferences.browseSourceId.get().ifBlank { SOURCE_ID_KOMGA })
+        mutableStateOf(
+            storagePreferences.browseSourceId.get().ifBlank {
+                if (prefs.hasConnection()) SOURCE_ID_KOMGA else SOURCE_ID_LOCAL
+            },
+        )
     }
     val currentSourceEntry = sourceEntries.firstOrNull { it.id == currentSourceId } ?: sourceEntries.first()
     val currentIsFileSource = currentSourceEntry.kind.isFileSource
@@ -514,6 +532,8 @@ private fun KomgaMainScreen(
     // Refresh counter: bumped by tab re-tap and by Activity onResume (returning
     // from the reader). Passed to tabs to trigger data reload.
     val refreshTick by refreshSignal.collectAsState()
+    // Komga 连接状态跟随 onResume 复查（从 KomgaConnectActivity 添加完返回时生效）。
+    LaunchedEffect(refreshTick) { komgaConnected = prefs.hasConnection() }
     // M3.12: search collapsed to an icon in the title row; expands the field.
     var searchOpen by remember { mutableStateOf(false) }
 
@@ -550,10 +570,10 @@ private fun KomgaMainScreen(
     var libraries by remember { mutableStateOf<List<LibraryDto>>(emptyList()) }
     var selectedLibraryId by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        if (!prefs.hasConnection()) {
-            context.startActivity(Intent(context, KomgaConnectActivity::class.java))
-        } else {
+    // Komga 现为可选来源（未添加不显示）：不再强制跳转连接页，未连接时停在本地浏览；
+    // 添加完 Komga 连接返回（komgaConnected 翻转）后补拉一次库列表。
+    LaunchedEffect(komgaConnected) {
+        if (prefs.hasConnection()) {
             runCatching { client.getLibraries() }
                 .onSuccess { libs ->
                     libraries = libs
@@ -633,8 +653,12 @@ private fun KomgaMainScreen(
                         else -> SourceSwitchButton(
                             current = currentSourceEntry,
                             entries = sourceEntries,
+                            komgaAdded = komgaConnected,
                             onSelect = ::selectSource,
                             onAddSource = { showSourceManager = true },
+                            onAddKomga = {
+                                context.startActivity(Intent(context, KomgaConnectActivity::class.java))
+                            },
                         )
                     }
                 },
@@ -905,18 +929,16 @@ private fun KomgaMainScreen(
                     MainTab.Settings -> SettingsTab(context)
                 }
                 // SY --> Komiho Phase4: 「添加来源」= WebDAV 连接管理对话框（新增/编辑/删除）。
-                // 关闭后重建来源菜单（sourceVersion++）；当前选中的连接被删时回落 Komga。
+                // 关闭后重建来源菜单（sourceVersion++）；当前选中的连接被删时回落本地
+                // （本地是唯一必然存在的来源；Komga 现同为可添加来源，走 onAddKomga）。
                 if (showSourceManager) {
                     WebDavFlowDialog(
                         onDismiss = {
                             showSourceManager = false
                             sourceVersion++
                             // 用关闭后的最新来源列表校验（sourceEntries 还是旧快照）。
-                            if (currentSourceId != SOURCE_ID_KOMGA &&
-                                currentSourceId != SOURCE_ID_LOCAL &&
-                                buildSourceEntries().none { it.id == currentSourceId }
-                            ) {
-                                selectSource(SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, "Komga"))
+                            if (buildSourceEntries(prefs.hasConnection()).none { it.id == currentSourceId }) {
+                                selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, "本地"))
                             }
                         },
                     )
@@ -4176,26 +4198,28 @@ private suspend fun checkForKomihoUpdate(context: android.content.Context, onFin
 
 // ---------- Local source tab (P0) ----------
 
-/** 来源条目圆点颜色（按类型固定，与来源预览图一致）。 */
-@Composable
-private fun sourceDotColor(kind: SourceKind) = when (kind) {
-    SourceKind.Komga -> Color(0xFF7F77DD)
-    SourceKind.WebDav -> Color(0xFFEF9F27)
-    SourceKind.Smb -> Color(0xFF378ADD)
-    SourceKind.Local -> Color(0xFF1D9E75)
+/** 来源条目小图标（按类型固定，替代早前的彩色圆点）。 */
+private fun sourceIcon(kind: SourceKind): ImageVector = when (kind) {
+    SourceKind.Komga -> Icons.Filled.Dns
+    SourceKind.WebDav -> Icons.Filled.CloudQueue
+    SourceKind.Smb -> Icons.Filled.Lan
+    SourceKind.Local -> Icons.Filled.Folder
 }
 
 /**
- * 全局来源切换按钮（顶栏标题位）：`● 来源名 ▾`，下拉菜单列出全部来源条目
- * （圆点 + 名称 + 类型副标题 + 当前项 ✓），底部「＋ 添加来源」打开连接管理。
+ * 全局来源切换按钮（顶栏标题位）：`图标 来源名 ▾`，下拉菜单列出全部来源条目
+ * （类型图标 + 名称 + 类型副标题 + 当前项 ✓），底部「添加 Komga / 添加 WebDAV /
+ * 添加 SMB（未支持）」入口；Komga 已添加时隐藏对应入口。
  * 排序与可见性由 [buildSourceEntries] 决定（未添加的来源不显示）。
  */
 @Composable
 private fun SourceSwitchButton(
     current: SourceEntry,
     entries: List<SourceEntry>,
+    komgaAdded: Boolean,
     onSelect: (SourceEntry) -> Unit,
     onAddSource: () -> Unit,
+    onAddKomga: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -4207,11 +4231,11 @@ private fun SourceSwitchButton(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(sourceDotColor(current.kind)),
+            Icon(
+                imageVector = sourceIcon(current.kind),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 text = current.name,
@@ -4232,11 +4256,11 @@ private fun SourceSwitchButton(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(12.dp)
-                                    .clip(CircleShape)
-                                    .background(sourceDotColor(entry.kind)),
+                            Icon(
+                                imageVector = sourceIcon(entry.kind),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Column {
                                 Text(entry.name, style = MaterialTheme.typography.bodyMedium)
@@ -4260,13 +4284,29 @@ private fun SourceSwitchButton(
                 )
             }
             HorizontalDivider()
+            if (!komgaAdded) {
+                DropdownMenuItem(
+                    text = { Text("添加 Komga") },
+                    leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    onClick = {
+                        open = false
+                        onAddKomga()
+                    },
+                )
+            }
             DropdownMenuItem(
-                text = { Text("添加来源") },
+                text = { Text("添加 WebDAV") },
                 leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
                 onClick = {
                     open = false
                     onAddSource()
                 },
+            )
+            DropdownMenuItem(
+                text = { Text("添加 SMB（暂未支持）") },
+                enabled = false,
+                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                onClick = {},
             )
         }
     }
