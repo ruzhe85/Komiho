@@ -5,6 +5,7 @@ package app.mihonsy.komga.ui
 // dismiss（onDismissRequest），内部的 BackHandler 收不到事件，编辑页按返回会直接
 // 退回主页。这里渲染为宿主组合内的全屏 overlay（顶栏/底栏由调用方在流程打开时隐藏），
 // BackHandler 与主界面同组合且后注册，返回键逐层回退：表单页 → 类型选择页 → 关闭流程。
+// 视觉口径：SegmentedButton 选中 = 反色底 + 无 ✓（icon = {} 覆盖默认勾）；✓ 标记只用于来源菜单下拉的当前项。
 // 流程：类型选择页（本地 → Komga → WebDAV → SMB 卡片，各类型已添加来源列在卡片下方，
 // 编辑/删除为右侧图标按钮）→ 点卡片进对应表单页：
 //  - WebDAV 表单：来源名称 / 协议+服务器 / 端口 / 路径 / 账户 / 测试连接 / 取消·保存
@@ -492,6 +493,7 @@ private fun WebDavFormPage(
                         useHttps = false
                     },
                     shape = SegmentedButtonDefaults.itemShape(0, 2),
+                    icon = {},
                 ) { Text("HTTP", style = MaterialTheme.typography.bodySmall) }
                 SegmentedButton(
                     selected = useHttps,
@@ -501,6 +503,7 @@ private fun WebDavFormPage(
                         useHttps = true
                     },
                     shape = SegmentedButtonDefaults.itemShape(1, 2),
+                    icon = {},
                 ) { Text("HTTPS", style = MaterialTheme.typography.bodySmall) }
             }
             Spacer(Modifier.width(8.dp))
@@ -712,6 +715,7 @@ private fun KomgaFormPage(
                         useHttps = false
                     },
                     shape = SegmentedButtonDefaults.itemShape(0, 2),
+                    icon = {},
                 ) { Text("HTTP", style = MaterialTheme.typography.bodySmall) }
                 SegmentedButton(
                     selected = useHttps,
@@ -721,6 +725,7 @@ private fun KomgaFormPage(
                         useHttps = true
                     },
                     shape = SegmentedButtonDefaults.itemShape(1, 2),
+                    icon = {},
                 ) { Text("HTTPS", style = MaterialTheme.typography.bodySmall) }
             }
             Spacer(Modifier.width(8.dp))
@@ -748,11 +753,13 @@ private fun KomgaFormPage(
                 selected = authType == KomgaAuthType.BASIC,
                 onClick = { authType = KomgaAuthType.BASIC },
                 shape = SegmentedButtonDefaults.itemShape(0, 2),
+                icon = {},
             ) { Text(composeStringResource(R.string.addsrc_auth_basic), style = MaterialTheme.typography.bodySmall) }
             SegmentedButton(
                 selected = authType == KomgaAuthType.API_KEY,
                 onClick = { authType = KomgaAuthType.API_KEY },
                 shape = SegmentedButtonDefaults.itemShape(1, 2),
+                icon = {},
             ) { Text("API Key", style = MaterialTheme.typography.bodySmall) }
         }
 
