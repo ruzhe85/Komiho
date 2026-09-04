@@ -107,7 +107,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItemDefaults
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -4275,14 +4275,15 @@ private fun SourceSwitchButton(
                             Text(entry.name, style = MaterialTheme.typography.bodyMedium)
                         }
                     },
+                    // 选中反色：material3 无 DropdownMenuItemDefaults，用 MenuDefaults.itemColors().copy。
                     colors = if (selected) {
-                        DropdownMenuItemDefaults.menuItemColors(
+                        MenuDefaults.itemColors().copy(
                             containerColor = MaterialTheme.colorScheme.inverseSurface,
                             textColor = MaterialTheme.colorScheme.inverseOnSurface,
                             leadingIconColor = MaterialTheme.colorScheme.inverseOnSurface,
                         )
                     } else {
-                        DropdownMenuItemDefaults.menuItemColors()
+                        MenuDefaults.itemColors()
                     },
                     onClick = {
                         open = false

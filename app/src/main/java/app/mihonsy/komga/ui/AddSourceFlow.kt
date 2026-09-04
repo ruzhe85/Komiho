@@ -575,6 +575,9 @@ private fun WebDavFormPage(
         )
 
         Spacer(Modifier.height(16.dp))
+        // 测试结果文案在组合期取好（stringResource 是 @Composable，不能在 onClick lambda 里调）。
+        val okMsg = composeStringResource(R.string.addsrc_test_ok)
+        val failMsg = composeStringResource(R.string.addsrc_test_failed)
         OutlinedButton(
             onClick = {
                 val temp = WebDavConnection(
@@ -585,8 +588,6 @@ private fun WebDavFormPage(
                     // 编辑留空 = 沿用旧密码：直接带旧密文，decryptStored 兼容明文/密文两种形态。
                     passEnc = pass.ifBlank { existing?.passEnc.orEmpty() },
                 )
-                val okMsg = composeStringResource(R.string.addsrc_test_ok)
-                val failMsg = composeStringResource(R.string.addsrc_test_failed)
                 testing = true
                 testMsg = null
                 scope.launch {
@@ -795,11 +796,12 @@ private fun KomgaFormPage(
         }
 
         Spacer(Modifier.height(16.dp))
+        // 测试结果文案在组合期取好（stringResource 是 @Composable，不能在 onClick lambda 里调）。
+        val okMsg = composeStringResource(R.string.addsrc_test_ok)
+        val failMsg = composeStringResource(R.string.addsrc_test_failed)
         OutlinedButton(
             onClick = {
                 val conn = buildConn()
-                val okMsg = composeStringResource(R.string.addsrc_test_ok)
-                val failMsg = composeStringResource(R.string.addsrc_test_failed)
                 testing = true
                 testMsg = null
                 scope.launch {
