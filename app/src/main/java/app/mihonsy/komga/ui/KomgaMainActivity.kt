@@ -5279,6 +5279,18 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
 }
 
 
+// SY: WebDAV 目录的 href 普遍带尾斜杠（如 /dav/Comics/），resolveHref 原样保留 →
+// 直接 substringAfterLast('/') 会取到空串，恢复出来的面包屑按钮「无文字但能点」（URL 仍有效）。
+// 面包屑显示名统一走这里：先去掉尾斜杠再取末段、再 URL 解码，都取不到才回退完整路径。
+// SY -->
+private fun webDavCrumbName(url: String): String {
+    val trimmed = url.trimEnd('/')
+    val raw = trimmed.substringAfterLast('/')
+    val decoded = runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrNull()
+    return decoded?.takeIf { it.isNotBlank() } ?: raw.takeIf { it.isNotBlank() } ?: trimmed
+}
+// SY <--
+
 /** WebDAV 浏览页（Phase4 全局首页形态）：挂在 Browse tab 下，连接由顶栏来源按钮决定。
  *  UI 与本地文件浏览器同一套「列表模式」：面包屑（可点快速跳层）+ 列表/紧凑网格 +
  *  排序/显示选项（Tune）。显示模式/排序/列数为独立偏好（webdav_browse_*），不与本地浏览互串；
@@ -5318,11 +5330,7 @@ private fun WebDavBrowsePane(
             ?.filter { it.startsWith(conn.baseUrl) && it.length > conn.baseUrl.length }
             .orEmpty()
         mutableStateOf(
-            listOf(rootLabel to conn.baseUrl) + savedUrls.map { url ->
-                val name = runCatching { java.net.URLDecoder.decode(url.substringAfterLast('/'), "UTF-8") }
-                    .getOrNull() ?: url.substringAfterLast('/')
-                name to url
-            },
+            listOf(rootLabel to conn.baseUrl) + savedUrls.map { url -> webDavCrumbName(url) to url },
         )
     }
     val dirUrl = trail.last().second
@@ -5338,11 +5346,7 @@ private fun WebDavBrowsePane(
         val urls = target.removePrefix(conn.baseUrl).trim('/').split('/')
             .filter { it.isNotBlank() }
             .map { seg -> acc = "$acc/$seg"; acc }
-        trail = listOf(rootLabel to conn.baseUrl) + urls.map { url ->
-            val name = runCatching { java.net.URLDecoder.decode(url.substringAfterLast('/'), "UTF-8") }
-                .getOrNull() ?: url.substringAfterLast('/')
-            name to url
-        }
+        trail = listOf(rootLabel to conn.baseUrl) + urls.map { url -> webDavCrumbName(url) to url }
     }
 
     // SY: 目录变化即记忆（按连接一行存储，其余连接记录保留）。
