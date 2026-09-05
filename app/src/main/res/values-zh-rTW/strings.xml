@@ -144,7 +144,7 @@
     <string name="about_third_party">Komga 由 Gotson 開發，本應用程式透過 Komga API 與之互動；其餘第三方元件版權歸各自所有者所有。</string>
 
     <!-- 設定：書庫（原「主頁設定」） -->
-    <string name="settings_home">書庫</string>
+    <string name="settings_home">Komga</string>
     <string name="settings_home_summary">主頁、預覽圖與快取</string>
     <string name="settings_home_page">主頁</string>
     <string name="settings_home_page_summary">區塊調整與顯示</string>
