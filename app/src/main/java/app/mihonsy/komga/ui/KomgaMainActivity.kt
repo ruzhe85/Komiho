@@ -4735,7 +4735,13 @@ private fun LocalFileBrowser(
             ) {
                 // 面包屑根：全权限模式下 base 是卷根（内部存储 name 会是 "0"），
                 // 显示完整真实路径（如 /storage/emulated/0）；多于一个卷时可下拉切换。
-                TextButton(onClick = { navigateTo(emptyList()) }) {
+                // SY: 面包屑要的是「X/XX/XXX」紧凑结构 —— TextButton 默认左右 12dp 内边距会在
+                // 每层之间撑出空隙，这里清零；"/" 分隔符也不加 padding，紧贴前后文字。
+                // SY -->
+                TextButton(
+                    onClick = { navigateTo(emptyList()) },
+                    contentPadding = PaddingValues(horizontal = 0.dp),
+                ) {
                     Text(
                         text = if (hasAllFilesAccess) {
                             currentRootPath.ifBlank { storageRootLabel(currentRootPath) }
@@ -4788,7 +4794,10 @@ private fun LocalFileBrowser(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    TextButton(onClick = { navigateTo(stack.take(index + 1)) }) {
+                    TextButton(
+                        onClick = { navigateTo(stack.take(index + 1)) },
+                        contentPadding = PaddingValues(horizontal = 0.dp),
+                    ) {
                         Text(
                             text = seg,
                             style = MaterialTheme.typography.bodySmall,
@@ -5418,7 +5427,11 @@ private fun WebDavBrowsePane(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    TextButton(onClick = { trail = trail.take(index + 1) }) {
+                    // SY: 同本地浏览——面包屑要「X/XX/XXX」紧凑结构，清掉 TextButton 默认内边距。
+                    TextButton(
+                        onClick = { trail = trail.take(index + 1) },
+                        contentPadding = PaddingValues(horizontal = 0.dp),
+                    ) {
                         Text(
                             text = name,
                             style = MaterialTheme.typography.bodySmall,
