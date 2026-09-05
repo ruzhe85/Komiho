@@ -160,6 +160,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.rememberScrollState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
@@ -6047,7 +6048,6 @@ private data class MergedBook(
 )
 
 /** 历史 tab：按卷（chapterUrl）合并的最近阅读；3-dot 菜单提供「汇聚」与「删除记录」。 */
-@Composable
 // SY --> Komiho: 来源仪表盘（方案 B 启动首页）。
 // 每来源一张卡：类型图标 + 名称 + 阅读摘要。摘要统一取自本地历史库——
 // 本地/WebDAV 记录挂在 LocalSource.ID 下（chapterUrl 以 webdav: 前缀区分归属连接），
@@ -6223,6 +6223,7 @@ private fun SourceDashboardPane(
 }
 // SY <--
 
+@Composable
 private fun HistoryTabLocal(
     refreshTick: Int,
     onOpenLocation: (String) -> Unit,
