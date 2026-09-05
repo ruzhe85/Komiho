@@ -51,7 +51,6 @@
     <!-- 庫選擇 -->
     <string name="select_library">選擇庫</string>
     <string name="no_libraries">暫無庫</string>
-    <string name="library_drawer_title">庫</string>
     <string name="open_library_drawer">展開庫列表</string>
     <string name="close_library_drawer">收起庫列表</string>
     <string name="select_library_hint">請在頂部下拉選擇庫</string>
