@@ -1931,6 +1931,8 @@ private fun LibraryDrawerHost(
             gesturesEnabled = true,
             drawerContent = {
                 ModalDrawerSheet(
+                    // SY: 默认 360dp 在手机上几乎满屏，固定 280dp（与平板侧栏 260dp 视觉接近）。
+                    modifier = Modifier.width(280.dp),
                     drawerContainerColor = MaterialTheme.colorScheme.surface,
                 ) {
                     LibraryRail(
