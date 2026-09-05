@@ -533,7 +533,7 @@ private const val MAX_ZOOM_SCALE = 5F
  * crashes on those, so they must skip enhancement and use the standard path.
  * [BufferedSource.peek] does not consume the stream.
  */
-private fun isStandardImageStream(source: BufferedSource): Boolean {
+internal fun isStandardImageStream(source: BufferedSource): Boolean {
     return try {
         source.peek().use { peek ->
             val head = peek.readByteArray(16)

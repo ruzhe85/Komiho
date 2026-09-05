@@ -22,6 +22,8 @@ import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.withLock
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
 import kotlin.math.min
@@ -46,6 +48,14 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Configuration used by the pager, like allow taps, scale mode on images, page transitions...
      */
     val config = PagerConfig(this, scope)
+
+    // SY（A+B，Page 流畅度优化）：预处理结果缓存 + 相邻页预热。
+    // 借鉴 webtoon「解码好了等你滑」：翻页选定后，后台提前把相邻页的
+    // stream 物化/处理/增强预解码做完，holder 实例化时直接命中缓存。
+    val preparedCache = PagerPreparedCache()
+
+    /** 预热串行锁：避免前后两页同时跑 Lanczos 预解码打满 CPU（教训同 offscreen 调高）。 */
+    private val prewarmMutex = kotlinx.coroutines.sync.Mutex()
 
     /**
      * Adapter of the pager.
@@ -148,6 +158,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         }
 
         config.reloadChapterListener = {
+            preparedCache.clear() // SY: 章节重载（如加密包换密码）后旧预处理结果一律作废
             activity.reloadChapters(it)
         }
 
@@ -257,6 +268,37 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         if (inPreloadRange && allowPreload && page.chapter == adapter.currentChapter) {
             logcat { "Request preload next chapter because we're at page ${page.number} of ${pages.size}" }
             adapter.nextTransition?.to?.let(activity::requestPreloadChapter)
+        }
+
+        // SY（A）：相邻页预热（前+后各一页），解码好等用户翻
+        prewarmAdjacentPages()
+    }
+
+    /**
+     * 预热当前页相邻两页（offscreen=1 之外的"第 2 页"由此获得与 webtoon 同级的提前量）。
+     * 双页合并配置（pair.second != null）会命中副作用分支，预热无意义，跳过。
+     */
+    private fun prewarmAdjacentPages() {
+        val positions = listOf(pager.currentItem + 1, pager.currentItem - 1)
+        for (position in positions) {
+            val pair = adapter.joinedItems.getOrNull(position) ?: continue
+            if (pair.second != null) continue // 双页合并模式：纯管线放弃，预热无收益
+            val next = pair.first as? ReaderPage ?: continue
+            val key = preparedCache.key(next, pair.second as? ReaderPage)
+            if (preparedCache.get(key) != null) continue
+            scope.launchIO {
+                prewarmMutex.withLock {
+                    // 拿到锁后复查：可能已被相邻预热或 holder 计算填入
+                    if (preparedCache.get(key) != null) return@withLock
+                    val prepared = PagerPagePreparer.preparePure(
+                        viewer = this@PagerViewer,
+                        page = next,
+                        extraPage = pair.second as? ReaderPage,
+                        viewHeight = pager.height,
+                    )
+                    prepared?.let { preparedCache.put(key, it) }
+                }
+            }
         }
     }
 
@@ -400,6 +442,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      */
     private fun refreshAdapter() {
         val currentItem = pager.currentItem
+        preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
         adapter.refresh()
         pager.adapter = adapter
         pager.setCurrentItem(currentItem, false)
