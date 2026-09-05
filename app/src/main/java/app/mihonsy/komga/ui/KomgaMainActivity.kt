@@ -3684,6 +3684,9 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
     val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
     val storagePrefs = remember { Injekt.get<StoragePreferences>() }
     val webdavCacheDir = remember { File(context.cacheDir, "webdav_fallback") }
+    // SY --> Komiho Phase5: 页级缓存目录并入 usage 统计与清除（上限共用同一滑条值）。
+    val webdavPageCacheDir = remember { File(context.cacheDir, "webdav_pages") }
+    // SY <--
     var cacheMaxMb by remember {
         mutableStateOf(storagePrefs.webdavCacheMaxBytes.get() / (1024f * 1024f))
     }
@@ -3691,10 +3694,17 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
     var usageTick by remember { mutableStateOf(0) }
     LaunchedEffect(usageTick) {
         usageBytes = withContext(Dispatchers.IO) {
-            webdavCacheDir.listFiles()
+            val fallbackBytes = webdavCacheDir.listFiles()
                 ?.filter { it.isFile && it.name.startsWith("webdav_") && !it.name.endsWith(".part") }
                 ?.sumOf { it.length() }
                 ?: 0L
+            // SY --> Komiho Phase5: 页缓存（每书一目录）计入占用
+            val pageBytes = webdavPageCacheDir.listFiles()
+                ?.flatMap { it.listFiles()?.toList() ?: emptyList() }
+                ?.sumOf { it.length() }
+                ?: 0L
+            // SY <--
+            fallbackBytes + pageBytes
         }
     }
     val scope = rememberCoroutineScope()
@@ -3757,9 +3767,13 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 onClick = {
                     scope.launch {
                         val freed = withContext(Dispatchers.IO) {
-                            val total = webdavCacheDir.listFiles()?.sumOf { it.length() } ?: 0L
+                            // SY --> Komiho Phase5: 清除范围扩展到页缓存目录
+                            val fallbackTotal = webdavCacheDir.listFiles()?.sumOf { it.length() } ?: 0L
                             webdavCacheDir.listFiles()?.forEach { it.delete() }
-                            total
+                            val pageTotal = webdavPageCacheDir.listFiles()?.sumOf { it.length() } ?: 0L
+                            webdavPageCacheDir.deleteRecursively()
+                            // SY <--
+                            fallbackTotal + pageTotal
                         }
                         usageTick++
                         android.widget.Toast.makeText(

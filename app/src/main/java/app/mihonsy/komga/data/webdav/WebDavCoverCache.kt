@@ -86,7 +86,7 @@ object WebDavCoverCache {
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
             cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
         )
-        val handle: ArchiveHandle = try {
+        val delegate: ArchiveHandle = try {
             WebDavZipReader(source)
         } catch (e: Exception) {
             // 与 ChapterLoader 同款回落：中央目录直读不支持 → libarchive 回调路径。
@@ -95,6 +95,18 @@ object WebDavCoverCache {
                 throw err
             }
         }
+        // SY --> Komiho Phase5: 封面生成同样吃页级缓存（首图已缓存则零网络）。
+        val handle: ArchiveHandle = CachingArchiveHandle(
+            delegate = delegate,
+            cache = WebDavPageCache(
+                root = File(context.cacheDir, "webdav_pages"),
+                maxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+            ),
+            metaKey = {
+                source.remoteFingerprint?.let { fp -> "${source.normalizedUrl}|$fp" }
+            },
+        )
+        // SY <--
         handle.use { h ->
             // 加密包：无密码（null）或密码错误（true）时首图读不出来，直接放弃
             //（阅读器会弹密码框，输对后下次打开自然能生成）。

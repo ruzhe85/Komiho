@@ -7,6 +7,8 @@ import eu.kanade.tachiyomi.data.download.DownloadProvider
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavCoverCache
+import app.mihonsy.komga.data.webdav.CachingArchiveHandle
+import app.mihonsy.komga.data.webdav.WebDavPageCache
 import app.mihonsy.komga.source.KomgaSource
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
@@ -218,12 +220,25 @@ class ChapterLoader(
         // （独立连接、失败静默、成功后历史/书签行零请求显示，见 WebDavCoverCache）。
         WebDavCoverCache.generateAsync(context, remoteUrl)
         // SY <--
-        return try {
+        val delegate: ArchiveHandle = try {
             WebDavZipReader(source)
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "WebDavZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
             ArchiveReader(source)
         }
+        // SY --> Komiho Phase5: 页级磁盘缓存装饰器——回翻/重开章节零网络；
+        // rar/7z 强制整本回退时 source.remoteFingerprint 指向整本文件，页缓存自动停用。
+        return CachingArchiveHandle(
+            delegate = delegate,
+            cache = WebDavPageCache(
+                root = File(context.cacheDir, "webdav_pages"),
+                maxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+            ),
+            metaKey = {
+                source.remoteFingerprint?.let { fp -> "${source.normalizedUrl}|$fp" }
+            },
+        )
+        // SY <--
     }
     // SY <--
 }

@@ -301,8 +301,8 @@
     <string name="storage_all_files_access">All-files access</string>
     <string name="storage_perm_granted_desc">Granted: local browsing uses real paths (faster lists/covers/reading)</string>
     <string name="storage_perm_denied_desc">Not granted: local browsing uses SAF. Granting speeds it up greatly</string>
-    <string name="storage_webdav_cache">WebDAV whole-file cache</string>
-    <string name="storage_webdav_cache_desc">rar/7z remote archives are cached whole when opened (zip/cbz use none);\noldest entries are evicted above the limit. Lowering the limit applies on next download.</string>
+    <string name="storage_webdav_cache">WebDAV cache</string>
+    <string name="storage_webdav_cache_desc">zip/cbz pages you have read are cached on disk (zero network on revisit); rar/7z archives are cached whole when opened;\nshared limit, oldest entries evicted above it. Lowering the limit applies on next write.</string>
     <string name="storage_cache_limit">Limit: </string>
     <string name="storage_cache_range">200 MB – 4 GB, 200 MB steps (default 1 GB)</string>
     <string name="storage_cache_usage">Used: </string>

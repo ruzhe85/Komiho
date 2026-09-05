@@ -298,8 +298,8 @@
     <string name="storage_all_files_access">所有檔案存取權限</string>
     <string name="storage_perm_granted_desc">已授權：本地瀏覽使用真實路徑（列表/封面/閱讀更快）</string>
     <string name="storage_perm_denied_desc">未授權：本地瀏覽使用 SAF。授權後可大幅提速</string>
-    <string name="storage_webdav_cache">WebDAV 整本快取</string>
-    <string name="storage_webdav_cache_desc">rar/7z 遠端壓縮包開啟時整本快取到本地（zip/cbz 不佔用）；\n超過上限自動淘汰最舊，降低上限後在下一次下載時生效。</string>
+    <string name="storage_webdav_cache">WebDAV 快取</string>
+    <string name="storage_webdav_cache_desc">zip/cbz 按頁快取已讀圖片（回翻/重開零流量）；rar/7z 開啟時整本快取到本地；\n共用上限，超限自動淘汰最舊，降低上限後在下一次寫入時生效。</string>
     <string name="storage_cache_limit">上限：</string>
     <string name="storage_cache_range">200 MB — 4 GB，200 MB 一檔（預設 1 GB）</string>
     <string name="storage_cache_usage">目前佔用：</string>

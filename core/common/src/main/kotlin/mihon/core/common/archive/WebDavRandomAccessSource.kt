@@ -60,6 +60,22 @@ class WebDavRandomAccessSource(
     private fun remoteExt(): String =
         requestUrl.substringBefore('?').substringAfterLast('/').substringAfterLast('.', "").lowercase()
 
+    // SY --> Komiho Phase5：页级磁盘缓存的失效键素材。
+    /** 规范化 URL（页缓存按它分书目录；阅读器与封面缓存共用同一键）。 */
+    val normalizedUrl: String get() = requestUrl
+
+    /** rar/7z 强制整本回退时页缓存不启用（整本已落盘，页缓存只会双份占空间）。 */
+    val isForcedFallback: Boolean get() = forceFallback
+
+    /**
+     * 探测完成后的远程文件指纹（`size:Last-Modified`；无 Last-Modified 时为 `size:`）。
+     * 页缓存以此判断「远程文件是否被替换」；null = 尚未探测（调用方此时不应读写页缓存）。
+     */
+    @Volatile
+    var remoteFingerprint: String? = null
+        private set
+    // SY <--
+
     private val authHeader: String? =
         if (username.isNullOrEmpty() && password.isNullOrEmpty()) {
             null
@@ -155,6 +171,7 @@ class WebDavRandomAccessSource(
                 val file = ensureFallbackFile()
                 fallback = LocalRandomAccessSource(file)
                 total = file.length()
+                remoteFingerprint = "${file.length()}:${file.lastModified()}"
                 probed = true
                 return
             }
@@ -169,6 +186,7 @@ class WebDavRandomAccessSource(
                         // Content-Range: bytes 0-0/<total>
                         total = resp.header("Content-Range")?.substringAfterLast('/')?.toLongOrNull()
                             ?: throw IOException("WebDAV 206 未返回 Content-Range: $requestUrl")
+                        remoteFingerprint = "$total:${resp.header("Last-Modified").orEmpty()}"
                     } else {
                         // 不支持 Range：整本流式落盘（本次响应体即全量数据，直接消费）
                         // → 本地随机读回退（不崩，代价全量下载）
@@ -184,6 +202,7 @@ class WebDavRandomAccessSource(
                         tmp.renameTo(file)
                         fallback = LocalRandomAccessSource(file)
                         total = file.length()
+                        remoteFingerprint = "${file.length()}:${file.lastModified()}"
                     }
                 }
             } finally {
