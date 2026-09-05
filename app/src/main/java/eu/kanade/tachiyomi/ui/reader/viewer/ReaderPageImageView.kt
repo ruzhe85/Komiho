@@ -235,9 +235,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
      * MihonSY: shows the enhancement outcome badge. Success shows the real elapsed
      * time; failure/skip shows 跳过. No-op unless enhancement is on AND the status
      * toggle is on. Enhancement itself runs synchronously inside the Coil decoder,
-     * so this is only called from the Coil success/error listeners.
+     * so this is only called from the Coil success/error listeners — plus
+     * PagerPageHolder for the pre-decoded bitmap path (SY: Page 优化，耗时来自预处理阶段).
      */
-    private fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
+    internal fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0 || !preferences.showEnhancementStatus.get()) return
         val tv = ensureEnhanceStatusView()

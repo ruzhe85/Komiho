@@ -39,11 +39,17 @@ import uy.kohesive.injekt.api.get
  */
 class PagerPreparedPage(
     val source: BufferedSource,
+    /** 双页合并的原始第二页流；仅 [layoutApplied]=false 的合并分支缓存它，供 holder 补跑布局。 */
+    val source2: BufferedSource?,
     val isAnimated: Boolean,
     val background: Drawable?,
     val decodedBitmap: Bitmap?,
     val enhancementMode: Int,
     val cropBorders: Boolean,
+    /** 增强预解码耗时（毫秒）；-1 = 未走预解码（关闭/动图/失败/布局未应用）。 */
+    val enhanceElapsedMillis: Long,
+    /** false = 仅完成通用预处理（流物化+嗅探），布局处理（分割/合并）留待 holder 补跑。 */
+    val layoutApplied: Boolean,
 )
 
 /**
@@ -83,14 +89,15 @@ class PagerPreparedCache(private val maxSize: Int = 3) {
 /**
  * 纯 Prepare 管线（无任何副作用），holder 与后台预热共用。
  *
- * 与 holder 内旧管线的唯一区别：所有带副作用的分支（双页分割宽页的 onPageSplit、
- * 双页合并的 fullPage/splitDoublePages）在这里直接返回 null——预热方放弃、holder
- * 回退到旧管线。常规单页配置（绝大多数场景）完全走本管线。
+ * C 方案分层：所有页都完成「通用预处理」（流物化 + 动图嗅探）；能无副作用完成布局
+ * （process/merge 的纯分支）的页继续做背景选择 + 增强预解码（layoutApplied=true）；
+ * 副作用分支（双页分割 onPageSplit、双页合并 splitDoublePages）返回 layoutApplied=false
+ * 的通用预处理结果，布局处理由 holder 补跑（applyLegacyLayout）。
  */
 object PagerPagePreparer {
 
     /**
-     * 处理一页并返回可缓存的预处理结果；返回 null 表示命中副作用分支（或流不可用）。
+     * 处理一页并返回预处理结果；返回 null 仅表示流不可用或管线异常（此时 holder 走完整旧管线）。
      * [viewHeight] 用于宽页居中边距计算；holder 传自身高度，预热传 pager 高度（两者等高）。
      */
     suspend fun preparePure(
@@ -111,23 +118,42 @@ object PagerPagePreparer {
                 val isAnimated = ImageUtil.isAnimatedAndSupported(source1) ||
                     (source2 != null && ImageUtil.isAnimatedAndSupported(source2))
 
-                val itemSource: BufferedSource = if (config.dualPageSplit) {
-                    processPure(viewer, page, source1) ?: return@withIOContext null
+                if (config.dualPageSplit) {
+                    val itemSource = processPure(viewer, page, source1)
+                        // C 方案：副作用分支（宽图分割需 onPageSplit 插 InsertPage）——
+                        // 通用预处理照常缓存，布局处理留给 holder 补跑；增强预解码跳过
+                        //（预解码输入须是布局后的半图，整图比例对不上）。
+                        ?: return@withIOContext PagerPreparedPage(
+                            source = source1,
+                            source2 = null,
+                            isAnimated = isAnimated,
+                            background = null,
+                            decodedBitmap = null,
+                            enhancementMode = enhancementMode,
+                            cropBorders = config.imageCropBorders,
+                            enhanceElapsedMillis = -1L,
+                            layoutApplied = false,
+                        )
+                    finishLayout(viewer, itemSource, isAnimated, enhancementMode, config)
                 } else {
-                    mergePure(viewer, page, extraPage, source1, source2, isAnimated, viewHeight)
-                        ?: return@withIOContext null
+                    val itemSource = mergePure(viewer, page, extraPage, source1, source2, isAnimated, viewHeight)
+                    if (itemSource == null) {
+                        // C 方案：合并分支（splitDoublePages 副作用）——同上，缓存通用预处理结果
+                        PagerPreparedPage(
+                            source = source1,
+                            source2 = source2,
+                            isAnimated = isAnimated,
+                            background = null,
+                            decodedBitmap = null,
+                            enhancementMode = enhancementMode,
+                            cropBorders = config.imageCropBorders,
+                            enhanceElapsedMillis = -1L,
+                            layoutApplied = false,
+                        )
+                    } else {
+                        finishLayout(viewer, itemSource, isAnimated, enhancementMode, config)
+                    }
                 }
-
-                val background = if (!isAnimated && config.automaticBackground) {
-                    ImageUtil.chooseBackground(viewer.activity, itemSource.peek())
-                } else {
-                    null
-                }
-
-                // A：增强开启时预解码到屏幕尺寸（Lanczos 同步在解码器内完成），滑动前就绪
-                val bitmap = maybePreDecodeEnhanced(viewer, itemSource, isAnimated, enhancementMode, config.imageCropBorders)
-
-                PagerPreparedPage(itemSource, isAnimated, background, bitmap, enhancementMode, config.imageCropBorders)
             } catch (e: kotlin.coroutines.cancellation.CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -137,7 +163,35 @@ object PagerPagePreparer {
         }
     }
 
-    /** 对应 PagerPageHolder.process() 的纯版本：宽页分割需回调 onPageSplit → 纯管线放弃。 */
+    /** 布局完成后的收尾：背景选择 + 计时的增强预解码（A）。 */
+    private suspend fun finishLayout(
+        viewer: PagerViewer,
+        itemSource: BufferedSource,
+        isAnimated: Boolean,
+        enhancementMode: Int,
+        config: PagerConfig,
+    ): PagerPreparedPage {
+        val background = if (!isAnimated && config.automaticBackground) {
+            ImageUtil.chooseBackground(viewer.activity, itemSource.peek())
+        } else {
+            null
+        }
+        val decodeStart = android.os.SystemClock.uptimeMillis()
+        val bitmap = maybePreDecodeEnhanced(viewer, itemSource, isAnimated, enhancementMode, config.imageCropBorders)
+        return PagerPreparedPage(
+            source = itemSource,
+            source2 = null,
+            isAnimated = isAnimated,
+            background = background,
+            decodedBitmap = bitmap,
+            enhancementMode = enhancementMode,
+            cropBorders = config.imageCropBorders,
+            enhanceElapsedMillis = if (bitmap != null) android.os.SystemClock.uptimeMillis() - decodeStart else -1L,
+            layoutApplied = true,
+        )
+    }
+
+    /** 对应 PagerPageHolder.process() 的纯版本：宽页分割需回调 onPageSplit → 返回 null（holder 补跑布局）。 */
     private fun processPure(viewer: PagerViewer, page: ReaderPage, imageSource: BufferedSource): BufferedSource? {
         val config = viewer.config
         if (config.dualPageRotateToFit) {
@@ -161,7 +215,7 @@ object PagerPagePreparer {
         return null
     }
 
-    /** 对应 PagerPageHolder.mergePages() 的纯版本：双页合并全程有副作用 → 放弃。 */
+    /** 对应 PagerPageHolder.mergePages() 的纯版本：合并全程有副作用 → 返回 null（holder 补跑布局）。 */
     private fun mergePure(
         viewer: PagerViewer,
         page: ReaderPage,
