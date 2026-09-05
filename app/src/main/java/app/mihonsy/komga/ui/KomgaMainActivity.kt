@@ -5545,10 +5545,27 @@ private fun webDavEntryComparator(sort: LocalFileSort): Comparator<WebDavEntry> 
     return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
 }
 
-/** 章节 URL → 来源标识（历史/书签共用存储，靠前缀区分展示）：webdav:/smb: 为远程来源，其余为本地路径。 */
+/** 章节 URL → 来源显示名（历史/书签共用存储，靠前缀区分）。
+ *  SY: 远程条目显示**来源名称**（WebDAV 连接名，如「QNAP」）而非硬编码协议名；
+ *  找不到连接（已删除 / 旧数据）才回落协议名。连接列表由调用方一次性快照传入——
+ *  WebDavConnectionStore.all() 要读偏好 + JSON 解析，逐行调用太重。 */
 @Composable
-private fun chapterSourceLabel(chapterUrl: String): String = when {
-    chapterUrl.startsWith("webdav:") -> "WebDAV"
+private fun chapterSourceLabel(
+    chapterUrl: String,
+    webDavConns: List<WebDavConnection>,
+): String = when {
+    chapterUrl.startsWith(WebDavConnectionStore.CONN_URL_PREFIX) -> {
+        // 新格式 webdav://<connId>/<URL>：connId 精确匹配
+        val connId = chapterUrl.removePrefix(WebDavConnectionStore.CONN_URL_PREFIX).substringBefore('/')
+        webDavConns.firstOrNull { it.id == connId }?.displayName() ?: "WebDAV"
+    }
+    chapterUrl.startsWith("webdav:") -> {
+        // 旧格式 webdav:<URL>：baseUrl 最长前缀匹配
+        val fullUrl = WebDavConnectionStore.extractFullUrl(chapterUrl)
+        webDavConns.filter { fullUrl.startsWith(it.baseUrl) }
+            .maxByOrNull { it.baseUrl.length }
+            ?.displayName() ?: "WebDAV"
+    }
     chapterUrl.startsWith("smb:") -> "SMB"
     else -> composeStringResource(R.string.source_local)
 }
@@ -5839,7 +5856,13 @@ private fun LocalFileRow(
                             text = sourceBadge,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                            // SY: 来源名称可能很长（连接名，或无名时回退 baseUrl），
+                            // 限宽 + 省略号，避免把标题和三点菜单挤出屏幕。
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .widthIn(max = 96.dp)
+                                .padding(horizontal = 5.dp, vertical = 1.dp),
                         )
                     }
                 }
@@ -5953,6 +5976,12 @@ private fun HistoryTabLocal(
         historyRepo.getHistoryBySourceDetailed(LocalSource.ID)
     }.collectAsState(emptyList())
 
+    // SY: 来源名称（WebDAV 连接名）快照——WebDavConnectionStore.all() 读偏好 + JSON 解析，
+    // 走 IO 线程取一次给整列表用，避免每行重复读盘。
+    val webDavConns by produceState(emptyList<WebDavConnection>(), refreshTick, queryTick) {
+        value = withContext(Dispatchers.IO) { WebDavConnectionStore.all() }
+    }
+
     // 按「卷/文件」(chapterUrl) 合并：每卷取最近一次阅读作为代表，保留全部阅读会话供「汇聚」对话框。
     // 注意：本地模型 series=manga、volume=chapter，用 mangaId 聚合会把整系列压成一行，故用 chapterUrl。
     val merged = remember(items) {
@@ -5998,7 +6027,7 @@ private fun HistoryTabLocal(
                 context = context,
                 title = volumeTitle,
                 subtitle = subtitle,
-                sourceBadge = chapterSourceLabel(rep.chapterUrl),
+                sourceBadge = chapterSourceLabel(rep.chapterUrl, webDavConns),
                 fileSize = stat.size,
                 // 文件修改时间对远程章节无意义，行内改显最后阅读时间
                 dateTime = rep.readAt?.time ?: 0L,
@@ -6137,6 +6166,11 @@ private fun BookmarksTabLocal(
     var loading by remember { mutableStateOf(true) }
     var expanded by remember { mutableStateOf<Set<Long>>(emptySet()) }
 
+    // SY: 同历史 tab——来源名称（WebDAV 连接名）快照，IO 线程取一次给整列表用。
+    val webDavConns by produceState(emptyList<WebDavConnection>(), refreshTick) {
+        value = withContext(Dispatchers.IO) { WebDavConnectionStore.all() }
+    }
+
     fun load() {
         scope.launch {
             loading = true
@@ -6202,7 +6236,7 @@ private fun BookmarksTabLocal(
                         context = context,
                         title = first.mangaTitle,
                         subtitle = composeStringResource(R.string.bookmarks_count_subtitle, chapterText, bms.size),
-                        sourceBadge = chapterSourceLabel(first.chapterUrl),
+                        sourceBadge = chapterSourceLabel(first.chapterUrl, webDavConns),
                         fileSize = stat.size,
                         // 文件修改时间对远程章节无意义，行内改显最后阅读时间
                         dateTime = first.lastRead?.time ?: 0L,
