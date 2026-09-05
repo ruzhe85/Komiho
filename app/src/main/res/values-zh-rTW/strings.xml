@@ -4,6 +4,11 @@
 
     <!-- 底部導覽 tab -->
     <string name="tab_home">主頁</string>
+    <!-- SY: Komiho 來源儀表板 -->
+    <string name="tab_sources">來源</string>
+    <string name="dashboard_summary">讀過 %1$d 本</string>
+    <string name="dashboard_komga_hint">點按進入 Komga 首頁</string>
+    <string name="dashboard_no_history">尚未有閱讀記錄</string>
     <string name="tab_library">庫</string>
     <string name="tab_lists">列表</string>
     <string name="tab_downloads">下載</string>

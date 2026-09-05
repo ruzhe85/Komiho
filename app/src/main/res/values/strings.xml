@@ -5,6 +5,11 @@
 
     <!-- 底部导航 tab -->
     <string name="tab_home">主页</string>
+    <!-- SY: Komiho 来源仪表盘 -->
+    <string name="tab_sources">来源</string>
+    <string name="dashboard_summary">读过 %1$d 本</string>
+    <string name="dashboard_komga_hint">点按进入 Komga 首页</string>
+    <string name="dashboard_no_history">尚未有阅读记录</string>
     <string name="tab_library">库</string>
     <string name="tab_lists">列表</string>
     <string name="tab_downloads">下载</string>

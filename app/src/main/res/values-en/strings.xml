@@ -4,6 +4,11 @@
 
     <!-- Bottom nav tabs -->
     <string name="tab_home">Home</string>
+    <!-- SY: Komiho source dashboard -->
+    <string name="tab_sources">Sources</string>
+    <string name="dashboard_summary">%1$d books read</string>
+    <string name="dashboard_komga_hint">Tap to open the Komga home</string>
+    <string name="dashboard_no_history">No reading history yet</string>
     <string name="tab_library">Library</string>
     <string name="tab_lists">Lists</string>
     <string name="tab_downloads">Downloads</string>
