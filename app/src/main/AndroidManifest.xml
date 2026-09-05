@@ -42,6 +42,34 @@
         android:name="android.permission.ACCESS_ADSERVICES_AD_ID"
         tools:node="remove" />
 
+    <!-- Komiho: 移除第三方 AAR 合并进来的死权限——
+         CAMERA 来自 zxing-android-embedded（仅用其 Intents 常量类，无扫码功能）；
+         SYSTEM_ALERT_WINDOW 来自 Shizuku api（无悬浮窗代码）；
+         QUERY_ALL_PACKAGES 为扩展扫描遗留（扩展组已隐藏，纯 Komga 客户端不保留）。 -->
+    <uses-permission
+        android:name="android.permission.CAMERA"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.SYSTEM_ALERT_WINDOW"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:node="remove" />
+
+    <!-- Komiho: 包可见性白名单（替代 QUERY_ALL_PACKAGES）——
+         WebViewUtil.spoofedPackageName 需要看见 chrome/系统设置/YT-TV，
+         VIEW+https 让各浏览器/WebView provider 可见。 -->
+    <queries>
+        <package android:name="com.google.android.webview" />
+        <package android:name="com.android.chrome" />
+        <package android:name="com.android.settings" />
+        <package android:name="com.google.android.youtube.tv" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <application
         android:name=".App"
         android:allowBackup="false"
