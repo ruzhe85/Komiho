@@ -168,7 +168,10 @@ object SettingsAdvancedScreen : SearchableSettings {
             getLibraryGroup(libraryPreferences = libraryPreferences),
             getDownloadsGroup(downloadPreferences = downloadPreferences),
             getReaderGroup(basePreferences = basePreferences),
-            getExtensionsGroup(basePreferences = basePreferences),
+            // SY --> Komiho: 纯 Komga 客户端不保留扩展能力——扩展组隐藏
+            //（QUERY_ALL_PACKAGES 权限同步移除，扩展扫描无包可见）。回滚取消注释即可。
+            // getExtensionsGroup(basePreferences = basePreferences),
+            // SY <--
             // SY -->
             // getDownloaderGroup(),
             getDataSaverGroup(),
