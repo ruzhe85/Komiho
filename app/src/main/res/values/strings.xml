@@ -307,8 +307,8 @@
     <string name="storage_all_files_access">所有文件访问权限</string>
     <string name="storage_perm_granted_desc">已授权：本地浏览使用真实路径（列表/封面/阅读更快）</string>
     <string name="storage_perm_denied_desc">未授权：本地浏览使用 SAF。授权后可大幅提速</string>
-    <string name="storage_webdav_cache">WebDAV 整本缓存</string>
-    <string name="storage_webdav_cache_desc">rar/7z 远程压缩包打开时整本缓存到本地（zip/cbz 不占用）；\n超过上限自动淘汰最旧，降低上限后在下一次下载时生效。</string>
+    <string name="storage_webdav_cache">WebDAV 缓存</string>
+    <string name="storage_webdav_cache_desc">zip/cbz 按页缓存已读图片（回翻/重开零流量）；rar/7z 打开时整本缓存到本地；\n共用上限，超限自动淘汰最旧，降低上限后在下一次写入时生效。</string>
     <string name="storage_cache_limit">上限：</string>
     <string name="storage_cache_range">200 MB — 4 GB，200 MB 一档（默认 1 GB）</string>
     <string name="storage_cache_usage">当前占用：</string>
