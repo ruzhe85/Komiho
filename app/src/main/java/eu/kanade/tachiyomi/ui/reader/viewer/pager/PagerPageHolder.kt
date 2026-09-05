@@ -174,8 +174,9 @@ class PagerPageHolder(
         // SY（A+B+C，Page 流畅度优化）：
         // 1) 命中预处理缓存（预热/上次离开时算好的整图+标志+可能的增强预解码位图）→ 直接应用；
         // 2) 未命中走纯管线（PagerPagePreparer，无副作用）并把结果入缓存（B: 回翻/重建复用）；
-        // 3) 纯管线放弃的副作用分支（双页分割 onPageSplit / 合并 splitDoublePages）回退旧管线，
-        //    旧管线结果同样入缓存。
+        // 3) C 方案：副作用分支（双页分割 onPageSplit / 合并 splitDoublePages）不再整体放弃——
+        //    纯管线缓存「通用预处理」（流物化+嗅探，layoutApplied=false），此处补跑布局；
+        // 4) 补跑失败才回退完整旧管线 prepareLegacy（从流重新读取）。
         val key = viewer.preparedCache.key(page, extraPage)
         var prepared = viewer.preparedCache.get(key)
         if (prepared == null) {
@@ -185,6 +186,9 @@ class PagerPageHolder(
                 extraPage = extraPage,
                 viewHeight = if (height > 0) height else viewer.pager.height,
             )
+        }
+        if (prepared != null && !prepared.layoutApplied) {
+            prepared = applyLegacyLayout(prepared)
         }
         if (prepared == null) {
             try {
@@ -208,6 +212,8 @@ class PagerPageHolder(
                     android.graphics.drawable.BitmapDrawable(resources, bitmap),
                     viewerImageConfig(),
                 )
+                // SY: 预解码路径补发增强角标（现场解码路径由 SSIV 的 Coil 回调触发）
+                showEnhancementOutcome(success = true, elapsedMillis = result.enhanceElapsedMillis)
             } else {
                 setImage(result.source.peek(), result.isAnimated, viewerImageConfig())
             }
@@ -267,12 +273,54 @@ class PagerPageHolder(
         }
         return PagerPreparedPage(
             source = source,
+            source2 = null,
             isAnimated = isAnimated,
             background = background,
             decodedBitmap = null,
             enhancementMode = Injekt.get<ReaderPreferences>().enhancementMode.get(),
             cropBorders = viewer.config.imageCropBorders,
+            enhanceElapsedMillis = -1L,
+            layoutApplied = true,
         )
+    }
+
+    /**
+     * SY（C 方案）：为「通用预处理已完成、布局未应用」（layoutApplied=false）的结果补跑
+     * 旧布局管线（双页分割 onPageSplit / 合并 splitDoublePages 等副作用保留在本 holder）。
+     * 输入流已物化（免重复 IO），失败返回 null，由调用方回退完整 prepareLegacy。
+     */
+    private suspend fun applyLegacyLayout(raw: PagerPreparedPage): PagerPreparedPage? {
+        return try {
+            val itemSource = withIOContext {
+                if (viewer.config.dualPageSplit) {
+                    process(page, raw.source)
+                } else {
+                    mergePages(raw.source, raw.source2)
+                }
+            }
+            val isAnimated = ImageUtil.isAnimatedAndSupported(itemSource)
+            val background = if (!isAnimated && viewer.config.automaticBackground) {
+                ImageUtil.chooseBackground(context, itemSource.peek())
+            } else {
+                null
+            }
+            PagerPreparedPage(
+                source = itemSource,
+                source2 = null,
+                isAnimated = isAnimated,
+                background = background,
+                decodedBitmap = null,
+                enhancementMode = Injekt.get<ReaderPreferences>().enhancementMode.get(),
+                cropBorders = viewer.config.imageCropBorders,
+                enhanceElapsedMillis = -1L,
+                layoutApplied = true,
+            )
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            logcat(LogPriority.ERROR, e) { "pager applyLegacyLayout failed, falling back to full legacy" }
+            null
+        }
     }
 
     private fun process(page: ReaderPage, imageSource: BufferedSource): BufferedSource {
