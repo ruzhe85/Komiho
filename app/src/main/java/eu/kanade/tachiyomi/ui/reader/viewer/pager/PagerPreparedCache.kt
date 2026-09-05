@@ -194,7 +194,7 @@ object PagerPagePreparer {
             config.centerMarginType and PagerConfig.CenterMarginType.WIDE_PAGE_CENTER_MARGIN > 0 &&
             !config.imageCropBorders
         ) {
-            ImageUtil.addHorizontalCenterMargin(imageSource, viewHeight, viewer.context)
+            ImageUtil.addHorizontalCenterMargin(imageSource, viewHeight, viewer.activity)
         } else {
             imageSource
         }
@@ -243,7 +243,7 @@ object PagerPagePreparer {
         val height = viewer.pager.height
         if (width <= 0 || height <= 0) return null
         return runCatching {
-            val context = viewer.context
+            val context = viewer.activity
             val request = ImageRequest.Builder(context)
                 .data(source.peek())
                 .memoryCachePolicy(CachePolicy.DISABLED)
