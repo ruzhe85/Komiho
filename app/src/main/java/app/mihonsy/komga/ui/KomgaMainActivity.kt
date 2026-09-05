@@ -212,6 +212,9 @@ import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
 import mihon.core.designsystem.utils.isMediumWidthWindow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -611,6 +614,8 @@ private fun KomgaMainScreen(
     // switches the active library in place (no dialog, no extra screen).
     var libraries by remember { mutableStateOf<List<LibraryDto>>(emptyList()) }
     var selectedLibraryId by remember { mutableStateOf<String?>(null) }
+    // SY: 每库合计书籍数（Komiho 口径 Series=书；size=1 只取 totalElements）。
+    var libraryCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     // 库切换控件（方案 B）：手机 = 临时 modal 抽屉；平板 = 可收起常驻侧栏。
     var libraryDrawerOpen by rememberSaveable { mutableStateOf(false) }
     var libraryRailOpen by rememberSaveable { mutableStateOf(true) }
@@ -624,6 +629,17 @@ private fun KomgaMainScreen(
                     libraries = libs
                     if (selectedLibraryId == null) {
                         selectedLibraryId = libs.firstOrNull()?.id
+                    }
+                    // SY: 并发拉每库系列数（size=1 只为 totalElements），失败留空不阻塞库列表。
+                    libraryCounts = coroutineScope {
+                        libs.map { lib ->
+                            async {
+                                runCatching { client.getSeries(libraryId = lib.id, size = 1) }
+                                    .getOrNull()?.totalElements
+                            }
+                        }.awaitAll()
+                            .mapIndexed { i, count -> libs[i].id to (count ?: 0) }
+                            .toMap()
                     }
                 }
         }
@@ -903,6 +919,7 @@ private fun KomgaMainScreen(
                             onDrawerOpenChange = { libraryDrawerOpen = it },
                             railOpen = libraryRailOpen,
                             libraries = libraries,
+                            libraryCounts = libraryCounts,
                             selectedLibraryId = selectedLibraryId,
                             currentName = currentLibName,
                             onSelect = { id ->
@@ -1902,6 +1919,7 @@ private fun LibraryDrawerHost(
     onDrawerOpenChange: (Boolean) -> Unit,
     railOpen: Boolean,
     libraries: List<LibraryDto>,
+    libraryCounts: Map<String, Int>,
     selectedLibraryId: String?,
     currentName: String?,
     onSelect: (String) -> Unit,
@@ -1913,6 +1931,7 @@ private fun LibraryDrawerHost(
             if (railOpen) {
                 LibraryRail(
                     libraries = libraries,
+                    libraryCounts = libraryCounts,
                     selectedLibraryId = selectedLibraryId,
                     onSelect = onSelect,
                     modifier = Modifier
@@ -1947,6 +1966,7 @@ private fun LibraryDrawerHost(
                 ) {
                     LibraryRail(
                         libraries = libraries,
+                        libraryCounts = libraryCounts,
                         selectedLibraryId = selectedLibraryId,
                         onSelect = onSelect,
                         modifier = Modifier.fillMaxHeight(),
@@ -1962,6 +1982,7 @@ private fun LibraryDrawerHost(
 @Composable
 private fun LibraryRail(
     libraries: List<LibraryDto>,
+    libraryCounts: Map<String, Int>,
     selectedLibraryId: String?,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -1986,6 +2007,7 @@ private fun LibraryRail(
                 items(libraries, key = { it.id }) { lib ->
                     LibraryRailItem(
                         lib = lib,
+                        count = libraryCounts[lib.id],
                         selected = lib.id == selectedLibraryId,
                         onClick = { onSelect(lib.id) },
                     )
@@ -1998,6 +2020,7 @@ private fun LibraryRail(
 @Composable
 private fun LibraryRailItem(
     lib: LibraryDto,
+    count: Int?,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -2019,7 +2042,18 @@ private fun LibraryRailItem(
                 color = if (selected) colors.onPrimaryContainer else colors.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            // SY: 库内合计书籍数（Series 口径）；未拉到不显示占位。
+            if (count != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = count.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (selected) colors.onPrimaryContainer.copy(alpha = 0.7f)
+                    else colors.onSurfaceVariant,
+                )
+            }
         }
     }
 }
