@@ -1916,7 +1916,7 @@ private fun LibraryDrawerHost(
                     selectedLibraryId = selectedLibraryId,
                     onSelect = onSelect,
                     modifier = Modifier
-                        .width(260.dp)
+                        .width(220.dp)
                         .fillMaxHeight()
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
                 )
@@ -1926,6 +1926,8 @@ private fun LibraryDrawerHost(
     } else {
         // 手机：临时 modal 抽屉，选库或点遮罩/返回后自动关闭。
         val drawerState = rememberDrawerState(DrawerValue.Closed)
+        // SY: 抽屉开着时返回键 = 关抽屉（注册晚于主屏返回处理器，优先接管，不再回 Home tab）。
+        BackHandler(enabled = drawerOpen) { onDrawerOpenChange(false) }
         LaunchedEffect(drawerOpen) {
             if (drawerOpen) drawerState.open() else drawerState.close()
         }
@@ -1939,8 +1941,8 @@ private fun LibraryDrawerHost(
             gesturesEnabled = true,
             drawerContent = {
                 ModalDrawerSheet(
-                    // SY: 默认 360dp 在手机上几乎满屏，固定 280dp（与平板侧栏 260dp 视觉接近）。
-                    modifier = Modifier.width(280.dp),
+                    // SY: 默认 360dp 在手机上几乎满屏，固定 240dp（再收一档，标准抽屉宽度）。
+                    modifier = Modifier.width(240.dp),
                     drawerContainerColor = MaterialTheme.colorScheme.surface,
                 ) {
                     LibraryRail(
