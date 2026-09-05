@@ -129,7 +129,8 @@
         </activity>
 
         <!-- Komga client: app entry point (M3-1). Routes to the main tabbed
-             activity when a connection is configured, otherwise to setup. -->
+             activity when a connection is configured, otherwise to the
+             onboarding welcome screen (SY: 多源化——不再强制 Komga 设置). -->
         <activity
             android:name="app.mihonsy.komga.ui.KomgaLauncherActivity"
             android:exported="true"
@@ -140,6 +141,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- SY --> Komiho Onboarding: 首启欢迎页（三来源任选，可跳过） -->
+        <activity
+            android:name="app.mihonsy.komga.ui.OnboardingActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Tachiyomi.SplashScreen" />
 
         <activity
             android:name=".ui.main.MainActivity"

@@ -7,6 +7,19 @@
     <string name="tab_home">主页</string>
     <!-- SY: Komiho 来源仪表盘 -->
     <string name="tab_sources">来源</string>
+    <!-- SY --> Komiho Onboarding: 首启欢迎页 -->
+    <string name="onboarding_title">欢迎使用 Komiho</string>
+    <string name="onboarding_subtitle">选择你的漫画来源，之后随时可以在设置里添加更多</string>
+    <string name="onboarding_komga">Komga 服务器</string>
+    <string name="onboarding_komga_desc">自建媒体库 · API Key 连接</string>
+    <string name="onboarding_webdav">WebDAV 网盘</string>
+    <string name="onboarding_webdav_desc">NAS / 网盘 · cbz 直读</string>
+    <string name="onboarding_local">本地文件夹</string>
+    <string name="onboarding_local_desc">设备内存储的漫画文件</string>
+    <string name="onboarding_ready">已就绪</string>
+    <string name="onboarding_pending">未配置</string>
+    <string name="onboarding_skip">跳过，先随便逛逛</string>
+    <string name="onboarding_enter">开始使用</string>
     <string name="dashboard_summary">读过 %1$d 本</string>
     <string name="dashboard_komga_hint">点按进入 Komga 首页</string>
     <string name="dashboard_no_history">尚未有阅读记录</string>

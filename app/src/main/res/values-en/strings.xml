@@ -6,6 +6,19 @@
     <string name="tab_home">Home</string>
     <!-- SY: Komiho source dashboard -->
     <string name="tab_sources">Sources</string>
+    <!-- SY --> Komiho Onboarding: first-launch welcome -->
+    <string name="onboarding_title">Welcome to Komiho</string>
+    <string name="onboarding_subtitle">Pick your manga source — you can add more anytime in Settings</string>
+    <string name="onboarding_komga">Komga server</string>
+    <string name="onboarding_komga_desc">Self-hosted library · API key</string>
+    <string name="onboarding_webdav">WebDAV drive</string>
+    <string name="onboarding_webdav_desc">NAS / cloud drive · direct cbz reading</string>
+    <string name="onboarding_local">Local folder</string>
+    <string name="onboarding_local_desc">Comic files stored on this device</string>
+    <string name="onboarding_ready">Ready</string>
+    <string name="onboarding_pending">Not set up</string>
+    <string name="onboarding_skip">Skip and look around</string>
+    <string name="onboarding_enter">Get started</string>
     <string name="dashboard_summary">%1$d books read</string>
     <string name="dashboard_komga_hint">Tap to open the Komga home</string>
     <string name="dashboard_no_history">No reading history yet</string>

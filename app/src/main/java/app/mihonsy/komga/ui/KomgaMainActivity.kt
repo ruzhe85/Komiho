@@ -3692,7 +3692,7 @@ private fun SettingsCategoryDialog(
  *  关键修复：用 BuildConfig.APPLICATION_ID 拼 package Uri，避免 context.packageName 在某些 Context 包装下为空
  *  导致 dat=package: 为空、系统找不到对应 Activity 而抛 ActivityNotFoundException 崩溃（一加/Android16 实测）。
  *  若设备（部分 OEM）无该 Action 的 Activity，则兜底跳应用详情页；整体 try/catch 防崩。 */
-private fun launchManageAllFilesAccess(context: android.content.Context) {
+internal fun launchManageAllFilesAccess(context: android.content.Context) {
     val pkg = BuildConfig.APPLICATION_ID
     // 不能用 resolveActivity 预判：API 30+ 包可见性过滤查不到系统设置组件，会误判走兜底页。
     // startActivity 隐式跳转不受该过滤限制，直接按优先级逐个尝试即可。
