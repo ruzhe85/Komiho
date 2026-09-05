@@ -51,6 +51,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hippo.unifile.UniFile
+import app.mihonsy.komga.data.KomgaPreferences
 import eu.kanade.presentation.more.settings.screen.SettingsDataScreen
 import eu.kanade.tachiyomi.R
 import tachiyomi.domain.storage.service.StoragePreferences
