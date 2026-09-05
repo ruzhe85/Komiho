@@ -128,19 +128,6 @@
     <!-- 系列卡片 -->
     <string name="unread_count">%1$d 未讀</string>
 
-    <!-- 設定：伺服器連線 -->
-    <string name="settings_server">伺服器連線</string>
-    <string name="settings_address_fmt">位址：%1$s</string>
-    <string name="settings_auth_fmt">認證：%1$s</string>
-    <string name="auth_api_key">API Key</string>
-    <string name="auth_username_password">帳號密碼</string>
-    <string name="server_add">新增伺服器</string>
-    <string name="server_edit">編輯</string>
-    <string name="server_current">目前</string>
-    <string name="server_name">名稱</string>
-    <string name="server_name_hint">選填，預設用伺服器位址</string>
-    <string name="server_delete_confirm">確定刪除該伺服器連線？</string>
-
     <!-- 設定：關於 -->
     <string name="settings_about">關於</string>
     <string name="about">關於 Komiho</string>
@@ -296,6 +283,7 @@
     <!-- SY: Komiho 主介面來源切換 / 本地瀏覽 / 儲存 / 下載 -->
     <string name="source_local">本地</string>
     <string name="source_add">來源管理</string>
+    <string name="source_add_summary">管理本地、WebDAV、Komga 等全部來源</string>
     <string name="source_switch_cd">切換來源</string>
     <string name="source_unsupported">該來源暫未支援</string>
     <string name="source_webdav_missing">該 WebDAV 連線不存在，請從頂欄重新選擇來源</string>
