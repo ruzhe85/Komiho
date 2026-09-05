@@ -52,7 +52,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 // SY --> Komiho: 本地封面（走 Coil，自带 filesDir/komiho_local_covers 缓存，与 Komga 缓存隔离）
@@ -688,7 +687,7 @@ private fun KomgaMainScreen(
             TopAppBar(
                 title = {
                     when {
-                        // Komga 来源 + Library tab：选库下拉仍是标题（库语义内切换）。
+                        // Komga 来源 + Library tab：标题行 = 平板 ☰ 开合侧栏 / 手机点按开抽屉。
                         currentTabEnum == MainTab.Library && !currentIsFileSource -> {
                             val currentLibName = libraries.firstOrNull { it.id == selectedLibraryId }?.name
                             if (isMedium) {
@@ -890,7 +889,6 @@ private fun KomgaMainScreen(
                             drawerOpen = libraryDrawerOpen,
                             onDrawerOpenChange = { libraryDrawerOpen = it },
                             railOpen = libraryRailOpen,
-                            onRailOpenChange = { libraryRailOpen = it },
                             libraries = libraries,
                             selectedLibraryId = selectedLibraryId,
                             currentName = currentLibName,
@@ -1890,7 +1888,6 @@ private fun LibraryDrawerHost(
     drawerOpen: Boolean,
     onDrawerOpenChange: (Boolean) -> Unit,
     railOpen: Boolean,
-    onRailOpenChange: (Boolean) -> Unit,
     libraries: List<LibraryDto>,
     selectedLibraryId: String?,
     currentName: String?,
@@ -1898,15 +1895,13 @@ private fun LibraryDrawerHost(
     content: @Composable () -> Unit,
 ) {
     if (isMedium) {
-        // 平板：左侧常驻侧栏，可点 ✕ 收起；收起后内容区占满全宽。
+        // 平板：左侧常驻侧栏，展开/收起由顶栏标题行 ☰ 切换（railOpen）；收起后内容区占满全宽。
         Row(Modifier.fillMaxSize()) {
             if (railOpen) {
                 LibraryRail(
                     libraries = libraries,
                     selectedLibraryId = selectedLibraryId,
                     onSelect = onSelect,
-                    onClose = { onRailOpenChange(false) },
-                    showClose = true,
                     modifier = Modifier
                         .width(260.dp)
                         .fillMaxHeight()
@@ -1939,8 +1934,6 @@ private fun LibraryDrawerHost(
                         libraries = libraries,
                         selectedLibraryId = selectedLibraryId,
                         onSelect = onSelect,
-                        onClose = { onDrawerOpenChange(false) },
-                        showClose = false,
                         modifier = Modifier.fillMaxHeight(),
                     )
                 }
@@ -1956,32 +1949,10 @@ private fun LibraryRail(
     libraries: List<LibraryDto>,
     selectedLibraryId: String?,
     onSelect: (String) -> Unit,
-    onClose: () -> Unit,
-    showClose: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    // SY: 无头行——展开/收起由顶栏标题行 ☰ 承担，列表直接顶格。
     Column(modifier = modifier) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = composeStringResource(R.string.library_drawer_title),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-            )
-            if (showClose) {
-                IconButton(onClick = onClose) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = composeStringResource(R.string.close_library_drawer),
-                    )
-                }
-            }
-        }
-        HorizontalDivider()
         if (libraries.isEmpty()) {
             Box(Modifier.fillMaxWidth().padding(16.dp)) {
                 Text(
@@ -2024,53 +1995,16 @@ private fun LibraryRailItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (selected) {
-                Box(
-                    Modifier
-                        .width(4.dp)
-                        .height(36.dp)
-                        .background(colors.primary, RoundedCornerShape(2.dp)),
-                )
-                Spacer(Modifier.width(8.dp))
-            } else {
-                Spacer(Modifier.width(12.dp))
-            }
-            val char = lib.name.firstOrNull()?.toString() ?: "?"
-            Box(
-                Modifier
-                    .size(36.dp)
-                    .background(
-                        if (selected) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.14f),
-                        CircleShape,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    char,
-                    color = if (selected) colors.onPrimary else colors.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
             Text(
                 text = lib.name,
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (selected) colors.primary else colors.onSurface,
+                color = if (selected) colors.onPrimaryContainer else colors.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
             )
-            if (selected) {
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    imageVector = Icons.Filled.Check,
-                    contentDescription = null,
-                    tint = colors.primary,
-                )
-            }
         }
     }
 }
@@ -2082,13 +2016,14 @@ private fun LibraryRailTitle(
     onToggleRail: () -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        if (!railOpen) {
-            IconButton(onClick = onToggleRail) {
-                Icon(
-                    imageVector = Icons.Filled.Menu,
-                    contentDescription = composeStringResource(R.string.open_library_drawer),
-                )
-            }
+        // SY: ☰ 常驻——展开时点击收起、收起时点击展开（同一按钮）。
+        IconButton(onClick = onToggleRail) {
+            Icon(
+                imageVector = Icons.Filled.Menu,
+                contentDescription = composeStringResource(
+                    if (railOpen) R.string.close_library_drawer else R.string.open_library_drawer,
+                ),
+            )
         }
         Text(
             text = currentName ?: composeStringResource(R.string.select_library),
