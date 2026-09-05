@@ -144,7 +144,7 @@
     <string name="about_third_party">Komga is developed by Gotson; this app interacts with it via the Komga API. Other third-party components are copyrighted by their respective owners.</string>
 
     <!-- Settings: library (was "home settings") -->
-    <string name="settings_home">Library</string>
+    <string name="settings_home">Komga</string>
     <string name="settings_home_summary">Home, preview images &amp; cache</string>
     <string name="settings_home_page">Home</string>
     <string name="settings_home_page_summary">Section layout &amp; display</string>
