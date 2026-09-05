@@ -14,7 +14,7 @@ import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageViewKt.isStandardImageStream
+import eu.kanade.tachiyomi.ui.reader.viewer.isStandardImageStream
 import logcat.LogPriority
 import okio.Buffer
 import okio.BufferedSource
@@ -119,7 +119,7 @@ object PagerPagePreparer {
                 }
 
                 val background = if (!isAnimated && config.automaticBackground) {
-                    ImageUtil.chooseBackground(viewer.context, itemSource.peek())
+                    ImageUtil.chooseBackground(viewer.activity, itemSource.peek())
                 } else {
                     null
                 }
