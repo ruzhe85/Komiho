@@ -417,7 +417,11 @@ private fun KomgaMainScreen(
 ) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
-    val client = remember { KomgaApiClient(prefs.connection()) }
+    // SY --> Komiho: 懒构造客户端。欢迎页无连接「随便逛逛」/ 仅 WebDAV / 仅本地进入主界面时，
+    // 旧写法 remember { KomgaApiClient(...) } 在组合阶段就触发 init 的 require(baseUrl)
+    // （「服务器地址不能为空」）直接崩溃。改为 lazy 委托：所有使用点都只在 Komga tab /
+    // hasConnection 守卫内可达，无 Komga 连接时永不构造；在设置里添加连接后首次访问即构造。
+    val client: KomgaApiClient by remember { lazy { KomgaApiClient(prefs.connection()) } }
 
     // SY --> Komiho P0: 本地浏览所需状态。
     // 用户所选文件夹**即**漫画根目录（不再有 local 子目录这一层）；目录未选择时

@@ -17,7 +17,6 @@
     <string name="onboarding_local_desc">Comic files stored on this device</string>
     <string name="onboarding_ready">Ready</string>
     <string name="onboarding_pending">Not set up</string>
-    <string name="onboarding_skip">Skip and look around</string>
     <string name="onboarding_enter">Get started</string>
     <string name="dashboard_summary">%1$d books read</string>
     <string name="dashboard_komga_hint">Tap to open the Komga home</string>

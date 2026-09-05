@@ -1,10 +1,10 @@
 package app.mihonsy.komga.ui
 
 // SY --> Komiho Onboarding: 首启欢迎页（方案二）。
-// 背景：Komiho 已从「纯 Komga 阅读器」演进为多来源客户端（Komga / WebDAV / 本地），
+// 背景：Komiho 已从「纯 Komga 阅读器」演进为多来源客户端（本地 / Komga / WebDAV），
 // 旧首启链路 KomgaLauncherActivity → 无连接 → 强制 KomgaConnectActivity 把 Komga
 // 当成了必选项。现在无连接时进本页：三来源卡任选（点卡直达 AddSourceFlow 对应表单），
-// 也可跳过——本地源内置，主界面随时可用；来源之后在设置里随时添加。
+// 也可直接「开始使用」——本地源内置兜底，主界面随时可用；来源之后在设置里随时添加。
 // 复用点：表单页全部来自 AddSourceFlow（initialScreen 直达），SAF 选目录与
 // 「所有文件访问」授权引导与主界面同款，行为一致。
 
@@ -13,10 +13,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -42,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -118,7 +118,7 @@ private fun OnboardingScreen(onDone: () -> Unit) {
             komgaReady = komgaReady,
             localReady = localDir != null,
             onPick = { flowScreen = it },
-            onSkip = onDone,
+            onEnter = onDone,
         )
     } else {
         AddSourceFlow(
@@ -141,7 +141,7 @@ private fun OnboardingWelcome(
     komgaReady: Boolean,
     localReady: Boolean,
     onPick: (AddSourceScreen) -> Unit,
-    onSkip: () -> Unit,
+    onEnter: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -152,19 +152,12 @@ private fun OnboardingWelcome(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .size(64.dp)
-                .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(16.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "K",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
+        // SY --> Komiho: 欢迎页顶图直接用 APP 启动图标（mipmap ic_launcher 位图，painterResource 可加载）。
+        Image(
+            painter = painterResource(R.mipmap.ic_launcher),
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+        )
         Text(
             text = composeStringResource(R.string.onboarding_title),
             style = MaterialTheme.typography.headlineSmall,
@@ -179,6 +172,14 @@ private fun OnboardingWelcome(
             modifier = Modifier.padding(top = 6.dp, bottom = 28.dp),
         )
 
+        // SY --> Komiho: 卡片顺序 本地 → Komga → WebDAV（本地内置兜底放最前）。
+        OnboardingSourceCard(
+            icon = sourceIcon(SourceKind.Local),
+            title = composeStringResource(R.string.onboarding_local),
+            desc = composeStringResource(R.string.onboarding_local_desc),
+            ready = localReady,
+            onClick = { onPick(AddSourceScreen.Local) },
+        )
         OnboardingSourceCard(
             icon = sourceIcon(SourceKind.Komga),
             title = composeStringResource(R.string.onboarding_komga),
@@ -193,22 +194,11 @@ private fun OnboardingWelcome(
             ready = false,
             onClick = { onPick(AddSourceScreen.WebDav(connId = null)) },
         )
-        OnboardingSourceCard(
-            icon = sourceIcon(SourceKind.Local),
-            title = composeStringResource(R.string.onboarding_local),
-            desc = composeStringResource(R.string.onboarding_local_desc),
-            ready = localReady,
-            onClick = { onPick(AddSourceScreen.Local) },
-        )
 
-        TextButton(onClick = onSkip, modifier = Modifier.padding(top = 20.dp)) {
-            Text(
-                text = if (komgaReady || localReady) {
-                    composeStringResource(R.string.onboarding_enter)
-                } else {
-                    composeStringResource(R.string.onboarding_skip)
-                },
-            )
+        // SY --> Komiho: 去掉「随便逛逛」——本地源内置兜底，按钮固定为「开始使用」；
+        // 什么都没配也能进主界面（客户端已改为懒构造，无 Komga 连接不会崩）。
+        TextButton(onClick = onEnter, modifier = Modifier.padding(top = 20.dp)) {
+            Text(text = composeStringResource(R.string.onboarding_enter))
         }
     }
 }
