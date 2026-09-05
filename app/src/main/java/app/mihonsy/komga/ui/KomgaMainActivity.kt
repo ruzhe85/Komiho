@@ -6059,8 +6059,12 @@ private fun HistoryTabLocal(
                         if (range == ClearRange.ALL) {
                             historyRepo.deleteAllHistory()
                         } else {
+                            // SY: 语义 = 保留最近 [range] 的记录，清除更早的（readAt < cutoff）。
+                            // 之前写成 >= cutoff，删的正好是要保留的「最近一段」，选 24 小时前
+                            // 会把最近一天的记录全删光（历史本来都很新 → 看着像被全部清空）。
+                            // readAt 缺失视为「很早」，一并清除。
                             val cutoff = System.currentTimeMillis() - range.millis
-                            items.filter { (it.readAt?.time ?: 0L) >= cutoff }
+                            items.filter { (it.readAt?.time ?: 0L) < cutoff }
                                 .forEach { historyRepo.resetHistory(it.id) }
                         }
                     }
