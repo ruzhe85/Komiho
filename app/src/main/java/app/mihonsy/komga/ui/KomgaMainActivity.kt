@@ -375,10 +375,15 @@ private enum class MainTab(
     val komgaOnly: Boolean = false,
     /** 仅在文件型来源下出现（浏览语义）。 */
     val fileOnly: Boolean = false,
+    // SY --> Komiho: 临时屏蔽标志（来源仪表盘等 SMB 落地后再认真启用）。
+    val hiddenForNow: Boolean = false,
+    // SY <--
 ) {
     // SY --> Komiho: 来源仪表盘（方案 B 启动首页）——固定第一位、全来源可见，不参与
     // 「来源首个内容 tab」的选取（selectSource / openSourceFromDashboard 均跳过它）。
-    Sources(R.string.tab_sources, Icons.Filled.Dashboard),
+    // SY: 暂时屏蔽（hiddenForNow）——等 SMB 落地后结合首启引导一起认真启用；
+    // 代码全部保留，去掉标志即恢复。
+    Sources(R.string.tab_sources, Icons.Filled.Dashboard, hiddenForNow = true),
     // SY <--（下方各 tab 维持原语义）
     Home(R.string.tab_home, Icons.Filled.Home, komgaOnly = true),
     Library(R.string.tab_library, Icons.Filled.Book, komgaOnly = true),
@@ -395,6 +400,7 @@ private enum class MainTab(
     ;
 
     fun visibleFor(isFileSource: Boolean): Boolean = when {
+        hiddenForNow -> false
         komgaOnly -> !isFileSource
         fileOnly -> isFileSource
         else -> true
@@ -473,7 +479,9 @@ private fun KomgaMainScreen(
     // the current tab across activity.recreate() — theme/language switches
     // in Settings would otherwise bounce back to the Home tab.
     // SY: 启动默认落在「来源」仪表盘（方案 B）；后续由 rememberSaveable 记忆用户所在 tab。
-    var currentTab by rememberSaveable { mutableIntStateOf(MainTab.Sources.ordinal) }
+    // SY: 默认落 Komga=主页 / 文件型=浏览（首个可见 tab；Sources 仪表盘暂时屏蔽，兜底
+    // LaunchedEffect(visibleTabs) 会把旧记忆值纠正到首个可见 tab）。
+    var currentTab by rememberSaveable { mutableIntStateOf(MainTab.Home.ordinal) }
 
     // SY --> Komiho: 历史/书签「打开文件位置」→ 应用内跳转。navRequest 状态在此声明；
     // 跳转函数 openLocationInApp 定义在 selectSource 之后（局部函数不能前向引用）：
