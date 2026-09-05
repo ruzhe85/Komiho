@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.verticalScroll
@@ -51,6 +52,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 // SY --> Komiho: 本地封面（走 Coil，自带 filesDir/komiho_local_covers 缓存，与 Komga 缓存隔离）
@@ -72,8 +74,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
@@ -109,6 +111,10 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
 import eu.kanade.presentation.components.TabbedDialog
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.SliderItem
@@ -143,6 +149,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.rememberScrollState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -202,9 +209,9 @@ import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.presentation.util.LocalBackPress
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.annotation.StringRes
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
+import mihon.core.designsystem.utils.isMediumWidthWindow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -594,15 +601,19 @@ private fun KomgaMainScreen(
     val isLandscape = remember(configuration) {
         configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     }
+    val isMedium = isMediumWidthWindow()
     var portraitColumns by remember { mutableStateOf(prefs.libraryPortraitColumns) }
     var landscapeColumns by remember { mutableStateOf(prefs.libraryLandscapeColumns) }
     val columns = if (isLandscape) landscapeColumns else portraitColumns
 
-    // Library selection — owned at the top level. The Library tab's top bar
-    // shows a dropdown (LibrarySelector) listing all libraries; picking one
+    // Library selection — owned at the top level. The Library tab uses a
+    // drawer/rail (LibraryDrawerHost) listing all libraries; picking one
     // switches the active library in place (no dialog, no extra screen).
     var libraries by remember { mutableStateOf<List<LibraryDto>>(emptyList()) }
     var selectedLibraryId by remember { mutableStateOf<String?>(null) }
+    // 库切换控件（方案 B）：手机 = 临时 modal 抽屉；平板 = 可收起常驻侧栏。
+    var libraryDrawerOpen by rememberSaveable { mutableStateOf(false) }
+    var libraryRailOpen by rememberSaveable { mutableStateOf(true) }
 
     // Komga 现为可选来源（未添加不显示）：不再强制跳转连接页，未连接时停在本地浏览；
     // 添加完 Komga 连接返回（komgaConnected 翻转）后补拉一次库列表。
@@ -642,7 +653,7 @@ private fun KomgaMainScreen(
     // 避免退出程序。但当本实例是被 Series 详情页调起（点 tag/作者 → 过滤库）时，
     // 它不是 task 根——Series 页在它下面，此时绝不能拦截本地 UI 态以外的返回，
     // 只拦截搜索框/菜单等本地 UI 态，其余交还系统 → 返回手势回 Series 页。
-    // 选库现已改为顶栏下拉（LibrarySelector），不再有「选库对话框」态，
+    // 选库现已改为抽屉/侧栏（LibraryDrawerHost），不再有「选库对话框」态，
     // 因此 Library tab 上按返回直接回 Home（与 Lists/Downloads 一致）。
     // 优先级（仅根实例）：搜索框/菜单打开→关闭；非 Home tab→回 Home；
     // Home 根→交还系统默认（退出程序）。
@@ -679,11 +690,19 @@ private fun KomgaMainScreen(
                     when {
                         // Komga 来源 + Library tab：选库下拉仍是标题（库语义内切换）。
                         currentTabEnum == MainTab.Library && !currentIsFileSource -> {
-                            LibrarySelector(
-                                libraries = libraries,
-                                selectedLibraryId = selectedLibraryId,
-                                onSelect = { selectedLibraryId = it },
-                            )
+                            val currentLibName = libraries.firstOrNull { it.id == selectedLibraryId }?.name
+                            if (isMedium) {
+                                LibraryRailTitle(
+                                    currentName = currentLibName,
+                                    railOpen = libraryRailOpen,
+                                    onToggleRail = { libraryRailOpen = !libraryRailOpen },
+                                )
+                            } else {
+                                LibraryDrawerTrigger(
+                                    currentName = currentLibName,
+                                    onClick = { libraryDrawerOpen = true },
+                                )
+                            }
                         }
                         // 设置页与来源无关，显示页名。
                         currentTabEnum == MainTab.Settings -> Text(MainTab.entries[currentTab].labelText())
@@ -864,30 +883,48 @@ private fun KomgaMainScreen(
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
-                    MainTab.Library -> LibraryTab(
-                        client = client,
-                        selectedLibraryId = selectedLibraryId,
-                        displayMode = displayMode,
-                        columns = columns,
-                        refreshTick = refreshTick,
-                        sort = librarySortMode,
-                        onSortModeChange = { librarySortMode = it },
-                        readFilter = libraryReadFilter,
-                        onReadFilterChange = { libraryReadFilter = it },
-                        filterType = libraryFilterType,
-                        filterValue = libraryFilterValue,
-                        onFilterClear = {
-                            // 根实例（正常库页）：清除筛选、停留库页。
-                            // 非根实例（被 Series 详情页调起的过滤层）：✕ 等同关闭该层，回到系列页。
-                            val act = context as? android.app.Activity
-                            if (act != null && !act.isTaskRoot) {
-                                act.finish()
-                            } else {
-                                filterSignal.value = null
+                    MainTab.Library -> {
+                        val currentLibName = libraries.firstOrNull { it.id == selectedLibraryId }?.name
+                        LibraryDrawerHost(
+                            isMedium = isMedium,
+                            drawerOpen = libraryDrawerOpen,
+                            onDrawerOpenChange = { libraryDrawerOpen = it },
+                            railOpen = libraryRailOpen,
+                            onRailOpenChange = { libraryRailOpen = it },
+                            libraries = libraries,
+                            selectedLibraryId = selectedLibraryId,
+                            currentName = currentLibName,
+                            onSelect = { id ->
+                                selectedLibraryId = id
+                                libraryDrawerOpen = false
+                            },
+                        ) {
+                            LibraryTab(
+                                client = client,
+                                selectedLibraryId = selectedLibraryId,
+                                displayMode = displayMode,
+                                columns = columns,
+                                refreshTick = refreshTick,
+                                sort = librarySortMode,
+                                onSortModeChange = { librarySortMode = it },
+                                readFilter = libraryReadFilter,
+                                onReadFilterChange = { libraryReadFilter = it },
+                                filterType = libraryFilterType,
+                                filterValue = libraryFilterValue,
+                                onFilterClear = {
+                                    // 根实例（正常库页）：清除筛选、停留库页。
+                                    // 非根实例（被 Series 详情页调起的过滤层）：✕ 等同关闭该层，回到系列页。
+                                    val act = context as? android.app.Activity
+                                    if (act != null && !act.isTaskRoot) {
+                                        act.finish()
+                                    } else {
+                                        filterSignal.value = null
+                                    }
+                                },
+                            ) { seriesId ->
+                                context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                             }
-                        },
-                    ) { seriesId ->
-                        context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
+                        }
                     }
                     MainTab.Lists -> ListsTab(
                         client,
@@ -1031,7 +1068,7 @@ private fun KomgaMainScreen(
         }
     }
 
-    // 选库已改为顶栏 LibrarySelector 下拉（见下方 LibrarySelector 组合函数），
+    // 选库已改为抽屉/侧栏（见下方 LibraryDrawerHost 组合函数），
     // 不再使用 AlertDialog，返回键也不再被困在「选库」态。
 
 }
@@ -1843,56 +1880,242 @@ private fun HomeSeriesListItem(
 
 // ---------- Library tab ----------
 
+// ---------- Library drawer / rail (方案 B) ----------
+// 手机：临时 modal 抽屉；平板（≥600dp）：可收起常驻侧栏。两形态复用同一份库列表内容。
+// 抽屉/侧栏不含搜索（库内已有搜索按钮）。
+
 @Composable
-/**
- * Top-bar library picker (replaces the old AlertDialog). Shows the current
- * library name with a caret; tapping opens a dropdown of all libraries.
- * Selecting one switches the active library in place — no dialog, no extra
- * screen, and back no longer gets trapped in a "pick a library" state.
- */
-private fun LibrarySelector(
+private fun LibraryDrawerHost(
+    isMedium: Boolean,
+    drawerOpen: Boolean,
+    onDrawerOpenChange: (Boolean) -> Unit,
+    railOpen: Boolean,
+    onRailOpenChange: (Boolean) -> Unit,
+    libraries: List<LibraryDto>,
+    selectedLibraryId: String?,
+    currentName: String?,
+    onSelect: (String) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (isMedium) {
+        // 平板：左侧常驻侧栏，可点 ✕ 收起；收起后内容区占满全宽。
+        Row(Modifier.fillMaxSize()) {
+            if (railOpen) {
+                LibraryRail(
+                    libraries = libraries,
+                    selectedLibraryId = selectedLibraryId,
+                    onSelect = onSelect,
+                    onClose = { onRailOpenChange(false) },
+                    showClose = true,
+                    modifier = Modifier
+                        .width(260.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                )
+            }
+            Box(Modifier.fillMaxSize().weight(1f)) { content() }
+        }
+    } else {
+        // 手机：临时 modal 抽屉，选库或点遮罩/返回后自动关闭。
+        val drawerState = rememberDrawerState(DrawerValue.Closed)
+        LaunchedEffect(drawerOpen) {
+            if (drawerOpen) drawerState.open() else drawerState.close()
+        }
+        LaunchedEffect(drawerState.currentValue) {
+            if (drawerState.currentValue == DrawerValue.Closed) {
+                onDrawerOpenChange(false)
+            }
+        }
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            gesturesEnabled = true,
+            drawerContent = {
+                ModalDrawerSheet(
+                    drawerContainerColor = MaterialTheme.colorScheme.surface,
+                ) {
+                    LibraryRail(
+                        libraries = libraries,
+                        selectedLibraryId = selectedLibraryId,
+                        onSelect = onSelect,
+                        onClose = { onDrawerOpenChange(false) },
+                        showClose = false,
+                        modifier = Modifier.fillMaxHeight(),
+                    )
+                }
+            },
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun LibraryRail(
     libraries: List<LibraryDto>,
     selectedLibraryId: String?,
     onSelect: (String) -> Unit,
+    onClose: () -> Unit,
+    showClose: Boolean,
+    modifier: Modifier = Modifier,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val current = libraries.firstOrNull { it.id == selectedLibraryId }
-    Box {
+    Column(modifier = modifier) {
         Row(
             modifier = Modifier
-                .clickable { expanded = true }
-                .padding(horizontal = 4.dp, vertical = 8.dp),
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = current?.name ?: composeStringResource(R.string.select_library),
-                style = MaterialTheme.typography.titleLarge,
-                maxLines = 1,
+                text = composeStringResource(R.string.library_drawer_title),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
             )
-            Icon(
-                imageVector = Icons.Filled.ArrowDropDown,
-                contentDescription = composeStringResource(R.string.select_library),
-            )
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (libraries.isEmpty()) {
-                DropdownMenuItem(
-                    text = { Text(composeStringResource(R.string.no_libraries)) },
-                    onClick = { expanded = false },
-                    enabled = false,
-                )
-            }
-            libraries.forEach { lib ->
-                DropdownMenuItem(
-                    text = { Text(lib.name) },
-                    trailingIcon = { if (lib.id == selectedLibraryId) Icon(Icons.Filled.Check, contentDescription = null) },
-                    onClick = {
-                        onSelect(lib.id)
-                        expanded = false
-                    },
-                )
+            if (showClose) {
+                IconButton(onClick = onClose) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = composeStringResource(R.string.close_library_drawer),
+                    )
+                }
             }
         }
+        HorizontalDivider()
+        if (libraries.isEmpty()) {
+            Box(Modifier.fillMaxWidth().padding(16.dp)) {
+                Text(
+                    text = composeStringResource(R.string.no_libraries),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(vertical = 8.dp, horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(libraries, key = { it.id }) { lib ->
+                    LibraryRailItem(
+                        lib = lib,
+                        selected = lib.id == selectedLibraryId,
+                        onClick = { onSelect(lib.id) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryRailItem(
+    lib: LibraryDto,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        color = if (selected) colors.primaryContainer else Color.Transparent,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (selected) {
+                Box(
+                    Modifier
+                        .width(4.dp)
+                        .height(36.dp)
+                        .background(colors.primary, RoundedCornerShape(2.dp)),
+                )
+                Spacer(Modifier.width(8.dp))
+            } else {
+                Spacer(Modifier.width(12.dp))
+            }
+            val char = lib.name.firstOrNull()?.toString() ?: "?"
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .background(
+                        if (selected) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.14f),
+                        CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    char,
+                    color = if (selected) colors.onPrimary else colors.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = lib.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (selected) colors.primary else colors.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (selected) {
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = colors.primary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryRailTitle(
+    currentName: String?,
+    railOpen: Boolean,
+    onToggleRail: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (!railOpen) {
+            IconButton(onClick = onToggleRail) {
+                Icon(
+                    imageVector = Icons.Filled.Menu,
+                    contentDescription = composeStringResource(R.string.open_library_drawer),
+                )
+            }
+        }
+        Text(
+            text = currentName ?: composeStringResource(R.string.select_library),
+            style = MaterialTheme.typography.titleLarge,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun LibraryDrawerTrigger(
+    currentName: String?,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = currentName ?: composeStringResource(R.string.select_library),
+            style = MaterialTheme.typography.titleLarge,
+            maxLines = 1,
+        )
+        Icon(
+            imageVector = Icons.Filled.ArrowDropDown,
+            contentDescription = composeStringResource(R.string.select_library),
+        )
     }
 }
 

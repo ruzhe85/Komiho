@@ -51,6 +51,9 @@
     <!-- Library picker -->
     <string name="select_library">Select library</string>
     <string name="no_libraries">No libraries</string>
+    <string name="library_drawer_title">Libraries</string>
+    <string name="open_library_drawer">Open library list</string>
+    <string name="close_library_drawer">Collapse library list</string>
     <string name="select_library_hint">Select a library from the top bar</string>
     <string name="cancel">Cancel</string>
     <string name="delete">Delete</string>
