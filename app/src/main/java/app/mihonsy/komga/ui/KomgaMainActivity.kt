@@ -94,7 +94,6 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material.icons.outlined.Bookmark
@@ -971,7 +970,10 @@ private fun KomgaMainScreen(
                         onOpenLocation = { openLocationInApp(it) },
                     )
                     // SY <--
-                    MainTab.Settings -> SettingsTab(context)
+                    MainTab.Settings -> SettingsTab(
+                        context,
+                        onOpenSourceManagement = { showAddSource = true },
+                    )
                 }
                 // SY --> Komiho Phase4: 「来源管理」全屏流程（类型选择 / 表单 / 删除确认全在内）。
                 // 关闭后重建来源菜单（sourceVersion++）、复查 Komga 连接状态；
@@ -3276,13 +3278,15 @@ private fun EmbeddedSearch(
 // ---------- Settings tab ----------
 
 @Composable
-private fun SettingsTab(context: android.content.Context) {
+private fun SettingsTab(
+    context: android.content.Context,
+    onOpenSourceManagement: () -> Unit,
+) {
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     var showAppearance by remember { mutableStateOf(false) }
     var showHome by remember { mutableStateOf(false) }
     var showHomePage by remember { mutableStateOf(false) }
     var showPreview by remember { mutableStateOf(false) }
-    var showServer by remember { mutableStateOf(false) }
     var showReaderSettings by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var showLocalStorage by remember { mutableStateOf(false) }
@@ -3312,10 +3316,10 @@ private fun SettingsTab(context: android.content.Context) {
             onPreferenceClick = { showReaderSettings = true },
         )
         TextPreferenceWidget(
-            title = composeStringResource(R.string.settings_server),
-            subtitle = runCatching { prefs.connection().baseUrl }.getOrDefault(""),
-            icon = Icons.Outlined.Cloud,
-            onPreferenceClick = { showServer = true },
+            title = composeStringResource(R.string.source_add),
+            subtitle = composeStringResource(R.string.source_add_summary),
+            icon = Icons.Filled.Folder,
+            onPreferenceClick = onOpenSourceManagement,
         )
         TextPreferenceWidget(
             title = composeStringResource(R.string.storage_title),
@@ -3372,12 +3376,6 @@ private fun SettingsTab(context: android.content.Context) {
             onDismiss = { showPreview = false },
             title = composeStringResource(R.string.settings_preview_images),
         ) { padding -> KomgaPreviewSettings(Modifier.padding(padding), context) }
-    }
-    if (showServer) {
-        SettingsCategoryDialog(
-            onDismiss = { showServer = false },
-            title = composeStringResource(R.string.settings_server),
-        ) { padding -> KomgaServerSettings(Modifier.padding(padding), context, onDismiss = { showServer = false }) }
     }
     if (showAbout) {
         SettingsCategoryDialog(
@@ -3999,151 +3997,6 @@ private fun hostOf(url: String): String {
         val u = java.net.URI(url)
         u.host.takeIf { it.isNotBlank() } ?: url
     }.getOrDefault(url)
-}
-
-@Composable
-private fun KomgaServerSettings(
-    modifier: Modifier,
-    context: android.content.Context,
-    onDismiss: () -> Unit,
-) {
-    val prefs = remember { KomgaPreferences(context.applicationContext) }
-    var connections by remember { mutableStateOf(prefs.connections()) }
-    val activeId = remember(connections) { prefs.activeConnectionId }
-    var pendingDelete by remember { mutableStateOf<KomgaConnection?>(null) }
-
-    fun refresh() {
-        connections = prefs.connections()
-    }
-
-    fun switchTo(id: String) {
-        prefs.setActiveConnection(id)
-        // 重启主界面，使所有 composable 用新连接重拉数据
-        context.startActivity(
-            android.content.Intent(context, KomgaMainActivity::class.java)
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK),
-        )
-    }
-
-    LazyColumn(modifier.fillMaxSize()) {
-        item { PreferenceGroupHeader(composeStringResource(R.string.settings_server)) }
-        items(connections) { conn ->
-            val isActive = conn.id == activeId
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { if (!isActive) switchTo(conn.id) }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RadioButton(
-                    selected = isActive,
-                    onClick = { if (!isActive) switchTo(conn.id) },
-                )
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .padding(start = 8.dp),
-                ) {
-                    Text(
-                        conn.name.ifBlank { hostOf(conn.baseUrl) },
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        composeStringResource(R.string.settings_address_fmt, conn.baseUrl),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        composeStringResource(
-                            R.string.settings_auth_fmt,
-                            composeStringResource(
-                                if (conn.authType.name == "API_KEY") {
-                                    R.string.auth_api_key
-                                } else {
-                                    R.string.auth_username_password
-                                },
-                            ),
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    if (isActive) {
-                        Text(
-                            composeStringResource(R.string.server_current),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-                IconButton(
-                    onClick = {
-                        // 编辑：打开连接页（编辑模式），关掉本设置页避免返回时状态陈旧
-                        context.startActivity(
-                            android.content.Intent(context, KomgaConnectActivity::class.java)
-                                .putExtra(KomgaConnectActivity.EXTRA_CONNECTION_ID, conn.id),
-                        )
-                        onDismiss()
-                    },
-                ) {
-                    Icon(
-                        Icons.Outlined.Edit,
-                        contentDescription = composeStringResource(R.string.server_edit),
-                    )
-                }
-                IconButton(onClick = { pendingDelete = conn }) {
-                    Icon(
-                        Icons.Outlined.Delete,
-                        contentDescription = composeStringResource(R.string.delete),
-                    )
-                }
-            }
-        }
-        item {
-            OutlinedButton(
-                onClick = {
-                    context.startActivity(android.content.Intent(context, KomgaConnectActivity::class.java))
-                    onDismiss()
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-            ) {
-                Text(composeStringResource(R.string.server_add))
-            }
-        }
-    }
-
-    if (pendingDelete != null) {
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text(composeStringResource(R.string.delete)) },
-            text = { Text(composeStringResource(R.string.server_delete_confirm)) },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val conn = pendingDelete!!
-                        val wasActive = conn.id == activeId
-                        prefs.deleteConnection(conn.id)
-                        pendingDelete = null
-                        // 删的是激活项 → deleteConnection 已自动回退，重启主界面重拉；
-                        // 否则原地刷新列表
-                        if (wasActive) {
-                            context.startActivity(
-                                android.content.Intent(context, KomgaMainActivity::class.java)
-                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK),
-                            )
-                        } else {
-                            refresh()
-                        }
-                    },
-                ) { Text(composeStringResource(R.string.delete)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
-                    Text(composeStringResource(R.string.cancel))
-                }
-            },
-        )
-    }
 }
 
 @Composable
