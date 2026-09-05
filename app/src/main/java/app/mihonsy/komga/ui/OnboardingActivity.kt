@@ -40,8 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -143,6 +143,7 @@ private fun OnboardingWelcome(
     onPick: (AddSourceScreen) -> Unit,
     onEnter: () -> Unit,
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -152,9 +153,25 @@ private fun OnboardingWelcome(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // SY --> Komiho: 欢迎页顶图直接用 APP 启动图标（mipmap ic_launcher 位图，painterResource 可加载）。
+        // SY --> Komiho: 欢迎页顶图用真实 APP 启动图标。不能用 painterResource(R.mipmap.ic_launcher)：
+        // API 26+ 会解析到 mipmap-anydpi-v26 的自适应图标 XML（AdaptiveIconDrawable），
+        // Compose painterResource 只支持 VectorDrawable/位图，直接抛 IllegalArgumentException
+        // （3483ad2 线上翻车点）。改为运行时取 PackageManager 的启动图标，非位图
+        // （自适应图标等）离屏绘制成 Bitmap 再显示，任何 ROM 都稳。查自身包不算读取应用列表。
+        val appIcon = remember {
+            val drawable = context.packageManager.getApplicationIcon(context.packageName)
+            if (drawable is android.graphics.drawable.BitmapDrawable) {
+                drawable.bitmap
+            } else {
+                val size = maxOf(drawable.intrinsicWidth, drawable.intrinsicHeight).takeIf { it > 0 } ?: 192
+                val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+                drawable.setBounds(0, 0, size, size)
+                drawable.draw(android.graphics.Canvas(bmp))
+                bmp
+            }
+        }
         Image(
-            painter = painterResource(R.mipmap.ic_launcher),
+            bitmap = appIcon.asImageBitmap(),
             contentDescription = null,
             modifier = Modifier.size(64.dp),
         )

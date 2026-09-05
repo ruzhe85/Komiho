@@ -83,8 +83,16 @@ class ExtensionManager(
     val untrustedExtensionsFlow = untrustedExtensionMapFlow.mapExtensions(scope)
 
     init {
-        initExtensions()
-        ExtensionInstallReceiver(InstallationListener()).register(context)
+        // SY --> Komiho: 不再启动时加载扩展。Komiho 无扩展系统（扩展组已隐藏、无任何扩展源），
+        // 原 initExtensions() 在启动链路（App.onCreate → initExpensiveComponents →
+        // DownloadManager → DownloadCache → 本类构造）即调用 PackageManager.getInstalledPackages
+        // 扫描全机应用，在 OPPO / 鸿蒙等 ROM 上触发「读取应用列表」隐私弹窗。
+        // 改为空实现：installedExtensionsFlow 恒为空，内置源（Komga / WebDAV / 本地）不受影响；
+        // isInitialized 置 true 放行等待方（DownloadCache.renewCache 有 30s 超时兜底，不能悬空）。
+        // 将来若恢复扩展能力，恢复下面两行调用即可。
+        // initExtensions()
+        // ExtensionInstallReceiver(InstallationListener()).register(context)
+        _isInitialized.value = true
     }
 
     private var subLanguagesEnabledOnFirstRun = preferences.enabledLanguages.isSet()
