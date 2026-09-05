@@ -843,8 +843,20 @@ private fun KomgaMainScreen(
                         NavigationBarItem(
                             selected = currentTab == tab.ordinal,
                             onClick = {
-                                // 点击 tab（含重复点击当前 tab）触发刷新。
-                                if (currentTab == tab.ordinal) refreshSignal.update { it + 1 } else currentTab = tab.ordinal
+                                if (currentTab == tab.ordinal) {
+                                    // SY: 重复点库 tab = 开/关抽屉（手机）或侧栏（平板）；其余 tab 重复点击仍触发刷新。
+                                    if (tab == MainTab.Library) {
+                                        if (isMedium) {
+                                            libraryRailOpen = !libraryRailOpen
+                                        } else {
+                                            libraryDrawerOpen = !libraryDrawerOpen
+                                        }
+                                    } else {
+                                        refreshSignal.update { it + 1 }
+                                    }
+                                } else {
+                                    currentTab = tab.ordinal
+                                }
                             },
                             icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
                             label = null,
