@@ -657,6 +657,14 @@ class ReaderViewModel @JvmOverloads constructor(
     @Volatile
     private var autoWebtoonAspectDone = false
 
+    /**
+     * MihonSY: 比例检测命中的章节 URL——自动条漫只对「这一章」内存生效，
+     * 绝不写入 manga.readingMode（持久记忆只由用户手动切换模式更新）。
+     * 换章后失效，新章重新检测，同系列混排条漫/页漫可按章独立判断。
+     */
+    @Volatile
+    private var autoWebtoonEffectiveChapter: String? = null
+
     /** Chapter URL the current check session belongs to; reset on chapter change. */
     private var autoWebtoonCheckChapter: String? = null
 
@@ -677,8 +685,9 @@ class ReaderViewModel @JvmOverloads constructor(
      * page (normal manga ratio ~1.5) before the long strips start. Instead of inspecting only
      * the first page, we inspect the first [AUTO_WEBTOON_PAGES_TO_CHECK] pages as the reader
      * passes through them: if ANY of them is a tall strip (ratio above
-     * [AUTO_WEBTOON_MIN_ASPECT_RATIO]) the manga is a webtoon and its reading mode is set
-     * permanently. Only when all of them turn out normal-sized does the check give up.
+     * [AUTO_WEBTOON_MIN_ASPECT_RATIO]) the chapter is a webtoon and the reader switches to
+     * webtoon mode for this chapter only (in-memory; the saved manga mode is never touched).
+     * Only when all of them turn out normal-sized does the check give up.
      *
      * Triggered from TWO places (MihonSY):
      *  1. [onPageSelected] — fallback, fires on page turns.
@@ -692,8 +701,12 @@ class ReaderViewModel @JvmOverloads constructor(
         if (autoWebtoonAspectDone) return
         if (!readerPreferences.useAutoWebtoon.get()) return
         val manga = manga ?: return
-        // Only when the manga has no explicit reading mode (still DEFAULT)
+        // Only when the manga has no explicit reading mode (still DEFAULT).
+        // MihonSY: 非 DEFAULT 只剩用户手动记忆——手动选择优先，自动检测永不覆盖。
         if (ReadingMode.fromPreference(manga.readingMode.toInt()) != ReadingMode.DEFAULT) return
+        // MihonSY: 只检测当前激活章节——预加载章的就绪页面不触发，
+        // 避免读到上一章时被下一章的预载结果提前重建 viewer。
+        if (page.chapter != getCurrentChapter()) return
         // Skip if tag/source based detection already resolved to webtoon
         if (getMangaReadingMode() == ReadingMode.WEBTOON.flagValue) return
 
@@ -707,6 +720,19 @@ class ReaderViewModel @JvmOverloads constructor(
             autoWebtoonCheckChapter = chapterUrl
             // Fresh window: allow a few delayed re-checks for still-loading pages.
             autoWebtoonRetriesLeft = AUTO_WEBTOON_RETRIES
+            // MihonSY: 检测窗口按章独立——新章重开窗口（旧实现 done 后永不复位，
+            // 同一会话里第一章放弃检测后，后续条漫章节永远不再判断）。
+            autoWebtoonAspectDone = false
+            // MihonSY: 上一章的自动条漫只对上一章生效——进入新章时若解析出的
+            // 模式不同（如条漫章 → 页漫章），立即按新章模式重建 viewer。
+            val previousMode = getMangaReadingMode()
+            if (autoWebtoonEffectiveChapter != null && autoWebtoonEffectiveChapter != chapterUrl) {
+                autoWebtoonEffectiveChapter = null
+                if (getMangaReadingMode() != previousMode) {
+                    logcat { "MihonSY auto-webtoon: leaving auto-webtoon chapter, rebuilding viewer for new chapter" }
+                    recreateViewerForAutoMode()
+                }
+            }
         }
 
         // Check EVERY early page that is already ready, not just the current one.
@@ -727,9 +753,8 @@ class ReaderViewModel @JvmOverloads constructor(
                 val ratio = measurePageAspectRatio(candidate) ?: continue
                 logcat { "MihonSY auto-webtoon aspect check page ${candidate.number}: ratio=$ratio" }
                 if (ratio > AUTO_WEBTOON_MIN_ASPECT_RATIO) {
-                    autoWebtoonAspectDone = true
                     logcat { "MihonSY auto-webtoon: page ${candidate.number} is a tall strip, switching to webtoon mode" }
-                    setMangaReadingMode(ReadingMode.WEBTOON)
+                    applyAutoWebtoonForCurrentChapter(chapterUrl)
                     return@launchIO
                 }
                 synchronized(autoWebtoonCheckedIndices) { autoWebtoonCheckedIndices.add(candidate.index) }
@@ -754,6 +779,34 @@ class ReaderViewModel @JvmOverloads constructor(
                 }
             }
         }
+    }
+
+    /**
+     * MihonSY: 比例检测命中后调用——把当前章标记为「自动条漫」并按需重建 viewer。
+     * 只改内存状态（[autoWebtoonEffectiveChapter]），不写 manga.readingMode：
+     * 持久模式记忆仅由用户手动切换（[setMangaReadingMode]）更新，自动判断永不污染。
+     */
+    private fun applyAutoWebtoonForCurrentChapter(chapterUrl: String) {
+        autoWebtoonAspectDone = true
+        val previousMode = getMangaReadingMode()
+        autoWebtoonEffectiveChapter = chapterUrl
+        // 已经是条漫（如全局默认/标签推断）则只需记账，无需重建
+        if (getMangaReadingMode() == previousMode) return
+        logcat { "MihonSY auto-webtoon: chapter $chapterUrl switches to webtoon (in-memory, not saved)" }
+        recreateViewerForAutoMode()
+    }
+
+    /**
+     * MihonSY: 不落库地按 [getMangaReadingMode] 重建 viewer（自动模式切换专用）。
+     * 与 [setMangaReadingMode] 相同的位置保存逻辑，但不写数据库、不发 ReloadViewerChapters
+     * （状态未变，直接发 RecreateViewer 让 ReaderActivity 重建并重喂章节）。
+     */
+    private fun recreateViewerForAutoMode() {
+        val currChapters = state.value.viewerChapters ?: return
+        val currChapter = currChapters.currChapter
+        currChapter.requestedPage = currChapter.chapter.last_page_read
+        // Channel 默认 RENDEZVOUS，trySend 在无接收者时会丢——用 send 保证送达
+        viewModelScope.launchIO { eventChannel.send(Event.RecreateViewer) }
     }
 
     /**
@@ -1110,6 +1163,14 @@ class ReaderViewModel @JvmOverloads constructor(
         val readingMode = ReadingMode.fromPreference(manga.readingMode.toInt())
         // SY -->
         return when {
+            // MihonSY: 比例检测命中的当前章——内存级 effective 模式优先于标签/全局推断，
+            // 仅当该章仍是激活章时生效（换章后自然失效，由新章重新检测）。
+            resolveDefault && readingMode == ReadingMode.DEFAULT &&
+                readerPreferences.useAutoWebtoon.get() &&
+                autoWebtoonEffectiveChapter != null &&
+                autoWebtoonEffectiveChapter == state.value.viewerChapters?.currChapter?.chapter?.url -> {
+                ReadingMode.WEBTOON.flagValue
+            }
             resolveDefault && readingMode == ReadingMode.DEFAULT && readerPreferences.useAutoWebtoon.get() -> {
                 manga.defaultReaderType(manga.mangaType(sourceName = sourceManager.get(manga.source)?.name))
                     ?: default
@@ -1717,6 +1778,8 @@ class ReaderViewModel @JvmOverloads constructor(
 
     sealed interface Event {
         data object ReloadViewerChapters : Event
+        // MihonSY: 自动模式切换（内存生效，不落库）后按当前解析模式重建 viewer
+        data object RecreateViewer : Event
         data object PageChanged : Event
         data class SetOrientation(val orientation: Int) : Event
         data class SetCoverResult(val result: SetAsCoverResult) : Event

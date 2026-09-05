@@ -290,6 +290,12 @@ class ReaderActivity : BaseActivity() {
                         viewModel.state.value.viewerChapters?.let(::setChapters)
                     }
 
+                    // MihonSY: 自动模式切换（内存生效）——按当前解析模式重建 viewer 并重喂章节
+                    ReaderViewModel.Event.RecreateViewer -> {
+                        updateViewer()
+                        viewModel.state.value.viewerChapters?.let(::setChapters)
+                    }
+
                     ReaderViewModel.Event.PageChanged -> {
                         displayRefreshHost.flash()
                     }
