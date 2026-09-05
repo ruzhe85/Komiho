@@ -172,6 +172,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -4266,8 +4267,8 @@ private suspend fun checkForKomihoUpdate(context: android.content.Context, onFin
 
 /**
  * 全局来源切换按钮（顶栏标题位）：`图标 来源名 ▾`，下拉菜单列出全部来源条目
- * （类型图标 + 名称 + 类型副标题 + 当前项 ✓），底部「来源管理」打开全屏管理流程
- * （[AddSourceFlow]，见 AddSourceFlow.kt）。
+ * （类型图标 + 名称 + 类型副标题；当前项图标主色 + 名称加重，无尾部标记），
+ * 底部「来源管理」打开全屏管理流程（[AddSourceFlow]，见 AddSourceFlow.kt）。
  * 排序与可见性由 [buildSourceEntries] 决定（未添加的来源不显示）。
  */
 @Composable
@@ -4290,12 +4291,13 @@ private fun SourceSwitchButton(
             Icon(
                 imageVector = sourceIcon(current.kind),
                 contentDescription = null,
-                modifier = Modifier.size(20.dp),
+                // SY: 24dp 配平 titleLarge——其他 tab 顶栏标题都是默认 titleLarge，此前 titleMedium 小了 1 号。
+                modifier = Modifier.size(24.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 text = current.name,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -4306,6 +4308,7 @@ private fun SourceSwitchButton(
             onDismissRequest = { open = false },
         ) {
             entries.forEach { entry ->
+                val selected = entry.id == current.id
                 DropdownMenuItem(
                     text = {
                         Row(
@@ -4316,15 +4319,15 @@ private fun SourceSwitchButton(
                                 imageVector = sourceIcon(entry.kind),
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                // SY: 方案C——当前项图标主色 + 名称加重，无尾部标记（✓ 已弃用，反色仅限编辑表单）。
+                                tint = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            Text(entry.name, style = MaterialTheme.typography.bodyMedium)
-                        }
-                    },
-                    // 选中项右侧 ✓ 标记（反色方案已弃用——反色只保留在编辑表单的选择控件上）。
-                    trailingIcon = {
-                        if (entry.id == current.id) {
-                            Icon(Icons.Filled.Check, contentDescription = "当前来源")
+                            Text(
+                                entry.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.Medium else null,
+                            )
                         }
                     },
                     onClick = {
