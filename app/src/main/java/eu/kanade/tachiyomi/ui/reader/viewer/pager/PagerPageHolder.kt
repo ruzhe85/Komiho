@@ -11,10 +11,13 @@ import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -168,64 +171,108 @@ class PagerPageHolder(
             progressIndicator?.setProgress(95)
         }
 
-        val streamFn = page.stream ?: return
-        val streamFn2 = extraPage?.stream
-
-        try {
-            val (source, isAnimated, background) = withIOContext {
-                streamFn().buffered(16).use { source ->
-                    // SY（教训留档）：这里曾加 check(source.read() != -1) 判空，但
-                    // InputStream.read() 会消费掉首字节（BufferedInputStream 缓冲区是
-                    // 读取位置不是 peek），每张图片被吃掉第一个字节 → JPEG/PNG 头损坏
-                    // → 解码器嗅探失败 "No decoder found" → pager 全部页面渲染失败
-                    // （webtoon 无此行不受影响）。空流兜底已由读取层
-                    // ArchivePageLoader.readEntryBytes 承担，此处不再判空。
-                    // SY -->
-                    if (extraPage != null) {
-                        streamFn2?.invoke()
-                            ?.buffered(16)
-                    } else {
-                        null
-                    }.use { source2 ->
-                        val itemSource = if (viewer.config.dualPageSplit) {
-                            process(item.first, Buffer().readFrom(source))
-                        } else {
-                            mergePages(Buffer().readFrom(source), source2?.let { Buffer().readFrom(it) })
-                        }
-                        // SY <--
-                        val isAnimated = ImageUtil.isAnimatedAndSupported(itemSource)
-                        val background = if (!isAnimated && viewer.config.automaticBackground) {
-                            ImageUtil.chooseBackground(context, itemSource.peek())
-                        } else {
-                            null
-                        }
-                        Triple(itemSource, isAnimated, background)
-                    }
-                }
-            }
-            withUIContext {
-                setImage(
-                    source,
-                    isAnimated,
-                    Config(
-                        zoomDuration = viewer.config.doubleTapAnimDuration,
-                        minimumScaleType = viewer.config.imageScaleType,
-                        cropBorders = viewer.config.imageCropBorders,
-                        zoomStartPosition = viewer.config.imageZoomType,
-                        landscapeZoom = viewer.config.landscapeZoom,
-                    ),
-                )
-                if (!isAnimated) {
-                    pageBackground = background
-                }
-                removeErrorLayout()
-            }
-        } catch (e: Throwable) {
-            logcat(LogPriority.ERROR, e)
-            withUIContext {
-                setError(e)
+        // SY（A+B+C，Page 流畅度优化）：
+        // 1) 命中预处理缓存（预热/上次离开时算好的整图+标志+可能的增强预解码位图）→ 直接应用；
+        // 2) 未命中走纯管线（PagerPagePreparer，无副作用）并把结果入缓存（B: 回翻/重建复用）；
+        // 3) 纯管线放弃的副作用分支（双页分割 onPageSplit / 合并 splitDoublePages）回退旧管线，
+        //    旧管线结果同样入缓存。
+        val key = viewer.preparedCache.key(page, extraPage)
+        var prepared = viewer.preparedCache.get(key)
+        if (prepared == null) {
+            prepared = PagerPagePreparer.preparePure(
+                viewer = viewer,
+                page = page,
+                extraPage = extraPage,
+                viewHeight = if (height > 0) height else viewer.pager.height,
+            )
+        }
+        if (prepared == null) {
+            try {
+                prepared = prepareLegacy()
+            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                logcat(LogPriority.ERROR, e)
+                withUIContext { setError(e) }
+                return
             }
         }
+        val result = prepared ?: return
+        viewer.preparedCache.put(key, result)
+
+        withUIContext {
+            val bitmap = result.decodedBitmap
+            if (bitmap != null && !bitmap.isRecycled) {
+                // 增强预解码已完成：直接走 bitmap 路径（与旧增强成功路径等价）
+                setImage(
+                    android.graphics.drawable.BitmapDrawable(resources, bitmap),
+                    viewerImageConfig(),
+                )
+            } else {
+                setImage(result.source.peek(), result.isAnimated, viewerImageConfig())
+            }
+            if (!result.isAnimated) {
+                pageBackground = result.background
+            }
+            removeErrorLayout()
+        }
+    }
+
+    private fun viewerImageConfig() = Config(
+        zoomDuration = viewer.config.doubleTapAnimDuration,
+        minimumScaleType = viewer.config.imageScaleType,
+        cropBorders = viewer.config.imageCropBorders,
+        zoomStartPosition = viewer.config.imageZoomType,
+        landscapeZoom = viewer.config.landscapeZoom,
+    )
+
+    /**
+     * 旧同步管线（保留副作用：双页分割 onPageSplit / 合并 splitDoublePages 与进度回调），
+     * 仅在纯管线放弃（双页相关配置）时使用。结果同样包装进缓存供回翻复用。
+     */
+    private suspend fun prepareLegacy(): PagerPreparedPage {
+        val streamFn = page.stream ?: throw IllegalStateException("page stream is null")
+        val streamFn2 = extraPage?.stream
+
+        val (source, isAnimated, background) = withIOContext {
+            streamFn().buffered(16).use { source ->
+                // SY（教训留档）：这里曾加 check(source.read() != -1) 判空，但
+                // InputStream.read() 会消费掉首字节（BufferedInputStream 缓冲区是
+                // 读取位置不是 peek），每张图片被吃掉第一个字节 → JPEG/PNG 头损坏
+                // → 解码器嗅探失败 "No decoder found" → pager 全部页面渲染失败
+                // （webtoon 无此行不受影响）。空流兜底已由读取层
+                // ArchivePageLoader.readEntryBytes 承担，此处不再判空。
+                // SY -->
+                if (extraPage != null) {
+                    streamFn2?.invoke()
+                        ?.buffered(16)
+                } else {
+                    null
+                }.use { source2 ->
+                    val itemSource = if (viewer.config.dualPageSplit) {
+                        process(item.first, Buffer().readFrom(source))
+                    } else {
+                        mergePages(Buffer().readFrom(source), source2?.let { Buffer().readFrom(it) })
+                    }
+                    // SY <--
+                    val isAnimated = ImageUtil.isAnimatedAndSupported(itemSource)
+                    val background = if (!isAnimated && viewer.config.automaticBackground) {
+                        ImageUtil.chooseBackground(context, itemSource.peek())
+                    } else {
+                        null
+                    }
+                    Triple(itemSource, isAnimated, background)
+                }
+            }
+        }
+        return PagerPreparedPage(
+            source = source,
+            isAnimated = isAnimated,
+            background = background,
+            decodedBitmap = null,
+            enhancementMode = Injekt.get<ReaderPreferences>().enhancementMode.get(),
+            cropBorders = viewer.config.imageCropBorders,
+        )
     }
 
     private fun process(page: ReaderPage, imageSource: BufferedSource): BufferedSource {
