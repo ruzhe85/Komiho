@@ -126,9 +126,14 @@ internal fun AddSourceFlow(
     onPickLocalFolder: () -> Unit,
     onManageAccess: () -> Unit,
     onDismiss: () -> Unit,
+    // SY --> Komiho Onboarding: 首启欢迎页复用本流程——点来源卡直达对应表单页，
+    // 表单返回仍回类型选择页、再返回才 onDismiss（= 回欢迎页）。
+    initialScreen: AddSourceScreen = AddSourceScreen.TypeSelect,
+    // SY <--
 ) {
     val context = LocalContext.current
-    var screen by remember { mutableStateOf<AddSourceScreen>(AddSourceScreen.TypeSelect) }
+    // SY: Onboarding 传入 initialScreen 时从这里起步（默认仍是类型选择页）。
+    var screen by remember { mutableStateOf<AddSourceScreen>(initialScreen) }
     // 类型选择页列表刷新计数：每次从表单页返回 / 删除后 +1。
     var listTick by remember { mutableIntStateOf(0) }
     var deleteKomga by remember { mutableStateOf<KomgaConnection?>(null) }
