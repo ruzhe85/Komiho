@@ -417,11 +417,24 @@ private fun KomgaMainScreen(
 ) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
-    // SY --> Komiho: 懒构造客户端。欢迎页无连接「随便逛逛」/ 仅 WebDAV / 仅本地进入主界面时，
-    // 旧写法 remember { KomgaApiClient(...) } 在组合阶段就触发 init 的 require(baseUrl)
-    // （「服务器地址不能为空」）直接崩溃。改为 lazy 委托：所有使用点都只在 Komga tab /
-    // hasConnection 守卫内可达，无 Komga 连接时永不构造；在设置里添加连接后首次访问即构造。
-    val client: KomgaApiClient by remember { lazy { KomgaApiClient(prefs.connection()) } }
+    // SY --> Komiho: 懒构造客户端。欢迎页「开始使用」/ 仅 WebDAV / 仅本地进入主界面时，
+    // 无条件构造会在 init 的 require(baseUrl)（「服务器地址不能为空」）直接崩溃。
+    // b3ec421 首版懒构造仍被首帧组合触碰（currentTab 记忆值 Home 先于 tab 修正
+    // LaunchedEffect 组合 HomeTab），翻车于此。三层兜底：①初始 tab 按有无连接落点；
+    // ②无连接时 Komga 专属 tab 重定向本地浏览（见 safeTab）；③此处构造永不抛——
+    // 无连接用占位连接，请求自然失败，绝不在组合期 throw。
+    val client: KomgaApiClient by remember {
+        lazy {
+            val conn = prefs.connection()
+            KomgaApiClient(
+                if (conn.baseUrl.isNotBlank()) {
+                    conn
+                } else {
+                    KomgaConnection(baseUrl = "http://127.0.0.1:1")
+                },
+            )
+        }
+    }
 
     // SY --> Komiho P0: 本地浏览所需状态。
     // 用户所选文件夹**即**漫画根目录（不再有 local 子目录这一层）；目录未选择时
@@ -485,7 +498,11 @@ private fun KomgaMainScreen(
     // SY: 启动默认落在「来源」仪表盘（方案 B）；后续由 rememberSaveable 记忆用户所在 tab。
     // SY: 默认落 Komga=主页 / 文件型=浏览（首个可见 tab；Sources 仪表盘暂时屏蔽，兜底
     // LaunchedEffect(visibleTabs) 会把旧记忆值纠正到首个可见 tab）。
-    var currentTab by rememberSaveable { mutableIntStateOf(MainTab.Home.ordinal) }
+    // SY --> Komiho: 初始 tab 按有无 Komga 连接落点——无连接不能从 Home 起步（Home 首帧
+    // 组合即取 client），落 Browse（本地内置兜底）；LaunchedEffect 修正仍在，双保险。
+    var currentTab by rememberSaveable {
+        mutableIntStateOf(if (prefs.hasConnection()) MainTab.Home.ordinal else MainTab.Browse.ordinal)
+    }
 
     // SY --> Komiho: 历史/书签「打开文件位置」→ 应用内跳转。navRequest 状态在此声明；
     // 跳转函数 openLocationInApp 定义在 selectSource 之后（局部函数不能前向引用）：
@@ -939,7 +956,13 @@ private fun KomgaMainScreen(
                 }
             }
             Box(Modifier.fillMaxSize()) {
-                when (MainTab.entries[currentTab]) {
+                // SY --> Komiho: 兜底重定向——无 Komga 连接（如进程恢复的陈旧记忆 tab /
+                // 极端路径）时，Komga 专属 tab（komgaOnly）一律渲染为本地浏览，
+                // 绝不触碰 client；有连接时行为不变。
+                val safeTab = MainTab.entries[currentTab]
+                    .takeIf { prefs.hasConnection() || !it.komgaOnly }
+                    ?: MainTab.Browse
+                when (safeTab) {
                     // SY --> Komiho: 来源仪表盘（方案 B 启动首页）。
                     MainTab.Sources -> SourceDashboardPane(
                         entries = sourceEntries,
