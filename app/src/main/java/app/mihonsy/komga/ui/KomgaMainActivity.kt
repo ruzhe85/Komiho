@@ -72,6 +72,12 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+// SY --> Komiho: 来源仪表盘
+import android.text.format.DateUtils
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material3.CardDefaults
+import app.mihonsy.komga.source.KomgaSource
+// SY <--
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Menu
@@ -105,6 +111,7 @@ import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -368,6 +375,10 @@ private enum class MainTab(
     /** 仅在文件型来源下出现（浏览语义）。 */
     val fileOnly: Boolean = false,
 ) {
+    // SY --> Komiho: 来源仪表盘（方案 B 启动首页）——固定第一位、全来源可见，不参与
+    // 「来源首个内容 tab」的选取（selectSource / openSourceFromDashboard 均跳过它）。
+    Sources(R.string.tab_sources, Icons.Filled.Dashboard),
+    // SY <--（下方各 tab 维持原语义）
     Home(R.string.tab_home, Icons.Filled.Home, komgaOnly = true),
     Library(R.string.tab_library, Icons.Filled.Book, komgaOnly = true),
     Lists(R.string.tab_lists, Icons.AutoMirrored.Filled.List, komgaOnly = true),
@@ -460,7 +471,8 @@ private fun KomgaMainScreen(
     // configChanges flag (orientation). rememberSaveable additionally keeps
     // the current tab across activity.recreate() — theme/language switches
     // in Settings would otherwise bounce back to the Home tab.
-    var currentTab by rememberSaveable { mutableIntStateOf(MainTab.Home.ordinal) }
+    // SY: 启动默认落在「来源」仪表盘（方案 B）；后续由 rememberSaveable 记忆用户所在 tab。
+    var currentTab by rememberSaveable { mutableIntStateOf(MainTab.Sources.ordinal) }
 
     // SY --> Komiho: 历史/书签「打开文件位置」→ 应用内跳转。navRequest 状态在此声明；
     // 跳转函数 openLocationInApp 定义在 selectSource 之后（局部函数不能前向引用）：
@@ -536,8 +548,19 @@ private fun KomgaMainScreen(
         if (entry.id == currentSourceId) return
         currentSourceId = entry.id
         storagePreferences.browseSourceId.set(entry.id)
-        currentTab = MainTab.entries.first { it.visibleFor(entry.kind.isFileSource) }.ordinal
+        // SY: 跳过 Sources 仪表盘——「首个可见 tab」指来源的内容首页（Komga=Home / 文件型=浏览）。
+        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource) }.ordinal
     }
+
+    // SY --> Komiho: 来源仪表盘点卡——无论该来源是否已是当前来源，都切换并落到其内容首页
+    //（Komga=Home / 文件型=浏览）。与 selectSource 的区别：同源不早退（仪表盘上点当前来源
+    // 的卡片，预期也是「进去」而不是没反应）。
+    fun openSourceFromDashboard(entry: SourceEntry) {
+        currentSourceId = entry.id
+        storagePreferences.browseSourceId.set(entry.id)
+        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource) }.ordinal
+    }
+    // SY <--
 
     // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转（按条目所属来源路由）：
     // 本地条目 → 切到本地来源 + 浏览 tab 定位所在目录；
@@ -904,6 +927,15 @@ private fun KomgaMainScreen(
             }
             Box(Modifier.fillMaxSize()) {
                 when (MainTab.entries[currentTab]) {
+                    // SY --> Komiho: 来源仪表盘（方案 B 启动首页）。
+                    MainTab.Sources -> SourceDashboardPane(
+                        entries = sourceEntries,
+                        currentSourceId = currentSourceId,
+                        refreshTick = refreshTick,
+                        onAddSource = { showAddSource = true },
+                        onOpenSource = ::openSourceFromDashboard,
+                    )
+                    // SY <--
                     MainTab.Home -> HomeTab(
                         client = client,
                         refreshTick = refreshTick,
@@ -6016,6 +6048,181 @@ private data class MergedBook(
 
 /** 历史 tab：按卷（chapterUrl）合并的最近阅读；3-dot 菜单提供「汇聚」与「删除记录」。 */
 @Composable
+// SY --> Komiho: 来源仪表盘（方案 B 启动首页）。
+// 每来源一张卡：类型图标 + 名称 + 阅读摘要。摘要统一取自本地历史库——
+// 本地/WebDAV 记录挂在 LocalSource.ID 下（chapterUrl 以 webdav: 前缀区分归属连接），
+// Komga 记录挂在 KomgaSource.ID 下（阅读器若未写本地历史则回落引导语，进度主体在服务器）。
+// 点卡直达该来源内容首页；末尾「添加来源」卡进入来源管理流程。
+private data class SourceCardSummary(val count: Int, val lastTitle: String?, val lastReadAt: Date?)
+
+@Composable
+private fun SourceDashboardPane(
+    entries: List<SourceEntry>,
+    currentSourceId: String,
+    refreshTick: Int,
+    onAddSource: () -> Unit,
+    onOpenSource: (SourceEntry) -> Unit,
+) {
+    val summaries by produceState<Map<String, SourceCardSummary>>(emptyMap(), entries, refreshTick) {
+        value = withContext(Dispatchers.IO) {
+            class Agg {
+                val urls = mutableSetOf<String>()
+                var last: LocalHistoryItem? = null
+                fun add(item: LocalHistoryItem) {
+                    urls.add(item.chapterUrl)
+                    if (last == null || (item.readAt?.time ?: 0L) > (last?.readAt?.time ?: 0L)) last = item
+                }
+            }
+            val local = Agg()
+            val komga = Agg()
+            val webdav = mutableMapOf<String, Agg>()
+            val repo = Injekt.get<HistoryRepository>()
+            val conns = WebDavConnectionStore.all()
+            // 本地/WebDAV：同一来源 ID，按 chapterUrl 前缀归类。
+            runCatching { repo.getHistoryBySourceDetailed(LocalSource.ID).first() }.getOrDefault(emptyList()).forEach { item ->
+                val url = item.chapterUrl
+                when {
+                    url.startsWith("webdav://") ->
+                        webdav.getOrPut("webdav:" + url.removePrefix("webdav://").substringBefore('/')) { Agg() }.add(item)
+                    url.startsWith("webdav:") -> {
+                        // 旧格式 webdav:<URL>（Phase3）：baseUrl 最长前缀匹配连接。
+                        val full = WebDavConnectionStore.extractFullUrl(url)
+                        conns.filter { full.startsWith(it.baseUrl) }
+                            .maxByOrNull { it.baseUrl.length }
+                            ?.let { webdav.getOrPut("webdav:" + it.id) { Agg() }.add(item) }
+                    }
+                    else -> local.add(item)
+                }
+            }
+            // Komga：独立来源 ID（无记录时卡片回落引导语）。
+            runCatching { repo.getHistoryBySourceDetailed(KomgaSource.ID).first() }.getOrDefault(emptyList()).forEach { komga.add(it) }
+            mapOf(
+                SOURCE_ID_LOCAL to SourceCardSummary(local.urls.size, local.last?.mangaTitle, local.last?.readAt),
+                SOURCE_ID_KOMGA to SourceCardSummary(komga.urls.size, komga.last?.mangaTitle, komga.last?.readAt),
+            ) + webdav.mapValues { (_, agg) -> SourceCardSummary(agg.urls.size, agg.last?.mangaTitle, agg.last?.readAt) }
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        entries.forEach { entry ->
+            val summary = summaries[entry.id]
+            val isCurrent = entry.id == currentSourceId
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { onOpenSource(entry) },
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isCurrent) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                ),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier.size(42.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = entry.name.take(1).uppercase(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isCurrent) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = entry.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (isCurrent) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                        val typeLabel = when (entry.kind) {
+                            SourceKind.Komga -> "Komga"
+                            SourceKind.WebDav -> "WebDAV"
+                            SourceKind.Smb -> "SMB"
+                            SourceKind.Local -> composeStringResource(R.string.source_local)
+                        }
+                        val countText = summary?.takeIf { it.count > 0 }?.let {
+                            composeStringResource(R.string.dashboard_summary, it.count)
+                        } ?: when (entry.kind) {
+                            SourceKind.Komga -> composeStringResource(R.string.dashboard_komga_hint)
+                            else -> composeStringResource(R.string.dashboard_no_history)
+                        }
+                        Text(
+                            text = "$typeLabel · $countText",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isCurrent) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                        summary?.lastTitle?.takeIf { it.isNotBlank() }?.let { title ->
+                            val ago = summary.lastReadAt?.let {
+                                DateUtils.getRelativeTimeSpanString(it.time).toString()
+                            }
+                            Text(
+                                text = if (ago.isNullOrBlank()) title else "最近：$title · $ago",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        // 「添加来源」卡：进入来源管理全屏流程（与顶栏 ☰ 菜单、设置入口同一流程）。
+        Card(
+            modifier = Modifier.fillMaxWidth().clickable { onAddSource() },
+            shape = MaterialTheme.shapes.large,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = composeStringResource(R.string.source_add),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+// SY <--
+
 private fun HistoryTabLocal(
     refreshTick: Int,
     onOpenLocation: (String) -> Unit,
