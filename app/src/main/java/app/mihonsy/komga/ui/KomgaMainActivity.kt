@@ -638,7 +638,7 @@ private fun KomgaMainScreen(
                                     .getOrNull()?.totalElements
                             }
                         }.awaitAll()
-                            .mapIndexed { i, count -> libs[i].id to (count ?: 0) }
+                            .mapIndexed { i, count -> libs[i].id to (count?.toInt() ?: 0) }
                             .toMap()
                     }
                 }
