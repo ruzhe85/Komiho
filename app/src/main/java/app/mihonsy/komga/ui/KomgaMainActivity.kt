@@ -5383,6 +5383,10 @@ private fun WebDavBrowsePane(
         errorText = null
         try {
             entries = WebDavPropfind.list(conn, dirUrl)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // SY: 目录被 navRequest 重切时 LaunchedEffect 会取消当前 job，propind 改用 await() 后
+            // 这里会收到 CancellationException；不算错误，不显示，直接抛回。
+            throw e
         } catch (e: Throwable) {
             errorText = e.message ?: dirBrowseFailed
         }

@@ -1,6 +1,7 @@
 package app.mihonsy.komga.data.webdav
 
 import android.util.Xml
+import eu.kanade.tachiyomi.network.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
@@ -66,7 +67,11 @@ object WebDavPropfind {
             }
             val selfPath = decodedPath(dir)
             val xml = WebDavRandomAccessSource.sharedHttpClient().newCall(builder.build())
-                .execute().use { resp ->
+                // SY: 用 Call.await() 替代阻塞 execute()——协程被取消时（如 WebDavBrowsePane 的
+                // dirUrl 因 navRequest 触发重切）能 invokeOnCancellation 调 call.cancel()，
+                // OkHttp 直接中断请求；否则 execute() 阻塞 IO 线程不响应协程取消，请求跑完再
+                // resume 时父 scope 已退出 → "The coroutine scope left the composition" 报错。
+                .await().use { resp ->
                     if (!resp.isSuccessful) {
                         throw Exception("PROPFIND ${resp.code}（目录浏览失败）")
                     }
