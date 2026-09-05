@@ -57,17 +57,14 @@
         tools:node="remove" />
 
     <!-- Komiho: 包可见性白名单（替代 QUERY_ALL_PACKAGES）——
-         WebViewUtil.spoofedPackageName 需要看见 chrome/系统设置/YT-TV，
-         VIEW+https 让各浏览器/WebView provider 可见。 -->
+         WebViewUtil.spoofedPackageName 需要看见 chrome/系统设置/YT-TV。
+         注意：不能加 VIEW+https intent（浏览器可见性）——Google 政策与鸿蒙
+         均视其为「读取已安装应用列表」，会重新触发风险标签。 -->
     <queries>
         <package android:name="com.google.android.webview" />
         <package android:name="com.android.chrome" />
         <package android:name="com.android.settings" />
         <package android:name="com.google.android.youtube.tv" />
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="https" />
-        </intent>
     </queries>
 
     <application
