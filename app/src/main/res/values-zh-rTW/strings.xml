@@ -17,7 +17,6 @@
     <string name="onboarding_local_desc">裝置內儲存的漫畫檔案</string>
     <string name="onboarding_ready">已就緒</string>
     <string name="onboarding_pending">未設定</string>
-    <string name="onboarding_skip">略過，先隨便逛逛</string>
     <string name="onboarding_enter">開始使用</string>
     <string name="dashboard_summary">讀過 %1$d 本</string>
     <string name="dashboard_komga_hint">點按進入 Komga 首頁</string>
