@@ -84,7 +84,9 @@ object SmbSessionManager {
             }
 
             val sessionRef = sessions[sKey] ?: run {
+                val connectStart = System.currentTimeMillis()
                 val connection = client.connect(conn.host, conn.port)
+                logcat(LogPriority.INFO) { "[Smb] TCP 连接+协商完成 ${conn.host}:${conn.port}，耗时 ${System.currentTimeMillis() - connectStart}ms" }
                 // SY: 用户名留空 = guest 访客（QNAP 等 NAS 口径），不再走匿名空会话——
                 // anonymous（null session）会被 QNAP 直接断开，表现即 SESSION_SETUP 阶段 broken pipe。
                 val auth = if (conn.user.isBlank()) {
@@ -96,13 +98,17 @@ object SmbSessionManager {
                         conn.domain.ifBlank { null },
                     )
                 }
+                val authStart = System.currentTimeMillis()
                 val session = connection.authenticate(auth)
+                logcat(LogPriority.INFO) { "[Smb] 会话认证完成 ${conn.host}:${conn.port}（user=${conn.user.ifBlank { "guest" }}），耗时 ${System.currentTimeMillis() - authStart}ms" }
                 SessionRef(connection, session, now).also { sessions[sKey] = it }
             }
             sessionRef.lastUsed = now
 
             val shareRef = shares[shKey] ?: run {
+                val treeStart = System.currentTimeMillis()
                 val share = sessionRef.session.connectShare(shareName) as DiskShare
+                logcat(LogPriority.INFO) { "[Smb] TreeConnect 完成 \\$${conn.host}\\$shareName，耗时 ${System.currentTimeMillis() - treeStart}ms" }
                 ShareRef(share, now).also { shares[shKey] = it }
             }
             shareRef.lastUsed = now
@@ -126,7 +132,9 @@ object SmbSessionManager {
                 closeLocked(sKey)
             }
             val sessionRef = sessions[sKey] ?: run {
+                val connectStart = System.currentTimeMillis()
                 val connection = client.connect(conn.host, conn.port)
+                logcat(LogPriority.INFO) { "[Smb] TCP 连接+协商完成 ${conn.host}:${conn.port}，耗时 ${System.currentTimeMillis() - connectStart}ms" }
                 val auth = if (conn.user.isBlank()) {
                     AuthenticationContext.guest()
                 } else {
@@ -136,7 +144,9 @@ object SmbSessionManager {
                         conn.domain.ifBlank { null },
                     )
                 }
+                val authStart = System.currentTimeMillis()
                 val session = connection.authenticate(auth)
+                logcat(LogPriority.INFO) { "[Smb] 会话认证完成 ${conn.host}:${conn.port}（user=${conn.user.ifBlank { "guest" }}），耗时 ${System.currentTimeMillis() - authStart}ms" }
                 SessionRef(connection, session, now).also { sessions[sKey] = it }
             }
             sessionRef.lastUsed = now

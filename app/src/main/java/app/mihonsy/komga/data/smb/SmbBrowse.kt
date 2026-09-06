@@ -57,13 +57,20 @@ object SmbBrowse {
      */
     suspend fun list(conn: SmbConnection, password: String, relPath: String): List<SmbEntry> =
         withContext(Dispatchers.IO) {
+            val listStart = System.currentTimeMillis()
             try {
-                listOnce(conn, password, relPath)
+                val out = listOnce(conn, password, relPath)
+                logcat(LogPriority.INFO) { "[Smb] 列目录 $relPath 完成，${out.size} 项，耗时 ${System.currentTimeMillis() - listStart}ms" }
+                out
             } catch (e: Exception) {
+                logcat(LogPriority.INFO) { "[Smb] 列目录 $relPath 失败（${System.currentTimeMillis() - listStart}ms），作废会话重试: ${e.message}" }
                 // 会话可能已断（NAS 休眠/换网）：作废后重试一次，仍失败才上抛。
                 logcat(LogPriority.DEBUG) { "[Smb] 列目录失败，作废会话重试: ${e.message}" }
                 SmbSessionManager.invalidate(conn)
-                listOnce(conn, password, relPath)
+                val retryStart = System.currentTimeMillis()
+                val out = listOnce(conn, password, relPath)
+                logcat(LogPriority.INFO) { "[Smb] 列目录 $relPath 重试成功，${out.size} 项，耗时 ${System.currentTimeMillis() - retryStart}ms" }
+                out
             }
         }
 
