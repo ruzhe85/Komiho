@@ -6840,14 +6840,14 @@ private fun HistoryTabLocal(
             }
             // SY <--
             // 标题取「卷名」（章节名 / chapterUrl 末段），而非系列名；副标题展示系列名。
-            val volumeTitle = rep.chapterName.ifBlank { rep.chapterUrl.substringAfterLast('/') }
+            val volumeTitle = rep.chapterName.ifBlank { rep.chapterUrl.trimEnd('/').substringAfterLast('/') }
             val subtitle = rep.mangaTitle
 
             LocalFileRow(
                 context = context,
                 title = volumeTitle,
                 subtitle = subtitle,
-                sourceBadge = chapterSourceLabel(rep.chapterUrl, webDavConns),
+                sourceBadge = chapterSourceLabel(rep.chapterUrl, webDavConns, smbConns),
                 fileSize = stat.size,
                 // 文件修改时间对远程章节无意义，行内改显最后阅读时间
                 dateTime = rep.readAt?.time ?: 0L,

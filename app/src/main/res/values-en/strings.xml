@@ -347,6 +347,9 @@
     <string name="smb_path_no_filename">Path is missing a file name</string>
     <string name="addsrc_smb_user">Username (blank = guest)</string>
     <string name="smb_conn_reset">Connection closed by server: enable SMB2/SMB3 on the NAS and grant the account (guest) access to the share</string>
+    <string name="addsrc_smb_scan">Scan LAN</string>
+    <string name="addsrc_smb_scanning">Scanning…</string>
+    <string name="addsrc_smb_scan_empty">No SMB hosts found on the LAN</string>
     <string name="webdav_chapter_write_failed">Failed to write chapters</string>
     <string name="dir_browse_failed">Failed to browse folder</string>
     <string name="file_not_found">File not found: %1$s</string>
