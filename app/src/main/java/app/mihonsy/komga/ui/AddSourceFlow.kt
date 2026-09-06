@@ -913,7 +913,9 @@ private fun SmbFormPage(
     }
 }
 
-// ------------------------------------------------------------ Komga 表单页@Composable
+// ------------------------------------------------------------ Komga 表单页
+
+@Composable
 private fun KomgaFormPage(
     prefs: KomgaPreferences,
     connId: String?,
