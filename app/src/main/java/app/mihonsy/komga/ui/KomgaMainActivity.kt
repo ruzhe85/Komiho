@@ -5872,20 +5872,28 @@ private suspend fun openWebDavTestFile(
                         )
                     }
                 }
-                // 保底：当前目录未被子目录覆盖（叶子散图目录）→ 单章，避免读不了当前图。
-                chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
-                    ?: chapterRepo.addAll(
+                // 保底：当前目录未被子目录覆盖（叶子散图目录）→ 单章。
+                // 命名 = 点开的图片文件名（去扩展名）：目录名与系列名相同会让历史显示成
+                // 「目录名/目录名」（如共享根的散图 → QNAP3/QNAP3）；旧版本建的章
+                //（name=目录名）在这里顺带迁移成文件名。
+                val fileBase = decodedName.substringBeforeLast('.').ifBlank { decodedName }
+                val existingChapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                if (existingChapter == null) {
+                    chapterRepo.addAll(
                         listOf(
                             Chapter.create().copy(
                                 mangaId = manga.id!!,
                                 url = chapterUrl,
-                                name = seriesTitle,
+                                name = fileBase,
                                 chapterNumber = 1.0,
                             ),
                         ),
                     )
+                } else if (existingChapter.name == seriesTitle && seriesTitle != fileBase) {
+                    chapterRepo.update(ChapterUpdate(id = existingChapter.id!!, name = fileBase))
+                }
                 // SY <--
-            } else {
+                } else {
             // 同目录归档全部建成章节（去重），顺序 = PROPFIND 自然排序，翻完自动续卷
             val siblings = runCatching {
                 WebDavPropfind.list(conn, mangaUrl).filter { it.isArchive }.map { it.url }
@@ -6231,20 +6239,28 @@ private suspend fun openSmbFile(
                         )
                     }
                 }
-                // 保底：当前目录未被子目录覆盖（叶子散图目录）→ 单章，避免读不了当前图。
-                chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
-                    ?: chapterRepo.addAll(
+                // 保底：当前目录未被子目录覆盖（叶子散图目录）→ 单章。
+                // 命名 = 点开的图片文件名（去扩展名）：目录名与系列名相同会让历史显示成
+                // 「目录名/目录名」（如共享根的散图 → QNAP3/QNAP3）；旧版本建的章
+                //（name=目录名）在这里顺带迁移成文件名。
+                val fileBase = fileName.substringBeforeLast('.').ifBlank { fileName }
+                val existingChapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                if (existingChapter == null) {
+                    chapterRepo.addAll(
                         listOf(
                             Chapter.create().copy(
                                 mangaId = manga.id!!,
                                 url = chapterUrl,
-                                name = seriesTitle,
+                                name = fileBase,
                                 chapterNumber = 1.0,
                             ),
                         ),
                     )
+                } else if (existingChapter.name == seriesTitle && seriesTitle != fileBase) {
+                    chapterRepo.update(ChapterUpdate(id = existingChapter.id!!, name = fileBase))
+                }
                 // SY <--
-            } else {
+                } else {
                 val siblings = runCatching {
                     SmbBrowse.list(conn, password, dirRel).filter { it.isArchive }.map { it.path }
                 }.onFailure {
