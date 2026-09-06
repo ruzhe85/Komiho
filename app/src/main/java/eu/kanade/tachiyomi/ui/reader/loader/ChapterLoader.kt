@@ -2,13 +2,17 @@ package eu.kanade.tachiyomi.ui.reader.loader
 
 import android.content.Context
 import java.io.File
+import java.io.IOException
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavCoverCache
-import app.mihonsy.komga.data.webdav.CachingArchiveHandle
-import app.mihonsy.komga.data.webdav.WebDavPageCache
+import app.mihonsy.komga.data.remote.CachingArchiveHandle
+import app.mihonsy.komga.data.remote.RemotePageCache
+import app.mihonsy.komga.data.smb.SmbConnectionStore
+import app.mihonsy.komga.data.smb.SmbCoverCache
+import app.mihonsy.komga.data.smb.SmbRandomAccessSource
 import app.mihonsy.komga.source.KomgaSource
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
@@ -19,8 +23,9 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import logcat.LogPriority
 import mihon.core.common.archive.ArchiveHandle
 import mihon.core.common.archive.ArchiveReader
+import mihon.core.common.archive.RemoteScheme
+import mihon.core.common.archive.RemoteZipReader
 import mihon.core.common.archive.WebDavRandomAccessSource
-import mihon.core.common.archive.WebDavZipReader
 import mihon.core.common.archive.archiveReader
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
@@ -146,8 +151,8 @@ class ChapterLoader(
                             is Format.Directory -> DirectoryPageLoader(format.file)
                             is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
                             is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
-                            // SY --> Komiho Phase3: WebDAV 远程随机访问（HTTP Range + libarchive seek 回调）
-                            is Format.RemoteArchive -> ArchivePageLoader(webDavArchiveHandle(format.remoteUrl))
+                            // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）
+                            is Format.RemoteArchive -> ArchivePageLoader(remoteArchiveHandle(format.remoteUrl))
                             // SY <--
                         }
                     }
@@ -167,8 +172,8 @@ class ChapterLoader(
                     is Format.Directory -> DirectoryPageLoader(format.file)
                     is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
                     is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
-                    // SY --> Komiho Phase3: WebDAV 远程随机访问（HTTP Range + libarchive seek 回调）
-                    is Format.RemoteArchive -> ArchivePageLoader(webDavArchiveHandle(format.remoteUrl))
+                    // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）
+                    is Format.RemoteArchive -> ArchivePageLoader(remoteArchiveHandle(format.remoteUrl))
                     // SY <--
                 }
             }
@@ -210,6 +215,40 @@ class ChapterLoader(
         )
     }
 
+    // SY --> Komiho Phase7: 远程归档按 URL 方案分派（webdav: / smb://）。
+    private fun remoteArchiveHandle(remoteUrl: String): ArchiveHandle =
+        if (RemoteScheme.isSmb(remoteUrl)) smbArchiveHandle(remoteUrl) else webDavArchiveHandle(remoteUrl)
+
+    // SY --> Komiho Phase7: 由 `smb://<connId>/<relPath>` 章节 url 构造 SMB 随机访问源。
+    // 与 WebDAV 的差异：SMB 原生支持按偏移读，无 Range 探测、无 rar/7z 整本缓存回退；
+    // 代价是会话有状态——由 SmbSessionManager 池化 + 断线重连（读写失败作废会话）。
+    // 页缓存与 WebDAV 共用同一个 RemotePageCache（键为 smb 定位串 + 指纹，天然不冲突）。
+    private fun smbArchiveHandle(remoteUrl: String): ArchiveHandle {
+        val target = SmbConnectionStore.resolve(remoteUrl)
+            ?: throw IOException("SMB 连接不存在（可能已删除）: $remoteUrl")
+        // SY --> Komiho Phase7: 打开章节时「顺便」生成历史/书签封面（缺缓存才拉，失败静默）。
+        SmbCoverCache.generateAsync(context, remoteUrl)
+        // SY <--
+        val source = SmbRandomAccessSource(target.conn, target.password, target.relPath)
+        val delegate: ArchiveHandle = try {
+            RemoteZipReader(source)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "RemoteZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
+            ArchiveReader(source)
+        }
+        return CachingArchiveHandle(
+            delegate = delegate,
+            cache = RemotePageCache(
+                root = File(context.cacheDir, "remote_pages"),
+                maxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+            ),
+            metaKey = {
+                source.remoteFingerprint?.let { fp -> "${source.normalizedUrl}|$fp" }
+            },
+        )
+    }
+    // SY <--
+
     // SY --> Komiho Phase3（方案 A+C）：远程 ZIP 走纯 Kotlin 中央目录直读（每页流量=条目本身，
     // 跳页 O(1)），彻底绕开 libarchive 逐条目迭代 × 256KB 放大（曾致每页流量 ≥ 整个文件）。
     // 加密（ZipCrypto / WinZip AES）内建解密，密码复用 CbzCrypto 全局密码，走既有弹窗流程。
@@ -221,17 +260,17 @@ class ChapterLoader(
         WebDavCoverCache.generateAsync(context, remoteUrl)
         // SY <--
         val delegate: ArchiveHandle = try {
-            WebDavZipReader(source)
+            RemoteZipReader(source)
         } catch (e: Exception) {
-            logcat(LogPriority.WARN, e) { "WebDavZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
+            logcat(LogPriority.WARN, e) { "RemoteZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
             ArchiveReader(source)
         }
         // SY --> Komiho Phase5: 页级磁盘缓存装饰器——回翻/重开章节零网络；
         // rar/7z 强制整本回退时 source.remoteFingerprint 指向整本文件，页缓存自动停用。
         return CachingArchiveHandle(
             delegate = delegate,
-            cache = WebDavPageCache(
-                root = File(context.cacheDir, "webdav_pages"),
+            cache = RemotePageCache(
+                root = File(context.cacheDir, "remote_pages"),
                 maxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
             ),
             metaKey = {

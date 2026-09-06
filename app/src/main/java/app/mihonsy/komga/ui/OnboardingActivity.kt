@@ -189,7 +189,7 @@ private fun OnboardingWelcome(
             modifier = Modifier.padding(top = 6.dp, bottom = 28.dp),
         )
 
-        // SY --> Komiho: 卡片顺序 本地 → Komga → WebDAV（本地内置兜底放最前）。
+        // SY --> Komiho: 卡片顺序 本地 → Komga → WebDAV → SMB（本地内置兜底放最前）。
         OnboardingSourceCard(
             icon = sourceIcon(SourceKind.Local),
             title = composeStringResource(R.string.onboarding_local),
@@ -211,6 +211,16 @@ private fun OnboardingWelcome(
             ready = false,
             onClick = { onPick(AddSourceScreen.WebDav(connId = null)) },
         )
+        // SY --> Komiho Phase7: 第 4 张 SMB 卡（就绪状态不查——连接信息在 SMB 连接存储里，
+        // 表单保存成功即可用，与 WebDAV 口径一致）。
+        OnboardingSourceCard(
+            icon = sourceIcon(SourceKind.Smb),
+            title = composeStringResource(R.string.onboarding_smb),
+            desc = composeStringResource(R.string.onboarding_smb_desc),
+            ready = false,
+            onClick = { onPick(AddSourceScreen.Smb(connId = null)) },
+        )
+        // SY <--
 
         // SY --> Komiho: 去掉「随便逛逛」——本地源内置兜底，按钮固定为「开始使用」；
         // 什么都没配也能进主界面（客户端已改为懒构造，无 Komga 连接不会崩）。

@@ -307,3 +307,19 @@
 -dontwarn org.ietf.jgss.Oid
 -dontwarn com.google.re2j.Matcher
 -dontwarn com.google.re2j.Pattern
+
+# SY --> Komiho Phase7: SMB (smbj) + BouncyCastle
+# smbj uses reflection-free but annotation-driven (de)serialisation of SMB2 packets;
+# keep the wire classes intact so R8 cannot rename fields the protocol depends on.
+-keep class com.hierynomus.** { *; }
+-keep class com.rapid7.** { *; }
+-dontwarn javax.el.**
+-dontwarn java.rmi.UnmarshalException
+-dontwarn sun.security.x509.X509Key
+-dontwarn org.ietf.jgss.**
+# BouncyCastle providers are registered reflectively by name.
+-keep class org.bouncycastle.jcajce.provider.** { *; }
+-keep class org.bouncycastle.jce.provider.** { *; }
+-dontwarn org.bouncycastle.jsse.**
+-dontwarn org.bouncycastle.pqc.**
+# SY <--

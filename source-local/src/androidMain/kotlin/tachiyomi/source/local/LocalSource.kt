@@ -18,8 +18,8 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromStream
 import logcat.LogPriority
+import mihon.core.common.archive.RemoteScheme
 import mihon.core.common.archive.ZipWriter
-import mihon.core.common.archive.WebDavRandomAccessSource
 import mihon.core.common.archive.archiveReader
 import nl.adaptivity.xmlutil.core.AndroidXmlReader
 import nl.adaptivity.xmlutil.serialization.XML
@@ -418,9 +418,11 @@ actual class LocalSource(
     override suspend fun getPageList(chapter: SChapter): List<Page> = throw UnsupportedOperationException("Unused")
 
     fun getFormat(chapter: SChapter): Format {
-        // SY --> Komiho Phase3: WebDAV 远程归档章节（`webdav:` 前缀）不进本地文件系统解析，
-        // 交由 ChapterLoader 构造 WebDavRandomAccessSource 走 HTTP Range 随机访问。
-        if (chapter.url.startsWith(WebDavRandomAccessSource.URL_PREFIX)) {
+        // SY --> Komiho Phase3/Phase7: 远程归档章节（`webdav:` / `smb://` 前缀）不进本地
+        // 文件系统解析，交由 ChapterLoader 构造对应的 RandomAccessSource 随机访问。
+        // （前缀判定收口在 core.common 的 RemoteScheme：source-local 看不到 app 层的
+        //  SMB 连接存储，但两边都依赖 core.common。）
+        if (RemoteScheme.isRemote(chapter.url)) {
             return Format.RemoteArchive(chapter.url)
         }
         // SY <--
