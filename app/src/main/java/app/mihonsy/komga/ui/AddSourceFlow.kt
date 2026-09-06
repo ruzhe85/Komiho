@@ -732,8 +732,8 @@ private fun WebDavFormPage(
 
 // SY --> Komiho Phase7: SMB 表单页（镜像 WebDavFormPage；无协议切换——SMB 恒 TCP 直连，
 // 端口默认 445）。字段：名称 / 主机 / 端口 / 路径（第一段=共享名）/ 域 / 账户 / 密码。
-// 测试连接 = 列共享内起始目录一次（SmbBrowse.list 自带会话重试），成功即代表
-// 主机可达 + 凭据有效 + 共享存在，三者一次覆盖。
+// 测试连接：填了共享 = 列起始目录；留空 = 枚举全部共享（srvsvc RPC，质感文件同款）。
+// SMB 地址模型 \\host\share\path 两层，共享是必须的——留空只是把「选共享」推迟到浏览根视图。
 @Composable
 private fun SmbFormPage(
     connId: String?,
@@ -763,13 +763,12 @@ private fun SmbFormPage(
     var testing by remember { mutableStateOf(false) }
     var testMsg by remember { mutableStateOf<String?>(null) }
 
-    // 「共享名/子目录」→ (share, path)。空 = 未填共享名，保存/测试前置校验拦截。
-    fun splitFullPath(): Pair<String, String>? {
+    // 「共享名/子目录」→ (share, path)。留空 = 不指定共享（浏览根 = 列出服务器全部共享）。
+    fun splitFullPath(): Pair<String, String> {
         val norm = fullPath.trim().replace('\\', '/').trim('/')
-        if (norm.isEmpty()) return null
+        if (norm.isEmpty()) return "" to ""
         return norm.substringBefore('/') to norm.substringAfter('/', "")
     }
-    val parsedPath = splitFullPath()
 
     Column(
         modifier = Modifier
@@ -869,13 +868,9 @@ private fun SmbFormPage(
         // 测试结果文案在组合期取好（stringResource 是 @Composable，不能在 onClick lambda 里调）。
         val okMsg = composeStringResource(R.string.addsrc_test_ok)
         val failMsg = composeStringResource(R.string.addsrc_test_failed)
-        val noShareMsg = composeStringResource(R.string.addsrc_smb_need_share)
         OutlinedButton(
             onClick = {
-                val (share, path) = splitFullPath() ?: run {
-                    testMsg = noShareMsg
-                    return@OutlinedButton
-                }
+                val (share, path) = splitFullPath()
                 val temp = SmbConnectionStore.temp(
                     name = name,
                     host = host,
@@ -891,7 +886,12 @@ private fun SmbFormPage(
                 testMsg = null
                 scope.launch {
                     testMsg = try {
-                        SmbBrowse.list(temp, WebDavCredentialCrypto.decryptStored(temp.passEnc), temp.path)
+                        // SY: 未填共享 = 枚举全部共享（srvsvc RPC）；填了 = 列该共享/起始目录。
+                        if (temp.share.isBlank()) {
+                            SmbBrowse.listShares(temp, WebDavCredentialCrypto.decryptStored(temp.passEnc))
+                        } else {
+                            SmbBrowse.list(temp, WebDavCredentialCrypto.decryptStored(temp.passEnc), temp.path)
+                        }
                         okMsg
                     } catch (e: Throwable) {
                         if (smbIsConnectionReset(e)) composeStringResource(R.string.smb_conn_reset) else (e.message ?: failMsg)
@@ -899,7 +899,7 @@ private fun SmbFormPage(
                     testing = false
                 }
             },
-            enabled = host.isNotBlank() && parsedPath != null && !testing,
+            enabled = host.isNotBlank() && !testing,
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (testing) {
@@ -930,7 +930,7 @@ private fun SmbFormPage(
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = {
-                    val (share, path) = splitFullPath() ?: return@Button
+                    val (share, path) = splitFullPath()
                     if (connId == null) {
                         SmbConnectionStore.add(name, host, port.trim().toIntOrNull() ?: SmbConnection.DEFAULT_PORT, share, path, domain, user, pass)
                     } else {
@@ -938,7 +938,7 @@ private fun SmbFormPage(
                     }
                     onSaved()
                 },
-                enabled = host.isNotBlank() && parsedPath != null,
+                enabled = host.isNotBlank(),
             ) { Text(composeStringResource(R.string.action_save)) }
         }
     }

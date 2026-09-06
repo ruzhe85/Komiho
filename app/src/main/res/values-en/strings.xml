@@ -287,7 +287,7 @@
     <string name="addsrc_test_failed">Connection failed</string>
     <string name="addsrc_name_hint_smb">e.g. Home NAS</string>
     <string name="addsrc_smb_host_hint">e.g. 192.168.1.10 or nas.local</string>
-    <string name="addsrc_smb_path_hint">Share/subfolder (first segment is the share, e.g. Multimedia/comics)</string>
+    <string name="addsrc_smb_path_hint">Share/subfolder (blank = list all shares)</string>
     <string name="addsrc_smb_domain">Domain (optional)</string>
     <string name="addsrc_auth_type">Authentication (choose one)</string>
     <string name="addsrc_auth_basic">Username &amp; password</string>
@@ -346,7 +346,6 @@
     <string name="webdav_url_no_filename">URL is missing a file name</string>
     <string name="smb_path_no_filename">Path is missing a file name</string>
     <string name="addsrc_smb_user">Username (blank = guest)</string>
-    <string name="addsrc_smb_need_share">Enter a path (first segment is the share name)</string>
     <string name="smb_conn_reset">Connection closed by server: enable SMB2/SMB3 on the NAS and grant the account (guest) access to the share</string>
     <string name="webdav_chapter_write_failed">Failed to write chapters</string>
     <string name="dir_browse_failed">Failed to browse folder</string>
