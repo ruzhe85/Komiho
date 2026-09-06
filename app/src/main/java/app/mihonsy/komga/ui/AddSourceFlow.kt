@@ -868,6 +868,8 @@ private fun SmbFormPage(
         // 测试结果文案在组合期取好（stringResource 是 @Composable，不能在 onClick lambda 里调）。
         val okMsg = composeStringResource(R.string.addsrc_test_ok)
         val failMsg = composeStringResource(R.string.addsrc_test_failed)
+        // SY: broken pipe 提示同样在组合期取好（stringResource 是 @Composable，launch 协程里不能调）。
+        val resetMsg = composeStringResource(R.string.smb_conn_reset)
         OutlinedButton(
             onClick = {
                 val (share, path) = splitFullPath()
@@ -894,7 +896,7 @@ private fun SmbFormPage(
                         }
                         okMsg
                     } catch (e: Throwable) {
-                        if (smbIsConnectionReset(e)) composeStringResource(R.string.smb_conn_reset) else (e.message ?: failMsg)
+                        if (smbIsConnectionReset(e)) resetMsg else (e.message ?: failMsg)
                     }
                     testing = false
                 }
