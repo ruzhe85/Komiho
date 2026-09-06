@@ -13,6 +13,7 @@ import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderItem
@@ -278,8 +279,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * 预热当前页相邻两页（offscreen=1 之外的"第 2 页"由此获得与 webtoon 同级的提前量）。
      * 双页合并配置（pair.second != null）会命中副作用分支，预热无意义，跳过。
      */
+    // SY（OOM 降峰）：增强开启时预热解码含 Lanczos 全流程，峰值更高——只预热下一页
+    //（前向阅读占绝对多数），上一页回翻走实时解码，换内存安全。
+    private val readerPrefs: ReaderPreferences by injectLazy()
+
     private fun prewarmAdjacentPages() {
-        val positions = listOf(pager.currentItem + 1, pager.currentItem - 1)
+        val positions = if (readerPrefs.enhancementMode.get() != 0) {
+            listOf(pager.currentItem + 1)
+        } else {
+            listOf(pager.currentItem + 1, pager.currentItem - 1)
+        }
         for (position in positions) {
             val pair = adapter.joinedItems.getOrNull(position) ?: continue
             if (pair.second != null) continue // 双页合并模式：纯管线放弃，预热无收益
