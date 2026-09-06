@@ -197,6 +197,9 @@ import app.mihonsy.komga.data.smb.SmbBrowse
 import app.mihonsy.komga.data.smb.SmbConnection
 import app.mihonsy.komga.data.smb.SmbConnectionStore
 import app.mihonsy.komga.data.smb.SmbCoverCache
+// SY --> Komiho Phase7: 散图扩展名表（internal，data 层共用）。
+import app.mihonsy.komga.data.smb.SMB_IMAGE_EXTS
+// SY <--
 import app.mihonsy.komga.data.smb.SmbEntry
 // SY <--
 import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
@@ -5975,7 +5978,7 @@ private fun SmbBrowsePane(
     }
 
     val visible = remember(entries, sort) {
-        entries.filter { it.isDir || it.isArchive }.sortedWith(smbEntryComparator(sort))
+        entries.filter { it.isDir || it.isArchive || it.isImage }.sortedWith(smbEntryComparator(sort))
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -6074,7 +6077,7 @@ private fun SmbBrowsePane(
 private fun SmbFileRow(entry: SmbEntry, onOpen: () -> Unit) {
     FileListRow(name = entry.name, clickable = true, onOpen = onOpen) {
         Icon(
-            fileKindIcon(entry.isDir, entry.isArchive),
+            fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
             contentDescription = null,
             tint = fileKindTint(entry.isDir, entry.isArchive),
             modifier = Modifier.size(24.dp),
@@ -6086,7 +6089,7 @@ private fun SmbFileRow(entry: SmbEntry, onOpen: () -> Unit) {
 private fun SmbGridItem(entry: SmbEntry, onClick: () -> Unit) {
     FileGridCell(
         name = entry.name,
-        icon = fileKindIcon(entry.isDir, entry.isArchive),
+        icon = fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
         iconTint = fileKindTint(entry.isDir, entry.isArchive),
         iconSize = 56.dp,
         clickable = true,
@@ -6116,10 +6119,18 @@ private suspend fun openSmbFile(
         val fileName = relPath.substringAfterLast('/')
         if (fileName.isBlank()) throw Exception(context.getString(R.string.smb_path_no_filename))
         val dirRel = relPath.substringBeforeLast('/', "")
+        // SY --> Komiho Phase7: 散图支持——点图片文件 = 所在目录当一章（URL 尾斜杠标识目录章节），
+        // 章节名/编号取目录名；归档仍走「同目录归档全部成章」。
+        val isImageFile = fileName.substringAfterLast('.', "").lowercase() in SMB_IMAGE_EXTS
+        // SY <--
         // manga.url = 共享内目录（同目录的多个归档同属一个系列）
         val mangaUrl = SmbConnectionStore.toChapterUrl(conn.id, dirRel)
         val seriesTitle = dirRel.substringAfterLast('/').ifBlank { conn.share }.ifBlank { fileName }
-        val chapterUrl = SmbConnectionStore.toChapterUrl(conn.id, relPath)
+        val chapterUrl = if (isImageFile) {
+            SmbConnectionStore.toChapterUrl(conn.id, dirRel) + "/"
+        } else {
+            SmbConnectionStore.toChapterUrl(conn.id, relPath)
+        }
         val (mangaId, chapterId) = withContext(Dispatchers.IO) {
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
@@ -6138,31 +6149,73 @@ private suspend fun openSmbFile(
             if (manga.ogTitle != seriesTitle) {
                 mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
             }
-            val siblings = runCatching {
-                SmbBrowse.list(conn, password, dirRel).filter { it.isArchive }.map { it.path }
-            }.onFailure {
-                logcat(LogPriority.WARN) { "[Smb] 章节扫描失败，仅打开当前文件: ${it.message}" }
-            }.getOrDefault(emptyList())
-            (siblings + relPath).distinct().forEach { siblingRel ->
-                val url = SmbConnectionStore.toChapterUrl(conn.id, siblingRel)
-                if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
-                    val fn = siblingRel.substringAfterLast('/')
-                    val name = fn.substringBeforeLast('.').ifBlank { fn }
-                    val parsed = ChapterRecognition.parseChapterNumber(seriesTitle, fn, -1.0)
-                    chapterRepo.addAll(
+            // SY --> Komiho Phase7: 散图对齐本地模式完整做法——
+            // 点图片 = 当前目录当漫画（manga.url=当前目录），其下全部子目录各成一章
+            //（散图目录章，URL 尾斜杠），叶子目录（无子目录）保底当前目录单章；
+            // 翻完当前卷自动续到下一个子目录章。归档 = 同目录归档全部成章。
+            if (isImageFile) {
+                val siblingDirs = runCatching {
+                    SmbBrowse.list(conn, password, dirRel).filter { it.isDir }
+                }.onFailure {
+                    logcat(LogPriority.WARN) { "[Smb] 散图子目录扫描失败: ${it.message}" }
+                }.getOrDefault(emptyList())
+                siblingDirs.forEach { sib ->
+                    val url = SmbConnectionStore.toChapterUrl(conn.id, sib.path) + "/"
+                    if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                        val parsed = ChapterRecognition.parseChapterNumber(seriesTitle, sib.name, -1.0)
+                        chapterRepo.addAll(
+                            listOf(
+                                Chapter.create().copy(
+                                    mangaId = manga.id!!,
+                                    url = url,
+                                    name = sib.name,
+                                    chapterNumber = if (parsed > 0) parsed else 1.0,
+                                    dateUpload = sib.lastModified.takeIf { it > 0 },
+                                ),
+                            ),
+                        )
+                    }
+                }
+                // 保底：当前目录未被子目录覆盖（叶子散图目录）→ 单章，避免读不了当前图。
+                chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                    ?: chapterRepo.addAll(
                         listOf(
                             Chapter.create().copy(
                                 mangaId = manga.id!!,
-                                url = url,
-                                name = name,
-                                chapterNumber = if (parsed > 0) {
-                                    parsed
-                                } else {
-                                    siblings.indexOf(siblingRel).coerceAtLeast(0) + 1.0
-                                },
+                                url = chapterUrl,
+                                name = seriesTitle,
+                                chapterNumber = 1.0,
                             ),
                         ),
                     )
+                // SY <--
+            } else {
+                val siblings = runCatching {
+                    SmbBrowse.list(conn, password, dirRel).filter { it.isArchive }.map { it.path }
+                }.onFailure {
+                    logcat(LogPriority.WARN) { "[Smb] 章节扫描失败，仅打开当前文件: ${it.message}" }
+                }.getOrDefault(emptyList())
+                (siblings + relPath).distinct().forEach { siblingRel ->
+                    val url = SmbConnectionStore.toChapterUrl(conn.id, siblingRel)
+                    if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                        val fn = siblingRel.substringAfterLast('/')
+                        val name = fn.substringBeforeLast('.').ifBlank { fn }
+                        val parsed = ChapterRecognition.parseChapterNumber(seriesTitle, fn, -1.0)
+                        chapterRepo.addAll(
+                            listOf(
+                                Chapter.create().copy(
+                                    mangaId = manga.id!!,
+                                    url = url,
+                                    name = name,
+                                    chapterNumber = if (parsed > 0) {
+                                        parsed
+                                    } else {
+                                        siblings.indexOf(siblingRel).coerceAtLeast(0) + 1.0
+                                    },
+                                ),
+                            ),
+                        )
+                    }
                 }
             }
             val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)

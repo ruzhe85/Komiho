@@ -31,10 +31,17 @@ data class SmbEntry(
     /** 是否为支持的归档（与本地/WebDAV 同口径）。 */
     val isArchive: Boolean =
         !isDir && name.substringAfterLast('.', "").lowercase() in SMB_ARCHIVE_EXTS
+
+    /** 是否为图片文件（散图目录成员；点它=把所在目录当一章打开）。 */
+    val isImage: Boolean =
+        !isDir && name.substringAfterLast('.', "").lowercase() in SMB_IMAGE_EXTS
 }
 
 /** 支持的归档扩展名（浏览过滤与条目判定共用）。 */
 internal val SMB_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7")
+
+/** 支持的图片扩展名（散图目录成员；与阅读器解码口径一致）。 */
+internal val SMB_IMAGE_EXTS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "heic", "heif")
 
 object SmbBrowse {
 
@@ -105,7 +112,9 @@ object SmbBrowse {
             val name = info.fileName
             if (name.isBlank() || name == "." || name == "..") continue
             val isDir = info.fileAttributes and FILE_ATTRIBUTE_DIRECTORY != 0L
-            if (!isDir && name.substringAfterLast('.', "").lowercase() !in SMB_ARCHIVE_EXTS) continue
+            val ext = name.substringAfterLast('.', "").lowercase()
+            // 显示：目录 + 归档 + 图片（散图目录成员，点它=所在目录当一章打开）。
+            if (!isDir && ext !in SMB_ARCHIVE_EXTS && ext !in SMB_IMAGE_EXTS) continue
             out += SmbEntry(
                 name = name,
                 isDir = isDir,
