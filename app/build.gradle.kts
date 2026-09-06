@@ -386,6 +386,9 @@ dependencies {
     // SY: DCERPC over SMB（srvsvc/NetShareEnum）——「路径留空 = 列出全部共享」用，
     // 质感文件（Material Files）同款配方；排除其传递 smbj，跟随本仓 0.14.0。
     implementation(libs.dcerpc) { exclude(group = "com.hierynomus", module = "smbj") }
+    // SY: slf4j 绑定（stderr→logcat）——否则 smbj 内部的连接/协商/断连日志全部被吞，
+    // SMB 慢/失败时无法从 logcat 看到发生在哪一环。
+    implementation(libs.slf4j.simple)
     // SY <--
 }
 
