@@ -56,6 +56,7 @@ import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 // SY --> Komiho: 本地封面（走 Coil，自带 filesDir/komiho_local_covers 缓存，与 Komga 缓存隔离）
 import eu.kanade.tachiyomi.data.coil.LocalCoverData
+import eu.kanade.tachiyomi.data.coil.SmbCoverData
 // SY <--
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
@@ -277,7 +278,6 @@ import tachiyomi.core.common.storage.extension
 import tachiyomi.core.common.storage.nameWithoutExtension
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 // SY --> Komiho 本地浏览器：显示模式 + 排序 + 封面
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.text.style.TextAlign
 import mihon.core.common.archive.archiveReader
 import java.text.SimpleDateFormat
@@ -5967,6 +5967,8 @@ private fun SmbBrowsePane(
     var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.webdavBrowseDisplayMode.get())) }
     var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.webdavBrowseSort.get())) }
     var columnCount by remember { mutableStateOf(prefs.webdavBrowseColumns.get()) }
+    // SY: 封面开关（默认关——归档首图/单图都要开 SMB 会话拉取，filesDir 缓存兜底）。
+    var showCover by remember { mutableStateOf(prefs.smbBrowseShowCover.get()) }
     var showOptions by remember { mutableStateOf(false) }
 
     val rootLabel = remember(conn.id) { conn.name.ifBlank { conn.host } }
@@ -6099,7 +6101,7 @@ private fun SmbBrowsePane(
             displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(visible, key = { it.path }) { e ->
-                        SmbFileRow(entry = e, onOpen = { onItemOpen(e) })
+                        SmbFileRow(conn = conn, entry = e, showCover = showCover, onOpen = { onItemOpen(e) })
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -6114,7 +6116,7 @@ private fun SmbBrowsePane(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(visible, key = { it.path }) { e ->
-                        SmbGridItem(entry = e, onClick = { onItemOpen(e) })
+                        SmbGridItem(conn = conn, entry = e, showCover = showCover, onClick = { onItemOpen(e) })
                     }
                 }
             }
@@ -6126,9 +6128,9 @@ private fun SmbBrowsePane(
         onDismiss = { showOptions = false },
         displayMode = displayMode,
         onDisplayModeChange = { displayMode = it; prefs.webdavBrowseDisplayMode.set(it.prefValue) },
-        showCover = false,
-        onShowCoverChange = {},
-        showCoverEnabled = false,
+        showCover = showCover,
+        onShowCoverChange = { showCover = it; prefs.smbBrowseShowCover.set(it) },
+        showCoverEnabled = true,
         columnCount = columnCount,
         onColumnChange = { columnCount = it; prefs.webdavBrowseColumns.set(it) },
         sort = sort,
@@ -6167,6 +6169,99 @@ private fun smbEntryComparator(sort: LocalFileSort): Comparator<SmbEntry> {
         LocalFileSortBy.DateModified -> compareBy { it.lastModified }
         LocalFileSortBy.Size -> compareBy { if (it.isDir) 0L else it.size }
     }
+@Composable
+private fun SmbFileRow(
+    conn: SmbConnection,
+    entry: SmbEntry,
+    showCover: Boolean,
+    onOpen: () -> Unit,
+) {
+    FileListRow(name = entry.name, clickable = true, onOpen = onOpen) {
+        SmbCoverThumb(conn = conn, entry = entry, showCover = showCover, iconSize = 40.dp)
+    }
+}
+
+@Composable
+private fun SmbGridItem(
+    conn: SmbConnection,
+    entry: SmbEntry,
+    showCover: Boolean,
+    onClick: () -> Unit,
+) {
+    // 未开封面：整体交给共用骨架 [FileGridCell]（自带点击/内边距，clickable=false 避免双重点击）。
+    if (!showCover || entry.isDir) {
+        FileGridCell(
+            name = entry.name,
+            icon = fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
+            iconTint = fileKindTint(entry.isDir, entry.isArchive),
+            iconSize = if (entry.isDir || entry.isArchive) 56.dp else 40.dp,
+            clickable = true,
+            onClick = onClick,
+        )
+        return
+    }
+    // 封面网格：0.7 比例槽 + 两行居中名称（镜像 LocalFileGridItem）。
+    Column(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
+            contentAlignment = Alignment.Center,
+        ) {
+            SmbCoverThumb(conn = conn, entry = entry, showCover = true, modifier = Modifier.fillMaxSize(), iconSize = 56.dp)
+        }
+        Text(
+            text = entry.name,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+// SY --> Komiho Phase7: SMB 条目封面/图标统一渲染（对齐本地 LocalCoverThumb）：
+// showCover 开且非目录时用 Coil + SmbCoverFetcher（归档首图/单图，filesDir 缓存隔离），
+// 加载中/取不到回落文件图标。列表与网格共用。
+@Composable
+private fun SmbCoverThumb(
+    conn: SmbConnection,
+    entry: SmbEntry,
+    showCover: Boolean,
+    modifier: Modifier = Modifier,
+    iconSize: Dp,
+) {
+    if (showCover && !entry.isDir) {
+        val context = LocalContext.current
+        SubcomposeAsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(SmbCoverData(conn, entry.path, entry.lastModified, entry.isImage))
+                .build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier,
+            loading = { SmbCoverFallback(entry, iconSize) },
+            error = { SmbCoverFallback(entry, iconSize) },
+        )
+    } else {
+        SmbCoverFallback(entry, iconSize)
+    }
+}
+
+/** SMB 条目回落图标（目录/取不到封面/列表未开封面时显示）。 */
+@Composable
+private fun SmbCoverFallback(entry: SmbEntry, iconSize: Dp) {
+    Icon(
+        fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
+        contentDescription = null,
+        tint = fileKindTint(entry.isDir, entry.isArchive),
+        modifier = Modifier.size(iconSize),
+    )
+}
+// SY <--
     return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
 }
 

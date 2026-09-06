@@ -51,6 +51,12 @@ class StoragePreferences(
         false,
     )
 
+    /** Komiho Phase7: SMB 文件浏览器是否显示封面缩略图（默认关——散图/归档首图都要开 SMB 会话拉取）。 */
+    val smbBrowseShowCover: Preference<Boolean> = preferenceStore.getBoolean(
+        Preference.appStateKey("smb_browse_show_cover"),
+        false,
+    )
+
     /** Komiho: 本地文件浏览器网格模式每行列数（0 = 自动 Adaptive 列密度）。 */
     val localBrowseColumns: Preference<Int> = preferenceStore.getInt(
         Preference.appStateKey("local_browse_columns"),

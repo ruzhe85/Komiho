@@ -46,6 +46,7 @@ import eu.kanade.tachiyomi.crash.GlobalExceptionHandler
 import eu.kanade.tachiyomi.data.coil.BufferedSourceFetcher
 // SY --> Komiho: 本地封面（自带 filesDir/komiho_local_covers 缓存，与 Komga 缓存隔离）
 import eu.kanade.tachiyomi.data.coil.LocalCoverFetcher
+import eu.kanade.tachiyomi.data.coil.SmbCoverFetcher
 import eu.kanade.tachiyomi.data.coil.LocalCoverKeyer
 // SY <--
 import eu.kanade.tachiyomi.data.coil.MangaCoverFetcher
@@ -252,6 +253,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 add(PagePreviewFetcher.Factory(callFactoryLazy))
                 // Komiho: 本地（文件型来源）封面，自带 filesDir 缓存，与 Komga 缓存隔离
                 add(LocalCoverFetcher.Factory(context.applicationContext))
+                // Komiho Phase7: SMB 浏览列表封面（归档首图/单图，filesDir 缓存隔离）
+                add(SmbCoverFetcher.Factory(context.applicationContext))
                 // SY <--
                 // Keyer
                 add(MangaCoverKeyer())
@@ -260,6 +263,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 add(PagePreviewKeyer())
                 // Komiho: 本地封面缓存键（uri + lastModified）
                 add(LocalCoverKeyer())
+                // Komiho Phase7: SMB 浏览封面 Keyer
+                add(eu.kanade.tachiyomi.data.coil.SmbCoverKeyer())
                 // SY <--
             }
 
