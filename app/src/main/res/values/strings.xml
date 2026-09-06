@@ -293,7 +293,7 @@
     <string name="addsrc_test_failed">连接失败</string>
     <string name="addsrc_name_hint_smb">如：家庭 NAS</string>
     <string name="addsrc_smb_host_hint">如 192.168.1.10 或 nas.local</string>
-    <string name="addsrc_smb_path_hint">共享名/子目录（第一段为共享名，如 Multimedia/comics）</string>
+    <string name="addsrc_smb_path_hint">共享名/子目录（留空 = 列出全部共享）</string>
     <string name="addsrc_smb_domain">域（可空）</string>
     <string name="addsrc_auth_type">认证方式（二选一）</string>
     <string name="addsrc_auth_basic">账号密码</string>
@@ -352,7 +352,6 @@
     <string name="webdav_url_no_filename">URL 缺少文件名</string>
     <string name="smb_path_no_filename">路径缺少文件名</string>
     <string name="addsrc_smb_user">用户名（留空 = guest 访客）</string>
-    <string name="addsrc_smb_need_share">请填写路径（第一段为共享名）</string>
     <string name="smb_conn_reset">连接被服务器中断：请确认 NAS 已启用 SMB2/SMB3，且账号（guest）对该共享有访问权限</string>
     <string name="webdav_chapter_write_failed">章节写入失败</string>
     <string name="dir_browse_failed">目录浏览失败</string>

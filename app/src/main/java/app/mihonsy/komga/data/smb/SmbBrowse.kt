@@ -44,6 +44,8 @@ object SmbBrowse {
     /**
      * 列出 [relPath] 的直接子项（目录在前、归档在后，各自按名称不区分大小写排序）。
      * 失败抛异常（认证失败/共享不存在/网络错误），由调用方提示。
+     * 连接未配置共享（[SmbConnection.share] 为空）时走「服务器根」模式：
+     * relPath 空 = 枚举全部共享（srvsvc RPC），relPath 第一段 = 共享名。
      * @param password 明文密码（匿名传空串）
      */
     suspend fun list(conn: SmbConnection, password: String, relPath: String): List<SmbEntry> =
@@ -59,7 +61,23 @@ object SmbBrowse {
         }
 
     private fun listOnce(conn: SmbConnection, password: String, relPath: String): List<SmbEntry> {
-        val share: DiskShare = SmbSessionManager.share(conn, password)
+        // SY: 连接未配置共享 → 根路径枚举共享列表，子路径第一段为共享名。
+        if (conn.share.isBlank()) {
+            val norm = relPath.trim('/')
+            if (norm.isEmpty()) {
+                return SmbSessionManager.listShares(conn, password).map { name ->
+                    SmbEntry(name = name, isDir = true, path = name)
+                }
+            }
+            val shareName = norm.substringBefore('/')
+            val subPath = norm.substringAfter('/', "")
+            return listInShare(conn, password, shareName, subPath)
+        }
+        return listInShare(conn, password, conn.share, relPath)
+    }
+
+    private fun listInShare(conn: SmbConnection, password: String, shareName: String, relPath: String): List<SmbEntry> {
+        val share: DiskShare = SmbSessionManager.share(conn, password, shareName)
         val dirPath = SmbSessionManager.toSmbPath(relPath)
         val items = share.list(dirPath)
         val out = ArrayList<SmbEntry>(items.size)
@@ -68,10 +86,16 @@ object SmbBrowse {
             if (name.isBlank() || name == "." || name == "..") continue
             val isDir = info.fileAttributes and FILE_ATTRIBUTE_DIRECTORY != 0L
             if (!isDir && name.substringAfterLast('.', "").lowercase() !in SMB_ARCHIVE_EXTS) continue
+            // 条目 path 保持「与 list 入参同口径」：未配置共享的连接带共享段前缀。
+            val entryPath = if (conn.share.isBlank() && shareName.isNotBlank()) {
+                SmbBrowse.join(shareName, name)
+            } else {
+                join(relPath, name)
+            }
             out += SmbEntry(
                 name = name,
                 isDir = isDir,
-                path = join(relPath, name),
+                path = entryPath,
                 size = if (isDir) 0L else info.endOfFile,
                 lastModified = info.lastWriteTime.toEpochMillisSafe(),
             )

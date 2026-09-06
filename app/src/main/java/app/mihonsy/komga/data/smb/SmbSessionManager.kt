@@ -11,6 +11,8 @@ import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
 import com.hierynomus.smbj.share.File
+import com.rapid7.client.dcerpc.mssrvs.ServerService
+import com.rapid7.client.dcerpc.transport.SMBTransportFactories
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import java.util.EnumSet
@@ -62,13 +64,18 @@ object SmbSessionManager {
     /**
      * 取（或建）[DiskShare]。断线时自动重连一次。
      * @param password 明文密码（匿名连接传空串）
+     * @param shareName 目标共享名；连接未配置共享（[SmbConnection.share] 为空）时由调用方
+     * 传入（浏览/阅读层从路径第一段解析），为空抛错。
      */
-    fun share(conn: SmbConnection, password: String): DiskShare {
+    fun share(conn: SmbConnection, password: String, shareName: String = conn.share): DiskShare {
+        if (shareName.isBlank()) {
+            throw IllegalArgumentException("连接未指定共享且未提供共享名: ${conn.location()}")
+        }
         val now = System.currentTimeMillis()
         synchronized(lock) {
             trimIdleLocked(now)
             val sKey = sessionKey(conn)
-            val shKey = "$sKey|${conn.share}"
+            val shKey = "$sKey|$shareName"
 
             val existing = sessions[sKey]
             if (existing != null && !existing.connection.isConnected) {
@@ -95,7 +102,7 @@ object SmbSessionManager {
             sessionRef.lastUsed = now
 
             val shareRef = shares[shKey] ?: run {
-                val share = sessionRef.session.connectShare(conn.share) as DiskShare
+                val share = sessionRef.session.connectShare(shareName) as DiskShare
                 ShareRef(share, now).also { shares[shKey] = it }
             }
             shareRef.lastUsed = now
@@ -103,11 +110,68 @@ object SmbSessionManager {
         }
     }
 
-    /** 打开共享内文件（只读、允许他人并发读）。@param relPath `/` 分隔的相对路径。 */
+    /**
+     * 枚举服务器上的共享（srvsvc/NetShareEnum over IPC$，质感文件 Material Files 同款配方）。
+     * 仅用于连接未配置共享的「服务器根」浏览：路径留空 = 列出全部共享。
+     * 过滤打印机/设备/IPC 型与 $ 结尾的管理性共享，只留磁盘型文件共享。
+     */
+    fun listShares(conn: SmbConnection, password: String): List<String> {
+        val now = System.currentTimeMillis()
+        synchronized(lock) {
+            trimIdleLocked(now)
+            val sKey = sessionKey(conn)
+            val existing = sessions[sKey]
+            if (existing != null && !existing.connection.isConnected) {
+                logcat(LogPriority.DEBUG) { "[Smb] 会话已断开，重建: ${conn.location()}" }
+                closeLocked(sKey)
+            }
+            val sessionRef = sessions[sKey] ?: run {
+                val connection = client.connect(conn.host, conn.port)
+                val auth = if (conn.user.isBlank()) {
+                    AuthenticationContext.guest()
+                } else {
+                    AuthenticationContext(
+                        conn.user,
+                        password.toCharArray(),
+                        conn.domain.ifBlank { null },
+                    )
+                }
+                val session = connection.authenticate(auth)
+                SessionRef(connection, session, now).also { sessions[sKey] = it }
+            }
+            sessionRef.lastUsed = now
+            val transport = SMBTransportFactories.SRVSVC.getTransport(sessionRef.session)
+            val serverService = ServerService(transport)
+            return serverService.shares1
+                .mapNotNull { info ->
+                    val name = info.netName
+                    val type = info.type
+                    if (name.isBlank()) return@mapNotNull null
+                    // shi1_type 低 2 位 = 0:DISKTREE / 1:PRINTQ / 2:DEVICE / 3:IPC；非 0 即非文件共享。
+                    val isDisk = (type.toLong() and 0x3L) == 0L
+                    if (isDisk && !name.endsWith("$")) name else null
+                }
+                .sortedBy { it.lowercase() }
+        }
+    }
+
+    /** 打开共享内文件（只读、允许他人并发读）。
+     *  连接未配置共享时，[relPath] 第一段即共享名（浏览根=共享列表的口径），其余为共享内路径。
+     *  @param relPath `/` 分隔的相对路径。 */
     fun openFile(conn: SmbConnection, password: String, relPath: String): File {
-        val share = share(conn, password)
+        val shareName: String
+        val inSharePath: String
+        if (conn.share.isBlank()) {
+            val norm = relPath.trim('/')
+            shareName = norm.substringBefore('/')
+            inSharePath = norm.substringAfter('/', "")
+        } else {
+            shareName = conn.share
+            inSharePath = relPath
+        }
+        val share = share(conn, password, shareName)
         return share.openFile(
-            toSmbPath(relPath),
+            toSmbPath(inSharePath),
             EnumSet.of(AccessMask.FILE_READ_DATA),
             null,
             SMB2ShareAccess.ALL,
