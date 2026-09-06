@@ -82,8 +82,14 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
+// SY --> Komiho Phase7: SMB 表单接入。
+import app.mihonsy.komga.data.smb.SmbBrowse
+import app.mihonsy.komga.data.smb.SmbConnection
+import app.mihonsy.komga.data.smb.SmbConnectionStore
+// SY <--
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
+import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.data.webdav.WebDavPropfind
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.R
@@ -98,6 +104,9 @@ internal sealed interface AddSourceScreen {
     data object TypeSelect : AddSourceScreen
     /** connId = null 新增，否则编辑该连接。 */
     data class WebDav(val connId: String?) : AddSourceScreen
+    // SY --> Komiho Phase7: SMB 连接表单（host/port/share/path/domain/user/pass）。
+    data class Smb(val connId: String?) : AddSourceScreen
+    // SY <--
     data class Komga(val connId: String?) : AddSourceScreen
     data object Local : AddSourceScreen
 }
@@ -138,6 +147,9 @@ internal fun AddSourceFlow(
     var listTick by remember { mutableIntStateOf(0) }
     var deleteKomga by remember { mutableStateOf<KomgaConnection?>(null) }
     var deleteWebDav by remember { mutableStateOf<WebDavConnection?>(null) }
+    // SY --> Komiho Phase7: SMB 连接删除确认状态。
+    var deleteSmb by remember { mutableStateOf<SmbConnection?>(null) }
+    // SY <--
 
     // 返回键统一接管（本组合内后注册，优先于主界面的 BackHandler）：
     // 表单页 → 类型选择页；类型选择页 → 关闭整个流程。
@@ -164,6 +176,7 @@ internal fun AddSourceFlow(
                     text = when (val s = screen) {
                         AddSourceScreen.TypeSelect -> composeStringResource(R.string.addsrc_title)
                         is AddSourceScreen.WebDav -> "WebDAV"
+                        is AddSourceScreen.Smb -> "SMB"
                         is AddSourceScreen.Komga -> "Komga"
                         AddSourceScreen.Local -> composeStringResource(R.string.addsrc_type_local)
                     },
@@ -178,6 +191,9 @@ internal fun AddSourceFlow(
                     onSelect = { screen = it },
                     onRequestDeleteKomga = { deleteKomga = it },
                     onRequestDeleteWebDav = { deleteWebDav = it },
+                    // SY --> Komiho Phase7: SMB 卡片编辑/删除回调。
+                    onRequestDeleteSmb = { deleteSmb = it },
+                    // SY <--
                 )
 
                 is AddSourceScreen.WebDav -> WebDavFormPage(
@@ -188,6 +204,17 @@ internal fun AddSourceFlow(
                         screen = AddSourceScreen.TypeSelect
                     },
                 )
+
+                // SY --> Komiho Phase7: SMB 表单页。
+                is AddSourceScreen.Smb -> SmbFormPage(
+                    connId = s.connId,
+                    onBack = { screen = AddSourceScreen.TypeSelect },
+                    onSaved = {
+                        listTick++
+                        screen = AddSourceScreen.TypeSelect
+                    },
+                )
+                // SY <--
 
                 is AddSourceScreen.Komga -> KomgaFormPage(
                     prefs = prefs,
@@ -259,6 +286,28 @@ internal fun AddSourceFlow(
             },
         )
     }
+
+    // SY --> Komiho Phase7: 删除确认（SMB）：store.remove 内部会作废该连接的 SMB 会话。
+    deleteSmb?.let { conn ->
+        AlertDialog(
+            onDismissRequest = { deleteSmb = null },
+            title = { Text(composeStringResource(R.string.addsrc_delete_title)) },
+            text = { Text(composeStringResource(R.string.addsrc_delete_msg, conn.displayName())) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteSmb = null
+                        SmbConnectionStore.remove(conn.id)
+                        listTick++
+                    },
+                ) { Text(composeStringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteSmb = null }) { Text(composeStringResource(R.string.cancel)) }
+            },
+        )
+    }
+    // SY <--
 }
 
 // ------------------------------------------------------------ 类型选择页
@@ -270,10 +319,15 @@ private fun TypeSelectContent(
     onSelect: (AddSourceScreen) -> Unit,
     onRequestDeleteKomga: (KomgaConnection) -> Unit,
     onRequestDeleteWebDav: (WebDavConnection) -> Unit,
+    // SY --> Komiho Phase7: SMB 卡片删除回调。
+    onRequestDeleteSmb: (SmbConnection) -> Unit,
+    // SY <--
 ) {
-    val context = LocalContext.current
     val komgaConns = remember(listTick) { prefs.connections() }
     val webdavConns = remember(listTick) { WebDavConnectionStore.all() }
+    // SY --> Komiho Phase7: SMB 已添加连接列表。
+    val smbConns = remember(listTick) { SmbConnectionStore.all() }
+    // SY <--
 
     Column(
         modifier = Modifier
@@ -321,16 +375,20 @@ private fun TypeSelectContent(
             )
         }
 
-        val smbToast = composeStringResource(R.string.addsrc_smb_toast)
+        // SY --> Komiho Phase7: SMB 卡片（可用，镜像 WebDAV 卡 + 已添加连接列表）。
         TypeCard(
             leading = { TypeCardIcon(Icons.Filled.Lan) },
             title = "SMB",
-            enabled = false,
-            trailingTag = composeStringResource(R.string.addsrc_smb_unsupported),
-            onClick = {
-                android.widget.Toast.makeText(context, smbToast, android.widget.Toast.LENGTH_SHORT).show()
-            },
+            onClick = { onSelect(AddSourceScreen.Smb(null)) },
         )
+        smbConns.forEach { conn ->
+            AddedSourceRow(
+                name = conn.displayName(),
+                onEdit = { onSelect(AddSourceScreen.Smb(conn.id)) },
+                onDelete = { onRequestDeleteSmb(conn) },
+            )
+        }
+        // SY <--
     }
 }
 
@@ -653,9 +711,209 @@ private fun WebDavFormPage(
     }
 }
 
-// ------------------------------------------------------------ Komga 表单页
-
+// SY --> Komiho Phase7: SMB 表单页（镜像 WebDavFormPage；无协议切换——SMB 恒 TCP 直连，
+// 端口默认 445）。字段：名称 / 主机 / 端口 / 共享名 / 起始目录 / 域 / 账户 / 密码。
+// 测试连接 = 列共享内起始目录一次（SmbBrowse.list 自带会话重试），成功即代表
+// 主机可达 + 凭据有效 + 共享存在，三者一次覆盖。
 @Composable
+private fun SmbFormPage(
+    connId: String?,
+    onBack: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val existing = remember(connId) {
+        connId?.let { id -> SmbConnectionStore.all().firstOrNull { it.id == id } }
+    }
+
+    var name by remember(existing) { mutableStateOf(existing?.name.orEmpty()) }
+    var host by remember(existing) { mutableStateOf(existing?.host.orEmpty()) }
+    var port by remember(existing) { mutableStateOf(existing?.port?.toString().orEmpty()) }
+    var share by remember(existing) { mutableStateOf(existing?.share.orEmpty()) }
+    var path by remember(existing) { mutableStateOf(existing?.path.orEmpty()) }
+    var domain by remember(existing) { mutableStateOf(existing?.domain.orEmpty()) }
+    var user by remember(existing) { mutableStateOf(existing?.user.orEmpty()) }
+    var pass by remember(existing) { mutableStateOf("") }
+    var showPass by remember { mutableStateOf(false) }
+    var testing by remember { mutableStateOf(false) }
+    var testMsg by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        FieldLabel(composeStringResource(R.string.addsrc_name))
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            placeholder = { Text(composeStringResource(R.string.addsrc_name_hint_smb)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        FieldLabel(composeStringResource(R.string.addsrc_server))
+        OutlinedTextField(
+            value = host,
+            onValueChange = { host = it },
+            placeholder = { Text(composeStringResource(R.string.addsrc_smb_host_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        FieldLabel(composeStringResource(R.string.addsrc_port))
+        OutlinedTextField(
+            value = port,
+            onValueChange = { port = it.filter { c -> c.isDigit() } },
+            placeholder = { Text("445") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        FieldLabel(composeStringResource(R.string.addsrc_smb_share))
+        OutlinedTextField(
+            value = share,
+            onValueChange = { share = it },
+            placeholder = { Text(composeStringResource(R.string.addsrc_smb_share_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        FieldLabel(composeStringResource(R.string.addsrc_path))
+        OutlinedTextField(
+            value = path,
+            onValueChange = { path = it },
+            placeholder = { Text(composeStringResource(R.string.addsrc_smb_path_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        FieldLabel(composeStringResource(R.string.addsrc_smb_domain))
+        OutlinedTextField(
+            value = domain,
+            onValueChange = { domain = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        FieldLabel(composeStringResource(R.string.addsrc_account))
+        OutlinedTextField(
+            value = user,
+            onValueChange = { user = it },
+            label = { Text(composeStringResource(R.string.addsrc_username_anon)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = pass,
+            onValueChange = { pass = it },
+            label = {
+                Text(
+                    if (existing == null) {
+                        composeStringResource(R.string.addsrc_password_new)
+                    } else {
+                        composeStringResource(R.string.addsrc_password_edit)
+                    },
+                )
+            },
+            singleLine = true,
+            visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { showPass = !showPass }) {
+                    Icon(
+                        imageVector = if (showPass) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = composeStringResource(
+                            if (showPass) R.string.addsrc_hide_password_cd else R.string.addsrc_show_password_cd,
+                        ),
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Text(
+            composeStringResource(R.string.addsrc_keystore_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+
+        Spacer(Modifier.height(16.dp))
+        // 测试结果文案在组合期取好（stringResource 是 @Composable，不能在 onClick lambda 里调）。
+        val okMsg = composeStringResource(R.string.addsrc_test_ok)
+        val failMsg = composeStringResource(R.string.addsrc_test_failed)
+        OutlinedButton(
+            onClick = {
+                val temp = SmbConnectionStore.temp(
+                    name = name,
+                    host = host,
+                    port = port.trim().toIntOrNull() ?: SmbConnection.DEFAULT_PORT,
+                    share = share,
+                    path = path,
+                    domain = domain,
+                    user = user,
+                    // 编辑留空 = 沿用旧密码：直接带旧密文（decryptStored 兼容明文/密文两种形态）。
+                    pass = pass.ifBlank { existing?.passEnc.orEmpty() },
+                )
+                testing = true
+                testMsg = null
+                scope.launch {
+                    testMsg = try {
+                        SmbBrowse.list(temp, WebDavCredentialCrypto.decryptStored(temp.passEnc), temp.path)
+                        okMsg
+                    } catch (e: Throwable) {
+                        e.message ?: failMsg
+                    }
+                    testing = false
+                }
+            },
+            enabled = host.isNotBlank() && share.isNotBlank() && !testing,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (testing) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(composeStringResource(R.string.addsrc_test))
+        }
+        testMsg?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (it == composeStringResource(R.string.addsrc_test_ok)) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(onClick = onBack) { Text(composeStringResource(R.string.cancel)) }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    if (connId == null) {
+                        SmbConnectionStore.add(name, host, port.trim().toIntOrNull() ?: SmbConnection.DEFAULT_PORT, share, path, domain, user, pass)
+                    } else {
+                        SmbConnectionStore.update(connId, name, host, port.trim().toIntOrNull() ?: SmbConnection.DEFAULT_PORT, share, path, domain, user, pass)
+                    }
+                    onSaved()
+                },
+                enabled = host.isNotBlank() && share.isNotBlank(),
+            ) { Text(composeStringResource(R.string.action_save)) }
+        }
+    }
+}
+
+// ------------------------------------------------------------ Komga 表单页@Composable
 private fun KomgaFormPage(
     prefs: KomgaPreferences,
     connId: String?,

@@ -192,9 +192,17 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.download.KomgaDownloadStore
+// SY --> Komiho Phase7: SMB 来源接入。
+import app.mihonsy.komga.data.smb.SmbBrowse
+import app.mihonsy.komga.data.smb.SmbConnection
+import app.mihonsy.komga.data.smb.SmbConnectionStore
+import app.mihonsy.komga.data.smb.SmbCoverCache
+import app.mihonsy.komga.data.smb.SmbEntry
+// SY <--
 import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
+import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.data.webdav.WebDavCoverCache
 import app.mihonsy.komga.data.webdav.WebDavEntry
 import app.mihonsy.komga.data.webdav.WebDavPropfind
@@ -328,12 +336,12 @@ class KomgaMainActivity : KomgaBaseActivity() {
  *  - Komga：库/系列语义，底部导航为 Home / Library / Lists / Downloads / Settings
  *  - 文件型来源：文件夹浏览语义，底部导航为 Browse / History / Bookmarks / Settings
  *
- * 文件型来源（本地、WebDAV、未来的 SMB）**共用** Browse tab，因此底部导航
+ * 文件型来源（本地、WebDAV、SMB）**共用** Browse tab，因此底部导航
  * 的数量恒定，不会随来源增加而膨胀成 8 个 tab。
  */
 // SY --> Komiho Phase4: 来源条目（全局首页顶栏切换，数据驱动）。本地是唯一内置来源、固定置顶；
-// Komga 需已添加服务器连接才出现；WebDAV 每条连接一个条目；SMB 预留未实现不显示，
-// 未来落地后在 [buildSourceEntries] 登记。（internal：AddSourceFlow.kt 的 sourceIcon 共用。）
+// Komga 需已添加服务器连接才出现；WebDAV / SMB 每条连接一个条目。
+// （internal：AddSourceFlow.kt 的 sourceIcon 共用。）
 internal enum class SourceKind {
     Komga,
     WebDav,
@@ -349,11 +357,15 @@ private data class SourceEntry(val id: String, val kind: SourceKind, val name: S
 private const val SOURCE_ID_KOMGA = "komga"
 private const val SOURCE_ID_LOCAL = "local"
 private const val SOURCE_ID_WEBDAV_PREFIX = "webdav:"
+// SY --> Komiho Phase7: SMB 来源条目 id 前缀（章节 url 是 `smb://<connId>/...`，来源 id 是
+// `smb:<connId>`——单冒号，避免与章节 url 的 scheme 混淆）。
+private const val SOURCE_ID_SMB_PREFIX = "smb:"
+// SY <--
 
 /**
  * 来源菜单排序：本地是唯一内置来源、固定置顶；其余按优先级 Komga > WebDAV > SMB，
  * 同级按名称升序。未「添加」的来源不显示——Komga 仅在已配置服务器连接（[komgaConnected]）
- * 时出现，WebDAV 每条连接一条，SMB 未实现。
+ * 时出现，WebDAV / SMB 每条连接一条。
  */
 private fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, localName: String): List<SourceEntry> {
     val entries = mutableListOf(
@@ -365,6 +377,11 @@ private fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, local
     WebDavConnectionStore.all()
         .sortedBy { it.displayName().lowercase() }
         .forEach { entries.add(SourceEntry(SOURCE_ID_WEBDAV_PREFIX + it.id, SourceKind.WebDav, it.displayName())) }
+    // SY --> Komiho Phase7: SMB 每条连接一个条目（排在 WebDAV 之后，同级按名称升序）。
+    SmbConnectionStore.all()
+        .sortedBy { it.displayName().lowercase() }
+        .forEach { entries.add(SourceEntry(SOURCE_ID_SMB_PREFIX + it.id, SourceKind.Smb, it.displayName())) }
+    // SY <--
     return entries
 }
 
@@ -375,15 +392,11 @@ private enum class MainTab(
     val komgaOnly: Boolean = false,
     /** 仅在文件型来源下出现（浏览语义）。 */
     val fileOnly: Boolean = false,
-    // SY --> Komiho: 临时屏蔽标志（来源仪表盘等 SMB 落地后再认真启用）。
-    val hiddenForNow: Boolean = false,
-    // SY <--
 ) {
     // SY --> Komiho: 来源仪表盘（方案 B 启动首页）——固定第一位、全来源可见，不参与
     // 「来源首个内容 tab」的选取（selectSource / openSourceFromDashboard 均跳过它）。
-    // SY: 暂时屏蔽（hiddenForNow）——等 SMB 落地后结合首启引导一起认真启用；
-    // 代码全部保留，去掉标志即恢复。
-    Sources(R.string.tab_sources, Icons.Filled.Dashboard, hiddenForNow = true),
+    // Phase7: SMB 落地，解除 hiddenForNow 屏蔽，仪表盘正式启用。
+    Sources(R.string.tab_sources, Icons.Filled.Dashboard),
     // SY <--（下方各 tab 维持原语义）
     Home(R.string.tab_home, Icons.Filled.Home, komgaOnly = true),
     Library(R.string.tab_library, Icons.Filled.Book, komgaOnly = true),
@@ -400,7 +413,6 @@ private enum class MainTab(
     ;
 
     fun visibleFor(isFileSource: Boolean): Boolean = when {
-        hiddenForNow -> false
         komgaOnly -> !isFileSource
         fileOnly -> isFileSource
         else -> true
@@ -510,6 +522,8 @@ private fun KomgaMainScreen(
     // 的 navRequest（目录 URL）。
     var localBrowseNavRequest by remember { mutableStateOf<String?>(null) }
     var webdavBrowseNavRequest by remember { mutableStateOf<String?>(null) }
+    // SY --> Komiho Phase7: SMB 浏览的「打开文件位置」跳转请求（共享内相对路径）。
+    var smbBrowseNavRequest by remember { mutableStateOf<String?>(null) }
     // SY <--
 
     // SY --> Komiho: 首次需要选择本地目录时，若尚未授予 MANAGE_EXTERNAL_STORAGE，
@@ -595,7 +609,8 @@ private fun KomgaMainScreen(
     // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转（按条目所属来源路由）：
     // 本地条目 → 切到本地来源 + 浏览 tab 定位所在目录；
     // WebDAV 条目 → 切到对应连接来源 + 浏览 tab 定位所在目录（此前 WebDAV 来源下点任何
-    // 条目都只会落在当前 WebDAV 浏览页，等于跳根目录）。
+    // 条目都只会落在当前 WebDAV 浏览页，等于跳根目录）；
+    // SMB 条目 → 同 WebDAV，定位目标为共享内相对路径。
     fun openLocationInApp(chapterUrl: String) {
         if (chapterUrl.startsWith("webdav:")) {
             val conn = if (chapterUrl.startsWith("webdav://")) {
@@ -612,6 +627,14 @@ private fun KomgaMainScreen(
             // 定位目标 = 文件所在目录的完整 URL，由 WebDavBrowsePane 从 baseUrl 逐段重建路径栈。
             webdavBrowseNavRequest = WebDavConnectionStore.extractFullUrl(chapterUrl).substringBeforeLast('/')
             selectSource(SourceEntry(SOURCE_ID_WEBDAV_PREFIX + conn.id, SourceKind.WebDav, conn.displayName()))
+        } else if (chapterUrl.startsWith("smb://")) {
+            // SY --> Komiho Phase7: SMB 条目 → 对应连接浏览 tab 定位所在目录。
+            // 章节 url = smb://<connId>/<relPath>；定位目标 = 文件所在目录的共享内相对路径。
+            val connId = SmbConnectionStore.extractConnId(chapterUrl)
+            val conn = SmbConnectionStore.all().firstOrNull { it.id == connId } ?: return
+            smbBrowseNavRequest = SmbConnectionStore.extractRelPath(chapterUrl).substringBeforeLast('/')
+            selectSource(SourceEntry(SOURCE_ID_SMB_PREFIX + conn.id, SourceKind.Smb, conn.displayName()))
+            // SY <--
         } else {
             // chapterUrl 已是真实绝对路径；LocalFileBrowser 的 navRequest 按「相对当前根的路径」消费，
             // 这里转成相对段（不在当前根下时退化为原值，落到根目录）。
@@ -1086,7 +1109,41 @@ private fun KomgaMainScreen(
                             }
                         }
 
-                        // SMB 未实现；Komga 不会出现（Browse 仅文件型来源可见）。
+                        // SY --> Komiho Phase7: SMB 浏览（镜像 WebDAV 分支；路径栈/记忆键由
+                        // SmbBrowsePane 内部按 `smb:` 前缀隔离）。
+                        SourceKind.Smb -> {
+                            val conn = remember(currentSourceId, sourceVersion) {
+                                SmbConnectionStore.all()
+                                    .firstOrNull { it.id == currentSourceId.removePrefix(SOURCE_ID_SMB_PREFIX) }
+                            }
+                            if (conn == null) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        composeStringResource(R.string.source_smb_missing),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            } else {
+                                SmbBrowsePane(
+                                    conn = conn,
+                                    onOpenFile = { relPath ->
+                                        scope.launch {
+                                            openSmbFile(
+                                                context,
+                                                conn,
+                                                WebDavCredentialCrypto.decryptStored(conn.passEnc),
+                                                relPath,
+                                            )
+                                        }
+                                    },
+                                    navRequest = smbBrowseNavRequest,
+                                    onNavConsumed = { smbBrowseNavRequest = null },
+                                )
+                            }
+                        }
+                        // SY <--
+
+                        // Komga 不会出现（Browse 仅文件型来源可见）。
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(composeStringResource(R.string.source_unsupported), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -3752,8 +3809,10 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
     val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
     val storagePrefs = remember { Injekt.get<StoragePreferences>() }
     val webdavCacheDir = remember { File(context.cacheDir, "webdav_fallback") }
-    // SY --> Komiho Phase5: 页级缓存目录并入 usage 统计与清除（上限共用同一滑条值）。
-    val webdavPageCacheDir = remember { File(context.cacheDir, "webdav_pages") }
+    // SY --> Komiho Phase5/Phase7: 页级缓存目录（WebDAV/SMB 共用 remote_pages）并入
+    // usage 统计与清除（上限共用同一滑条值）；旧 webdav_pages 目录仅作清除兜底。
+    val remotePageCacheDir = remember { File(context.cacheDir, "remote_pages") }
+    val legacyPageCacheDir = remember { File(context.cacheDir, "webdav_pages") }
     // SY <--
     var cacheMaxMb by remember {
         mutableStateOf(storagePrefs.webdavCacheMaxBytes.get() / (1024f * 1024f))
@@ -3766,11 +3825,12 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 ?.filter { it.isFile && it.name.startsWith("webdav_") && !it.name.endsWith(".part") }
                 ?.sumOf { it.length() }
                 ?: 0L
-            // SY --> Komiho Phase5: 页缓存（每书一目录）计入占用
-            val pageBytes = webdavPageCacheDir.listFiles()
-                ?.flatMap { it.listFiles()?.toList() ?: emptyList() }
-                ?.sumOf { it.length() }
-                ?: 0L
+            // SY --> Komiho Phase5/Phase7: 页缓存（每书一目录）计入占用（含旧 webdav_pages 兜底）
+            val pageBytes = listOf(remotePageCacheDir, legacyPageCacheDir)
+                .flatMap { dir -> dir.listFiles()?.toList() ?: emptyList() }
+                .filter { it.isDirectory }
+                .flatMap { it.listFiles()?.toList() ?: emptyList() }
+                .sumOf { it.length() }
             // SY <--
             fallbackBytes + pageBytes
         }
@@ -3835,11 +3895,14 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 onClick = {
                     scope.launch {
                         val freed = withContext(Dispatchers.IO) {
-                            // SY --> Komiho Phase5: 清除范围扩展到页缓存目录
+                            // SY --> Komiho Phase5/Phase7: 清除范围扩展到页缓存目录（含旧 webdav_pages 兜底）
                             val fallbackTotal = webdavCacheDir.listFiles()?.sumOf { it.length() } ?: 0L
                             webdavCacheDir.listFiles()?.forEach { it.delete() }
-                            val pageTotal = webdavPageCacheDir.listFiles()?.sumOf { it.length() } ?: 0L
-                            webdavPageCacheDir.deleteRecursively()
+                            val pageTotal = listOf(remotePageCacheDir, legacyPageCacheDir).sumOf { dir ->
+                                val bytes = dir.listFiles()?.sumOf { it.length() } ?: 0L
+                                dir.deleteRecursively()
+                                bytes
+                            }
                             // SY <--
                             fallbackTotal + pageTotal
                         }
@@ -5699,6 +5762,7 @@ private fun webDavEntryComparator(sort: LocalFileSort): Comparator<WebDavEntry> 
 private fun chapterSourceLabel(
     chapterUrl: String,
     webDavConns: List<WebDavConnection>,
+    smbConns: List<SmbConnection> = emptyList(),
 ): String = when {
     chapterUrl.startsWith(WebDavConnectionStore.CONN_URL_PREFIX) -> {
         // 新格式 webdav://<connId>/<URL>：connId 精确匹配
@@ -5712,6 +5776,12 @@ private fun chapterSourceLabel(
             .maxByOrNull { it.baseUrl.length }
             ?.displayName() ?: "WebDAV"
     }
+    // SY --> Komiho Phase7: SMB 条目显示连接名（smb://<connId>/<relPath> 精确匹配）。
+    chapterUrl.startsWith(SmbConnectionStore.CONN_URL_PREFIX) -> {
+        val connId = chapterUrl.removePrefix(SmbConnectionStore.CONN_URL_PREFIX).substringBefore('/')
+        smbConns.firstOrNull { it.id == connId }?.displayName() ?: "SMB"
+    }
+    // SY <--
     chapterUrl.startsWith("smb:") -> "SMB"
     else -> composeStringResource(R.string.source_local)
 }
@@ -5785,6 +5855,308 @@ private suspend fun openWebDavTestFile(
                                     parsed
                                 } else {
                                     siblings.indexOf(fileHttpUrl).coerceAtLeast(0) + 1.0
+                                },
+                            ),
+                        ),
+                    )
+                }
+            }
+            val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                ?: error(context.getString(R.string.webdav_chapter_write_failed))
+            manga.id!! to chapter.id!!.toLong()
+        }
+        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
+    } catch (e: Throwable) {
+        android.widget.Toast.makeText(
+            context,
+            context.getString(R.string.open_failed, e.message),
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
+}
+// SY <--
+
+// SY --> Komiho Phase7：SMB 浏览页（镜像 WebDavBrowsePane）。
+//
+// 与 WebDAV 版的差异只在数据源：路径栈存「共享内相对路径」（`/` 分隔，含连接起始目录）
+// 而非 URL——SMB 路径没有百分号编码往返问题，按段名重拼是安全的。
+// 显示模式/排序/列数**与 WebDAV 共用同一套偏好**（远程浏览体验保持一致，不新开一套键）；
+// 「上次访问目录」也复用 webdavBrowseLastPaths 键，行首标识加 `smb:` 前缀与 WebDAV 隔离。
+// 同样不提供封面缩略图（避免为列表里每一卷都去开 SMB 会话拉首图）。
+@Composable
+private fun SmbBrowsePane(
+    conn: SmbConnection,
+    onOpenFile: (relPath: String) -> Unit,
+    // SY: 历史/书签「打开文件位置」跳转请求（目标目录的共享内相对路径）。
+    navRequest: String? = null,
+    onNavConsumed: () -> Unit = {},
+) {
+    val prefs = remember { Injekt.get<StoragePreferences>() }
+    val dirBrowseFailed = composeStringResource(R.string.dir_browse_failed)
+    // 解密一次即可（Keystore 解密有成本，别放进重组热路径）
+    val password = remember(conn.id, conn.passEnc) {
+        WebDavCredentialCrypto.decryptStored(conn.passEnc)
+    }
+
+    var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.webdavBrowseDisplayMode.get())) }
+    var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.webdavBrowseSort.get())) }
+    var columnCount by remember { mutableStateOf(prefs.webdavBrowseColumns.get()) }
+    var showOptions by remember { mutableStateOf(false) }
+
+    val rootLabel = remember(conn.id) { conn.name.ifBlank { conn.host } }
+    val rootPath = remember(conn.id) { SmbBrowse.rootPath(conn) }
+    // 记忆键：与 WebDAV 共用偏好键，靠 `smb:` 前缀区分（WebDAV 侧按纯 connId 匹配，互不干扰）。
+    val memKey = remember(conn.id) { "smb:" + conn.id }
+    var trail by remember(conn.id) {
+        val saved = prefs.webdavBrowseLastPaths.get()
+            .lines()
+            .firstOrNull { it.substringBefore(' ') == memKey }
+            ?.substringAfter(' ', "")
+            ?.split('\u001F')
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
+        mutableStateOf(
+            listOf(rootLabel to rootPath) + saved.map { path ->
+                path.substringAfterLast('/') to path
+            },
+        )
+    }
+    val dirPath = trail.last().second
+
+    // SY: 历史/书签「打开文件位置」跳转消费——按目标路径逐段重建面包屑栈。
+    LaunchedEffect(navRequest) {
+        val target = navRequest ?: return@LaunchedEffect
+        onNavConsumed()
+        if (target.isBlank()) return@LaunchedEffect
+        val segs = target.trim('/').split('/').filter { it.isNotBlank() }
+        var acc = rootPath.trim('/')
+        val paths = segs.map { seg -> acc = if (acc.isEmpty()) seg else "$acc/$seg"; acc }
+        trail = listOf(rootLabel to rootPath) + paths.map { p -> p.substringAfterLast('/') to p }
+    }
+
+    LaunchedEffect(trail) {
+        val saved = trail.drop(1).joinToString("\u001F") { it.second }
+        prefs.webdavBrowseLastPaths.set(
+            prefs.webdavBrowseLastPaths.get()
+                .lines()
+                .filter { it.isNotBlank() && it.substringBefore(' ') != memKey }
+                .plus(if (saved.isEmpty()) null else "$memKey $saved")
+                .filterNotNull()
+                .joinToString("\n"),
+        )
+    }
+
+    var entries by remember { mutableStateOf<List<SmbEntry>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+    var retryTick by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(dirPath, retryTick) {
+        loading = true
+        errorText = null
+        try {
+            entries = SmbBrowse.list(conn, password, dirPath)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            errorText = e.message ?: dirBrowseFailed
+        }
+        loading = false
+    }
+
+    BackHandler(enabled = trail.size > 1) {
+        trail = trail.dropLast(1)
+    }
+
+    val onItemOpen: (SmbEntry) -> Unit = { e ->
+        if (e.isDir) trail = trail + (e.name to e.path) else onOpenFile(e.path)
+    }
+
+    val visible = remember(entries, sort) {
+        entries.filter { it.isDir || it.isArchive }.sortedWith(smbEntryComparator(sort))
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                trail.forEachIndexed { index, (name, _) ->
+                    if (index > 0) {
+                        Text(
+                            text = "/",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(
+                        onClick = { trail = trail.take(index + 1) },
+                        contentPadding = PaddingValues(horizontal = 0.dp),
+                    ) {
+                        Text(text = name, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                    }
+                }
+            }
+            IconButton(onClick = { showOptions = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Tune,
+                    contentDescription = composeStringResource(R.string.display_mode_header),
+                )
+            }
+        }
+
+        when {
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            errorText != null -> Column(
+                Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    composeStringResource(R.string.load_failed, errorText.orEmpty()),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { retryTick++ }) { Text(composeStringResource(R.string.retry)) }
+            }
+            visible.isEmpty() -> Box(Modifier.fillMaxSize())
+            displayMode == LibraryDisplayMode.List -> {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(visible, key = { it.path }) { e ->
+                        SmbFileRow(entry = e, onOpen = { onItemOpen(e) })
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            }
+            else -> {
+                val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = 96.dp)
+                LazyVerticalGrid(
+                    columns = cells,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(visible, key = { it.path }) { e ->
+                        SmbGridItem(entry = e, onClick = { onItemOpen(e) })
+                    }
+                }
+            }
+        }
+    }
+
+    LocalBrowseOptionsMenu(
+        expanded = showOptions,
+        onDismiss = { showOptions = false },
+        displayMode = displayMode,
+        onDisplayModeChange = { displayMode = it; prefs.webdavBrowseDisplayMode.set(it.prefValue) },
+        showCover = false,
+        onShowCoverChange = {},
+        showCoverEnabled = false,
+        columnCount = columnCount,
+        onColumnChange = { columnCount = it; prefs.webdavBrowseColumns.set(it) },
+        sort = sort,
+        onSortModeChange = { sort = it; prefs.webdavBrowseSort.set(it.toPref()) },
+    )
+}
+
+@Composable
+private fun SmbFileRow(entry: SmbEntry, onOpen: () -> Unit) {
+    FileListRow(name = entry.name, clickable = true, onOpen = onOpen) {
+        Icon(
+            fileKindIcon(entry.isDir, entry.isArchive),
+            contentDescription = null,
+            tint = fileKindTint(entry.isDir, entry.isArchive),
+            modifier = Modifier.size(24.dp),
+        )
+    }
+}
+
+@Composable
+private fun SmbGridItem(entry: SmbEntry, onClick: () -> Unit) {
+    FileGridCell(
+        name = entry.name,
+        icon = fileKindIcon(entry.isDir, entry.isArchive),
+        iconTint = fileKindTint(entry.isDir, entry.isArchive),
+        iconSize = 56.dp,
+        clickable = true,
+        onClick = onClick,
+    )
+}
+
+private fun smbEntryComparator(sort: LocalFileSort): Comparator<SmbEntry> {
+    val dirFirst = compareBy<SmbEntry> { !it.isDir }
+    val field: Comparator<SmbEntry> = when (sort.sortBy) {
+        LocalFileSortBy.Name -> compareBy { it.name.lowercase() }
+        LocalFileSortBy.DateModified -> compareBy { it.lastModified }
+        LocalFileSortBy.Size -> compareBy { if (it.isDir) 0L else it.size }
+    }
+    return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
+}
+
+/** 打开 SMB 归档：manga = 所在目录（系列），同目录归档全部建为章节（翻完自动续卷）。
+ *  与 [openWebDavTestFile] 同构，差异只有「兄弟归档来自 [SmbBrowse.list]」。 */
+private suspend fun openSmbFile(
+    context: android.content.Context,
+    conn: SmbConnection,
+    password: String,
+    relPath: String,
+) {
+    try {
+        val fileName = relPath.substringAfterLast('/')
+        if (fileName.isBlank()) throw Exception(context.getString(R.string.smb_path_no_filename))
+        val dirRel = relPath.substringBeforeLast('/', "")
+        // manga.url = 共享内目录（同目录的多个归档同属一个系列）
+        val mangaUrl = SmbConnectionStore.toChapterUrl(conn.id, dirRel)
+        val seriesTitle = dirRel.substringAfterLast('/').ifBlank { conn.share }.ifBlank { fileName }
+        val chapterUrl = SmbConnectionStore.toChapterUrl(conn.id, relPath)
+        val (mangaId, chapterId) = withContext(Dispatchers.IO) {
+            val mangaRepo = Injekt.get<MangaRepository>()
+            val chapterRepo = Injekt.get<ChapterRepository>()
+            val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
+                ?: mangaRepo.insertNetworkManga(
+                    listOf(
+                        Manga.create().copy(
+                            source = LocalSource.ID,
+                            url = mangaUrl,
+                            ogTitle = seriesTitle,
+                            favorite = false,
+                            chapterFlags = Manga.CHAPTER_SORTING_NUMBER,
+                        ),
+                    ),
+                ).first()
+            if (manga.ogTitle != seriesTitle) {
+                mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
+            }
+            val siblings = runCatching {
+                SmbBrowse.list(conn, password, dirRel).filter { it.isArchive }.map { it.path }
+            }.onFailure {
+                logcat(LogPriority.WARN) { "[Smb] 章节扫描失败，仅打开当前文件: ${it.message}" }
+            }.getOrDefault(emptyList())
+            (siblings + relPath).distinct().forEach { siblingRel ->
+                val url = SmbConnectionStore.toChapterUrl(conn.id, siblingRel)
+                if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                    val fn = siblingRel.substringAfterLast('/')
+                    val name = fn.substringBeforeLast('.').ifBlank { fn }
+                    val parsed = ChapterRecognition.parseChapterNumber(seriesTitle, fn, -1.0)
+                    chapterRepo.addAll(
+                        listOf(
+                            Chapter.create().copy(
+                                mangaId = manga.id!!,
+                                url = url,
+                                name = name,
+                                chapterNumber = if (parsed > 0) {
+                                    parsed
+                                } else {
+                                    siblings.indexOf(siblingRel).coerceAtLeast(0) + 1.0
                                 },
                             ),
                         ),
@@ -6111,12 +6483,17 @@ private fun SourceDashboardPane(
             val local = Agg()
             val komga = Agg()
             val webdav = mutableMapOf<String, Agg>()
+            // SY --> Komiho Phase7: SMB 摘要分桶（smb://<connId>/<relPath> → smb:<connId>）。
+            val smb = mutableMapOf<String, Agg>()
+            // SY <--
             val repo = Injekt.get<HistoryRepository>()
             val conns = WebDavConnectionStore.all()
             // 本地/WebDAV：同一来源 ID，按 chapterUrl 前缀归类。
             runCatching { repo.getHistoryBySourceDetailed(LocalSource.ID).first() }.getOrDefault(emptyList()).forEach { item ->
                 val url = item.chapterUrl
                 when {
+                    url.startsWith("smb://") ->
+                        smb.getOrPut(SOURCE_ID_SMB_PREFIX + url.removePrefix("smb://").substringBefore('/')) { Agg() }.add(item)
                     url.startsWith("webdav://") ->
                         webdav.getOrPut("webdav:" + url.removePrefix("webdav://").substringBefore('/')) { Agg() }.add(item)
                     url.startsWith("webdav:") -> {
@@ -6134,7 +6511,10 @@ private fun SourceDashboardPane(
             mapOf(
                 SOURCE_ID_LOCAL to SourceCardSummary(local.urls.size, local.last?.mangaTitle, local.last?.readAt),
                 SOURCE_ID_KOMGA to SourceCardSummary(komga.urls.size, komga.last?.mangaTitle, komga.last?.readAt),
-            ) + webdav.mapValues { (_, agg) -> SourceCardSummary(agg.urls.size, agg.last?.mangaTitle, agg.last?.readAt) }
+            ) + webdav.mapValues { (_, agg) -> SourceCardSummary(agg.urls.size, agg.last?.mangaTitle, agg.last?.readAt) } +
+                // SY --> Komiho Phase7: SMB 卡片摘要。
+                smb.mapValues { (_, agg) -> SourceCardSummary(agg.urls.size, agg.last?.mangaTitle, agg.last?.readAt) }
+            // SY <--
         }
     }
     Column(
@@ -6302,6 +6682,11 @@ private fun HistoryTabLocal(
     val webDavConns by produceState(emptyList<WebDavConnection>(), refreshTick, queryTick) {
         value = withContext(Dispatchers.IO) { WebDavConnectionStore.all() }
     }
+    // SY --> Komiho Phase7: 来源名称（SMB 连接名）快照，同 webDavConns 口径。
+    val smbConns by produceState(emptyList<SmbConnection>(), refreshTick, queryTick) {
+        value = withContext(Dispatchers.IO) { SmbConnectionStore.all() }
+    }
+    // SY <--
 
     // 按「卷/文件」(chapterUrl) 合并：每卷取最近一次阅读作为代表，保留全部阅读会话供「汇聚」对话框。
     // 注意：本地模型 series=manga、volume=chapter，用 mangaId 聚合会把整系列压成一行，故用 chapterUrl。
@@ -6337,7 +6722,9 @@ private fun HistoryTabLocal(
             val coverModel: Any? = remember(file, stat.modified, queryTick) {
                 file?.let { LocalCoverData(it, stat.modified) }
                     ?: rep.thumbnailUrl?.takeIf { it.isNotBlank() }
+                    // SY: WebDAV/SMB 章节（无本地文件）→ 读打开时「顺便」生成的封面缓存（无则占位图标）。
                     ?: WebDavCoverCache.existingCoverFile(context, rep.chapterUrl)
+                    ?: SmbCoverCache.existingCoverFile(context, rep.chapterUrl)
             }
             // SY <--
             // 标题取「卷名」（章节名 / chapterUrl 末段），而非系列名；副标题展示系列名。
@@ -6491,6 +6878,11 @@ private fun BookmarksTabLocal(
     val webDavConns by produceState(emptyList<WebDavConnection>(), refreshTick) {
         value = withContext(Dispatchers.IO) { WebDavConnectionStore.all() }
     }
+    // SY --> Komiho Phase7: 来源名称（SMB 连接名）快照，同 webDavConns 口径。
+    val smbConns by produceState(emptyList<SmbConnection>(), refreshTick) {
+        value = withContext(Dispatchers.IO) { SmbConnectionStore.all() }
+    }
+    // SY <--
 
     fun load() {
         scope.launch {
@@ -6542,7 +6934,9 @@ private fun BookmarksTabLocal(
                     val coverModel: Any? = remember(file, stat.modified, resumeTick) {
                         file?.let { LocalCoverData(it, stat.modified) }
                             ?: first.thumbnailUrl?.takeIf { it.isNotBlank() }
+                            // SY: WebDAV/SMB 章节 → 打开时「顺便」生成的封面缓存。
                             ?: WebDavCoverCache.existingCoverFile(context, first.chapterUrl)
+                            ?: SmbCoverCache.existingCoverFile(context, first.chapterUrl)
                     }
                     // SY <--
                     val chapterText = if (first.chapterNumber >= 0) {
@@ -6557,7 +6951,7 @@ private fun BookmarksTabLocal(
                         context = context,
                         title = first.mangaTitle,
                         subtitle = composeStringResource(R.string.bookmarks_count_subtitle, chapterText, bms.size),
-                        sourceBadge = chapterSourceLabel(first.chapterUrl, webDavConns),
+                        sourceBadge = chapterSourceLabel(first.chapterUrl, webDavConns, smbConns),
                         fileSize = stat.size,
                         // 文件修改时间对远程章节无意义，行内改显最后阅读时间
                         dateTime = first.lastRead?.time ?: 0L,

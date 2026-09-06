@@ -12,7 +12,7 @@ import java.io.Closeable
 import java.io.File
 import java.io.InputStream
 
-// SY --> Phase3: 实现 ArchiveHandle 窄接口，与 WebDavZipReader（远程 ZIP 直读路径）共用 ArchivePageLoader
+// SY --> Phase3: 实现 ArchiveHandle 窄接口，与 RemoteZipReader（远程 ZIP 直读路径）共用 ArchivePageLoader
 class ArchiveReader : ArchiveHandle {
 
     val size: Long

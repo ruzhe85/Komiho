@@ -173,6 +173,10 @@ android {
                 "META-INF/DEPENDENCIES",
                 "META-INF/LICENSE",
                 "META-INF/NOTICE",
+                // SY --> Komiho Phase7: smbj / bcprov 是多版本 JAR（Java 9+ 变体），
+                // Android 只吃基础变体；留着会与基础类重复触发打包冲突。
+                "META-INF/versions/**",
+                // SY <--
                 "META-INF/README.md",
             )
         }
@@ -376,6 +380,10 @@ dependencies {
 
     // ZXing Android Embedded
     implementation(sylibs.zxing.android.embedded)
+
+    // SY --> Komiho Phase7: SMB（smbj；BouncyCastle 随传递依赖引入，SMB3 加密/NTLMv2 需要）
+    implementation(libs.smbj)
+    // SY <--
 }
 
 androidComponents {

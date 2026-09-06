@@ -1,4 +1,4 @@
-package app.mihonsy.komga.data.webdav
+package app.mihonsy.komga.data.remote
 
 import logcat.LogPriority
 import logcat.logcat
@@ -9,17 +9,20 @@ import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
-// SY --> Komiho Phase5：WebDAV 页级磁盘缓存。
+// SY --> Komiho Phase5：远程（WebDAV / SMB）页级磁盘缓存——两源共用同一实现与同一份预算。
 //
-// 背景：WebDAV 的 zip/cbz 走 WebDavZipReader 每页一次 Range 按需拉取（无磁盘缓存，
-// 重看重拉）；rar/7z 虽有整本回退缓存，但那是 RandomAccessSource 层的字节段文件。
+// 背景：远程 zip/cbz 走 RemoteZipReader 每页一次按需拉取（WebDAV=Range 请求，
+// SMB=原生 offset 读），无磁盘缓存时重看重拉；rar/7z 虽有整本回退缓存（仅 WebDAV），
+// 但那是 RandomAccessSource 层的字节段文件。
 // 本缓存把「每一页解压/解密后的原始图片字节」按书落盘，收益：
 //  - 回翻 / 重开章节 / 历史跳转 → 零网络、零解压；
 //  - Pager 的 A+B+C 预热照常工作（stream 层透明），命中时预热变纯磁盘读。
 //
 // 设计要点：
 //  - 插入点 = ArchiveHandle 窄接口的装饰器（[CachingArchiveHandle]），
-//    WebDavZipReader 快路径与 libarchive 回落路径统一覆盖，阅读链路零改动；
+//    RemoteZipReader 快路径与 libarchive 回落路径统一覆盖，阅读链路零改动；
+//  - 两源共用：缓存键 = 远程定位串（WebDAV=规范 URL，SMB=smb://host/share/path）
+//    + 指纹，天然互不冲突；目录 root 与预算也共用（设置-存储一个滑条管全部远程页缓存）；
 //  - 失效键 = normalizedUrl + 探测指纹(size:Last-Modified)，远程文件被替换 → 整书目录作废；
 //  - 只缓存「可安全产出内容」的读取：加密包在密码未验证通过前不落盘；
 //  - rar/7z 强制整本回退（isForcedFallback）时不启用——整本已落盘，页缓存只会双份占空间；
@@ -37,7 +40,7 @@ import java.util.concurrent.atomic.AtomicLong
  * ```
  * 线程安全：所有方法可在任意线程调用；跨实例写入同一目录由 .meta 幂等化兜底。
  */
-class WebDavPageCache(private val root: File, private val maxBytes: Long) {
+class RemotePageCache(private val root: File, private val maxBytes: Long) {
 
     private val putCounter = AtomicLong()
 
@@ -54,7 +57,7 @@ class WebDavPageCache(private val root: File, private val maxBytes: Long) {
         dir.mkdirs()
         if (!meta.exists()) {
             runCatching { meta.writeText(metaKey) }
-                .onFailure { logcat(LogPriority.WARN) { "[WebDavPageCache] meta 写入失败: ${it.message}" } }
+                .onFailure { logcat(LogPriority.WARN) { "[RemotePageCache] meta 写入失败: ${it.message}" } }
         }
         return if (dir.isDirectory) dir else null
     }
@@ -65,7 +68,7 @@ class WebDavPageCache(private val root: File, private val maxBytes: Long) {
         if (!file.isFile) return null
         file.setLastModified(System.currentTimeMillis())
         return runCatching { file.readBytes() }
-            .onFailure { logcat(LogPriority.WARN) { "[WebDavPageCache] 缓存读取失败，按未命中处理: ${it.message}" } }
+            .onFailure { logcat(LogPriority.WARN) { "[RemotePageCache] 缓存读取失败，按未命中处理: ${it.message}" } }
             .getOrNull()
             ?.takeIf { it.isNotEmpty() }
     }
@@ -78,7 +81,7 @@ class WebDavPageCache(private val root: File, private val maxBytes: Long) {
             tmp.writeBytes(bytes)
             if (file.exists()) file.delete()
             tmp.renameTo(file)
-        }.onFailure { logcat(LogPriority.WARN) { "[WebDavPageCache] 缓存写入失败: ${it.message}" } }
+        }.onFailure { logcat(LogPriority.WARN) { "[RemotePageCache] 缓存写入失败: ${it.message}" } }
         // 每 32 页淘汰一次（列目录有成本），首次打开书时也会兜底执行
         if (putCounter.incrementAndGet() % EVICT_INTERVAL == 0L) evict()
     }
@@ -98,7 +101,7 @@ class WebDavPageCache(private val root: File, private val maxBytes: Long) {
                 val size = file.length()
                 if (file.delete()) total -= size
             }
-        }.onFailure { logcat(LogPriority.WARN) { "[WebDavPageCache] 淘汰失败: ${it.message}" } }
+        }.onFailure { logcat(LogPriority.WARN) { "[RemotePageCache] 淘汰失败: ${it.message}" } }
     }
 
     /** 清空全部页缓存，返回释放的字节数（设置-存储「清除缓存」调用）。 */
@@ -136,7 +139,7 @@ class WebDavPageCache(private val root: File, private val maxBytes: Long) {
  */
 class CachingArchiveHandle(
     private val delegate: ArchiveHandle,
-    private val cache: WebDavPageCache,
+    private val cache: RemotePageCache,
     private val metaKey: () -> String?,
 ) : ArchiveHandle by delegate {
 

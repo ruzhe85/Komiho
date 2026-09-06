@@ -13,6 +13,8 @@
     <string name="onboarding_komga_desc">Self-hosted library · API key</string>
     <string name="onboarding_webdav">WebDAV drive</string>
     <string name="onboarding_webdav_desc">NAS / cloud drive · direct cbz reading</string>
+    <string name="onboarding_smb">SMB share</string>
+    <string name="onboarding_smb_desc">NAS / LAN share · direct cbz reading</string>
     <string name="onboarding_local">Local folder</string>
     <string name="onboarding_local_desc">Comic files stored on this device</string>
     <string name="onboarding_ready">Ready</string>
@@ -260,8 +262,6 @@
     <string name="addsrc_title">Manage sources</string>
     <string name="addsrc_select_type">Choose a source type</string>
     <string name="addsrc_type_local">Local storage</string>
-    <string name="addsrc_smb_unsupported">Not yet supported</string>
-    <string name="addsrc_smb_toast">SMB is not yet supported</string>
     <string name="addsrc_delete_title">Delete source</string>
     <string name="addsrc_delete_msg">Delete \"%1$s\"? History and bookmarks will be kept.</string>
     <string name="addsrc_edit_cd">Edit</string>
@@ -285,6 +285,12 @@
     <string name="addsrc_test">Test connection</string>
     <string name="addsrc_test_ok">Connection OK</string>
     <string name="addsrc_test_failed">Connection failed</string>
+    <string name="addsrc_name_hint_smb">e.g. Home NAS</string>
+    <string name="addsrc_smb_host_hint">e.g. 192.168.1.10 or nas.local</string>
+    <string name="addsrc_smb_share">Share name</string>
+    <string name="addsrc_smb_share_hint">e.g. manga</string>
+    <string name="addsrc_smb_path_hint">Start folder inside share (optional)</string>
+    <string name="addsrc_smb_domain">Domain (optional)</string>
     <string name="addsrc_auth_type">Authentication (choose one)</string>
     <string name="addsrc_auth_basic">Username &amp; password</string>
     <string name="addsrc_username_email">Username / email</string>
@@ -309,6 +315,7 @@
     <string name="source_switch_cd">Switch source</string>
     <string name="source_unsupported">This source is not supported yet</string>
     <string name="source_webdav_missing">This WebDAV connection no longer exists. Pick a source from the top bar.</string>
+    <string name="source_smb_missing">This SMB connection no longer exists. Pick a source from the top bar.</string>
     <string name="perm_dialog_title">All-files access recommended</string>
     <string name="perm_dialog_body">For faster, steadier access to local manga, grant \"All-files access\".\nYou can also keep using the system folder picker (SAF) instead.</string>
     <string name="perm_grant">Grant</string>
@@ -318,8 +325,8 @@
     <string name="storage_all_files_access">All-files access</string>
     <string name="storage_perm_granted_desc">Granted: local browsing uses real paths (faster lists/covers/reading)</string>
     <string name="storage_perm_denied_desc">Not granted: local browsing uses SAF. Granting speeds it up greatly</string>
-    <string name="storage_webdav_cache">WebDAV cache</string>
-    <string name="storage_webdav_cache_desc">zip/cbz pages you have read are cached on disk (zero network on revisit); rar/7z archives are cached whole when opened;\nshared limit, oldest entries evicted above it. Lowering the limit applies on next write.</string>
+    <string name="storage_webdav_cache">Remote cache</string>
+    <string name="storage_webdav_cache_desc">Pages you have read from WebDAV/SMB zip/cbz are cached on disk (zero network on revisit); rar/7z archives are cached whole when opened;\nshared limit, oldest entries evicted above it. Lowering the limit applies on next write.</string>
     <string name="storage_cache_limit">Limit: </string>
     <string name="storage_cache_range">200 MB – 4 GB, 200 MB steps (default 1 GB)</string>
     <string name="storage_cache_usage">Used: </string>
@@ -339,6 +346,7 @@
     <string name="webdav_empty_dir">No archives (zip/cbz/rar/7z) in this folder</string>
     <string name="webdav_url_not_http">URL must start with http:// or https://</string>
     <string name="webdav_url_no_filename">URL is missing a file name</string>
+    <string name="smb_path_no_filename">Path is missing a file name</string>
     <string name="webdav_chapter_write_failed">Failed to write chapters</string>
     <string name="dir_browse_failed">Failed to browse folder</string>
     <string name="file_not_found">File not found: %1$s</string>

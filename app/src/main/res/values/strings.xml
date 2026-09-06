@@ -14,6 +14,8 @@
     <string name="onboarding_komga_desc">自建媒体库 · API Key 连接</string>
     <string name="onboarding_webdav">WebDAV 网盘</string>
     <string name="onboarding_webdav_desc">NAS / 网盘 · cbz 直读</string>
+    <string name="onboarding_smb">SMB 共享</string>
+    <string name="onboarding_smb_desc">NAS / 局域网共享 · cbz 直读</string>
     <string name="onboarding_local">本地文件夹</string>
     <string name="onboarding_local_desc">设备内存储的漫画文件</string>
     <string name="onboarding_ready">已就绪</string>
@@ -266,8 +268,6 @@
     <string name="addsrc_title">来源管理</string>
     <string name="addsrc_select_type">选择来源类型</string>
     <string name="addsrc_type_local">本地</string>
-    <string name="addsrc_smb_unsupported">暂未支持</string>
-    <string name="addsrc_smb_toast">SMB 暂未支持</string>
     <string name="addsrc_delete_title">删除来源</string>
     <string name="addsrc_delete_msg">确定删除「%1$s」？历史与书签记录将保留。</string>
     <string name="addsrc_edit_cd">编辑</string>
@@ -291,6 +291,12 @@
     <string name="addsrc_test">测试连接</string>
     <string name="addsrc_test_ok">连接正常</string>
     <string name="addsrc_test_failed">连接失败</string>
+    <string name="addsrc_name_hint_smb">如：家庭 NAS</string>
+    <string name="addsrc_smb_host_hint">如 192.168.1.10 或 nas.local</string>
+    <string name="addsrc_smb_share">共享名</string>
+    <string name="addsrc_smb_share_hint">如 manga</string>
+    <string name="addsrc_smb_path_hint">共享内起始目录（可空）</string>
+    <string name="addsrc_smb_domain">域（可空）</string>
     <string name="addsrc_auth_type">认证方式（二选一）</string>
     <string name="addsrc_auth_basic">账号密码</string>
     <string name="addsrc_username_email">用户名 / 邮箱</string>
@@ -315,6 +321,7 @@
     <string name="source_switch_cd">切换来源</string>
     <string name="source_unsupported">该来源暂未支持</string>
     <string name="source_webdav_missing">该 WebDAV 连接不存在，请从顶栏重新选择来源</string>
+    <string name="source_smb_missing">该 SMB 连接不存在，请从顶栏重新选择来源</string>
     <string name="perm_dialog_title">需要所有文件访问权限</string>
     <string name="perm_dialog_body">为更快、稳定地访问本地漫画，建议授予「所有文件访问权限」。\n你也可以选择继续使用系统目录选择器（SAF）来授权本地目录。</string>
     <string name="perm_grant">去授权</string>
@@ -324,8 +331,8 @@
     <string name="storage_all_files_access">所有文件访问权限</string>
     <string name="storage_perm_granted_desc">已授权：本地浏览使用真实路径（列表/封面/阅读更快）</string>
     <string name="storage_perm_denied_desc">未授权：本地浏览使用 SAF。授权后可大幅提速</string>
-    <string name="storage_webdav_cache">WebDAV 缓存</string>
-    <string name="storage_webdav_cache_desc">zip/cbz 按页缓存已读图片（回翻/重开零流量）；rar/7z 打开时整本缓存到本地；\n共用上限，超限自动淘汰最旧，降低上限后在下一次写入时生效。</string>
+    <string name="storage_webdav_cache">远程缓存</string>
+    <string name="storage_webdav_cache_desc">WebDAV/SMB 的 zip/cbz 按页缓存已读图片（回翻/重开零流量）；rar/7z 打开时整本缓存到本地；\n共用上限，超限自动淘汰最旧，降低上限后在下一次写入时生效。</string>
     <string name="storage_cache_limit">上限：</string>
     <string name="storage_cache_range">200 MB — 4 GB，200 MB 一档（默认 1 GB）</string>
     <string name="storage_cache_usage">当前占用：</string>
@@ -345,6 +352,7 @@
     <string name="webdav_empty_dir">此目录没有压缩包（zip/cbz/rar/7z）</string>
     <string name="webdav_url_not_http">URL 须以 http:// 或 https:// 开头</string>
     <string name="webdav_url_no_filename">URL 缺少文件名</string>
+    <string name="smb_path_no_filename">路径缺少文件名</string>
     <string name="webdav_chapter_write_failed">章节写入失败</string>
     <string name="dir_browse_failed">目录浏览失败</string>
     <string name="file_not_found">找不到文件：%1$s</string>

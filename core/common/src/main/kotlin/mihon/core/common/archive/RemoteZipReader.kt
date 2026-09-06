@@ -39,12 +39,12 @@ import javax.crypto.spec.SecretKeySpec
 //
 // - 线程安全：索引建好后只读不可变；每页独立的 InputStream；source 自身线程安全。
 // - 不支持的情况（非 ZIP、bzip2/zstd 等压缩方法、zip64 越界）在**构造期**抛
-//   [WebDavZipUnsupportedException]，调用方回落 libarchive 路径，行为不回退。
+//   [RemoteZipUnsupportedException]，调用方回落 libarchive 路径，行为不回退。
 // - 实现了与 [ArchiveReader] 相同的 [ArchiveHandle] 窄接口，ArchivePageLoader 零改动复用。
-class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
+class RemoteZipReader(private val source: RandomAccessSource) : ArchiveHandle {
 
     /** 构造期即判定「该文件不适合本路径」，调用方应回落 libarchive。 */
-    class WebDavZipUnsupportedException(message: String) : IOException(message)
+    class RemoteZipUnsupportedException(message: String) : IOException(message)
 
     private class CdEntry(
         val name: String,
@@ -89,14 +89,14 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         }
         if (hasEncrypted) {
             wrongPassword = if (passwordBytes == null) {
-                logcat(LogPriority.INFO) { "[WebDavZip] 加密包无已存密码 → 弹框 entry=${parsed.third?.name}" }
+                logcat(LogPriority.INFO) { "[RemoteZip] 加密包无已存密码 → 弹框 entry=${parsed.third?.name}" }
                 null // 无密码 → 阅读器弹密码输入框
             } else {
                 // hasEncrypted=true 必有加密条目（parseCentralDirectory 保证），null 仅是穷尽性防御
-                val probe = parsed.third ?: throw WebDavZipUnsupportedException("内部错误：加密标记为真但无加密条目")
+                val probe = parsed.third ?: throw RemoteZipUnsupportedException("内部错误：加密标记为真但无加密条目")
                 val ok = validatePassword(probe)
                 logcat(LogPriority.INFO) {
-                    "[WebDavZip] 密码校验=${if (ok) "通过" else "失败"} entry=${probe.name} " +
+                    "[RemoteZip] 密码校验=${if (ok) "通过" else "失败"} entry=${probe.name} " +
                         "method=${probe.method} bit3=${probe.useTimeCheckByte} " +
                         "compSize=${probe.compSize} uncompSize=${probe.uncompSize}"
                 }
@@ -115,7 +115,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         val tailLen = minOf(TAIL_SIZE.toLong(), fileSize).toInt()
         val tail = readFully(fileSize - tailLen, tailLen)
         val eocdIdx = findSignature(tail, EOCD_SIG, fromEnd = true)
-            ?: throw WebDavZipUnsupportedException("未找到 EOCD（不是 ZIP？）")
+            ?: throw RemoteZipUnsupportedException("未找到 EOCD（不是 ZIP？）")
 
         var totalEntries = tail.u16(eocdIdx + 10).toLong()
         var cdSize = tail.u32(eocdIdx + 12).toLong() and 0xFFFFFFFFL
@@ -125,15 +125,15 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         if (cdOffset == 0xFFFFFFFFL || cdSize == 0xFFFFFFFFL || totalEntries == 0xFFFFL) {
             val tailStart = fileSize - tailLen
             val locAbs = tailStart + eocdIdx - 20
-            if (locAbs < 0) throw WebDavZipUnsupportedException("ZIP64 字段饱和但 EOCD64 locator 越界")
+            if (locAbs < 0) throw RemoteZipUnsupportedException("ZIP64 字段饱和但 EOCD64 locator 越界")
             val locator = if (eocdIdx >= 20) tail.copyOfRange(eocdIdx - 20, eocdIdx) else readFully(locAbs, 20)
             if (locator.u32(0).toLong() != ZIP64_LOC_SIG.toLong()) {
-                throw WebDavZipUnsupportedException("ZIP64 字段饱和但找不到 EOCD64 locator")
+                throw RemoteZipUnsupportedException("ZIP64 字段饱和但找不到 EOCD64 locator")
             }
             val eocd64Offset = locator.u64(8)
             val eocd64 = readFully(eocd64Offset, 56)
             if (eocd64.u32(0).toLong() != ZIP64_EOCD_SIG.toLong()) {
-                throw WebDavZipUnsupportedException("EOCD64 签名不符")
+                throw RemoteZipUnsupportedException("EOCD64 签名不符")
             }
             totalEntries = eocd64.u64(32)
             cdSize = eocd64.u64(40)
@@ -141,7 +141,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         }
 
         // 3. 拉中央目录并解析
-        if (cdSize > Int.MAX_VALUE) throw WebDavZipUnsupportedException("中央目录超大（超过 2GB）")
+        if (cdSize > Int.MAX_VALUE) throw RemoteZipUnsupportedException("中央目录超大（超过 2GB）")
         val cd = readFully(cdOffset, cdSize.toInt())
 
         val map = HashMap<String, CdEntry>(totalEntries.coerceAtMost(1_000_000).toInt())
@@ -209,14 +209,14 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
                     }
                     q += 4 + sz
                 }
-                if (aesStrength == 0) throw WebDavZipUnsupportedException("method=99 但缺 0x9901 AES extra（$name）")
-                if (aesStrength !in 1..3) throw WebDavZipUnsupportedException("未知 AES 强度 $aesStrength（$name）")
+                if (aesStrength == 0) throw RemoteZipUnsupportedException("method=99 但缺 0x9901 AES extra（$name）")
+                if (aesStrength !in 1..3) throw RemoteZipUnsupportedException("未知 AES 强度 $aesStrength（$name）")
                 isEncrypted = true
             }
             if (method != METHOD_STORED && method != METHOD_DEFLATED) {
-                throw WebDavZipUnsupportedException("不支持的压缩方法 method=$method（$name）")
+                throw RemoteZipUnsupportedException("不支持的压缩方法 method=$method（$name）")
             }
-            if (compSize > Int.MAX_VALUE) throw WebDavZipUnsupportedException("单条目超 2GB（$name）")
+            if (compSize > Int.MAX_VALUE) throw RemoteZipUnsupportedException("单条目超 2GB（$name）")
 
             if (!name.endsWith("/") && name.isNotEmpty()) {
                 val checkByte = if (flags and 0x0008 != 0) dosTimeHigh else ((crc ushr 24) and 0xFF).toInt()
@@ -243,7 +243,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
             count++
         }
 
-        if (map.isEmpty()) throw WebDavZipUnsupportedException("中央目录无有效条目")
+        if (map.isEmpty()) throw RemoteZipUnsupportedException("中央目录无有效条目")
         return Triple(map, anyEncrypted, firstEncrypted)
     }
 
@@ -352,7 +352,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
             // 密码错（构造期校验漏网的 1/256）：抛密码异常而非普通 IO 错，语义正确，
             // 渲染层识别后直接弹密码框（submitArchivePassword 兜底当前章整章重载）
             logcat(LogPriority.WARN) {
-                "[WebDavZip] 读页期 ZipCrypto 校验不符 name=${e.name} method=${e.method} " +
+                "[RemoteZip] 读页期 ZipCrypto 校验不符 name=${e.name} method=${e.method} " +
                     "bit3=${e.useTimeCheckByte} checkByte=${e.checkByte} " +
                     "plain=${raw[11].toInt() and 0xFF} compSize=${e.compSize}"
             }
@@ -381,7 +381,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
             (derived[2 * keyLen + 1].toInt() and 0xFF) != (storedVer.second and 0xFF)
         ) {
             logcat(LogPriority.WARN) {
-                "[WebDavZip] 读页期 AES passVer 不符 name=${e.name} strength=${e.aesStrength} " +
+                "[RemoteZip] 读页期 AES passVer 不符 name=${e.name} strength=${e.aesStrength} " +
                     "stored=(${storedVer.first and 0xFF},${storedVer.second and 0xFF}) " +
                     "derived=(${derived[2 * keyLen].toInt() and 0xFF},${derived[2 * keyLen + 1].toInt() and 0xFF})"
             }
@@ -444,7 +444,7 @@ class WebDavZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         1 -> 16
         2 -> 24
         3 -> 32
-        else -> throw WebDavZipUnsupportedException("未知 AES 强度 $strength")
+        else -> throw RemoteZipUnsupportedException("未知 AES 强度 $strength")
     }
 
     private fun aesSaltLen(strength: Int): Int = 4 * (strength + 1) // 1→8, 2→12, 3→16
