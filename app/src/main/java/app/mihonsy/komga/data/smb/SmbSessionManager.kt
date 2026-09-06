@@ -172,7 +172,9 @@ object SmbSessionManager {
         val share = share(conn, password, shareName)
         return share.openFile(
             toSmbPath(inSharePath),
-            EnumSet.of(AccessMask.FILE_READ_DATA),
+            // FILE_READ_ATTRIBUTES：getFileInformation()（取大小/修改时间）需要它，
+            // 只给 FILE_READ_DATA 时 QNAP 等会回 STATUS_ACCESS_DENIED（0xc0000022）。
+            EnumSet.of(AccessMask.FILE_READ_DATA, AccessMask.FILE_READ_ATTRIBUTES),
             null,
             SMB2ShareAccess.ALL,
             SMB2CreateDisposition.FILE_OPEN,

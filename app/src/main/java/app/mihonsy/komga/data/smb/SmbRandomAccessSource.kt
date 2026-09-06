@@ -99,15 +99,14 @@ class SmbRandomAccessSource(
             val info = try {
                 f.getFileInformation()
             } catch (e: Exception) {
-                // 少数共享不支持 FileAllInformation 查询：退回「仅大小未知」——
-                // 用 share 侧查询再兜一次，仍失败则允许继续（size 取 Long.MAX_VALUE 会让
-                // RemoteZipReader 的尾部读取失败，故这种情况直接抛错由调用方回落）。
+                // 拿不到文件大小绝不能静默置 0：size=0 会让 RemoteZipReader 读 EOCD「未找到」、
+                // libarchive 回落同样空，最终表现成误导性的「没有图片」。快速失败报真实原因。
                 logcat(LogPriority.WARN) { "[Smb] 文件信息查询失败: ${e.message}" }
-                null
+                throw IOException("SMB 文件信息查询失败（大小未知）: ${e.message}", e)
             }
-            total = info?.standardInformation?.endOfFile ?: 0L
-            remoteFingerprint = info?.basicInformation?.lastWriteTime?.toEpochMillis()
-                ?.let { "$total:$it" }
+            total = info.standardInformation.endOfFile
+            remoteFingerprint = info.basicInformation.lastWriteTime.toEpochMillis()
+                .let { "$total:$it" }
         }
     }
 
