@@ -40,10 +40,19 @@ data class WebDavEntry(
     val isArchive: Boolean =
         !isDir && name.substringAfterLast('.', "").lowercase() in ARCHIVE_EXTS
 
+    /** 是否为图片文件（散图目录成员；点它=把所在目录当漫画打开，对齐本地模式）。 */
+    val isImage: Boolean =
+        !isDir && name.substringAfterLast('.', "").lowercase() in IMAGE_EXTS
+
     private companion object {
         val ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7")
+        val IMAGE_EXTS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "heic", "heif")
     }
 }
+
+// SY --> Komiho Phase7: 支持的图片扩展名（散图目录成员；ui 层点击判定共用）。
+internal val WEBDAV_IMAGE_EXTS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "heic", "heif")
+// SY <--
 
 object WebDavPropfind {
 
