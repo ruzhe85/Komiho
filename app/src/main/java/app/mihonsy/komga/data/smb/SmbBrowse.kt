@@ -83,12 +83,20 @@ object SmbBrowse {
             }
             val shareName = norm.substringBefore('/')
             val subPath = norm.substringAfter('/', "")
-            return listInShare(conn, password, shareName, subPath)
+            // 条目 path 口径 = 完整 relPath（含共享段+子目录），阅读/打开文件直接用。
+            return listInShare(conn, password, shareName, subPath, norm)
         }
-        return listInShare(conn, password, conn.share, relPath)
+        return listInShare(conn, password, conn.share, relPath, relPath)
     }
 
-    private fun listInShare(conn: SmbConnection, password: String, shareName: String, relPath: String): List<SmbEntry> {
+    private fun listInShare(
+        conn: SmbConnection,
+        password: String,
+        shareName: String,
+        relPath: String,
+        /** 条目 path 的前缀口径（未配置共享的连接含共享段；否则为共享内相对路径）。 */
+        pathPrefix: String,
+    ): List<SmbEntry> {
         val share: DiskShare = SmbSessionManager.share(conn, password, shareName)
         val dirPath = SmbSessionManager.toSmbPath(relPath)
         val items = share.list(dirPath)
@@ -98,16 +106,10 @@ object SmbBrowse {
             if (name.isBlank() || name == "." || name == "..") continue
             val isDir = info.fileAttributes and FILE_ATTRIBUTE_DIRECTORY != 0L
             if (!isDir && name.substringAfterLast('.', "").lowercase() !in SMB_ARCHIVE_EXTS) continue
-            // 条目 path 保持「与 list 入参同口径」：未配置共享的连接带共享段前缀。
-            val entryPath = if (conn.share.isBlank() && shareName.isNotBlank()) {
-                SmbBrowse.join(shareName, name)
-            } else {
-                join(relPath, name)
-            }
             out += SmbEntry(
                 name = name,
                 isDir = isDir,
-                path = entryPath,
+                path = join(pathPrefix, name),
                 size = if (isDir) 0L else info.endOfFile,
                 lastModified = info.lastWriteTime.toEpochMillisSafe(),
             )
