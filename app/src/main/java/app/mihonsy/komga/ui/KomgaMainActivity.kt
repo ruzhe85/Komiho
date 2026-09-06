@@ -6138,30 +6138,6 @@ private fun SmbBrowsePane(
     )
 }
 
-@Composable
-private fun SmbFileRow(entry: SmbEntry, onOpen: () -> Unit) {
-    FileListRow(name = entry.name, clickable = true, onOpen = onOpen) {
-        Icon(
-            fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
-            contentDescription = null,
-            tint = fileKindTint(entry.isDir, entry.isArchive),
-            modifier = Modifier.size(24.dp),
-        )
-    }
-}
-
-@Composable
-private fun SmbGridItem(entry: SmbEntry, onClick: () -> Unit) {
-    FileGridCell(
-        name = entry.name,
-        icon = fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
-        iconTint = fileKindTint(entry.isDir, entry.isArchive),
-        iconSize = 56.dp,
-        clickable = true,
-        onClick = onClick,
-    )
-}
-
 private fun smbEntryComparator(sort: LocalFileSort): Comparator<SmbEntry> {
     val dirFirst = compareBy<SmbEntry> { !it.isDir }
     val field: Comparator<SmbEntry> = when (sort.sortBy) {
@@ -6169,6 +6145,9 @@ private fun smbEntryComparator(sort: LocalFileSort): Comparator<SmbEntry> {
         LocalFileSortBy.DateModified -> compareBy { it.lastModified }
         LocalFileSortBy.Size -> compareBy { if (it.isDir) 0L else it.size }
     }
+    return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
+}
+
 @Composable
 private fun SmbFileRow(
     conn: SmbConnection,
@@ -6262,8 +6241,6 @@ private fun SmbCoverFallback(entry: SmbEntry, iconSize: Dp) {
     )
 }
 // SY <--
-    return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
-}
 
 /** 打开 SMB 归档：manga = 所在目录（系列），同目录归档全部建为章节（翻完自动续卷）。
  *  与 [openWebDavTestFile] 同构，差异只有「兄弟归档来自 [SmbBrowse.list]」。 */
