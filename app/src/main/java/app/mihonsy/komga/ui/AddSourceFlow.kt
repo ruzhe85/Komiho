@@ -93,7 +93,9 @@ import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.data.webdav.WebDavPropfind
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.R
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 协议默认端口：HTTP=80 / HTTPS=443；切换协议时空端口或仍是另一协议默认值时自动填新默认。 */
 internal const val DEFAULT_PORT_HTTP = "80"
@@ -102,6 +104,41 @@ internal const val DEFAULT_PORT_HTTPS = "443"
 // SY --> Komiho Phase7: SMB 报错识别——smbj 的 TransportException（含 Broken pipe）对用户
 // 无意义。成因几乎总是「服务器在协商/认证阶段主动断开」：方言不匹配（SMB1-only）/ guest
 // 或账号无该共享权限 / 服务器强制加密。识别命中返回 true，由调用方换成可行动的本地化提示。
+/**
+ * 扫描局域网内开放 SMB（TCP 445）的主机——质感文件「添加 LAN SMB 服务器」的简化版：
+ * 不依赖 jcifs NBT 名字服务（SMB1 时代产物，Win10+ 常失效），直接并发探测当前
+ * Wi-Fi /24 网段的 445 端口（64 线程 × 300ms 超时，254 个地址秒级完成）。
+ * @return 存活主机 IP 列表（按末段升序；本机排除）。
+ */
+internal suspend fun scanLanSmbHosts(): List<String> = withContext(Dispatchers.IO) {
+    val local = java.net.NetworkInterface.getNetworkInterfaces().asSequence()
+        .flatMap { it.inetAddresses.asSequence() }
+        .filterIsInstance<java.net.Inet4Address>()
+        .firstOrNull { it.isSiteLocalAddress && !it.isLoopbackAddress }
+        ?.hostAddress
+        ?: return@withContext emptyList()
+    val prefix = local.substringBeforeLast('.')
+    val pool = java.util.concurrent.Executors.newFixedThreadPool(64)
+    try {
+        (1..254).map { last ->
+            pool.submit(java.util.concurrent.Callable {
+                val ip = "$prefix.$last"
+                if (ip == local) return@Callable null
+                try {
+                    java.net.Socket().use { s ->
+                        s.connect(java.net.InetSocketAddress(ip, 445), 300)
+                        ip
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            })
+        }.mapNotNull { it.get() }
+    } finally {
+        pool.shutdownNow()
+    }.sortedBy { it.substringAfterLast('.').toInt() }
+}
+
 internal fun smbIsConnectionReset(e: Throwable): Boolean {
     var cause: Throwable? = e
     while (cause != null) {
@@ -793,6 +830,60 @@ private fun SmbFormPage(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        // SY --> Komiho Phase7: 扫描局域网（质感文件「添加 LAN SMB 服务器」简化版）——
+        // 并发探测当前网段 445 端口，结果点击回填主机；免手输 IP。
+        var lanScanning by remember { mutableStateOf(false) }
+        var lanScanned by remember { mutableStateOf(false) }
+        var lanHosts by remember { mutableStateOf<List<String>>(emptyList()) }
+        val scanLabel = composeStringResource(
+            if (lanScanning) R.string.addsrc_smb_scanning else R.string.addsrc_smb_scan,
+        )
+        TextButton(
+            onClick = {
+                if (lanScanning) return@TextButton
+                lanScanning = true
+                lanScanned = false
+                lanHosts = emptyList()
+                scope.launch {
+                    lanHosts = scanLanSmbHosts()
+                    lanScanning = false
+                    lanScanned = true
+                }
+            },
+        ) {
+            if (lanScanning) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(scanLabel, style = MaterialTheme.typography.bodyMedium)
+        }
+        if (!lanScanning && lanScanned && lanHosts.isEmpty()) {
+            Text(
+                composeStringResource(R.string.addsrc_smb_scan_empty),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        lanHosts.forEach { ip ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { host = ip }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Lan,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(ip, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        // SY <--
 
         FieldLabel(composeStringResource(R.string.addsrc_port))
         OutlinedTextField(
