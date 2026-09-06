@@ -60,6 +60,18 @@ object SmbBrowse {
             }
         }
 
+    /** 枚举服务器全部共享（连接未配置共享时的「浏览根」）。断线作废会话重试一次，同 [list]。 */
+    suspend fun listShares(conn: SmbConnection, password: String): List<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                SmbSessionManager.listShares(conn, password)
+            } catch (e: Exception) {
+                logcat(LogPriority.DEBUG) { "[Smb] 共享枚举失败，作废会话重试: ${e.message}" }
+                SmbSessionManager.invalidate(conn)
+                SmbSessionManager.listShares(conn, password)
+            }
+        }
+
     private fun listOnce(conn: SmbConnection, password: String, relPath: String): List<SmbEntry> {
         // SY: 连接未配置共享 → 根路径枚举共享列表，子路径第一段为共享名。
         if (conn.share.isBlank()) {
