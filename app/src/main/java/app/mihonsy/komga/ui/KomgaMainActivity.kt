@@ -205,6 +205,9 @@ import app.mihonsy.komga.data.smb.SmbEntry
 import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
+// SY --> Komiho Phase7: 散图扩展名表（internal，data 层共用）。
+import app.mihonsy.komga.data.webdav.WEBDAV_IMAGE_EXTS
+// SY <--
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.data.webdav.WebDavCoverCache
 import app.mihonsy.komga.data.webdav.WebDavEntry
@@ -5617,7 +5620,7 @@ private fun WebDavBrowsePane(
 
     // 只显示目录 + 可读归档（与本地浏览「过滤不可读文件」口径一致），排序走本地同款排序器。
     val visible = remember(entries, sort) {
-        entries.filter { it.isDir || it.isArchive }.sortedWith(webDavEntryComparator(sort))
+        entries.filter { it.isDir || it.isArchive || it.isImage }.sortedWith(webDavEntryComparator(sort))
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -5725,7 +5728,7 @@ private fun WebDavBrowsePane(
 private fun WebDavFileRow(entry: WebDavEntry, onOpen: () -> Unit) {
     FileListRow(name = entry.name, clickable = true, onOpen = onOpen) {
         Icon(
-            fileKindIcon(entry.isDir, entry.isArchive),
+            fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
             contentDescription = null,
             tint = fileKindTint(entry.isDir, entry.isArchive),
             modifier = Modifier.size(24.dp),
@@ -5738,7 +5741,7 @@ private fun WebDavFileRow(entry: WebDavEntry, onOpen: () -> Unit) {
 private fun WebDavGridItem(entry: WebDavEntry, onClick: () -> Unit) {
     FileGridCell(
         name = entry.name,
-        icon = fileKindIcon(entry.isDir, entry.isArchive),
+        icon = fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
         iconTint = fileKindTint(entry.isDir, entry.isArchive),
         iconSize = 56.dp,
         clickable = true,
@@ -5806,12 +5809,21 @@ private suspend fun openWebDavTestFile(
         val fileName = httpUrl.substringAfterLast('/')
         if (fileName.isBlank()) throw Exception(context.getString(R.string.webdav_url_no_filename))
         val decodedName = runCatching { java.net.URLDecoder.decode(fileName, "UTF-8") }.getOrDefault(fileName)
+        // SY --> Komiho Phase7: 散图——点图片文件 = 所在目录当漫画（manga.url=当前目录），
+        // 章节 URL 尾斜杠标识目录章节（与 SMB 同约定）；归档不变。
+        val isImageFile = fileName.substringAfterLast('.', "").lowercase() in WEBDAV_IMAGE_EXTS
+        val dirUrl = httpUrl.substringBeforeLast('/') + "/"
+        // SY <--
         // manga.url = 远程目录（同一远程目录的多个归档同属一个系列）
         val mangaUrl = httpUrl.substringBeforeLast('/')
         val seriesTitle = runCatching {
             java.net.URLDecoder.decode(mangaUrl.substringAfterLast('/'), "UTF-8")
         }.getOrDefault(mangaUrl.substringAfterLast('/')).ifBlank { decodedName }
-        val chapterUrl = WebDavConnectionStore.toChapterUrl(conn.id, httpUrl)
+        val chapterUrl = if (isImageFile) {
+            WebDavConnectionStore.toChapterUrl(conn.id, dirUrl)
+        } else {
+            WebDavConnectionStore.toChapterUrl(conn.id, httpUrl)
+        }
         prefs.webdavTestUrl.set(httpUrl)
         val (mangaId, chapterId) = withContext(Dispatchers.IO) {
             val mangaRepo = Injekt.get<MangaRepository>()
@@ -5832,6 +5844,48 @@ private suspend fun openWebDavTestFile(
             if (manga.ogTitle != seriesTitle) {
                 mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
             }
+            // SY --> Komiho Phase7: 散图对齐本地模式——点图片 = 当前目录当漫画，
+            // 其下全部子目录各成一章（目录章节，URL 尾斜杠），叶子目录保底当前目录单章；
+            // 归档 = 同目录归档全部成章（原有）。
+            if (isImageFile) {
+                val siblingDirs = runCatching {
+                    WebDavPropfind.list(conn, mangaUrl).filter { it.isDir }
+                }.onFailure {
+                    logcat(LogPriority.WARN) { "[WebDav] 散图子目录扫描失败: ${it.message}" }
+                }.getOrDefault(emptyList())
+                siblingDirs.forEach { sib ->
+                    val dirHttp = if (sib.url.endsWith('/')) sib.url else "${sib.url}/"
+                    val url = WebDavConnectionStore.toChapterUrl(conn.id, dirHttp)
+                    if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                        val parsed =
+                            ChapterRecognition.parseChapterNumber(seriesTitle, sib.name, -1.0)
+                        chapterRepo.addAll(
+                            listOf(
+                                Chapter.create().copy(
+                                    mangaId = manga.id!!,
+                                    url = url,
+                                    name = sib.name,
+                                    chapterNumber = if (parsed > 0) parsed else 1.0,
+                                    dateUpload = sib.lastModified.takeIf { it > 0 },
+                                ),
+                            ),
+                        )
+                    }
+                }
+                // 保底：当前目录未被子目录覆盖（叶子散图目录）→ 单章，避免读不了当前图。
+                chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                    ?: chapterRepo.addAll(
+                        listOf(
+                            Chapter.create().copy(
+                                mangaId = manga.id!!,
+                                url = chapterUrl,
+                                name = seriesTitle,
+                                chapterNumber = 1.0,
+                            ),
+                        ),
+                    )
+                // SY <--
+            } else {
             // 同目录归档全部建成章节（去重），顺序 = PROPFIND 自然排序，翻完自动续卷
             val siblings = runCatching {
                 WebDavPropfind.list(conn, mangaUrl).filter { it.isArchive }.map { it.url }
@@ -5863,6 +5917,7 @@ private suspend fun openWebDavTestFile(
                         ),
                     )
                 }
+            }
             }
             val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
                 ?: error(context.getString(R.string.webdav_chapter_write_failed))

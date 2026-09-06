@@ -153,10 +153,10 @@ class ChapterLoader(
                             is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
                             // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）
                             // SY: SMB 且 URL 以 / 结尾 = 散图目录章节（点目录内图片打开）。
-                            is Format.RemoteArchive -> if (smbIsDirectoryChapter(format.remoteUrl)) {
-                                smbDirectoryLoader(format.remoteUrl)
-                            } else {
-                                ArchivePageLoader(remoteArchiveHandle(format.remoteUrl))
+                            is Format.RemoteArchive -> when {
+                                smbIsDirectoryChapter(format.remoteUrl) -> smbDirectoryLoader(format.remoteUrl)
+                                webDavIsDirectoryChapter(format.remoteUrl) -> webDavDirectoryLoader(format.remoteUrl)
+                                else -> ArchivePageLoader(remoteArchiveHandle(format.remoteUrl))
                             }
                             // SY <--
                         }
@@ -179,10 +179,10 @@ class ChapterLoader(
                     is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
                     // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）
                     // SY: SMB 且 URL 以 / 结尾 = 散图目录章节（点目录内图片打开）。
-                    is Format.RemoteArchive -> if (smbIsDirectoryChapter(format.remoteUrl)) {
-                        smbDirectoryLoader(format.remoteUrl)
-                    } else {
-                        ArchivePageLoader(remoteArchiveHandle(format.remoteUrl))
+                    is Format.RemoteArchive -> when {
+                        smbIsDirectoryChapter(format.remoteUrl) -> smbDirectoryLoader(format.remoteUrl)
+                        webDavIsDirectoryChapter(format.remoteUrl) -> webDavDirectoryLoader(format.remoteUrl)
+                        else -> ArchivePageLoader(remoteArchiveHandle(format.remoteUrl))
                     }
                     // SY <--
                 }
@@ -234,6 +234,20 @@ class ChapterLoader(
             ?: throw IOException("SMB 连接不存在（可能已删除）: $remoteUrl")
         val dirRel = SmbConnectionStore.extractRelPath(remoteUrl).trim('/')
         return SmbDirectoryPageLoader(target.conn, target.password, dirRel)
+    }
+    // SY <--
+
+    // SY --> Komiho Phase7: WebDAV 散图目录章节——URL 约定 `webdav://<connId>/<dirUrl>/`（尾斜杠）。
+    private fun webDavIsDirectoryChapter(remoteUrl: String): Boolean =
+        remoteUrl.startsWith("webdav:") && remoteUrl.endsWith("/")
+
+    private fun webDavDirectoryLoader(remoteUrl: String): WebDavDirectoryPageLoader {
+        val connId = remoteUrl.removePrefix("webdav://").substringBefore('/')
+        val conn = WebDavConnectionStore.all().firstOrNull { it.id == connId }
+            ?: throw IOException("WebDAV 连接不存在（可能已删除）: $remoteUrl")
+        val dirUrl = WebDavConnectionStore.extractFullUrl(remoteUrl)
+            .let { if (it.endsWith('/')) it else "$it/" }
+        return WebDavDirectoryPageLoader(conn, dirUrl)
     }
     // SY <--
 
