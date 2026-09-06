@@ -33,8 +33,15 @@ import java.util.concurrent.TimeUnit
 object SmbSessionManager {
 
     private val config: SmbConfig = SmbConfig.builder()
-        // SMB1 已废弃且多数 NAS 默认关闭，只协商 2.1 及以上；3.1.1 支持加密与更强签名。
-        .withDialects(SMB2Dialect.SMB_2_1, SMB2Dialect.SMB_3_0, SMB2Dialect.SMB_3_0_2, SMB2Dialect.SMB_3_1_1)
+        // SMB1 已废弃且多数 NAS 默认关闭；从 2.0.2 起协商（部分老 NAS/旧 Samba 最高只到
+        // 2.0.2，不含它会在 NEGOTIATE 阶段被服务器直接断开 → 表现为 broken pipe）。
+        .withDialects(
+            SMB2Dialect.SMB_2_0_2,
+            SMB2Dialect.SMB_2_1,
+            SMB2Dialect.SMB_3_0,
+            SMB2Dialect.SMB_3_0_2,
+            SMB2Dialect.SMB_3_1_1,
+        )
         // 签名「启用但不强制」：域环境/WinServer 要求签名时可用，老 NAS 不要求也能连。
         .withSigningEnabled(true)
         .withTimeout(30, TimeUnit.SECONDS)
@@ -71,8 +78,10 @@ object SmbSessionManager {
 
             val sessionRef = sessions[sKey] ?: run {
                 val connection = client.connect(conn.host, conn.port)
-                val auth = if (conn.user.isBlank() && password.isBlank()) {
-                    AuthenticationContext.anonymous()
+                // SY: 用户名留空 = guest 访客（QNAP 等 NAS 口径），不再走匿名空会话——
+                // anonymous（null session）会被 QNAP 直接断开，表现即 SESSION_SETUP 阶段 broken pipe。
+                val auth = if (conn.user.isBlank()) {
+                    AuthenticationContext.guest()
                 } else {
                     AuthenticationContext(
                         conn.user,
