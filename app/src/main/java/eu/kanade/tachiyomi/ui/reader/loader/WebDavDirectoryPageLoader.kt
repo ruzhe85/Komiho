@@ -3,7 +3,7 @@ package eu.kanade.tachiyomi.ui.reader.loader
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.data.webdav.WebDavPropfind
-import app.mihonsy.komga.data.webdav.WebDavRandomAccessSource
+import mihon.core.common.archive.WebDavRandomAccessSource
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
@@ -32,7 +32,7 @@ internal class WebDavDirectoryPageLoader(
         if (images.isEmpty()) throw IOException("目录内没有图片：$dirUrl")
         return images.mapIndexed { i, url ->
             ReaderPage(i).apply {
-                stream = { fetchBytes(url) }
+                stream = { fetchBytes(url).inputStream() }
                 status = Page.State.Ready
             }
         }
