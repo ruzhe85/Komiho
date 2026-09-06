@@ -32,7 +32,8 @@ internal class SmbDirectoryPageLoader(
         if (images.isEmpty()) throw IOException("目录内没有图片：$dirRel")
         return images.mapIndexed { i, path ->
             ReaderPage(i).apply {
-                stream = { readPageBytes(path) }
+                // stream 契约：() -> InputStream（ByteArray 需包一层）。
+                stream = { readPageBytes(path).inputStream() }
                 status = Page.State.Ready
             }
         }
@@ -44,8 +45,9 @@ internal class SmbDirectoryPageLoader(
 
     private fun readPageBytes(path: String): ByteArray {
         check(!isRecycled) { "页面读取时章节已被回收（翻页/换章竞态）——重载即恢复" }
-        val bytes = SmbSessionManager.openFile(conn, password, path).use { input ->
-            input.buffered().use { it.readBytes() }
+        // smbj 的 File 是句柄不是 InputStream：getInputStream() 取实时流再读全量。
+        val bytes = SmbSessionManager.openFile(conn, password, path).use { f ->
+            f.getInputStream().buffered().use { it.readBytes() }
         }
         check(bytes.isNotEmpty()) { "图片读取为空（章节流已被回收关闭）：$path——重载即恢复" }
         return bytes

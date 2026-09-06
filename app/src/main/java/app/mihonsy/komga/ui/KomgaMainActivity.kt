@@ -5866,7 +5866,7 @@ private suspend fun openWebDavTestFile(
                                     url = url,
                                     name = sib.name,
                                     chapterNumber = if (parsed > 0) parsed else 1.0,
-                                    dateUpload = sib.lastModified.takeIf { it > 0 },
+                                    dateUpload = sib.lastModified.takeIf { it > 0 } ?: 0L,
                                 ),
                             ),
                         )
@@ -6225,7 +6225,7 @@ private suspend fun openSmbFile(
                                     url = url,
                                     name = sib.name,
                                     chapterNumber = if (parsed > 0) parsed else 1.0,
-                                    dateUpload = sib.lastModified.takeIf { it > 0 },
+                                    dateUpload = sib.lastModified.takeIf { it > 0 } ?: 0L,
                                 ),
                             ),
                         )
