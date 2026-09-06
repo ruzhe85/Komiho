@@ -99,6 +99,25 @@ import kotlinx.coroutines.launch
 internal const val DEFAULT_PORT_HTTP = "80"
 internal const val DEFAULT_PORT_HTTPS = "443"
 
+// SY --> Komiho Phase7: SMB 报错识别——smbj 的 TransportException（含 Broken pipe）对用户
+// 无意义。成因几乎总是「服务器在协商/认证阶段主动断开」：方言不匹配（SMB1-only）/ guest
+// 或账号无该共享权限 / 服务器强制加密。识别命中返回 true，由调用方换成可行动的本地化提示。
+internal fun smbIsConnectionReset(e: Throwable): Boolean {
+    var cause: Throwable? = e
+    while (cause != null) {
+        val msg = cause.message ?: ""
+        if (cause is com.hierynomus.protocol.transport.TransportException ||
+            msg.contains("Broken pipe", ignoreCase = true) ||
+            msg.contains("Connection reset", ignoreCase = true)
+        ) {
+            return true
+        }
+        cause = cause.cause
+    }
+    return false
+}
+// SY <--
+
 /** 来源管理流程内的页面栈（简化为单层：表单页返回即回类型选择）。 */
 internal sealed interface AddSourceScreen {
     data object TypeSelect : AddSourceScreen
@@ -712,7 +731,7 @@ private fun WebDavFormPage(
 }
 
 // SY --> Komiho Phase7: SMB 表单页（镜像 WebDavFormPage；无协议切换——SMB 恒 TCP 直连，
-// 端口默认 445）。字段：名称 / 主机 / 端口 / 共享名 / 起始目录 / 域 / 账户 / 密码。
+// 端口默认 445）。字段：名称 / 主机 / 端口 / 路径（第一段=共享名）/ 域 / 账户 / 密码。
 // 测试连接 = 列共享内起始目录一次（SmbBrowse.list 自带会话重试），成功即代表
 // 主机可达 + 凭据有效 + 共享存在，三者一次覆盖。
 @Composable
@@ -729,14 +748,28 @@ private fun SmbFormPage(
     var name by remember(existing) { mutableStateOf(existing?.name.orEmpty()) }
     var host by remember(existing) { mutableStateOf(existing?.host.orEmpty()) }
     var port by remember(existing) { mutableStateOf(existing?.port?.toString().orEmpty()) }
-    var share by remember(existing) { mutableStateOf(existing?.share.orEmpty()) }
-    var path by remember(existing) { mutableStateOf(existing?.path.orEmpty()) }
+    // SY: 单路径字段 = 共享名/子目录（第一段即共享名）。存储模型不变（share+path 两字段），
+    // 只是表单口径与常见 SMB 地址 \\host\share\path 对齐，不拆两个输入框。
+    var fullPath by remember(existing) {
+        mutableStateOf(
+            listOfNotNull(existing?.share?.takeIf { it.isNotBlank() }, existing?.path?.takeIf { it.isNotBlank() })
+                .joinToString("/"),
+        )
+    }
     var domain by remember(existing) { mutableStateOf(existing?.domain.orEmpty()) }
     var user by remember(existing) { mutableStateOf(existing?.user.orEmpty()) }
     var pass by remember(existing) { mutableStateOf("") }
     var showPass by remember { mutableStateOf(false) }
     var testing by remember { mutableStateOf(false) }
     var testMsg by remember { mutableStateOf<String?>(null) }
+
+    // 「共享名/子目录」→ (share, path)。空 = 未填共享名，保存/测试前置校验拦截。
+    fun splitFullPath(): Pair<String, String>? {
+        val norm = fullPath.trim().replace('\\', '/').trim('/')
+        if (norm.isEmpty()) return null
+        return norm.substringBefore('/') to norm.substringAfter('/', "")
+    }
+    val parsedPath = splitFullPath()
 
     Column(
         modifier = Modifier
@@ -771,19 +804,11 @@ private fun SmbFormPage(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        FieldLabel(composeStringResource(R.string.addsrc_smb_share))
-        OutlinedTextField(
-            value = share,
-            onValueChange = { share = it },
-            placeholder = { Text(composeStringResource(R.string.addsrc_smb_share_hint)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
+        // SY: 单路径字段——第一段为共享名，其余为共享内子目录。
         FieldLabel(composeStringResource(R.string.addsrc_path))
         OutlinedTextField(
-            value = path,
-            onValueChange = { path = it },
+            value = fullPath,
+            onValueChange = { fullPath = it },
             placeholder = { Text(composeStringResource(R.string.addsrc_smb_path_hint)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -801,7 +826,7 @@ private fun SmbFormPage(
         OutlinedTextField(
             value = user,
             onValueChange = { user = it },
-            label = { Text(composeStringResource(R.string.addsrc_username_anon)) },
+            label = { Text(composeStringResource(R.string.addsrc_smb_user)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -844,8 +869,13 @@ private fun SmbFormPage(
         // 测试结果文案在组合期取好（stringResource 是 @Composable，不能在 onClick lambda 里调）。
         val okMsg = composeStringResource(R.string.addsrc_test_ok)
         val failMsg = composeStringResource(R.string.addsrc_test_failed)
+        val noShareMsg = composeStringResource(R.string.addsrc_smb_need_share)
         OutlinedButton(
             onClick = {
+                val (share, path) = splitFullPath() ?: run {
+                    testMsg = noShareMsg
+                    return@OutlinedButton
+                }
                 val temp = SmbConnectionStore.temp(
                     name = name,
                     host = host,
@@ -864,12 +894,12 @@ private fun SmbFormPage(
                         SmbBrowse.list(temp, WebDavCredentialCrypto.decryptStored(temp.passEnc), temp.path)
                         okMsg
                     } catch (e: Throwable) {
-                        e.message ?: failMsg
+                        if (smbIsConnectionReset(e)) composeStringResource(R.string.smb_conn_reset) else (e.message ?: failMsg)
                     }
                     testing = false
                 }
             },
-            enabled = host.isNotBlank() && share.isNotBlank() && !testing,
+            enabled = host.isNotBlank() && parsedPath != null && !testing,
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (testing) {
@@ -900,6 +930,7 @@ private fun SmbFormPage(
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = {
+                    val (share, path) = splitFullPath() ?: return@Button
                     if (connId == null) {
                         SmbConnectionStore.add(name, host, port.trim().toIntOrNull() ?: SmbConnection.DEFAULT_PORT, share, path, domain, user, pass)
                     } else {
@@ -907,7 +938,7 @@ private fun SmbFormPage(
                     }
                     onSaved()
                 },
-                enabled = host.isNotBlank() && share.isNotBlank(),
+                enabled = host.isNotBlank() && parsedPath != null,
             ) { Text(composeStringResource(R.string.action_save)) }
         }
     }

@@ -5950,6 +5950,8 @@ private fun SmbBrowsePane(
     var loading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var retryTick by remember { mutableIntStateOf(0) }
+    // SY: broken pipe 等服务器断连的人话提示（组合期取好，不能放 catch lambda 里）。
+    val smbResetMsg = composeStringResource(R.string.smb_conn_reset)
 
     LaunchedEffect(dirPath, retryTick) {
         loading = true
@@ -5959,7 +5961,7 @@ private fun SmbBrowsePane(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
-            errorText = e.message ?: dirBrowseFailed
+            errorText = if (smbIsConnectionReset(e)) smbResetMsg else (e.message ?: dirBrowseFailed)
         }
         loading = false
     }
@@ -6169,9 +6171,11 @@ private suspend fun openSmbFile(
         }
         context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
     } catch (e: Throwable) {
+        // SY: broken pipe 等服务器断连翻成人话，其余原样。
+        val msg = if (smbIsConnectionReset(e)) context.getString(R.string.smb_conn_reset) else e.message
         android.widget.Toast.makeText(
             context,
-            context.getString(R.string.open_failed, e.message),
+            context.getString(R.string.open_failed, msg),
             android.widget.Toast.LENGTH_LONG,
         ).show()
     }
