@@ -3,6 +3,10 @@ package app.mihonsy.komga.data.webdav
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+// SY --> Komiho Phase7: 页缓存上提为共用实现（data.remote 包），需显式导入。
+import app.mihonsy.komga.data.remote.CachingArchiveHandle
+import app.mihonsy.komga.data.remote.RemotePageCache
+// SY <--
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import logcat.LogPriority
 import logcat.logcat
