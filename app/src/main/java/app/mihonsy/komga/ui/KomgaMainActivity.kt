@@ -3843,10 +3843,20 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
     val storagePrefs = remember { Injekt.get<StoragePreferences>() }
     val webdavCacheDir = remember { File(context.cacheDir, "webdav_fallback") }
     // SY --> Komiho Phase5/Phase7: 页级缓存目录（WebDAV/SMB 共用 remote_pages）并入
-    // usage 统计与清除（上限共用同一滑条值）；旧 webdav_pages 目录仅作清除兜底。
+    // usage 统计与清除（上限共用同一滑条值）。旧 webdav_pages 目录已废弃移除。
     val remotePageCacheDir = remember { File(context.cacheDir, "remote_pages") }
-    val legacyPageCacheDir = remember { File(context.cacheDir, "webdav_pages") }
     // SY <--
+    // SY: 本地/SMB/WebDAV 三套封面缓存（filesDir 各自隔离，可直接删目录重建）。
+    // 注：Komga 封面缓存是 Coil 磁盘池（cacheDir/komga_covers），**独立存在**——由 Komga
+    // 自己的「书库 → 预览图」上限设置管理，不与这三套合并统计/清除。
+    val coverCacheDirs = remember {
+        listOf(
+            File(context.filesDir, eu.kanade.tachiyomi.data.coil.LocalCoverFetcher.DIR),
+            File(context.filesDir, SmbCoverCache.DIR),
+            File(context.filesDir, WebDavCoverCache.DIR),
+        )
+    }
+    var coverUsageBytes by remember { mutableStateOf(0L) }
     var cacheMaxMb by remember {
         mutableStateOf(storagePrefs.webdavCacheMaxBytes.get() / (1024f * 1024f))
     }
@@ -3858,14 +3868,15 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 ?.filter { it.isFile && it.name.startsWith("webdav_") && !it.name.endsWith(".part") }
                 ?.sumOf { it.length() }
                 ?: 0L
-            // SY --> Komiho Phase5/Phase7: 页缓存（每书一目录）计入占用（含旧 webdav_pages 兜底）
-            val pageBytes = listOf(remotePageCacheDir, legacyPageCacheDir)
-                .flatMap { dir -> dir.listFiles()?.toList() ?: emptyList() }
+            // SY --> Komiho Phase5/Phase7: 页缓存（每书一目录）计入占用
+            val pageBytes = remotePageCacheDir.listFiles()?.toList().orEmpty()
                 .filter { it.isDirectory }
                 .flatMap { it.listFiles()?.toList() ?: emptyList() }
                 .sumOf { it.length() }
             // SY <--
-            fallbackBytes + pageBytes
+            usageBytes = fallbackBytes + pageBytes
+            // SY: 封面缓存四套目录（含子目录）总占用。
+            coverUsageBytes = coverCacheDirs.sumOf { dir -> dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
         }
     }
     val scope = rememberCoroutineScope()
@@ -3928,10 +3939,10 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 onClick = {
                     scope.launch {
                         val freed = withContext(Dispatchers.IO) {
-                            // SY --> Komiho Phase5/Phase7: 清除范围扩展到页缓存目录（含旧 webdav_pages 兜底）
                             val fallbackTotal = webdavCacheDir.listFiles()?.sumOf { it.length() } ?: 0L
                             webdavCacheDir.listFiles()?.forEach { it.delete() }
-                            val pageTotal = listOf(remotePageCacheDir, legacyPageCacheDir).sumOf { dir ->
+                            // SY --> Komiho Phase5/Phase7: 清除范围含页缓存目录
+                            val pageTotal = remotePageCacheDir.let { dir ->
                                 val bytes = dir.listFiles()?.sumOf { it.length() } ?: 0L
                                 dir.deleteRecursively()
                                 bytes
@@ -3953,6 +3964,55 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             }
         }
         // SY <--
+        // SY: 封面缓存卡片（本地 / SMB / WebDAV 三套 filesDir 缓存）。
+        // 此前这三套没有任何清理入口，只能靠上限 LRU 淘汰或清 app 数据。
+        // Komga 的 Coil 磁盘池不在此列——它独立存在，归「书库 → 预览图」管理。
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                composeStringResource(R.string.storage_cover_cache),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                composeStringResource(R.string.storage_cover_cache_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                composeStringResource(R.string.storage_cache_usage) + formatCacheSize(coverUsageBytes),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        val freed = withContext(Dispatchers.IO) {
+                            // 只清本地/SMB/WebDAV 三套 filesDir 缓存；Komga 的 Coil 磁盘池
+                            // （komga_covers）不动，归 Komga「书库 → 预览图」独立管理。
+                            // 顺带清 Coil 内存缓存，让界面上已解码的缩略图立即重新拉取。
+                            runCatching {
+                                coil3.SingletonImageLoader.get(context.applicationContext).memoryCache?.clear()
+                            }
+                            coverCacheDirs.sumOf { dir ->
+                                val bytes = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                                dir.deleteRecursively()
+                                dir.mkdirs()
+                                bytes
+                            }
+                        }
+                        usageTick++
+                        android.widget.Toast.makeText(
+                            context,
+                            context.getString(R.string.storage_cache_cleared, formatCacheSize(freed)),
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                },
+                enabled = coverUsageBytes > 0L,
+            ) {
+                Text(composeStringResource(R.string.storage_clear_cache))
+            }
+        }
+        // SY -->
     }
 }
 

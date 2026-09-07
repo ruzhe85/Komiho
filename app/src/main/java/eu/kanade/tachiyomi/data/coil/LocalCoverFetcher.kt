@@ -71,7 +71,7 @@ class LocalCoverFetcher(
     private val cacheKey: String get() = "${data.file.uri};${data.lastModified}"
 
     private fun cacheFile(): File {
-        val dir = File(context.filesDir, "komiho_local_covers").apply { mkdirs() }
+        val dir = File(context.filesDir, DIR).apply { mkdirs() }
         // v2 前缀：封面口径修正（存储/枚举序→自然序）后旧缓存内容可能是错误页面，直接作废重生成。
         return File(dir, "v2-" + sha256(cacheKey) + ".jpg")
     }
@@ -165,6 +165,9 @@ class LocalCoverFetcher(
     }
 
     companion object {
+        /** 封面缓存目录名（filesDir 下）。设为 public 供设置页统计/清除，避免目录名漂移。 */
+        const val DIR = "komiho_local_covers"
+
         // 主流客户端的封面缩略图档位：封面格子实际显示尺寸远小于此，450px 足够；
         // 配 q80 单张约 40–70KB，本地缓存（komiho_local_covers）能装上千张而不占 Komga 共享池。
         private const val MAX_PX = 450

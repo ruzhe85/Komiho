@@ -34,7 +34,8 @@ import kotlin.math.max
 // 40-70KB，可存上千张；如需回收可清 komiho_webdav_covers 目录，不影响其他缓存）。
 object WebDavCoverCache {
 
-    private const val DIR = "komiho_webdav_covers"
+    /** 封面缓存目录名（filesDir 下）。public 供设置页统计/清除，避免目录名漂移。 */
+    const val DIR = "komiho_webdav_covers"
     private const val MAX_PX = 450
     private const val JPEG_QUALITY = 80
 

@@ -336,6 +336,8 @@
     <string name="storage_cache_limit">上限：</string>
     <string name="storage_cache_range">200 MB — 4 GB，200 MB 一档（默认 1 GB）</string>
     <string name="storage_cache_usage">当前占用：</string>
+    <string name="storage_cover_cache">封面缓存</string>
+    <string name="storage_cover_cache_desc">本地 / SMB / WebDAV 三套封面缩略图；清除后浏览时自动重建，不影响阅读进度。Komga 封面缓存独立管理（书库 → 预览图）。</string>
     <string name="storage_cache_cleared">已清除 WebDAV 缓存（%1$s）</string>
     <string name="storage_clear_cache">清除缓存</string>
     <string name="settings_cache_preview_none">0 M（不缓存 / 实时预览）</string>
