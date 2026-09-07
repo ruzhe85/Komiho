@@ -623,7 +623,9 @@ private fun WebDavFormPage(
         val scheme = if (useHttps) "https" else "http"
         val portPart = if (port.isBlank()) "" else ":${port.trim()}"
         val pathPart = if (path.isBlank()) "" else if (path.startsWith("/")) path.trim() else "/${path.trim()}"
-        return "$scheme://${host.trim()}$portPart$pathPart"
+        // SY: 同 parseHttpUrl——剥 host 末尾的 DNS 根标记「.」，保证测试连接 / 保存出去的
+        // baseUrl 一定不带尾点（带尾点会被 OkHttp 拒收 →「非法 WebDAV URL」）。
+        return "$scheme://${host.trim().removeSuffix(".")}$portPart$pathPart"
     }
 
     Column(
@@ -1457,7 +1459,10 @@ private fun parseHttpUrl(url: String): ParsedUrl {
     val scheme = if (url.startsWith("http://")) "http" else "https"
     val rest = url.substringAfter("://")
     val authority = rest.substringBefore('/')
-    val host = authority.substringBefore(':')
+    // SY: 剥 host 末尾的 DNS 根标记「.」（FQDN 绝对名，如 `host.`）——HTTP 不需要该尾点，
+    // 且带尾点 host 会被 OkHttp 拒收（→「非法 WebDAV URL」）。旧连接可能存了带尾点的
+    // baseUrl，这里回填时洗净，避免编辑页把它原样带回去。
+    val host = authority.substringBefore(':').removeSuffix(".")
     val port = authority.substringAfter(':', "")
     val rawPath = rest.substringAfter('/', missingDelimiterValue = "")
     val path = if (rawPath.isBlank()) "" else "/$rawPath"
