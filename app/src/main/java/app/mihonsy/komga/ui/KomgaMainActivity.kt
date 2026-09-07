@@ -6743,21 +6743,7 @@ private fun SourceDashboardPane(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(
-                        modifier = Modifier.size(42.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = entry.name.take(1).uppercase(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = if (isCurrent) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
+                    // SY: 卡片最前的「名称首字」标识已移除（与类型标签重复且中文首字无意义）。
                     Column(Modifier.weight(1f)) {
                         Text(
                             text = entry.name,
