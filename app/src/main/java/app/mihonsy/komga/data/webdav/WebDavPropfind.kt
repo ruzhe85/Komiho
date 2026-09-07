@@ -163,9 +163,11 @@ object WebDavPropfind {
         return runCatching { URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
     }
 
-    /** 把 href 解析成完整 URL：绝对 URL 原样，路径相对 [dirUrl] 解析（处理 %编码）。 */
+    /** 把 href 解析成完整 URL：绝对 URL 原样（剥掉可能出现的 host 尾点），路径相对 [dirUrl] 解析（处理 %编码）。 */
     private fun resolveHref(dirUrl: String, href: String): String {
-        if (href.startsWith("http://") || href.startsWith("https://")) return href
+        if (href.startsWith("http://") || href.startsWith("https://")) {
+            return mihon.core.common.archive.WebDavRandomAccessSource.stripRootDot(href)
+        }
         return runCatching { URI(dirUrl).resolve(href).toString() }.getOrDefault(href)
     }
 }
