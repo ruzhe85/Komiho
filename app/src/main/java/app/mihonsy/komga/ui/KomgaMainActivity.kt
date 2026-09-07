@@ -269,6 +269,8 @@ import tachiyomi.domain.chapter.repository.BookmarkRepository
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.history.model.LocalHistoryItem
 import tachiyomi.domain.history.repository.HistoryRepository
+import tachiyomi.domain.manga.interactor.GetManga
+import tachiyomi.domain.manga.repository.MangaRepository
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import androidx.compose.material.icons.filled.Description
 import uy.kohesive.injekt.Injekt
@@ -6710,6 +6712,8 @@ private fun SourceDashboardPane(
             val smb = mutableMapOf<String, Agg>()
             // SY <--
             val repo = Injekt.get<HistoryRepository>()
+            val getManga = Injekt.get<GetManga>()
+            val mangaRepo = Injekt.get<MangaRepository>()
             val conns = WebDavConnectionStore.all()
             // 本地/WebDAV：同一来源 ID，按 chapterUrl 前缀归类。
             runCatching { repo.getHistoryBySourceDetailed(LocalSource.ID).first() }.getOrDefault(emptyList()).forEach { item ->
@@ -6731,16 +6735,44 @@ private fun SourceDashboardPane(
             }
             // Komga：独立来源 ID（无记录时卡片回落引导语）。
             runCatching { repo.getHistoryBySourceDetailed(KomgaSource.ID).first() }.getOrDefault(emptyList()).forEach { komga.add(it) }
-            // SY: 封面回退链与历史/书签行同口径（本地文件 → Komga thumbnailUrl → WebDAV 缓存 → SMB 缓存）。
+            // SY: 封面回退链与历史/书签行同口径（本地文件 → WebDAV 缓存 → SMB 缓存）。
+            // 注意：Komga 封面不走 coverOf（需挂起解析 Manga + 鉴权 fetcher），单独在下方 suspend 块处理。
             val coverOf: (LocalHistoryItem?) -> Any? = { item ->
                 val url = item?.chapterUrl
-                if (url == null) {
+                if (url == null ||
+                    url.startsWith(KomgaSource.BOOK_URL_PREFIX) ||
+                    url.startsWith(KomgaSource.SERIES_URL_PREFIX)
+                ) {
                     null
                 } else {
                     resolveLocalFile(url)?.let { LocalCoverData(it, runCatching { it.lastModified() }.getOrDefault(0L)) }
                         ?: item.thumbnailUrl?.takeIf { it.isNotBlank() }
                         ?: WebDavCoverCache.existingCoverFile(context, url)
                         ?: SmbCoverCache.existingCoverFile(context, url)
+                }
+            }
+            // SY: Komga 封面必须走 MangaCoverFetcher（按 source 解析 KomgaSource 带上鉴权头）。
+            // 直接传裸 URL 会用默认 network fetcher（无鉴权 → 401 无封面），所以这里解析出 Manga
+            // 对象交回渲染层触发该 fetcher，并依赖 ensureManga 写入的 ogThumbnailUrl。
+            // 补偿：升级前插入的旧记录 ogThumbnailUrl=null，按连接 baseUrl 即时补全并落库，
+            // 这样无需重新打开书，聚合页 Komga 卡片也能立刻出封面。
+            var komgaCover: Any? = null
+            val komgaLast = komga.last
+            if (komgaLast != null) {
+                var manga = runCatching { getManga.await(komgaLast.mangaId) }.getOrNull()
+                if (manga != null) {
+                    if (manga.thumbnailUrl.isNullOrBlank()) {
+                        val seriesId = manga.url.removePrefix(KomgaSource.SERIES_URL_PREFIX)
+                        val base = runCatching { KomgaPreferences(context.applicationContext).connection().baseUrl }
+                            .getOrNull()?.trimEnd('/')
+                        if (!seriesId.isBlank() && !base.isNullOrBlank()) {
+                            runCatching {
+                                mangaRepo.update(MangaUpdate(id = manga.id, thumbnailUrl = "$base/api/v1/series/$seriesId/thumbnail"))
+                            }
+                            manga = getManga.await(komgaLast.mangaId) ?: manga
+                        }
+                    }
+                    komgaCover = manga.takeIf { !it.thumbnailUrl.isNullOrBlank() }
                 }
             }
             val build: (Agg) -> SourceCardSummary = { agg ->
@@ -6758,7 +6790,7 @@ private fun SourceDashboardPane(
             }
             mapOf(
                 SOURCE_ID_LOCAL to build(local),
-                SOURCE_ID_KOMGA to build(komga),
+                SOURCE_ID_KOMGA to build(komga).copy(coverModel = komgaCover),
             ) + webdav.mapValues { (_, agg) -> build(agg) } +
                 // SY --> Komiho Phase7: SMB 卡片摘要。
                 smb.mapValues { (_, agg) -> build(agg) }
