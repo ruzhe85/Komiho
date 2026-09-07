@@ -3874,9 +3874,9 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 .flatMap { it.listFiles()?.toList() ?: emptyList() }
                 .sumOf { it.length() }
             // SY <--
-            usageBytes = fallbackBytes + pageBytes
-            // SY: 封面缓存四套目录（含子目录）总占用。
+            // SY: 封面缓存三套目录（本地/SMB/WebDAV，各含子目录）总占用。
             coverUsageBytes = coverCacheDirs.sumOf { dir -> dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
+            fallbackBytes + pageBytes
         }
     }
     val scope = rememberCoroutineScope()
