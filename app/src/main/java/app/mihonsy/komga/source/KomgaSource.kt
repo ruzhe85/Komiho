@@ -53,6 +53,15 @@ class KomgaSource(private val context: Context) : HttpSource() {
         }
     }
 
+    /**
+     * 基类 [eu.kanade.tachiyomi.source.online.HttpSource.headers] 是 `by lazy`——一旦被首次
+     * 访问就永久缓存。若在「添加 Komga 连接之前」被访问过（例如启动期的任何遍历），
+     * 缓存下来的就是**不含鉴权**的 headers，之后即使添加了连接，图片请求仍然 401
+     * （表现：首次添加源后封面全空）。这里改为每次都从最新 connection 构建，
+     * 保证新添加 / 改过密钥后立即生效。
+     */
+    override val headers: Headers get() = headersBuilder().build()
+
     private fun client(): KomgaApiClient = KomgaApiClient(prefs.connection())
 
     override fun fetchMangaDetails(manga: SManga): Observable<SManga> = Observable.fromCallable {

@@ -54,7 +54,18 @@ fun KomgaCover(
 
         val prefs = KomgaPreferences(context.applicationContext)
 
-        val imageRequest = ImageRequest.Builder(context).data(url)
+        // SY: 必须走 MangaCoverFetcher（按 sourceId 解析 KomgaSource，自动带上鉴权头
+        // X-API-Key / Basic），不能直接传裸 URL——默认 network fetcher 不带鉴权，
+        // 表现为「首次添加源后封面全空，随便点开一本才正常」（之前的实际 bug）。
+        // mangaId 传 0 即可：无自定义封面，直接走网络请求 + 磁盘缓存。
+        val coverModel = tachiyomi.domain.manga.model.MangaCover(
+            mangaId = 0L,
+            sourceId = app.mihonsy.komga.source.KomgaSource.ID,
+            isMangaFavorite = false,
+            ogUrl = url,
+            lastModified = 0L,
+        )
+        val imageRequest = ImageRequest.Builder(context).data(coverModel)
         // Cache limit 0 = live mode: disable memory + disk caching so the
         // cover is always re-fetched from the server.
         if (prefs.coverCacheLimitBytes <= 0L) {
