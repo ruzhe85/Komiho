@@ -90,13 +90,9 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // GPU limit.
         val isTallStrip = srcHeight > 0 && srcWidth > 0 &&
             srcHeight.toFloat() / srcWidth.toFloat() > 2.5f
-        // SY: OOM 修复——竖长条图（webtoon 条漫）此前保留「原始全高」，一张 1200x20000 的
-        // 条漫页解码 ~96MB、Lanczos 放宽到 2048 宽后输出 ~280MB，叠加当前页+预热直接把
-        // 前台应用顶到系统 OOM KILL（02:00 94.zip 实锤 SIGKILL）。高度统一封顶 4096：
-        // 宽度仍是增强主维度，高度封顶只影响极端长条的「一屏以外」部分，显示无损。
         val (targetW, targetH) = if (options.enhanced) {
             if (isTallStrip) {
-                enhanceTarget(dstWidth) to min(srcHeight, MAX_ENHANCE_SOURCE_HEIGHT)
+                enhanceTarget(dstWidth) to srcHeight
             } else {
                 enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
             }
@@ -211,8 +207,5 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         }
 
         const val MAX_ENHANCE_SOURCE_DIMENSION = 2048
-
-        /** SY: 竖长条图增强的高度上限（宽度仍走 2048 档；4096 ≈ 两屏高度，解码+输出峰值 ~33MB/页）。 */
-        const val MAX_ENHANCE_SOURCE_HEIGHT = 4096
     }
 }
