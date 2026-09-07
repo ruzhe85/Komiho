@@ -999,6 +999,11 @@ private fun KomgaMainScreen(
                         refreshTick = refreshTick,
                         onAddSource = { showAddSource = true },
                         onOpenSource = ::openSourceFromDashboard,
+                        onResumeReading = { entry, mangaId, chapterId, page ->
+                            // 先切源（退出阅读器后落回该来源），再与历史 tab 同口径带上次页码进阅读器（page 为 0-based）。
+                            openSourceFromDashboard(entry)
+                            context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, page))
+                        },
                     )
                     // SY <--
                     MainTab.Home -> HomeTab(
@@ -6659,8 +6664,23 @@ private data class MergedBook(
 // 每来源一张卡：类型图标 + 名称 + 阅读摘要。摘要统一取自本地历史库——
 // 本地/WebDAV 记录挂在 LocalSource.ID 下（chapterUrl 以 webdav: 前缀区分归属连接），
 // Komga 记录挂在 KomgaSource.ID 下（阅读器若未写本地历史则回落引导语，进度主体在服务器）。
-// 点卡直达该来源内容首页；末尾「添加来源」卡进入来源管理流程。
-private data class SourceCardSummary(val count: Int, val lastTitle: String?, val lastReadAt: Date?)
+// 卡片语义（与展示的「最近阅读」一致）：有最近记录 → 点卡=继续阅读（打开最后一章并恢复到
+// 上次页码，与历史 tab 同口径）；无记录 → 点卡=进入来源。右侧图标按钮恒为「进入来源」。
+// 末尾「添加来源」卡进入来源管理流程。
+private data class SourceCardSummary(
+    val count: Int,
+    val lastTitle: String?,
+    val lastReadAt: Date?,
+    // SY: 续读定位（历史记录主键，直接喂给 ReaderActivity，绕过 ChapterLoader 的已读守卫）
+    val lastMangaId: Long = 0L,
+    val lastChapterId: Long = 0L,
+    val lastChapterName: String? = null,
+    val lastPageRead: Long = 0L,
+    /** 封面请求体（本地 LocalCoverData / 远程封面缓存文件 / Komga thumbnailUrl），null=占位图标。 */
+    val coverModel: Any? = null,
+) {
+    val canResume: Boolean get() = lastMangaId > 0L && lastChapterId > 0L
+}
 
 @Composable
 private fun SourceDashboardPane(
@@ -6669,7 +6689,10 @@ private fun SourceDashboardPane(
     refreshTick: Int,
     onAddSource: () -> Unit,
     onOpenSource: (SourceEntry) -> Unit,
+    /** 续读：先把来源切过去（退出阅读器后落在该来源，避免「来源不对」），再带页码进阅读器。 */
+    onResumeReading: (entry: SourceEntry, mangaId: Long, chapterId: Long, page: Int) -> Unit,
 ) {
+    val context = LocalContext.current
     val summaries by produceState<Map<String, SourceCardSummary>>(emptyMap(), entries, refreshTick) {
         value = withContext(Dispatchers.IO) {
             class Agg {
@@ -6708,12 +6731,37 @@ private fun SourceDashboardPane(
             }
             // Komga：独立来源 ID（无记录时卡片回落引导语）。
             runCatching { repo.getHistoryBySourceDetailed(KomgaSource.ID).first() }.getOrDefault(emptyList()).forEach { komga.add(it) }
+            // SY: 封面回退链与历史/书签行同口径（本地文件 → Komga thumbnailUrl → WebDAV 缓存 → SMB 缓存）。
+            val coverOf: (LocalHistoryItem?) -> Any? = { item ->
+                val url = item?.chapterUrl
+                if (url == null) {
+                    null
+                } else {
+                    resolveLocalFile(url)?.let { LocalCoverData(it, runCatching { it.lastModified() }.getOrDefault(0L)) }
+                        ?: item.thumbnailUrl?.takeIf { it.isNotBlank() }
+                        ?: WebDavCoverCache.existingCoverFile(context, url)
+                        ?: SmbCoverCache.existingCoverFile(context, url)
+                }
+            }
+            val build: (Agg) -> SourceCardSummary = { agg ->
+                val last = agg.last
+                SourceCardSummary(
+                    count = agg.urls.size,
+                    lastTitle = last?.mangaTitle,
+                    lastReadAt = last?.readAt,
+                    lastMangaId = last?.mangaId ?: 0L,
+                    lastChapterId = last?.chapterId ?: 0L,
+                    lastChapterName = last?.chapterName?.takeIf { it.isNotBlank() },
+                    lastPageRead = last?.lastPageRead ?: 0L,
+                    coverModel = coverOf(last),
+                )
+            }
             mapOf(
-                SOURCE_ID_LOCAL to SourceCardSummary(local.urls.size, local.last?.mangaTitle, local.last?.readAt),
-                SOURCE_ID_KOMGA to SourceCardSummary(komga.urls.size, komga.last?.mangaTitle, komga.last?.readAt),
-            ) + webdav.mapValues { (_, agg) -> SourceCardSummary(agg.urls.size, agg.last?.mangaTitle, agg.last?.readAt) } +
+                SOURCE_ID_LOCAL to build(local),
+                SOURCE_ID_KOMGA to build(komga),
+            ) + webdav.mapValues { (_, agg) -> build(agg) } +
                 // SY --> Komiho Phase7: SMB 卡片摘要。
-                smb.mapValues { (_, agg) -> SourceCardSummary(agg.urls.size, agg.last?.mangaTitle, agg.last?.readAt) }
+                smb.mapValues { (_, agg) -> build(agg) }
             // SY <--
         }
     }
@@ -6728,7 +6776,15 @@ private fun SourceDashboardPane(
             val summary = summaries[entry.id]
             val isCurrent = entry.id == currentSourceId
             Card(
-                modifier = Modifier.fillMaxWidth().clickable { onOpenSource(entry) },
+                modifier = Modifier.fillMaxWidth().clickable {
+                    // SY: 有最近记录 → 继续阅读（恢复到上次页码）；否则 → 进入来源。
+                    val r = summary
+                    if (r != null && r.canResume) {
+                        onResumeReading(entry, r.lastMangaId, r.lastChapterId, r.lastPageRead.toInt())
+                    } else {
+                        onOpenSource(entry)
+                    }
+                },
                 shape = MaterialTheme.shapes.large,
                 colors = CardDefaults.cardColors(
                     containerColor = if (isCurrent) {
@@ -6743,7 +6799,40 @@ private fun SourceDashboardPane(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // SY: 卡片最前的「名称首字」标识已移除（与类型标签重复且中文首字无意义）。
+                    // SY: 左侧封面缩略图（回退链与历史行一致；取不到显示占位图标）。
+                    val enterSourceDesc = composeStringResource(R.string.dashboard_enter_source)
+                    val coverModel = summary?.coverModel
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.size(48.dp, 64.dp),
+                    ) {
+                        if (coverModel != null) {
+                            SubcomposeAsyncImage(
+                                model = ImageRequest.Builder(context).data(coverModel).build(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                                error = {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Filled.Description,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                },
+                            )
+                        } else {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.Description,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
                     Column(Modifier.weight(1f)) {
                         Text(
                             text = entry.name,
@@ -6779,8 +6868,11 @@ private fun SourceDashboardPane(
                             val ago = summary.lastReadAt?.let {
                                 DateUtils.getRelativeTimeSpanString(it.time).toString()
                             }
+                            // SY: 续读目标是「章节」——把章节名也带上（散图目录章=目录名/文件名）。
+                            val chapter = summary.lastChapterName?.takeIf { it.isNotBlank() && it != title }
+                            val line = listOfNotNull(title, chapter, ago).joinToString(" · ")
                             Text(
-                                text = if (ago.isNullOrBlank()) title else "最近：$title · $ago",
+                                text = if (ago.isNullOrBlank()) line else "最近：$line",
                                 style = MaterialTheme.typography.bodySmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -6788,11 +6880,14 @@ private fun SourceDashboardPane(
                             )
                         }
                     }
-                    Icon(
-                        imageVector = Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    // SY: 右侧按钮恒为「进入来源」（切到该来源的内容首页，保留最后浏览目录记忆）。
+                    IconButton(onClick = { onOpenSource(entry) }) {
+                        Icon(
+                            imageVector = Icons.Filled.FolderOpen,
+                            contentDescription = enterSourceDesc,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
