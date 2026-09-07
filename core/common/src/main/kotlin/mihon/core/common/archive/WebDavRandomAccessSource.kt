@@ -356,10 +356,12 @@ class WebDavRandomAccessSource(
             val cleaned = stripRootDot(raw)
             cleaned.toHttpUrlOrNull()?.let { return it.toString() }
             val schemeEnd = cleaned.indexOf("://")
-            require(schemeEnd > 0) { "非法 WebDAV URL: $raw" }
+            // SY: 报错打印**剥点后**的 cleaned 而非 raw——raw 里的尾点会让人误判成
+            // 「stripRootDot 没生效」，实际失败原因往往在别处（如未编码字符）。
+            require(schemeEnd > 0) { "非法 WebDAV URL: $cleaned" }
             val rest = cleaned.substring(schemeEnd + 3) // host[:port]/path...
             val slash = rest.indexOf('/')
-            require(slash >= 0) { "非法 WebDAV URL（缺路径）: $raw" }
+            require(slash >= 0) { "非法 WebDAV URL（缺路径）: $cleaned" }
             val authority = rest.substring(0, slash)
             val encodedPath = rest.substring(slash)
                 .split('/')
@@ -369,7 +371,7 @@ class WebDavRandomAccessSource(
                 }
             val rebuilt = "${cleaned.substring(0, schemeEnd)}://$authority$encodedPath"
             return rebuilt.toHttpUrlOrNull()?.toString()
-                ?: throw IllegalArgumentException("非法 WebDAV URL: $raw")
+                ?: throw IllegalArgumentException("非法 WebDAV URL: $cleaned")
         }
     }
 }

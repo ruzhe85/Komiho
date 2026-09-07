@@ -190,7 +190,9 @@ object WebDavConnectionStore {
     private fun StoredConnection.toPublic() = WebDavConnection(
         id = id,
         name = name,
-        baseUrl = baseUrl,
+        // SY: 读取出口也剥 host 尾点（FQDN 绝对名 `host.`）——存量旧连接可能存了带尾点的
+        // baseUrl，保证任何读取路径拿到的都是干净的，不再依赖「保存时/请求时」才修正。
+        baseUrl = mihon.core.common.archive.WebDavRandomAccessSource.stripRootDot(baseUrl),
         user = user,
         passEnc = passEnc,
     )
