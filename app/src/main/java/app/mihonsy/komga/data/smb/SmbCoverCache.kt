@@ -30,7 +30,8 @@ import kotlin.math.max
 // 缓存键 = 章节 URL 的 sha256（connId + 路径天然唯一）；生成失败只影响本次，下次打开重试。
 object SmbCoverCache {
 
-    private const val DIR = "komiho_smb_covers"
+    /** 封面缓存目录名（filesDir 下）。public 供设置页统计/清除，避免目录名漂移。 */
+    const val DIR = "komiho_smb_covers"
     private const val MAX_PX = 450
     private const val JPEG_QUALITY = 80
 

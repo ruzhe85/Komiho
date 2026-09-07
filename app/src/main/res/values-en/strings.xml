@@ -330,6 +330,8 @@
     <string name="storage_cache_limit">Limit: </string>
     <string name="storage_cache_range">200 MB – 4 GB, 200 MB steps (default 1 GB)</string>
     <string name="storage_cache_usage">Used: </string>
+    <string name="storage_cover_cache">Cover cache</string>
+    <string name="storage_cover_cache_desc">Local / SMB / WebDAV cover thumbnails. Rebuilt automatically while browsing; reading progress is unaffected. Komga covers are managed separately under Library → Previews.</string>
     <string name="storage_cache_cleared">WebDAV cache cleared (%1$s)</string>
     <string name="storage_clear_cache">Clear cache</string>
     <string name="settings_cache_preview_none">0 MB (no cache / live preview)</string>
