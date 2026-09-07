@@ -82,6 +82,7 @@ import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.data.SourceVisibilityStore
 // SY --> Komiho Phase7: SMB 表单接入。
 import app.mihonsy.komga.data.smb.SmbBrowse
 import app.mihonsy.komga.data.smb.SmbConnection
@@ -411,8 +412,16 @@ private fun TypeSelectContent(
             onClick = { onSelect(AddSourceScreen.Komga(null)) },
         )
         komgaConns.forEach { conn ->
+            // SY: 聚合页显示开关（按连接记；聚合页 Komga 单卡——任一条可见即显示）。
+            val visId = SourceVisibilityStore.ID_KOMGA_CONN_PREFIX + conn.id
+            var visible by remember(visId) { mutableStateOf(SourceVisibilityStore.isVisible(visId)) }
             AddedSourceRow(
                 name = connDisplayName(conn.name, conn.baseUrl),
+                visible = visible,
+                onToggleVisible = {
+                    visible = !visible
+                    SourceVisibilityStore.setVisible(visId, visible)
+                },
                 onEdit = { onSelect(AddSourceScreen.Komga(conn.id)) },
                 onDelete = { onRequestDeleteKomga(conn) },
             )
@@ -424,8 +433,16 @@ private fun TypeSelectContent(
             onClick = { onSelect(AddSourceScreen.WebDav(null)) },
         )
         webdavConns.forEach { conn ->
+            // SY: 聚合页显示开关（来源 id 与聚合页卡片 id 对齐：`webdav:<id>`）。
+            val visId = SourceVisibilityStore.ID_WEBDAV_PREFIX + conn.id
+            var visible by remember(visId) { mutableStateOf(SourceVisibilityStore.isVisible(visId)) }
             AddedSourceRow(
                 name = conn.displayName(),
+                visible = visible,
+                onToggleVisible = {
+                    visible = !visible
+                    SourceVisibilityStore.setVisible(visId, visible)
+                },
                 onEdit = { onSelect(AddSourceScreen.WebDav(conn.id)) },
                 onDelete = { onRequestDeleteWebDav(conn) },
             )
@@ -438,8 +455,16 @@ private fun TypeSelectContent(
             onClick = { onSelect(AddSourceScreen.Smb(null)) },
         )
         smbConns.forEach { conn ->
+            // SY: 聚合页显示开关（来源 id 与聚合页卡片 id 对齐：`smb:<id>`）。
+            val visId = SourceVisibilityStore.ID_SMB_PREFIX + conn.id
+            var visible by remember(visId) { mutableStateOf(SourceVisibilityStore.isVisible(visId)) }
             AddedSourceRow(
                 name = conn.displayName(),
+                visible = visible,
+                onToggleVisible = {
+                    visible = !visible
+                    SourceVisibilityStore.setVisible(visId, visible)
+                },
                 onEdit = { onSelect(AddSourceScreen.Smb(conn.id)) },
                 onDelete = { onRequestDeleteSmb(conn) },
             )
@@ -514,10 +539,12 @@ private fun TypeCardIcon(icon: ImageVector? = null, letter: String? = null) {
     }
 }
 
-/** 已添加来源条目行：名称居左，右侧「编辑 / 删除」图标按钮成组靠右（删除红色）。 */
+/** 已添加来源条目行：名称居左，右侧「显示 / 编辑 / 删除」图标按钮成组靠右（删除红色）。 */
 @Composable
 private fun AddedSourceRow(
     name: String,
+    visible: Boolean,
+    onToggleVisible: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -535,6 +562,19 @@ private fun AddedSourceRow(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        // SY: 聚合页显示开关——开（眼睛）才在聚合页显示该来源卡片，关（斜杠眼）则隐藏。
+        IconButton(onClick = onToggleVisible, modifier = Modifier.size(32.dp)) {
+            Icon(
+                if (visible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                contentDescription = composeStringResource(R.string.addsrc_toggle_visible_cd),
+                modifier = Modifier.size(16.dp),
+                tint = if (visible) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
         IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
             Icon(
                 Icons.Filled.Edit,

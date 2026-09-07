@@ -264,6 +264,7 @@
     <string name="addsrc_delete_msg">確定刪除「%1$s」？歷史與書籤記錄將保留。</string>
     <string name="addsrc_edit_cd">編輯</string>
     <string name="addsrc_delete_cd">刪除</string>
+    <string name="addsrc_toggle_visible_cd">在聚合頁顯示</string>
     <string name="addsrc_name">來源名稱</string>
     <string name="addsrc_name_hint_webdav">如：我的 WebDAV</string>
     <string name="addsrc_name_hint_komga">如：我的 Komga</string>
