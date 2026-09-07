@@ -184,7 +184,8 @@ object WebDavConnectionStore {
 
     // ------------------------------------------------------------ 工具
 
-    private fun normalizeBase(raw: String): String = raw.trim().trimEnd('/')
+    private fun normalizeBase(raw: String): String =
+        mihon.core.common.archive.WebDavRandomAccessSource.stripRootDot(raw.trim().trimEnd('/'))
 
     private fun StoredConnection.toPublic() = WebDavConnection(
         id = id,

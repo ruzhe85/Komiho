@@ -328,12 +328,36 @@ class WebDavRandomAccessSource(
         /** 这些扩展名的远程归档不支持随机访问，打开时整本缓存到本地（Phase4-② 方案 B）。 */
         private val FORCED_FALLBACK_EXTS = setOf("rar", "cbr", "7z", "cb7")
 
+        /**
+         * 去掉 host 末尾的 DNS 根标记「.」：部分 WebDAV 服务器在 PROPFIND 的 href 里返回
+         * FQDN 绝对名（如 `dav.ruzhe.dpdns.org.`），HTTP URL 不需要该尾点，且 OkHttp 会
+         * 拒绝带尾点的 host（→「非法 WebDAV URL」）。统一剥掉，避免服务端 href 直接被当
+         * 成下一层目录 URL 时崩溃。仅剥 host，不动 path/query 里的点。
+         */
+        fun stripRootDot(url: String): String {
+            val schemeEnd = url.indexOf("://")
+            if (schemeEnd < 0) return url
+            val rest = url.substring(schemeEnd + 3) // host[:port]/path...
+            val slash = rest.indexOf('/').let { if (it < 0) rest.length else it }
+            val authority = rest.substring(0, slash)
+            val colon = authority.indexOf(':')
+            val host = if (colon < 0) authority else authority.substring(0, colon)
+            if (!host.endsWith('.')) return url
+            val strippedAuthority = if (colon < 0) {
+                host.removeSuffix(".")
+            } else {
+                host.removeSuffix(".") + authority.substring(colon)
+            }
+            return url.substring(0, schemeEnd + 3) + strippedAuthority + rest.substring(slash)
+        }
+
         /** 宽容解析手输 URL：中文/空格等未编码字符按 UTF-8 百分号编码补齐后重建。 */
         fun normalizeUrl(raw: String): String {
-            raw.toHttpUrlOrNull()?.let { return it.toString() }
-            val schemeEnd = raw.indexOf("://")
+            val cleaned = stripRootDot(raw)
+            cleaned.toHttpUrlOrNull()?.let { return it.toString() }
+            val schemeEnd = cleaned.indexOf("://")
             require(schemeEnd > 0) { "非法 WebDAV URL: $raw" }
-            val rest = raw.substring(schemeEnd + 3) // host[:port]/path...
+            val rest = cleaned.substring(schemeEnd + 3) // host[:port]/path...
             val slash = rest.indexOf('/')
             require(slash >= 0) { "非法 WebDAV URL（缺路径）: $raw" }
             val authority = rest.substring(0, slash)
@@ -343,7 +367,7 @@ class WebDavRandomAccessSource(
                     // 用 String 重载（API 1+）；Charset 重载要 API 33+
                     if (seg.isEmpty()) seg else URLEncoder.encode(seg, "UTF-8").replace("+", "%20")
                 }
-            val rebuilt = "${raw.substring(0, schemeEnd)}://$authority$encodedPath"
+            val rebuilt = "${cleaned.substring(0, schemeEnd)}://$authority$encodedPath"
             return rebuilt.toHttpUrlOrNull()?.toString()
                 ?: throw IllegalArgumentException("非法 WebDAV URL: $raw")
         }
