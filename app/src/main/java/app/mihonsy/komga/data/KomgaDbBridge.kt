@@ -26,7 +26,19 @@ object KomgaDbBridge {
     /** Returns the DB manga for a Komga series, inserting it on first visit. */
     suspend fun ensureManga(client: KomgaApiClient, seriesId: String, seriesName: String): Manga {
         val url = KomgaSource.SERIES_URL_PREFIX + seriesId
-        mangaRepository.getMangaByUrlAndSourceId(url, KomgaSource.ID)?.let { return it }
+        // Komga 系列缩略图 URL：聚合页 Komga 卡片封面、历史行的封面都依赖它
+        // （history 查询 join mangas.thumbnail_url = ogThumbnailUrl）。
+        val thumb = client.seriesThumbnailUrl(seriesId)
+        val existing = mangaRepository.getMangaByUrlAndSourceId(url, KomgaSource.ID)
+        if (existing != null) {
+            // 补全封面：早期插入记录 ogThumbnailUrl=null，导致聚合页 Komga 卡片无封面。
+            // 打开时按需补写系列缩略图 URL。
+            if (existing.thumbnailUrl.isNullOrBlank()) {
+                mangaRepository.update(MangaUpdate(id = existing.id, thumbnailUrl = thumb))
+                return mangaRepository.getMangaByUrlAndSourceId(url, KomgaSource.ID) ?: existing
+            }
+            return existing
+        }
         return mangaRepository.insertNetworkManga(
             listOf(
                 Manga(
@@ -44,7 +56,7 @@ object KomgaDbBridge {
                     ogTitle = seriesName,
                     ogArtist = null,
                     ogAuthor = null,
-                    ogThumbnailUrl = null,
+                    ogThumbnailUrl = thumb,
                     ogDescription = null,
                     ogGenre = null,
                     ogStatus = 0,
