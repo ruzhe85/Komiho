@@ -271,7 +271,6 @@ import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.history.model.LocalHistoryItem
 import tachiyomi.domain.history.repository.HistoryRepository
 import tachiyomi.domain.manga.interactor.GetManga
-import tachiyomi.domain.manga.repository.MangaRepository
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import androidx.compose.material.icons.filled.Description
 import uy.kohesive.injekt.Injekt
