@@ -267,6 +267,7 @@
     <string name="addsrc_delete_msg">Delete \"%1$s\"? History and bookmarks will be kept.</string>
     <string name="addsrc_edit_cd">Edit</string>
     <string name="addsrc_delete_cd">Delete</string>
+    <string name="addsrc_toggle_visible_cd">Show on dashboard</string>
     <string name="addsrc_name">Source name</string>
     <string name="addsrc_name_hint_webdav">e.g. My WebDAV</string>
     <string name="addsrc_name_hint_komga">e.g. My Komga</string>

@@ -192,6 +192,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.data.SourceVisibilityStore
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 // SY --> Komiho Phase7: SMB 来源接入。
 import app.mihonsy.komga.data.smb.SmbBrowse
@@ -362,12 +363,12 @@ internal enum class SourceKind {
 
 private data class SourceEntry(val id: String, val kind: SourceKind, val name: String)
 
-private const val SOURCE_ID_KOMGA = "komga"
-private const val SOURCE_ID_LOCAL = "local"
-private const val SOURCE_ID_WEBDAV_PREFIX = "webdav:"
+private const val SOURCE_ID_KOMGA = SourceVisibilityStore.ID_KOMGA
+private const val SOURCE_ID_LOCAL = SourceVisibilityStore.ID_LOCAL
+private const val SOURCE_ID_WEBDAV_PREFIX = SourceVisibilityStore.ID_WEBDAV_PREFIX
 // SY --> Komiho Phase7: SMB 来源条目 id 前缀（章节 url 是 `smb://<connId>/...`，来源 id 是
 // `smb:<connId>`——单冒号，避免与章节 url 的 scheme 混淆）。
-private const val SOURCE_ID_SMB_PREFIX = "smb:"
+private const val SOURCE_ID_SMB_PREFIX = SourceVisibilityStore.ID_SMB_PREFIX
 // SY <--
 
 /**
@@ -391,6 +392,22 @@ private fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, local
         .forEach { entries.add(SourceEntry(SOURCE_ID_SMB_PREFIX + it.id, SourceKind.Smb, it.displayName())) }
     // SY <--
     return entries
+}
+
+/**
+ * 聚合页是否展示该来源卡片——管理页「显示」开关为开才显示（[SourceVisibilityStore]）。
+ * - 本地：唯一内置来源，恒显示（管理页无编辑图标，不给开关）；
+ * - Komga：聚合页只有一张卡，管理页按连接列，故任一条连接可见即显示、全关才隐藏；
+ * - WebDAV / SMB：按连接 id 的开关决定。
+ *
+ * 注意：只过滤聚合页卡片，**不动**顶栏来源菜单——隐藏的来源仍可在菜单里切过去。
+ */
+private fun SourceEntry.visibleOnDashboard(prefs: KomgaPreferences): Boolean = when (id) {
+    SOURCE_ID_LOCAL -> true
+    SOURCE_ID_KOMGA -> prefs.connections().let { conns ->
+        conns.isEmpty() || conns.any { SourceVisibilityStore.isVisible(SourceVisibilityStore.ID_KOMGA_CONN_PREFIX + it.id) }
+    }
+    else -> SourceVisibilityStore.isVisible(id)
 }
 
 private enum class MainTab(
@@ -575,6 +592,10 @@ private fun KomgaMainScreen(
     }
     val sourceEntries = remember(sourceVersion, komgaConnected, komgaName, localName) {
         buildSourceEntries(komgaConnected, komgaName, localName)
+    }
+    // SY: 聚合页只展示「显示」开关为开的来源（管理页关闭后 sourceVersion++ 触发重算）。
+    val dashboardEntries = remember(sourceEntries, sourceVersion) {
+        sourceEntries.filter { it.visibleOnDashboard(prefs) }
     }
     var currentSourceId by remember {
         mutableStateOf(
@@ -996,7 +1017,7 @@ private fun KomgaMainScreen(
                 when (safeTab) {
                     // SY --> Komiho: 来源仪表盘（方案 B 启动首页）。
                     MainTab.Sources -> SourceDashboardPane(
-                        entries = sourceEntries,
+                        entries = dashboardEntries,
                         currentSourceId = currentSourceId,
                         refreshTick = refreshTick,
                         onAddSource = { showAddSource = true },
