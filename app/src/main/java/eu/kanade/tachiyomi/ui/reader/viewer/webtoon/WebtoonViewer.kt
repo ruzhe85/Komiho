@@ -444,7 +444,7 @@ class WebtoonViewer(
         if (position < 0) return
         val offset = layoutManager.findViewByPosition(position)?.top ?: 0
         flipRollback = {
-            layoutManager.stopScroll()
+            recycler.stopScroll()
             layoutManager.scrollToPositionWithOffset(position, offset)
         }
         flipRollbackAt = SystemClock.uptimeMillis()
