@@ -470,7 +470,7 @@ object SettingsReaderScreen : SearchableSettings {
                 // Komiho: v1 / v2 互斥 —— 打开一个自动关掉另一个
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.pageTransitionsWebtoon,
-                    title = stringResource(MR.strings.pref_page_transitions),
+                    title = stringResource(SYMR.strings.pref_page_transitions_linear),
                     onValueChanged = { enabled ->
                         if (enabled) readerPreferences.pageTransitionsWebtoonV2.set(false)
                         true

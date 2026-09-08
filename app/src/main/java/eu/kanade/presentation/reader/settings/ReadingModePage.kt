@@ -314,9 +314,9 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
         pref = screenModel.preferences.smoothAutoScroll,
     )
 
-    // Komiho: v1 / v2 互斥 —— 勾一个自动取消另一个（v1 匀速固定时长，v2 五次方减速 + 时长按距离算）。
+    // Komiho: v1 / v2 互斥 —— 勾一个自动取消另一个（v1 匀速固定时长，v2 三次方缓出 + 时长按距离算）。
     CheckboxItem(
-        label = stringResource(MR.strings.pref_page_transitions),
+        label = stringResource(SYMR.strings.pref_page_transitions_linear),
         checked = pageTransitionsWebtoon,
         onClick = {
             val next = !pageTransitionsWebtoon

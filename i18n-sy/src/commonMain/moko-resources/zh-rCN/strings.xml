@@ -240,6 +240,8 @@
     <string name="pref_smooth_scroll">平滑自动翻页</string>
 
     <!-- Komiho: 条页点击滚屏的第二套动画（ComicScreen 手感：三次方缓出 + 时长按距离算），与「匀速动画」互斥 -->
+    <!-- Komiho: 条页专用的 v1 线性动画命名（page 模式共用 key 显示「翻页动画」） -->
+    <string name="pref_page_transitions_linear">匀速动画</string>
     <string name="pref_page_transitions_v2">缓出动画</string>
     <string name="pref_page_transitions_v2_summary">缓出滚动，时长按滚动距离自动计算，与「匀速动画」互斥。开启后时长滑条不再生效。</string>
 
