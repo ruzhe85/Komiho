@@ -21,6 +21,13 @@ class ReaderPreferences(
     val pageTransitionsPager: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_pager_key", true)
 
     val pageTransitionsWebtoon: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_webtoon_key", true)
+
+    // Komiho: 条页点击滚屏的第二套动画（ComicScreen 手感：五次方减速 + 时长按距离算）。
+    // 与 pageTransitionsWebtoon 互斥（UI 层保证两个开关互关）；默认关闭，保持 v1 行为不变。
+    val pageTransitionsWebtoonV2: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_enable_transitions_webtoon_v2_key",
+        false,
+    )
     // SY <--
 
     val flashOnPageChange: Preference<Boolean> = preferenceStore.getBoolean("pref_reader_flash", false)

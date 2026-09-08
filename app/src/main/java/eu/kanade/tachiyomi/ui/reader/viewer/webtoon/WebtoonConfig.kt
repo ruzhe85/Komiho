@@ -65,6 +65,10 @@ class WebtoonConfig(
     // SY -->
     var usePageTransitions = false
 
+    // Komiho: 条页点击滚屏 v2（ComicScreen 手感）。与 usePageTransitions 互斥，
+    // 由设置 UI 保证；两个都开时以 v2 为准（见 WebtoonViewer.animateScrollBy）。
+    var usePageTransitionsV2 = false
+
     var continuousCropBorders = false
         private set
 
@@ -128,6 +132,10 @@ class WebtoonConfig(
 
         readerPreferences.pageTransitionsWebtoon
             .register({ usePageTransitions = it }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho: v2 动画开关（切到 v2 不需要重排页面，但仍走同一回调保持一致）
+        readerPreferences.pageTransitionsWebtoonV2
+            .register({ usePageTransitionsV2 = it }, { imagePropertyChangedListener?.invoke() })
         // SY <--
 
         // MihonSY -->

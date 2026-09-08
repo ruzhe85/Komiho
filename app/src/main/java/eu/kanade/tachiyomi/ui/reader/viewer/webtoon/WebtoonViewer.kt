@@ -8,6 +8,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.animation.Interpolator
 import android.view.animation.LinearInterpolator
 import androidx.core.animation.doOnEnd
 import androidx.core.app.ActivityCompat
@@ -352,8 +353,9 @@ class WebtoonViewer(
      *
      * @param totalDistance signed scroll distance in pixels (negative = scroll up)
      * @param durationMillis animation duration; <= 0 means jump instantly
+     * @param easeOut true = 翻页动画 v2：五次方减速曲线（ComicScreen 手感）
      */
-    private fun animateScrollBy(totalDistance: Int, durationMillis: Int) {
+    private fun animateScrollBy(totalDistance: Int, durationMillis: Int, easeOut: Boolean = false) {
         // Cancel any running animation first so rapid taps never overlap.
         scrollAnimator?.cancel()
         if (durationMillis <= 0 || totalDistance == 0) {
@@ -363,12 +365,12 @@ class WebtoonViewer(
 
         val animator = ValueAnimator.ofInt(0, totalDistance).apply {
             this.duration = durationMillis.toLong()
-            interpolator = LinearInterpolator()
+            interpolator = if (easeOut) EASE_OUT_QUINT else LinearInterpolator()
 
             addUpdateListener {
                 val animated = it.animatedValue as Int
-                // Scroll by the difference since the last frame: this yields a
-                // constant per-frame delta thanks to the linear interpolator.
+                // Scroll by the difference since the last frame: v1（线性）得到恒定
+                // 每帧位移；v2 由插值器给出五次方减速的每帧位移（先快后慢）。
                 val delta = animated - lastAnimatedValue
                 lastAnimatedValue = animated
                 if (delta != 0) {
@@ -391,11 +393,32 @@ class WebtoonViewer(
     }
 
     /**
+     * Komiho 翻页动画 v2：时长按滚动距离算（同 ComicScreen）——
+     * duration = (|距离| / 可视高度 + 1) × 300ms，封顶 2000ms。
+     * 整屏（屏高 − 23dp peek）约 590ms，半屏约 450ms：距离越长越慢，而不是固定值。
+     */
+    private fun computeEaseOutDuration(totalDistance: Int): Int {
+        val heightPx = if (recycler.height > 0) {
+            recycler.height
+        } else {
+            activity.resources.displayMetrics.heightPixels
+        }.coerceAtLeast(1)
+        val screens = kotlin.math.abs(totalDistance).toFloat() / heightPx
+        return ((screens + 1f) * EASE_OUT_DURATION_PER_SCREEN_MS)
+            .toLong()
+            .coerceAtMost(EASE_OUT_DURATION_MAX_MS)
+            .toInt()
+    }
+
+    /**
      * Scrolls up by [scrollDistance].
      */
     private fun scrollUp() {
-        if (config.usePageTransitions && config.tapScrollDurationMillis > 0) {
-            animateScrollBy(-scrollDistance, config.tapScrollDurationMillis)
+        // Komiho: v1（匀速，固定时长）/ v2（五次方减速，时长按距离算）互斥，v2 优先。
+        val useV2 = config.usePageTransitionsV2
+        if (useV2 || config.usePageTransitions) {
+            val duration = if (useV2) computeEaseOutDuration(-scrollDistance) else config.tapScrollDurationMillis
+            animateScrollBy(-scrollDistance, duration, easeOut = useV2)
         } else {
             recycler.scrollBy(0, -scrollDistance)
         }
@@ -423,7 +446,8 @@ class WebtoonViewer(
                 val position = adapter.items.indexOf(currentPage)
                 val nextItem = adapter.items.getOrNull(position + 1)
                 if (nextItem is ReaderPage) {
-                    if (config.usePageTransitions) {
+                    // v2 同样走平滑滚动（这条路径是整页对齐，曲线由系统 smooth scroll 决定）
+                    if (config.usePageTransitions || config.usePageTransitionsV2) {
                         recycler.smoothScrollToPosition(position + 1)
                     } else {
                         recycler.scrollToPosition(position + 1)
@@ -437,8 +461,10 @@ class WebtoonViewer(
 
     private fun scrollDownBy() {
         // SY <--
-        if (config.usePageTransitions && config.tapScrollDurationMillis > 0) {
-            animateScrollBy(scrollDistance, config.tapScrollDurationMillis)
+        val useV2 = config.usePageTransitionsV2
+        if (useV2 || config.usePageTransitions) {
+            val duration = if (useV2) computeEaseOutDuration(scrollDistance) else config.tapScrollDurationMillis
+            animateScrollBy(scrollDistance, duration, easeOut = useV2)
         } else {
             recycler.scrollBy(0, scrollDistance)
         }
@@ -511,3 +537,15 @@ private val RECYCLER_VIEW_CACHE_SIZE = if (Build.VERSION.SDK_INT >= Build.VERSIO
 // preset, mirroring ComicScreen's set_menu_pagekey_offset default (23dp). A sliver of
 // the next page stays visible so each tap feels like one full screen changed.
 private const val TAP_SCROLL_PEEK_MARGIN_DP = 23f
+
+// Komiho 翻页动画 v2：五次方减速曲线 (t-1)^5 + 1（等价于 1-(1-t)^5），与 ComicScreen
+// 用的 RecyclerView 默认 ViewFlinger 插值器一致——起步快（前 1/4 时间走完 3/4 路程）、
+// 长尾减速、无 overshoot 无回弹。
+private val EASE_OUT_QUINT = Interpolator { t ->
+    val f = t - 1
+    f * f * f * f * f + 1f
+}
+
+// v2 时长系数：每多滚一屏增加 300ms（(距离/屏高 + 1) × 300），上限 2000ms。
+private const val EASE_OUT_DURATION_PER_SCREEN_MS = 300f
+private const val EASE_OUT_DURATION_MAX_MS = 2000L

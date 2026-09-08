@@ -319,6 +319,11 @@
     <string name="reader_bottom_buttons_summary">Customize what buttons appear at the bottom of the reader</string>
     <string name="pref_smooth_scroll">Smooth Auto Scroll</string>
 
+    <!-- Komiho: second page-transition animation for webtoon tap scroll (ComicScreen feel:
+         quintic ease-out + duration derived from scroll distance). Mutually exclusive with pref_page_transitions. -->
+    <string name="pref_page_transitions_v2">Page transitions v2</string>
+    <string name="pref_page_transitions_v2_summary">Ease-out scroll with duration based on distance (ComicScreen style). Turns off "Page transitions".</string>
+
     <!-- Reader -->
     <!-- Reader Actions -->
     <string name="eh_autoscroll">Autoscroll</string>

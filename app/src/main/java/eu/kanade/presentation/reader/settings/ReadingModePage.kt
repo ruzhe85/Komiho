@@ -268,15 +268,22 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
         }
     }
 
+    // Komiho: 两代翻页动画互斥，先取状态，供时长滑条显隐与两个开关互关使用。
+    val pageTransitionsWebtoon by screenModel.preferences.pageTransitionsWebtoon.collectAsState()
+    val pageTransitionsWebtoonV2 by screenModel.preferences.pageTransitionsWebtoonV2.collectAsState()
+
     val webtoonTapScrollDuration by screenModel.preferences.webtoonTapScrollDuration.collectAsState()
-    SliderItem(
-        value = webtoonTapScrollDuration,
-        valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
-        label = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
-        valueString = "${webtoonTapScrollDuration}ms",
-        onChange = { screenModel.preferences.webtoonTapScrollDuration.set(it) },
-        pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-    )
+    // v2 的时长按滚动距离自动算，固定时长滑条对它无效 —— 开启 v2 时隐藏，避免改了没效果。
+    if (!pageTransitionsWebtoonV2) {
+        SliderItem(
+            value = webtoonTapScrollDuration,
+            valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
+            label = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
+            valueString = "${webtoonTapScrollDuration}ms",
+            onChange = { screenModel.preferences.webtoonTapScrollDuration.set(it) },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+    }
 
     CheckboxItem(
         label = stringResource(MR.strings.pref_webtoon_original_resolution),
@@ -307,9 +314,25 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
         pref = screenModel.preferences.smoothAutoScroll,
     )
 
+    // Komiho: v1 / v2 互斥 —— 勾一个自动取消另一个（v1 匀速固定时长，v2 五次方减速 + 时长按距离算）。
     CheckboxItem(
         label = stringResource(MR.strings.pref_page_transitions),
-        pref = screenModel.preferences.pageTransitionsWebtoon,
+        checked = pageTransitionsWebtoon,
+        onClick = {
+            val next = !pageTransitionsWebtoon
+            screenModel.preferences.pageTransitionsWebtoon.set(next)
+            if (next) screenModel.preferences.pageTransitionsWebtoonV2.set(false)
+        },
+    )
+
+    CheckboxItem(
+        label = stringResource(SYMR.strings.pref_page_transitions_v2),
+        checked = pageTransitionsWebtoonV2,
+        onClick = {
+            val next = !pageTransitionsWebtoonV2
+            screenModel.preferences.pageTransitionsWebtoonV2.set(next)
+            if (next) screenModel.preferences.pageTransitionsWebtoon.set(false)
+        },
     )
     // SY <--
 
