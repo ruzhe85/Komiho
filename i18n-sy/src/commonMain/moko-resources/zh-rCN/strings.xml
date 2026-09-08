@@ -238,6 +238,10 @@
     <string name="reader_bottom_buttons">阅读器底部按钮</string>
     <string name="reader_bottom_buttons_summary">自定义显示在阅读器底部的按钮</string>
     <string name="pref_smooth_scroll">平滑自动翻页</string>
+
+    <!-- Komiho: 条页点击滚屏的第二套动画（ComicScreen 手感：五次方减速 + 时长按距离算），与「翻页动画」互斥 -->
+    <string name="pref_page_transitions_v2">翻页动画 v2</string>
+    <string name="pref_page_transitions_v2_summary">减速滚动，时长按滚动距离自动计算（ComicScreen 手感），与「翻页动画」互斥。开启后时长滑条不再生效。</string>
     <!-- Reader -->
     <!-- Reader Actions -->
     <string name="eh_autoscroll">自动翻页</string>

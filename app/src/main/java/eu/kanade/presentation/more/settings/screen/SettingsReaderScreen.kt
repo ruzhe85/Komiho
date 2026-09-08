@@ -359,10 +359,11 @@ object SettingsReaderScreen : SearchableSettings {
         val rotateToFit by rotateToFitPref.collectAsState()
         val webtoonSidePadding by webtoonSidePaddingPref.collectAsState()
         val webtoonTapScrollDuration by readerPreferences.webtoonTapScrollDuration.collectAsState()
+        val pageTransitionsWebtoonV2 by readerPreferences.pageTransitionsWebtoonV2.collectAsState()
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.webtoon_viewer),
-            preferenceItems = listOf(
+            preferenceItems = listOfNotNull(
                 Preference.PreferenceItem.ListPreference(
                     preference = navModePref,
                     entries = ReaderPreferences.TapZones
@@ -378,13 +379,18 @@ object SettingsReaderScreen : SearchableSettings {
                         .toMap(),
                     title = stringResource(MR.strings.pref_webtoon_tap_scroll_distance),
                 ),
-                Preference.PreferenceItem.SliderPreference(
-                    value = webtoonTapScrollDuration,
-                    valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
-                    title = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
-                    valueString = "${webtoonTapScrollDuration}ms",
-                    onValueChanged = { readerPreferences.webtoonTapScrollDuration.set(it) },
-                ),
+                // Komiho: v2 的时长按滚动距离自动算，固定时长滑条对它无效 —— 开启 v2 时隐藏
+                if (!pageTransitionsWebtoonV2) {
+                    Preference.PreferenceItem.SliderPreference(
+                        value = webtoonTapScrollDuration,
+                        valueRange = ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MIN..ReaderPreferences.WEBTOON_TAP_SCROLL_DURATION_MAX,
+                        title = stringResource(MR.strings.pref_webtoon_tap_scroll_duration),
+                        valueString = "${webtoonTapScrollDuration}ms",
+                        onValueChanged = { readerPreferences.webtoonTapScrollDuration.set(it) },
+                    )
+                } else {
+                    null
+                },
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.webtoonOriginalSize,
                     title = stringResource(MR.strings.pref_webtoon_original_resolution),
@@ -461,9 +467,23 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_webtoon_disable_zoom_out),
                 ),
                 // SY -->
+                // Komiho: v1 / v2 互斥 —— 打开一个自动关掉另一个
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.pageTransitionsWebtoon,
                     title = stringResource(MR.strings.pref_page_transitions),
+                    onValueChanged = { enabled ->
+                        if (enabled) readerPreferences.pageTransitionsWebtoonV2.set(false)
+                        true
+                    },
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.pageTransitionsWebtoonV2,
+                    title = stringResource(SYMR.strings.pref_page_transitions_v2),
+                    subtitle = stringResource(SYMR.strings.pref_page_transitions_v2_summary),
+                    onValueChanged = { enabled ->
+                        if (enabled) readerPreferences.pageTransitionsWebtoon.set(false)
+                        true
+                    },
                 ),
                 // SY <--
             ),
