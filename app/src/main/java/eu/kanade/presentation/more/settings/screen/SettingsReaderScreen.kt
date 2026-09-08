@@ -485,6 +485,14 @@ object SettingsReaderScreen : SearchableSettings {
                         true
                     },
                 ),
+                // v2 速度档位（每屏基准时长，越小越快）——v2 关闭时置灰
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.pageTransitionsV2Speed,
+                    entries = ReaderPreferences.PageTransitionsV2Speeds.associateWith { "$it ms" },
+                    title = stringResource(SYMR.strings.pref_page_transitions_v2_speed),
+                    subtitle = stringResource(SYMR.strings.pref_page_transitions_v2_speed_summary),
+                    enabled = pageTransitionsWebtoonV2,
+                ),
                 // SY <--
             ),
         )

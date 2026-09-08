@@ -334,6 +334,20 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
             if (next) screenModel.preferences.pageTransitionsWebtoon.set(false)
         },
     )
+
+    // v2 速度档位（每屏基准时长，越小越快）——只在 v2 开启时显示
+    if (pageTransitionsWebtoonV2) {
+        val pageTransitionsV2Speed by screenModel.preferences.pageTransitionsV2Speed.collectAsState()
+        SettingsChipRow(SYMR.strings.pref_page_transitions_v2_speed) {
+            ReaderPreferences.PageTransitionsV2Speeds.map { speed ->
+                FilterChip(
+                    selected = pageTransitionsV2Speed == speed,
+                    onClick = { screenModel.preferences.pageTransitionsV2Speed.set(speed) },
+                    label = { Text("${speed}ms") },
+                )
+            }
+        }
+    }
     // SY <--
 
     val dualPageSplitWebtoon by screenModel.preferences.dualPageSplitWebtoon.collectAsState()

@@ -69,6 +69,10 @@ class WebtoonConfig(
     // 由设置 UI 保证；两个都开时以 v2 为准（见 WebtoonViewer.animateScrollBy）。
     var usePageTransitionsV2 = false
 
+    // v2 速度档位 = 每屏基准时长（ms，越小越快）
+    var pageTransitionsV2SpeedMs: Int = readerPreferences.pageTransitionsV2Speed.get()
+        private set
+
     var continuousCropBorders = false
         private set
 
@@ -136,6 +140,15 @@ class WebtoonConfig(
         // Komiho: v2 动画开关（切到 v2 不需要重排页面，但仍走同一回调保持一致）
         readerPreferences.pageTransitionsWebtoonV2
             .register({ usePageTransitionsV2 = it }, { imagePropertyChangedListener?.invoke() })
+
+        readerPreferences.pageTransitionsV2Speed
+            .register(
+                { speed ->
+                    pageTransitionsV2SpeedMs = ReaderPreferences.PageTransitionsV2Speeds
+                        .firstOrNull { it == speed }
+                        ?: ReaderPreferences.PAGE_TRANSITIONS_V2_SPEED_DEFAULT
+                },
+            )
         // SY <--
 
         // MihonSY -->

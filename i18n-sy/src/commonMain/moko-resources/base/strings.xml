@@ -322,7 +322,11 @@
     <!-- Komiho: second page-transition animation for webtoon tap scroll (ComicScreen feel:
          quintic ease-out + duration derived from scroll distance). Mutually exclusive with pref_page_transitions. -->
     <string name="pref_page_transitions_v2">Page transitions v2</string>
-    <string name="pref_page_transitions_v2_summary">Ease-out scroll with duration based on distance (ComicScreen style). Turns off "Page transitions".</string>
+    <string name="pref_page_transitions_v2_summary">Ease-out scroll, duration based on distance. Turns off "Page transitions".</string>
+
+    <!-- Komiho: v2 speed = base duration per screen in ms (lower is faster) -->
+    <string name="pref_page_transitions_v2_speed">Page transitions v2 speed</string>
+    <string name="pref_page_transitions_v2_speed_summary">Base ms per screen (lower is faster) · current: %s</string>
 
     <!-- Reader -->
     <!-- Reader Actions -->
