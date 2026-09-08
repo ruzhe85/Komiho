@@ -55,6 +55,10 @@ class WebtoonRecyclerView @JvmOverloads constructor(
     private var isManuallyScrolling = false
     private var tapDuringManualScroll = false
 
+    // Komiho: 已即时处理过的按下时间（downTime）。GestureDetector 的
+    // onSingleTapConfirmed 约 300ms 后还会再来一次，用它跳过，避免一次点击翻两屏。
+    private val immediateTapDownTimes = HashSet<Long>()
+
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         halfWidth = MeasureSpec.getSize(widthSpec) / 2
         halfHeight = MeasureSpec.getSize(heightSpec) / 2
@@ -230,6 +234,10 @@ class WebtoonRecyclerView @JvmOverloads constructor(
     inner class GestureListener : GestureDetectorWithLongTap.Listener() {
 
         override fun onSingleTapConfirmed(ev: MotionEvent): Boolean {
+            // 已在 ACTION_UP 即时处理过的点击不再重复触发（即时判定见 Detector.onTouchEvent）
+            if (immediateTapDownTimes.remove(ev.downTime)) {
+                return false
+            }
             if (!tapDuringManualScroll) {
                 tapListener?.invoke(ev)
             }
@@ -283,6 +291,10 @@ class WebtoonRecyclerView @JvmOverloads constructor(
                     scrollPointerId = ev.getPointerId(0)
                     downX = (ev.x + 0.5f).toInt()
                     downY = (ev.y + 0.5f).toInt()
+                    // 防止集合无限增长（正常情况 300ms 后就会被引擎消费掉）
+                    if (immediateTapDownTimes.size > 16) {
+                        immediateTapDownTimes.clear()
+                    }
                 }
                 MotionEvent.ACTION_POINTER_DOWN -> {
                     scrollPointerId = ev.getPointerId(actionIndex)
@@ -334,6 +346,20 @@ class WebtoonRecyclerView @JvmOverloads constructor(
                     }
                 }
                 MotionEvent.ACTION_UP -> {
+                    // Komiho: 点击即时翻页（对齐 ComicScreen）——GestureDetector 的
+                    // onSingleTapConfirmed 要等双击判定超时（约 300ms）才回调，点击会有
+                    // 肉眼可见的停顿。这里在抬手时自行判定：按压够短且几乎没位移就立刻翻页，
+                    // 并记下 downTime 让 300ms 后的 confirmed 跳过。
+                    if (!isDoubleTapping && !isQuickScaling && !isZoomDragging && !tapDuringManualScroll) {
+                        val pressDuration = ev.eventTime - ev.downTime
+                        if (pressDuration in 0..IMMEDIATE_TAP_MAX_DURATION_MS &&
+                            abs(ev.x - downX) < width / IMMEDIATE_TAP_MOVE_DIVISOR &&
+                            abs(ev.y - downY) < height / IMMEDIATE_TAP_MOVE_DIVISOR
+                        ) {
+                            immediateTapDownTimes.add(ev.downTime)
+                            tapListener?.invoke(ev)
+                        }
+                    }
                     if (isDoubleTapping && !isQuickScaling) {
                         listener.onDoubleTapConfirmed(ev)
                     }
@@ -353,6 +379,12 @@ class WebtoonRecyclerView @JvmOverloads constructor(
 }
 
 private const val ANIMATOR_DURATION_TIME = 200
+
+// Komiho: 即时点击翻页的判定阈值（取自 ComicScreen 的 ImgActivity）——
+// 按压时长上限 420ms，允许的最大位移为视区的 1/20（5%），超出即认为是滑动/长按，
+// 交回 GestureDetector 处理，避免误翻。
+private const val IMMEDIATE_TAP_MAX_DURATION_MS = 420L
+private const val IMMEDIATE_TAP_MOVE_DIVISOR = 20
 private const val MIN_RATE = 0.5f
 private const val DEFAULT_RATE = 1f
 private const val MAX_SCALE_RATE = 3f
