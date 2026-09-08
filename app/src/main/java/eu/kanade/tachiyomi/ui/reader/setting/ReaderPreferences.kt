@@ -28,6 +28,13 @@ class ReaderPreferences(
         "pref_enable_transitions_webtoon_v2_key",
         false,
     )
+
+    // Komiho: v2 的速度档位 = 每屏基准时长（ms，越小越快）。
+    // ComicScreen 反编译得出的基准 300 实测明显偏拖，故做成四档可调。
+    val pageTransitionsV2Speed: Preference<Int> = preferenceStore.getInt(
+        "pref_page_transitions_v2_speed",
+        PAGE_TRANSITIONS_V2_SPEED_DEFAULT,
+    )
     // SY <--
 
     val flashOnPageChange: Preference<Boolean> = preferenceStore.getBoolean("pref_reader_flash", false)
@@ -318,6 +325,11 @@ class ReaderPreferences(
         )
 
         val WebtoonTapScrollFractions = floatArrayOf(0.5f, 0.75f, 1.0f)
+
+        // Komiho 翻页动画 v2 的速度档位：每屏基准时长（ms），越小越快。
+        // 实际时长 = (|距离| / 可视高度 + 1) × 该值，因此同一档位下距离越长越慢。
+        val PageTransitionsV2Speeds = listOf(50, 100, 150, 200)
+        const val PAGE_TRANSITIONS_V2_SPEED_DEFAULT = 100
 
         // MihonSY image enhancement -->
         // index: 0 Off / 1 Anime4K (disabled) / 2 Lanczos3 / 3 Catmull-Rom / 4 Spline36 (disabled)

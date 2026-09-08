@@ -393,10 +393,10 @@ class WebtoonViewer(
     }
 
     /**
-     * Komiho 翻页动画 v2：时长按滚动距离算（同 ComicScreen 的公式，基数调到 200）——
-     * duration = (|距离| / 可视高度 + 1) × 200ms，封顶 2000ms。
-     * 整屏（屏高 − 23dp peek）约 394ms、3/4 屏约 350ms、半屏约 300ms：距离越长越慢，
-     * 而不是像 v1 那样固定值。
+     * Komiho 翻页动画 v2：时长按滚动距离算——
+     * duration = (|距离| / 可视高度 + 1) × 速度档位（50/100/150/200ms），封顶 2000ms。
+     * 以默认 100ms 档为例：整屏（屏高 − 23dp peek）约 197ms、3/4 屏约 175ms、
+     * 半屏约 150ms。距离越长越慢，档位越小越快。
      */
     private fun computeEaseOutDuration(totalDistance: Int): Int {
         val heightPx = if (recycler.height > 0) {
@@ -405,7 +405,7 @@ class WebtoonViewer(
             activity.resources.displayMetrics.heightPixels
         }.coerceAtLeast(1)
         val screens = kotlin.math.abs(totalDistance).toFloat() / heightPx
-        return ((screens + 1f) * EASE_OUT_DURATION_PER_SCREEN_MS)
+        return ((screens + 1f) * config.pageTransitionsV2SpeedMs)
             .toLong()
             .coerceAtMost(EASE_OUT_DURATION_MAX_MS)
             .toInt()
@@ -548,8 +548,6 @@ private val EASE_OUT_CUBIC = Interpolator { t ->
     f * f * f + 1f
 }
 
-// v2 时长系数：每多滚一屏增加 200ms（(距离/屏高 + 1) × 200），上限 2000ms。
-// ComicScreen 原值是 300（整屏约 590ms），实测偏慢，故降到 200：3/4 屏约 350ms、
-// 整屏约 394ms，接近 v1 默认 250ms 的节奏又保留距离感。
-private const val EASE_OUT_DURATION_PER_SCREEN_MS = 200f
+// v2 时长上限：无论距离多长都不超过 2000ms。
+// 每屏基准时长由「翻页动画 v2 速度」设置项决定（50/100/150/200），默认 100。
 private const val EASE_OUT_DURATION_MAX_MS = 2000L
