@@ -353,7 +353,7 @@ class WebtoonViewer(
      *
      * @param totalDistance signed scroll distance in pixels (negative = scroll up)
      * @param durationMillis animation duration; <= 0 means jump instantly
-     * @param easeOut true = 翻页动画 v2：五次方减速曲线（ComicScreen 手感）
+     * @param easeOut true = 翻页动画 v2：三次方减速曲线（起步快、尾段短）
      */
     private fun animateScrollBy(totalDistance: Int, durationMillis: Int, easeOut: Boolean = false) {
         // Cancel any running animation first so rapid taps never overlap.
@@ -365,7 +365,7 @@ class WebtoonViewer(
 
         val animator = ValueAnimator.ofInt(0, totalDistance).apply {
             this.duration = durationMillis.toLong()
-            interpolator = if (easeOut) EASE_OUT_QUINT else LinearInterpolator()
+            interpolator = if (easeOut) EASE_OUT_CUBIC else LinearInterpolator()
 
             addUpdateListener {
                 val animated = it.animatedValue as Int
@@ -393,9 +393,10 @@ class WebtoonViewer(
     }
 
     /**
-     * Komiho 翻页动画 v2：时长按滚动距离算（同 ComicScreen）——
-     * duration = (|距离| / 可视高度 + 1) × 300ms，封顶 2000ms。
-     * 整屏（屏高 − 23dp peek）约 590ms，半屏约 450ms：距离越长越慢，而不是固定值。
+     * Komiho 翻页动画 v2：时长按滚动距离算（同 ComicScreen 的公式，基数调到 200）——
+     * duration = (|距离| / 可视高度 + 1) × 200ms，封顶 2000ms。
+     * 整屏（屏高 − 23dp peek）约 394ms、3/4 屏约 350ms、半屏约 300ms：距离越长越慢，
+     * 而不是像 v1 那样固定值。
      */
     private fun computeEaseOutDuration(totalDistance: Int): Int {
         val heightPx = if (recycler.height > 0) {
@@ -538,14 +539,17 @@ private val RECYCLER_VIEW_CACHE_SIZE = if (Build.VERSION.SDK_INT >= Build.VERSIO
 // the next page stays visible so each tap feels like one full screen changed.
 private const val TAP_SCROLL_PEEK_MARGIN_DP = 23f
 
-// Komiho 翻页动画 v2：五次方减速曲线 (t-1)^5 + 1（等价于 1-(1-t)^5），与 ComicScreen
-// 用的 RecyclerView 默认 ViewFlinger 插值器一致——起步快（前 1/4 时间走完 3/4 路程）、
-// 长尾减速、无 overshoot 无回弹。
-private val EASE_OUT_QUINT = Interpolator { t ->
+// Komiho 翻页动画 v2 的曲线：三次方减速 (t-1)^3 + 1（等价于 1-(1-t)^3）。
+// ComicScreen / RecyclerView 默认用的是五次方（(t-1)^5+1），但五次方在 50% 时间就
+// 走完 97% 路程，后半程几乎看不见移动却在耗时间，主观很拖。三次方 50% 时间走完
+// 87.5%，尾巴短得多，点起来更脆快，同时保留"快起慢停"的减速手感。
+private val EASE_OUT_CUBIC = Interpolator { t ->
     val f = t - 1
-    f * f * f * f * f + 1f
+    f * f * f + 1f
 }
 
-// v2 时长系数：每多滚一屏增加 300ms（(距离/屏高 + 1) × 300），上限 2000ms。
-private const val EASE_OUT_DURATION_PER_SCREEN_MS = 300f
+// v2 时长系数：每多滚一屏增加 200ms（(距离/屏高 + 1) × 200），上限 2000ms。
+// ComicScreen 原值是 300（整屏约 590ms），实测偏慢，故降到 200：3/4 屏约 350ms、
+// 整屏约 394ms，接近 v1 默认 250ms 的节奏又保留距离感。
+private const val EASE_OUT_DURATION_PER_SCREEN_MS = 200f
 private const val EASE_OUT_DURATION_MAX_MS = 2000L
