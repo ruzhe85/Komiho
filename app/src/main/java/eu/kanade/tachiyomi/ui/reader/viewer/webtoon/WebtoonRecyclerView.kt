@@ -52,6 +52,10 @@ class WebtoonRecyclerView @JvmOverloads constructor(
     var tapListener: ((MotionEvent) -> Unit)? = null
     var longTapListener: ((MotionEvent) -> Boolean)? = null
 
+    // Komiho: 双击缩放回滚钩子——第二击按下（onDoubleTap）时回调，由 viewer 撤销
+    // 第一击的即时翻页，避免「先滚动再放大」。仅 doubleTapZoom 开启时触发。
+    var doubleTapUndo: (() -> Unit)? = null
+
     private var isManuallyScrolling = false
     private var tapDuringManualScroll = false
 
@@ -246,6 +250,11 @@ class WebtoonRecyclerView @JvmOverloads constructor(
 
         override fun onDoubleTap(ev: MotionEvent): Boolean {
             detector.isDoubleTapping = true
+            // Komiho: 双击缩放——第二击按下的瞬间先撤销第一击的即时翻页，
+            // 再等 ACTION_UP 的 onDoubleTapConfirmed 放大，观感即「直接放大」
+            if (doubleTapZoom) {
+                doubleTapUndo?.invoke()
+            }
             return false
         }
 

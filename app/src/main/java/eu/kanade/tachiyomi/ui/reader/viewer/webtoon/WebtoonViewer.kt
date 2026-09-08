@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 import android.graphics.PointF
 import android.animation.ValueAnimator
 import android.os.Build
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -100,6 +101,12 @@ class WebtoonViewer(
      */
     private var scrollAnimator: ValueAnimator? = null
 
+    // Komiho: 即时翻页的双击回滚——第一击翻页前记录第一可见项位置，第二击按下
+    // （onDoubleTap → recycler.doubleTapUndo）时恢复到该位置再放大，观感即
+    // 「直接放大」而不是先滚一屏。MENU 区点击不记录（见 tapListener）。
+    private var flipRollback: (() -> Unit)? = null
+    private var flipRollbackAt = 0L
+
     /**
      * Layout manager of the recycler view.
      */
@@ -166,9 +173,27 @@ class WebtoonViewer(
             )
             when (config.navigator.getAction(pos)) {
                 NavigationRegion.MENU -> activity.toggleMenu()
-                NavigationRegion.NEXT, NavigationRegion.RIGHT -> scrollDown()
-                NavigationRegion.PREV, NavigationRegion.LEFT -> scrollUp()
+                NavigationRegion.NEXT, NavigationRegion.RIGHT -> {
+                    markFlipForRollback()
+                    scrollDown()
+                }
+                NavigationRegion.PREV, NavigationRegion.LEFT -> {
+                    markFlipForRollback()
+                    scrollUp()
+                }
             }
+        }
+        // Komiho: 双击缩放时撤销第一击的即时翻页——取消翻页动画并把列表瞬间
+        // 恢复到翻页前位置，随后 ACTION_UP 的 onDoubleTapConfirmed 正常放大。
+        recycler.doubleTapUndo = f@{
+            val rollback = flipRollback
+            flipRollback = null
+            // 只回滚双击窗口内刚发生的翻页；陈旧快照（间隔过久、三击连按）直接丢弃
+            if (rollback == null || SystemClock.uptimeMillis() - flipRollbackAt > DOUBLE_TAP_ROLLBACK_WINDOW_MS) {
+                return@f
+            }
+            scrollAnimator?.cancel()
+            rollback()
         }
         recycler.longTapListener = f@{ event ->
             if (activity.viewModel.state.value.menuVisible || config.longTapEnabled) {
@@ -412,6 +437,20 @@ class WebtoonViewer(
     }
 
     /**
+     * Komiho: 翻页前记录第一可见项位置及偏移，供双击缩放时回滚（见 doubleTapUndo）。
+     */
+    private fun markFlipForRollback() {
+        val position = layoutManager.findFirstVisibleItemPosition()
+        if (position < 0) return
+        val offset = layoutManager.findViewByPosition(position)?.top ?: 0
+        flipRollback = {
+            layoutManager.stopScroll()
+            layoutManager.scrollToPositionWithOffset(position, offset)
+        }
+        flipRollbackAt = SystemClock.uptimeMillis()
+    }
+
+    /**
      * Scrolls up by [scrollDistance].
      */
     private fun scrollUp() {
@@ -551,3 +590,8 @@ private val EASE_OUT_CUBIC = Interpolator { t ->
 // v2 时长上限：无论距离多长都不超过 2000ms。
 // 每屏基准时长由「翻页动画 v2 速度」设置项决定（50/100/150/200），默认 100。
 private const val EASE_OUT_DURATION_MAX_MS = 2000L
+
+// Komiho: 双击回滚窗口——GestureDetector 的双击判定窗口是 DOUBLE_TAP_TIMEOUT
+// （300ms），双击的第二击按下必然落在此窗口内；取 350ms 留余量，超过即视为
+// 陈旧快照丢弃（如间隔较久的后续双击，不再回滚第一次的翻页）。
+private const val DOUBLE_TAP_ROLLBACK_WINDOW_MS = 350L
