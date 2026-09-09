@@ -25,6 +25,11 @@
     <string name="dashboard_komga_hint">点按进入 Komga 首页</string>
     <string name="dashboard_no_history">尚未有阅读记录</string>
     <string name="dashboard_enter_source">进入来源</string>
+    <string name="dashboard_recent_page">第 %1$d 页</string>
+    <string name="dashboard_recent_from_start">从头阅读</string>
+    <string name="settings_group_dashboard">聚合页</string>
+    <string name="settings_dashboard_recent">每个来源显示最近</string>
+    <string name="settings_dashboard_recent_summary">%1$d 条最近阅读记录</string>
     <string name="tab_library">库</string>
     <string name="tab_lists">列表</string>
     <string name="tab_downloads">下载</string>

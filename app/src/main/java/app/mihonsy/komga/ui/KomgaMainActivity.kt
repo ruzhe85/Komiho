@@ -396,14 +396,14 @@ private fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, local
 
 /**
  * 聚合页是否展示该来源卡片——管理页「显示」开关为开才显示（[SourceVisibilityStore]）。
- * - 本地：唯一内置来源，恒显示（管理页无编辑图标，不给开关）；
+ * - 本地：内置唯一来源，也可隐藏（管理页本地卡右侧的眼睛开关）；
  * - Komga：聚合页只有一张卡，管理页按连接列，故任一条连接可见即显示、全关才隐藏；
  * - WebDAV / SMB：按连接 id 的开关决定。
  *
  * 注意：只过滤聚合页卡片，**不动**顶栏来源菜单——隐藏的来源仍可在菜单里切过去。
  */
 private fun SourceEntry.visibleOnDashboard(prefs: KomgaPreferences): Boolean = when (id) {
-    SOURCE_ID_LOCAL -> true
+    SOURCE_ID_LOCAL -> SourceVisibilityStore.isVisible(SourceVisibilityStore.ID_LOCAL)
     SOURCE_ID_KOMGA -> prefs.connections().let { conns ->
         conns.isEmpty() || conns.any { SourceVisibilityStore.isVisible(SourceVisibilityStore.ID_KOMGA_CONN_PREFIX + it.id) }
     }
@@ -4039,6 +4039,8 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
     var appThemeSel by remember { mutableStateOf(appThemeEnum) }
     var amoledSel by remember { mutableStateOf(prefs.themeDarkAmoled) }
     var showAppLanguage by remember { mutableStateOf(false) }
+    var showDashboardRecent by remember { mutableStateOf(false) }
+    var dashboardRecentSel by remember { mutableIntStateOf(DashboardPreferences.limitValue()) }
 
     val currentLangLabel = when (prefs.appLanguage) {
         "zh-CN" -> composeStringResource(R.string.lang_zh_cn)
@@ -4092,6 +4094,18 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                 onPreferenceClick = { showAppLanguage = true },
             )
         }
+        // SY: 聚合页（来源仪表盘）显示设置——每个来源列出几条最近阅读。
+        item { PreferenceGroupHeader(composeStringResource(R.string.settings_group_dashboard)) }
+        item {
+            TextPreferenceWidget(
+                title = composeStringResource(R.string.settings_dashboard_recent),
+                subtitle = composeStringResource(
+                    R.string.settings_dashboard_recent_summary,
+                    dashboardRecentSel,
+                ),
+                onPreferenceClick = { showDashboardRecent = true },
+            )
+        }
     }
 
     if (showAppLanguage) {
@@ -4129,6 +4143,48 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                         ) {
                             Text(label, modifier = Modifier.weight(1f))
                             if (prefs.appLanguage == tag) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+
+    // SY: 聚合页每个来源显示的最近阅读条数（1/3/5/10）。写进 DashboardPreferences，
+    // 聚合页用 changes() 流直连，改完回去卡片条数立刻变，无需重启。
+    if (showDashboardRecent) {
+        AlertDialog(
+            onDismissRequest = { showDashboardRecent = false },
+            title = { Text(composeStringResource(R.string.settings_dashboard_recent)) },
+            text = {
+                Column {
+                    DashboardPreferences.RECENT_OPTIONS.forEach { count ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    DashboardPreferences.setLimit(count)
+                                    dashboardRecentSel = count
+                                    showDashboardRecent = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = composeStringResource(
+                                    R.string.settings_dashboard_recent_summary,
+                                    count,
+                                ),
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (dashboardRecentSel == count) {
                                 Icon(
                                     imageVector = Icons.Filled.Check,
                                     contentDescription = null,
@@ -6744,25 +6800,47 @@ private data class MergedBook(
 
 /** 历史 tab：按卷（chapterUrl）合并的最近阅读；3-dot 菜单提供「汇聚」与「删除记录」。 */
 // SY --> Komiho: 来源仪表盘（方案 B 启动首页）。
-// 每来源一张卡：类型图标 + 名称 + 阅读摘要。摘要统一取自本地历史库——
-// 本地/WebDAV 记录挂在 LocalSource.ID 下（chapterUrl 以 webdav: 前缀区分归属连接），
-// Komga 记录挂在 KomgaSource.ID 下（阅读器若未写本地历史则回落引导语，进度主体在服务器）。
-// 卡片语义（与展示的「最近阅读」一致）：有最近记录 → 点卡=继续阅读（打开最后一章并恢复到
-// 上次页码，与历史 tab 同口径）；无记录 → 点卡=进入来源。右侧图标按钮恒为「进入来源」。
-// 末尾「添加来源」卡进入来源管理流程。
-private data class SourceCardSummary(
-    val count: Int,
-    val lastTitle: String?,
-    val lastReadAt: Date?,
-    // SY: 续读定位（历史记录主键，直接喂给 ReaderActivity，绕过 ChapterLoader 的已读守卫）
-    val lastMangaId: Long = 0L,
-    val lastChapterId: Long = 0L,
-    val lastChapterName: String? = null,
-    val lastPageRead: Long = 0L,
+// 每来源一张卡：卡片头是来源（名称 + 类型 + 进入来源），下面是最近 N 条阅读记录
+// （N 见 [DashboardPreferences.recentLimit]，默认 3）。每条只给四件事：
+// 名称（书名 · 章节）、进度（页码 / 总页数 + 百分比）、最后阅读时间、续读入口。
+// 旧版的「读过 X 本」已移除——它数的是历史章节数，口径既不是本也不是章，误导。
+//
+// 数据来源：本地/WebDAV/SMB 取本地历史库（按 chapterUrl 去重，取最近一次）；
+// Komga 优先取服务器「进行中」书籍（readProgress.readDate 倒序，与 Web 面板同口径），
+// 不足 N 条再用本地历史补齐。断网/无连接时自然只剩本地记录。
+/**
+ * 解析 Komga 的 readDate（形如 2026-09-08T15:44:41.123456789Z）为毫秒时间戳，失败返回 0。
+ * 只取到秒（尾部小数/时区忽略），不用 java.time 以避免 desugaring 风险。
+ */
+private fun parseKomgaReadDate(raw: String?): Long {
+    if (raw.isNullOrBlank()) return 0L
+    return runCatching {
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(raw)?.time
+    }.getOrNull() ?: 0L
+}
+
+private data class DashboardRecent(
+    /** 续读定位（直接喂给 ReaderActivity，绕过 ChapterLoader 的已读守卫）。 */
+    val mangaId: Long,
+    val chapterId: Long,
+    /** 名称：书名 · 章节/卷名（一行省略）。 */
+    val title: String,
+    /** 0-based 页码（与 ReaderActivity 的 page 参数同口径）。 */
+    val page: Int,
+    /** 总页数，0 = 未知（此时只显示「第 N 页」）。 */
+    val totalPages: Int,
+    /** 最后阅读时间（ms），0 = 未知。 */
+    val readAt: Long,
+    /** 本地历史记录 id：>0 才能提供「删除记录」（服务器条目没有本地记录）。 */
+    val historyId: Long = 0L,
     /** 封面请求体（本地 LocalCoverData / 远程封面缓存文件 / Komga thumbnailUrl），null=占位图标。 */
     val coverModel: Any? = null,
+)
+
+private data class SourceCardSummary(
+    val recents: List<DashboardRecent>,
 ) {
-    val canResume: Boolean get() = lastMangaId > 0L && lastChapterId > 0L
+    val canResume: Boolean get() = recents.isNotEmpty()
 }
 
 @Composable
@@ -6776,15 +6854,33 @@ private fun SourceDashboardPane(
     onResumeReading: (entry: SourceEntry, mangaId: Long, chapterId: Long, page: Int) -> Unit,
 ) {
     val context = LocalContext.current
-    val summaries by produceState<Map<String, SourceCardSummary>>(emptyMap(), entries, refreshTick) {
+    // SY: 每个来源显示几条最近阅读（设置项，Flow 直连——改完立刻生效）。
+    val recentLimit by remember { DashboardPreferences.recentLimit.changes() }
+        .collectAsState(initial = DashboardPreferences.limitValue())
+    val scope = rememberCoroutineScope()
+    // 行内「删除记录」后重算摘要（produceState 的 key）。
+    var deleteTick by remember { mutableIntStateOf(0) }
+    val summaries by produceState<Map<String, SourceCardSummary>>(
+        emptyMap(),
+        entries,
+        refreshTick,
+        recentLimit,
+        deleteTick,
+    ) {
         value = withContext(Dispatchers.IO) {
             class Agg {
-                val urls = mutableSetOf<String>()
+                val items = mutableListOf<LocalHistoryItem>()
                 var last: LocalHistoryItem? = null
                 fun add(item: LocalHistoryItem) {
-                    urls.add(item.chapterUrl)
+                    items.add(item)
                     if (last == null || (item.readAt?.time ?: 0L) > (last?.readAt?.time ?: 0L)) last = item
                 }
+                /** 按卷（chapterUrl）去重取最近一次，再按时间倒序取前 [limit] 条。 */
+                fun recents(limit: Int): List<LocalHistoryItem> =
+                    items.groupBy { it.chapterUrl }
+                        .mapNotNull { (_, recs) -> recs.maxByOrNull { it.readAt?.time ?: 0L } }
+                        .sortedByDescending { it.readAt?.time ?: 0L }
+                        .take(limit)
             }
             val local = Agg()
             val komga = Agg()
@@ -6856,60 +6952,86 @@ private fun SourceDashboardPane(
                     komgaCover = manga.takeIf { !it.thumbnailUrl.isNullOrBlank() }
                 }
             }
+            // SY: 历史记录 → 卡片条目。总页数取阅读器回填的内存备忘（未读过则 0，只显示页码）。
+            val toRecents: (List<LocalHistoryItem>) -> List<DashboardRecent> = { list ->
+                list.map { item ->
+                    val mangaTitle = item.mangaTitle.trim()
+                    val chapterName = item.chapterName.trim()
+                    val title = when {
+                        mangaTitle.isEmpty() -> chapterName
+                        chapterName.isEmpty() || chapterName == mangaTitle -> mangaTitle
+                        else -> "$mangaTitle · $chapterName"
+                    }
+                    DashboardRecent(
+                        mangaId = item.mangaId,
+                        chapterId = item.chapterId,
+                        title = title,
+                        page = item.lastPageRead.toInt(),
+                        totalPages = ChapterPageCountMemo.get(item.chapterUrl),
+                        readAt = item.readAt?.time ?: 0L,
+                        historyId = item.id,
+                        coverModel = coverOf(item),
+                    )
+                }
+            }
             val build: (Agg) -> SourceCardSummary = { agg ->
-                val last = agg.last
-                SourceCardSummary(
-                    count = agg.urls.size,
-                    lastTitle = last?.mangaTitle,
-                    lastReadAt = last?.readAt,
-                    lastMangaId = last?.mangaId ?: 0L,
-                    lastChapterId = last?.chapterId ?: 0L,
-                    lastChapterName = last?.chapterName?.takeIf { it.isNotBlank() },
-                    lastPageRead = last?.lastPageRead ?: 0L,
-                    coverModel = coverOf(last),
-                )
+                SourceCardSummary(toRecents(agg.recents(recentLimit)))
             }
             // Komiho: Komga 卡优先取「服务器最后一次阅读」——readProgress.readDate 最新的
             // 进行中书籍（与 Home 的「继续阅读」同口径）；没有进行中的书 / 断网 / 未连接
             // 时回落到本地历史（与改动前完全一致）。
-            var komgaCard = build(komga).copy(coverModel = komgaCover)
+            // Komga 本地历史行的封面走 coverOf 会拿到 null（Komga url 不进本地封面回退链），
+            // 首条补上按 series 解析出的 Komga 封面，与改动前的卡片封面一致。
+            val komgaLocalRecents = toRecents(komga.recents(recentLimit * 2)).mapIndexed { i, r ->
+                if (i == 0 && r.coverModel == null) r.copy(coverModel = komgaCover) else r
+            }
+            var komgaCard = SourceCardSummary(komgaLocalRecents.take(recentLimit))
             runCatching {
                 val prefs = KomgaPreferences(context.applicationContext)
                 if (prefs.hasConnection()) {
                     val client = KomgaApiClient(prefs.connection())
-                    val book = client.getBooks(
+                    val books = client.getBooks(
                         readStatus = "IN_PROGRESS",
                         sort = "readProgress.readDate,desc",
-                        size = 1,
-                    ).content.firstOrNull()
-                    val seriesId = book?.seriesId
-                    if (book != null && !seriesId.isNullOrBlank()) {
-                        val series = client.getSeriesDetail(seriesId)
-                        val manga = KomgaDbBridge.ensureManga(client, seriesId, series.name)
-                        val chapter = KomgaDbBridge.ensureChapters(client, seriesId, manga.id)
-                            .firstOrNull { it.url == KomgaSource.BOOK_URL_PREFIX + book.id }
-                        val chapterId = chapter?.id
-                        if (chapterId != null) {
-                            // 服务器页号是 1-based（上报时 pageIndex + 1），回本地要减 1
-                            val page = ((book.readProgress?.page ?: 1) - 1).coerceAtLeast(0)
-                            // 服务器 readDate 形如 2026-09-08T15:44:41.123456789Z，
-                            // 只取到秒（尾部小数/时区忽略，避免 java.time 的 desugaring 风险）
-                            val readAt = book.readProgress?.readDate?.let { raw ->
-                                runCatching {
-                                    java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(raw)
-                                }.getOrNull()
-                            }
-                            komgaCard = SourceCardSummary(
-                                count = komga.urls.size,
-                                lastTitle = series.name,
-                                lastReadAt = readAt ?: komgaCard.lastReadAt,
-                                lastMangaId = manga.id,
-                                lastChapterId = chapterId,
-                                lastChapterName = chapter?.name?.takeIf { it.isNotBlank() } ?: book.name,
-                                lastPageRead = page.toLong(),
-                                coverModel = manga.takeIf { !it.thumbnailUrl.isNullOrBlank() } ?: komgaCover,
-                            )
+                        size = recentLimit,
+                    ).content
+                    // 同一系列只解析一次：ensureChapters 会拉整系列书籍，别为同系列多本书重复拉。
+                    val seriesCache = HashMap<String, Triple<String, Manga, List<Chapter>>>()
+                    val serverRecents = mutableListOf<DashboardRecent>()
+                    books.forEach { book ->
+                        val seriesId = book.seriesId
+                        if (seriesId.isNullOrBlank() || serverRecents.size >= recentLimit) return@forEach
+                        val (seriesName, manga, chapters) = seriesCache.getOrPut(seriesId) {
+                            val detail = client.getSeriesDetail(seriesId)
+                            val m = KomgaDbBridge.ensureManga(client, seriesId, detail.name)
+                            Triple(detail.name, m, KomgaDbBridge.ensureChapters(client, seriesId, m.id))
                         }
+                        val chapter = chapters.firstOrNull { it.url == KomgaSource.BOOK_URL_PREFIX + book.id }
+                            ?: return@forEach
+                        val chapterId = chapter.id ?: return@forEach
+                        serverRecents += DashboardRecent(
+                            mangaId = manga.id,
+                            chapterId = chapterId,
+                            title = listOf(seriesName, book.name)
+                                .filter { it.isNotBlank() }
+                                .distinct()
+                                .joinToString(" · "),
+                            // 服务器页号是 1-based（上报时 pageIndex + 1），回本地要减 1
+                            page = ((book.readProgress?.page ?: 1) - 1).coerceAtLeast(0),
+                            totalPages = book.media.pagesCount,
+                            readAt = parseKomgaReadDate(book.readProgress?.readDate),
+                            coverModel = manga.takeIf { !it.thumbnailUrl.isNullOrBlank() },
+                        )
+                    }
+                    if (serverRecents.isNotEmpty()) {
+                        // 服务器「进行中」不足 N 条时用本地历史补齐（同一本按 chapterId 去重），
+                        // 仍按最后阅读时间倒序，保证卡片列表时间单调。
+                        val serverIds = serverRecents.map { it.chapterId }.toHashSet()
+                        komgaCard = SourceCardSummary(
+                            (serverRecents + komgaLocalRecents.filter { it.chapterId !in serverIds })
+                                .sortedByDescending { it.readAt }
+                                .take(recentLimit),
+                        )
                     }
                 }
             }
@@ -6930,18 +7052,16 @@ private fun SourceDashboardPane(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         entries.forEach { entry ->
-            val summary = summaries[entry.id]
+            val recents = summaries[entry.id]?.recents.orEmpty()
             val isCurrent = entry.id == currentSourceId
+            val typeLabel = when (entry.kind) {
+                SourceKind.Komga -> "Komga"
+                SourceKind.WebDav -> "WebDAV"
+                SourceKind.Smb -> "SMB"
+                SourceKind.Local -> composeStringResource(R.string.source_local)
+            }
             Card(
-                modifier = Modifier.fillMaxWidth().clickable {
-                    // SY: 有最近记录 → 继续阅读（恢复到上次页码）；否则 → 进入来源。
-                    val r = summary
-                    if (r != null && r.canResume) {
-                        onResumeReading(entry, r.lastMangaId, r.lastChapterId, r.lastPageRead.toInt())
-                    } else {
-                        onOpenSource(entry)
-                    }
-                },
+                modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
                 colors = CardDefaults.cardColors(
                     containerColor = if (isCurrent) {
@@ -6951,98 +7071,81 @@ private fun SourceDashboardPane(
                     },
                 ),
             ) {
+                // 卡片头 = 来源（名称 + 类型 chip）+ 进入来源按钮。整卡不再可点：点行才是续读。
+                val enterSourceDesc = composeStringResource(R.string.dashboard_enter_source)
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenSource(entry) }
+                        .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // SY: 左侧封面缩略图（回退链与历史行一致；取不到显示占位图标）。
-                    val enterSourceDesc = composeStringResource(R.string.dashboard_enter_source)
-                    val coverModel = summary?.coverModel
+                    Text(
+                        text = entry.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (isCurrent) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                    Spacer(Modifier.width(6.dp))
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.size(48.dp, 64.dp),
-                    ) {
-                        if (coverModel != null) {
-                            SubcomposeAsyncImage(
-                                model = ImageRequest.Builder(context).data(coverModel).build(),
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                                error = {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Filled.Description,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                },
-                            )
+                        color = if (isCurrent) {
+                            MaterialTheme.colorScheme.surface
                         } else {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Filled.Description,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                    Column(Modifier.weight(1f)) {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                    ) {
                         Text(
-                            text = entry.name,
-                            style = MaterialTheme.typography.titleMedium,
+                            text = typeLabel,
+                            style = MaterialTheme.typography.labelSmall,
                             color = if (isCurrent) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
                                 MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                        val typeLabel = when (entry.kind) {
-                            SourceKind.Komga -> "Komga"
-                            SourceKind.WebDav -> "WebDAV"
-                            SourceKind.Smb -> "SMB"
-                            SourceKind.Local -> composeStringResource(R.string.source_local)
-                        }
-                        val countText = summary?.takeIf { it.count > 0 }?.let {
-                            composeStringResource(R.string.dashboard_summary, it.count)
-                        } ?: when (entry.kind) {
-                            SourceKind.Komga -> composeStringResource(R.string.dashboard_komga_hint)
-                            else -> composeStringResource(R.string.dashboard_no_history)
-                        }
-                        Text(
-                            text = "$typeLabel · $countText",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isCurrent) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                         )
-                        summary?.lastTitle?.takeIf { it.isNotBlank() }?.let { title ->
-                            val ago = summary.lastReadAt?.let {
-                                DateUtils.getRelativeTimeSpanString(it.time).toString()
-                            }
-                            // SY: 续读目标是「章节」——把章节名也带上（散图目录章=目录名/文件名）。
-                            val chapter = summary.lastChapterName?.takeIf { it.isNotBlank() && it != title }
-                            val line = listOfNotNull(title, chapter, ago).joinToString(" · ")
-                            Text(
-                                text = if (ago.isNullOrBlank()) line else "最近：$line",
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
                     }
+                    Spacer(Modifier.weight(1f))
                     // SY: 右侧按钮恒为「进入来源」（切到该来源的内容首页，保留最后浏览目录记忆）。
-                    IconButton(onClick = { onOpenSource(entry) }) {
+                    IconButton(onClick = { onOpenSource(entry) }, modifier = Modifier.size(36.dp)) {
                         Icon(
                             imageVector = Icons.Filled.FolderOpen,
                             contentDescription = enterSourceDesc,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (recents.isEmpty()) {
+                    Text(
+                        text = when (entry.kind) {
+                            SourceKind.Komga -> composeStringResource(R.string.dashboard_komga_hint)
+                            else -> composeStringResource(R.string.dashboard_no_history)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 12.dp, bottom = 12.dp),
+                    )
+                } else {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    recents.forEachIndexed { index, item ->
+                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        DashboardRecentRow(
+                            context = context,
+                            item = item,
+                            onClick = { onResumeReading(entry, item.mangaId, item.chapterId, item.page) },
+                            onReadFromStart = { onResumeReading(entry, item.mangaId, item.chapterId, 0) },
+                            onDelete = {
+                                scope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        runCatching { Injekt.get<HistoryRepository>().resetHistory(item.historyId) }
+                                    }
+                                    deleteTick++
+                                }
+                            },
                         )
                     }
                 }
@@ -7070,6 +7173,145 @@ private fun SourceDashboardPane(
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 聚合页卡片里的「最近阅读」行：封面 + 名称 + 进度条（页码/总页数 · 百分比）+ 最后阅读时间。
+ * 点行 = 续读；右侧 ⋯ = 从头阅读 / 删除记录（服务器条目无本地历史，只给「从头阅读」）。
+ */
+@Composable
+private fun DashboardRecentRow(
+    context: Context,
+    item: DashboardRecent,
+    onClick: () -> Unit,
+    onReadFromStart: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val total = item.totalPages
+    val page = (item.page + 1).coerceAtLeast(1)
+    val progress = if (total > 0) (page.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
+    val progressText = if (total > 0) {
+        "$page/$total · ${(progress * 100).roundToInt()}%"
+    } else {
+        composeStringResource(R.string.dashboard_recent_page, page)
+    }
+    val ago = if (item.readAt > 0) {
+        DateUtils.getRelativeTimeSpanString(item.readAt).toString()
+    } else {
+        null
+    }
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.size(40.dp, 54.dp),
+        ) {
+            if (item.coverModel != null) {
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(context).data(item.coverModel).build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    error = {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.Description,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Filled.Description,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Box {
+                    // 定宽 Box + 图标靠右：与下方进度条右端对齐（IconButton 的 48dp 会内缩）。
+                    Box(
+                        modifier = Modifier
+                            .size(width = 28.dp, height = 28.dp)
+                            .clickable { menuExpanded = true },
+                        contentAlignment = Alignment.CenterEnd,
+                    ) {
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(composeStringResource(R.string.dashboard_recent_from_start)) },
+                            onClick = {
+                                menuExpanded = false
+                                onReadFromStart()
+                            },
+                        )
+                        if (item.historyId > 0L) {
+                            DropdownMenuItem(
+                                text = { Text(composeStringResource(R.string.local_history_delete)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDelete()
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+            Spacer(Modifier.height(3.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = progressText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (ago != null) {
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = ago,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
