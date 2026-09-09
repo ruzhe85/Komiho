@@ -1794,6 +1794,7 @@ private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, modifier
         val rp = b.readProgress
         if (rp != null && b.media.pagesCount > 0) {
             LinearProgressIndicator(
+                drawStopIndicator = {},
                 progress = { (rp.page.toFloat() / b.media.pagesCount).coerceIn(0f, 1f) },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1862,6 +1863,7 @@ private fun HomeContinueReadingListItem(client: KomgaApiClient, b: BookDto, onCl
             val rp = b.readProgress
             if (rp != null && b.media.pagesCount > 0) {
                 LinearProgressIndicator(
+                    drawStopIndicator = {},
                     progress = { (rp.page.toFloat() / b.media.pagesCount).coerceIn(0f, 1f) },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2008,6 +2010,7 @@ private fun HomeSeriesCard(
                 // Thin progress bar: read / total.
                 val fraction = (s.booksReadCount.toFloat() / s.booksCount).coerceIn(0f, 1f)
                 LinearProgressIndicator(
+                    drawStopIndicator = {},
                     progress = { fraction },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2055,6 +2058,7 @@ private fun HomeSeriesListItem(
             if (showProgress && s.booksCount > 0) {
                 val fraction = (s.booksReadCount.toFloat() / s.booksCount).coerceIn(0f, 1f)
                 LinearProgressIndicator(
+                    drawStopIndicator = {},
                     progress = { fraction },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -6775,6 +6779,7 @@ private fun LocalFileRow(
             )
             Spacer(Modifier.height(6.dp))
             LinearProgressIndicator(
+                drawStopIndicator = {},
                 progress = { progress.coerceIn(0f, 1f) },
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.primary,
@@ -7293,6 +7298,7 @@ private fun DashboardRecentRow(
             }
             Spacer(Modifier.height(6.dp))
             LinearProgressIndicator(
+                drawStopIndicator = {},
                 progress = { progress },
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.primary,
