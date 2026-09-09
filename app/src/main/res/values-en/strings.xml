@@ -24,6 +24,11 @@
     <string name="dashboard_komga_hint">Tap to open the Komga home</string>
     <string name="dashboard_no_history">No reading history yet</string>
     <string name="dashboard_enter_source">Open source</string>
+    <string name="dashboard_recent_page">Page %1$d</string>
+    <string name="dashboard_recent_from_start">Read from start</string>
+    <string name="settings_group_dashboard">Dashboard</string>
+    <string name="settings_dashboard_recent">Recent items per source</string>
+    <string name="settings_dashboard_recent_summary">%1$d recent reading records</string>
     <string name="tab_library">Library</string>
     <string name="tab_lists">Lists</string>
     <string name="tab_downloads">Downloads</string>
