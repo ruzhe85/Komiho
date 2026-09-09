@@ -641,11 +641,18 @@ class ReaderActivity : BaseActivity() {
      */
     override fun finish() {
         viewModel.onActivityFinish()
-        // Komiho: Komga 章节退出后回所读系列详情页（CLEAR_TOP 复用栈里已有的系列页，避免堆叠）
-        intent.getStringExtra(EXTRA_KOMGA_SERIES_ID)?.takeIf { it.isNotBlank() }?.let { seriesId ->
+        // Komiho: Komga 章节退出后回所读系列详情页（CLEAR_TOP 复用栈里已有的系列页，避免堆叠）。
+        // seriesId 优先用 intent 传入的；没传（聚合页续读、历史、首页继续阅读等入口都不传）
+        // 就按当前 manga.url（komga://series/{id}）反解——所有入口统一回系列页，
+        // 不至于换个入口进来就「后退不回系列」。
+        val seriesId = intent.getStringExtra(EXTRA_KOMGA_SERIES_ID)?.takeIf { it.isNotBlank() }
+            ?: viewModel.manga?.url
+                ?.takeIf { it.startsWith(KomgaSource.SERIES_URL_PREFIX) }
+                ?.removePrefix(KomgaSource.SERIES_URL_PREFIX)
+        seriesId?.takeIf { it.isNotBlank() }?.let { id ->
             startActivity(
                 Intent(this, KomgaSeriesActivity::class.java)
-                    .putExtra("seriesId", seriesId)
+                    .putExtra("seriesId", id)
                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             )
         }
