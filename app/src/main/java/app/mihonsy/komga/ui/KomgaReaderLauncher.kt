@@ -45,7 +45,9 @@ object KomgaReaderLauncher {
             context.startActivity(
                 Intent(context, ReaderActivity::class.java)
                     .putExtra("manga", manga.id)
-                    .putExtra("chapter", chapter.id),
+                    .putExtra("chapter", chapter.id)
+                    // Komiho: 退出章节时回该系列详情页（seriesId 由 manga.url 反解）
+                    .putExtra(ReaderActivity.EXTRA_KOMGA_SERIES_ID, manga.url.removePrefix(KomgaSource.SERIES_URL_PREFIX)),
             )
             return
         }
@@ -63,7 +65,9 @@ object KomgaReaderLauncher {
         context.startActivity(
             Intent(context, ReaderActivity::class.java)
                 .putExtra("manga", manga.id)
-                .putExtra("chapter", chapter.id),
+                .putExtra("chapter", chapter.id)
+                // Komiho: 退出章节时回该系列详情页
+                .putExtra(ReaderActivity.EXTRA_KOMGA_SERIES_ID, seriesId),
         )
     }
 }

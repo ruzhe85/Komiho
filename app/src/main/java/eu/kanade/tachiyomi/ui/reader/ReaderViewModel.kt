@@ -1290,7 +1290,44 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     fun openChapterListDialog() {
+        // Komiho: 打开列表前先把服务器进度拉回来（见 refreshChaptersFromKomga），失败静默用本地数据
+        refreshChaptersFromKomga()
         mutableState.update { it.copy(dialog = Dialog.ChapterList) }
+    }
+
+    /**
+     * Komiho: 章节列表的服务器→本地反向同步。
+     *
+     * 本机只在读到末页时才写本地 chapter.read，Web 端 / 其它设备读完的章节本地仍是未读，
+     * 章节列表因此与服务器不一致。这里按 series 拉一次 books（BookDto 自带 readProgress），
+     * 把 completed 回写本地 chapter.read；断网 / 无连接则静默放弃，行为与改动前一致。
+     */
+    private fun refreshChaptersFromKomga() {
+        val m = manga ?: return
+        if (!m.url.startsWith(KomgaSource.SERIES_URL_PREFIX)) return
+        viewModelScope.launchIO {
+            runCatching {
+                val prefs = KomgaPreferences(Injekt.get<Application>())
+                if (!prefs.hasConnection()) return@runCatching
+                val seriesId = m.url.removePrefix(KomgaSource.SERIES_URL_PREFIX)
+                val books = KomgaApiClient(prefs.connection()).getSeriesBooks(seriesId).content
+                if (books.isEmpty()) return@runCatching
+                val byUrl = books.associate { KomgaSource.BOOK_URL_PREFIX + it.id to it }
+                val updates = chapterList.mapNotNull { readerChapter ->
+                    val book = byUrl[readerChapter.chapter.url] ?: return@mapNotNull null
+                    val completed = book.readProgress?.completed == true
+                    if (readerChapter.chapter.read == completed) {
+                        null
+                    } else {
+                        readerChapter.chapter.read = completed
+                        ChapterUpdate(id = readerChapter.chapter.id!!, read = completed)
+                    }
+                }
+                if (updates.isNotEmpty()) {
+                    updateChapter.awaitAll(updates)
+                }
+            }
+        }
     }
 
     fun setDoublePages(doublePages: Boolean) {
