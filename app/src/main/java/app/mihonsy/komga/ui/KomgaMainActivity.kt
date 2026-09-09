@@ -190,6 +190,7 @@ import androidx.compose.ui.layout.ContentScale
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import app.mihonsy.komga.data.KomgaApiClient
+import app.mihonsy.komga.data.KomgaDbBridge
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.SourceVisibilityStore
@@ -6868,9 +6869,53 @@ private fun SourceDashboardPane(
                     coverModel = coverOf(last),
                 )
             }
+            // Komiho: Komga 卡优先取「服务器最后一次阅读」——readProgress.readDate 最新的
+            // 进行中书籍（与 Home 的「继续阅读」同口径）；没有进行中的书 / 断网 / 未连接
+            // 时回落到本地历史（与改动前完全一致）。
+            var komgaCard = build(komga).copy(coverModel = komgaCover)
+            runCatching {
+                val prefs = KomgaPreferences(context.applicationContext)
+                if (prefs.hasConnection()) {
+                    val client = KomgaApiClient(prefs.connection())
+                    val book = client.getBooks(
+                        readStatus = "IN_PROGRESS",
+                        sort = "readProgress.readDate,desc",
+                        size = 1,
+                    ).content.firstOrNull()
+                    val seriesId = book?.seriesId
+                    if (book != null && !seriesId.isNullOrBlank()) {
+                        val series = client.getSeriesDetail(seriesId)
+                        val manga = KomgaDbBridge.ensureManga(client, seriesId, series.name)
+                        val chapter = KomgaDbBridge.ensureChapters(client, seriesId, manga.id)
+                            .firstOrNull { it.url == KomgaSource.BOOK_URL_PREFIX + book.id }
+                        val chapterId = chapter?.id
+                        if (chapterId != null) {
+                            // 服务器页号是 1-based（上报时 pageIndex + 1），回本地要减 1
+                            val page = ((book.readProgress?.page ?: 1) - 1).coerceAtLeast(0)
+                            // 服务器 readDate 形如 2026-09-08T15:44:41.123456789Z，
+                            // 只取到秒（尾部小数/时区忽略，避免 java.time 的 desugaring 风险）
+                            val readAt = book.readProgress?.readDate?.let { raw ->
+                                runCatching {
+                                    java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(raw)
+                                }.getOrNull()
+                            }
+                            komgaCard = SourceCardSummary(
+                                count = komga.urls.size,
+                                lastTitle = series.name,
+                                lastReadAt = readAt ?: komgaCard.lastReadAt,
+                                lastMangaId = manga.id,
+                                lastChapterId = chapterId,
+                                lastChapterName = chapter?.name?.takeIf { it.isNotBlank() } ?: book.name,
+                                lastPageRead = page.toLong(),
+                                coverModel = manga.takeIf { !it.thumbnailUrl.isNullOrBlank() } ?: komgaCover,
+                            )
+                        }
+                    }
+                }
+            }
             mapOf(
                 SOURCE_ID_LOCAL to build(local),
-                SOURCE_ID_KOMGA to build(komga).copy(coverModel = komgaCover),
+                SOURCE_ID_KOMGA to komgaCard,
             ) + webdav.mapValues { (_, agg) -> build(agg) } +
                 // SY --> Komiho Phase7: SMB 卡片摘要。
                 smb.mapValues { (_, agg) -> build(agg) }

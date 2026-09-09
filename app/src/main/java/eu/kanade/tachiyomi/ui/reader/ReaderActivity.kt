@@ -137,6 +137,7 @@ import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.util.collectAsState
+import app.mihonsy.komga.ui.KomgaSeriesActivity
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.ByteArrayOutputStream
@@ -162,6 +163,9 @@ class ReaderActivity : BaseActivity() {
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
         }
+
+        /** Komiho: 退出阅读器时回到的 Komga 系列 id（仅 Komga 来源传入）。 */
+        const val EXTRA_KOMGA_SERIES_ID = "komgaSeriesId"
 
         const val SHIFT_DOUBLE_PAGES = "shiftingDoublePages"
         const val SHIFTED_PAGE_INDEX = "shiftedPageIndex"
@@ -637,6 +641,14 @@ class ReaderActivity : BaseActivity() {
      */
     override fun finish() {
         viewModel.onActivityFinish()
+        // Komiho: Komga 章节退出后回所读系列详情页（CLEAR_TOP 复用栈里已有的系列页，避免堆叠）
+        intent.getStringExtra(EXTRA_KOMGA_SERIES_ID)?.takeIf { it.isNotBlank() }?.let { seriesId ->
+            startActivity(
+                Intent(this, KomgaSeriesActivity::class.java)
+                    .putExtra("seriesId", seriesId)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            )
+        }
         super.finish()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             overrideActivityTransition(
