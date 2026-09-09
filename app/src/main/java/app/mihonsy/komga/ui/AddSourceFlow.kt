@@ -400,9 +400,32 @@ private fun TypeSelectContent(
         Spacer(Modifier.height(10.dp))
 
         // 排序：本地 → Komga → WebDAV → SMB（与顶栏来源菜单一致）。
+        // SY: 本地也可隐藏——聚合页显示开关（唯一内置来源，无编辑/删除，只给开关）。
+        // 与其他来源同口径：只影响聚合页卡片，顶栏来源菜单仍可切回本地。
+        val localVisId = SourceVisibilityStore.ID_LOCAL
+        var localVisible by remember(localVisId, listTick) {
+            mutableStateOf(SourceVisibilityStore.isVisible(localVisId))
+        }
         TypeCard(
             leading = { TypeCardIcon(Icons.Filled.Folder) },
             title = composeStringResource(R.string.addsrc_type_local),
+            trailing = {
+                IconButton(onClick = {
+                    localVisible = !localVisible
+                    SourceVisibilityStore.setVisible(localVisId, localVisible)
+                }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        if (localVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                        contentDescription = composeStringResource(R.string.addsrc_toggle_visible_cd),
+                        modifier = Modifier.size(16.dp),
+                        tint = if (localVisible) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            },
             onClick = { onSelect(AddSourceScreen.Local) },
         )
 
@@ -479,6 +502,8 @@ private fun TypeCard(
     title: String,
     enabled: Boolean = true,
     trailingTag: String? = null,
+    /** 标题右侧、chevron 左侧的自定义控件（内置来源无编辑/删除，只放聚合页显示开关）。 */
+    trailing: @Composable (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -514,6 +539,11 @@ private fun TypeCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(end = 4.dp),
             )
+        }
+        // SY: 内置来源（本地）没有「已添加条目行」，聚合页显示开关直接挂在类型卡右侧。
+        if (trailing != null) {
+            trailing()
+            Spacer(Modifier.width(4.dp))
         }
         Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
