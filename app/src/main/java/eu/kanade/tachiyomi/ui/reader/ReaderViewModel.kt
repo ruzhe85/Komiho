@@ -118,6 +118,7 @@ import java.time.Instant
 import java.util.Collections
 import java.util.Date
 import java.util.HashSet
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Presenter used by the activity to perform background operations.
@@ -349,6 +350,8 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     fun onActivityFinish() {
         deletePendingChapters()
+        // Komiho: 退出前强制上报一次进度，避免最后一次页码被节流吃掉（自动跳章的首页尤甚）。
+        flushKomgaBookProgress()
     }
 
     /**
@@ -1670,25 +1673,39 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     // Komiho V2 (R-3) -->
-    private var lastKomgaBookSyncTimestamp = 0L
+    /**
+     * bookUrl -> (上次上报时间戳, 上次上报页码)。节流按章节分别计时——共用单一时间戳时，
+     * 「读完 A 章 → 自动加载 B 章第一页」会被 A 章完成那次上报的节流窗口吃掉，
+     * 导致 B 章要读到第二页才同步（Komga 上只剩 A 章已读记录）。
+     */
+    private val lastKomgaBookSync = ConcurrentHashMap<String, Pair<Long, Int>>()
+    /** 上一次上报的章节 url：换章后的第一页强制上报，保证服务器立刻出现「B 章读到第 1 页」。 */
+    @Volatile
+    private var lastKomgaBookSyncUrl: String? = null
 
     /**
      * Komiho V2 (R-3): writes the current page position of a Komga book back to
      * the server, so progress is visible in Komga Web in near-real time.
      * - bookId is parsed from chapter.url (komga://book/{id}) — independent of
      *   the Mihon track service.
-     * - Throttled to [KOMGA_PAGE_SYNC_INTERVAL_MS]; reaching the last page
+     * - Throttled per book to [KOMGA_PAGE_SYNC_INTERVAL_MS]; reaching the last page
      *   forces an immediate sync with completed = true.
+     * - [force] / 换章 / 退出阅读器时无视节流立即上报。
      */
-    private fun syncKomgaBookProgress(readerChapter: ReaderChapter, pageIndex: Int) {
+    private fun syncKomgaBookProgress(readerChapter: ReaderChapter, pageIndex: Int, force: Boolean = false) {
         val url = readerChapter.chapter.url
         if (!url.startsWith(KomgaSource.BOOK_URL_PREFIX)) return
         val bookId = url.removePrefix(KomgaSource.BOOK_URL_PREFIX)
         val pages = readerChapter.pages ?: return
         val completed = pageIndex >= pages.lastIndex
+        val chapterChanged = url != lastKomgaBookSyncUrl
         val now = System.currentTimeMillis()
-        if (!completed && now - lastKomgaBookSyncTimestamp < KOMGA_PAGE_SYNC_INTERVAL_MS) return
-        lastKomgaBookSyncTimestamp = now
+        if (!force && !completed && !chapterChanged) {
+            val (lastAt, lastPage) = lastKomgaBookSync[url] ?: (0L to -1)
+            if (lastPage == pageIndex || now - lastAt < KOMGA_PAGE_SYNC_INTERVAL_MS) return
+        }
+        lastKomgaBookSync[url] = now to pageIndex
+        lastKomgaBookSyncUrl = url
 
         viewModelScope.launchNonCancellable {
             runCatching {
@@ -1696,6 +1713,13 @@ class ReaderViewModel @JvmOverloads constructor(
                 KomgaApiClient(prefs.connection()).updateReadProgress(bookId, pageIndex + 1, completed)
             }
         }
+    }
+
+    /** 退出阅读器前强制把当前页码推一次（含刚自动跳到下一章第一页的情况）。 */
+    private fun flushKomgaBookProgress() {
+        val chapter = getCurrentChapter() ?: return
+        val pageIndex = chapterPageIndex.takeIf { it >= 0 } ?: return
+        syncKomgaBookProgress(chapter, pageIndex, force = true)
     }
     // Komiho V2 (R-3) <--
 
