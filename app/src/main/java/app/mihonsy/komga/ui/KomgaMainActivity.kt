@@ -189,6 +189,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.ContentScale
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import app.mihonsy.komga.data.DashboardPreferences
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaDbBridge
 import app.mihonsy.komga.data.KomgaConnection
