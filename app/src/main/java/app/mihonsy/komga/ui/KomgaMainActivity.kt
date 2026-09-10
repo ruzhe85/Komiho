@@ -3710,31 +3710,26 @@ private fun SettingsTab(
     ) {
         TextPreferenceWidget(
             title = composeStringResource(R.string.settings_appearance),
-            subtitle = composeStringResource(R.string.settings_appearance_summary),
             icon = Icons.Outlined.Palette,
             onPreferenceClick = { showAppearance = true },
         )
         TextPreferenceWidget(
             title = composeStringResource(R.string.settings_home),
-            subtitle = composeStringResource(R.string.settings_home_summary),
             icon = Icons.Filled.Home,
             onPreferenceClick = { showHome = true },
         )
         TextPreferenceWidget(
             title = composeStringResource(R.string.settings_reading),
-            subtitle = composeStringResource(R.string.settings_reader_summary),
             icon = Icons.AutoMirrored.Outlined.ChromeReaderMode,
             onPreferenceClick = { showReaderSettings = true },
         )
         TextPreferenceWidget(
             title = composeStringResource(R.string.source_add),
-            subtitle = composeStringResource(R.string.source_add_summary),
             icon = Icons.Filled.Folder,
             onPreferenceClick = onOpenSourceManagement,
         )
         TextPreferenceWidget(
             title = composeStringResource(R.string.storage_title),
-            subtitle = composeStringResource(R.string.storage_all_files_access),
             icon = Icons.Outlined.Storage,
             onPreferenceClick = { showLocalStorage = true },
         )
@@ -4722,15 +4717,6 @@ private fun SourceSwitchButton(
                     },
                 )
             }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text(composeStringResource(R.string.source_add)) },
-                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                onClick = {
-                    open = false
-                    onAddSource()
-                },
-            )
         }
     }
 }
