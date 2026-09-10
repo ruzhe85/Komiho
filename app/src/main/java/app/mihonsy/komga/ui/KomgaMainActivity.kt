@@ -426,8 +426,8 @@ private enum class MainTab(
     // SY <--（下方各 tab 维持原语义）
     Home(R.string.tab_home, Icons.Filled.Home, komgaOnly = true),
     Library(R.string.tab_library, Icons.Filled.Book, komgaOnly = true),
+    // SY: 下载已并入 Lists（列表 tab 内的第一个分段），不再单独占一个底部 tab。
     Lists(R.string.tab_lists, Icons.AutoMirrored.Filled.List, komgaOnly = true),
-    Downloads(R.string.tab_downloads, Icons.Filled.Download, komgaOnly = true),
     // 本地文件浏览器：仅文件型来源可见（Komga 来源下不显示，避免库/系列语义混入本地文件夹浏览）。
     // SMB / WebDAV 落地后各自独立成 tab，或在此下扩展。
     Browse(R.string.tab_browse, Icons.Filled.Folder, fileOnly = true),
@@ -438,30 +438,10 @@ private enum class MainTab(
     Settings(R.string.tab_settings, Icons.Filled.Settings),
     ;
 
-    /**
-     * @param isFileSource 当前来源是否文件型（本地 / WebDAV / SMB）。
-     * @param hasLists 是否有阅读列表或收藏；null = 尚未探测完。
-     * @param hasDownloads 是否有已下载条目；null = 尚未探测完。
-     *
-     * 列表 / 下载这两个 tab 在**确认没有数据**后自动隐藏；数据尚未探测完（null）
-     * 一律先显示，避免启动瞬间先隐藏再冒出来造成闪烁。
-     */
-    fun visibleFor(
-        isFileSource: Boolean,
-        hasLists: Boolean? = null,
-        hasDownloads: Boolean? = null,
-    ): Boolean {
-        val base = when {
-            komgaOnly -> !isFileSource
-            fileOnly -> isFileSource
-            else -> true
-        }
-        if (!base) return false
-        return when (this) {
-            Lists -> hasLists != false
-            Downloads -> hasDownloads != false
-            else -> true
-        }
+    fun visibleFor(isFileSource: Boolean): Boolean = when {
+        komgaOnly -> !isFileSource
+        fileOnly -> isFileSource
+        else -> true
     }
 
     @Composable
@@ -627,12 +607,8 @@ private fun KomgaMainScreen(
     }
     val currentSourceEntry = sourceEntries.firstOrNull { it.id == currentSourceId } ?: sourceEntries.first()
     val currentIsFileSource = currentSourceEntry.kind.isFileSource
-    // SY: 列表 / 下载 tab 的「有无数据」探测结果。null = 还没探测完（先显示，避免闪烁）；
-    // true / false = 已确认有 / 无数据。请求失败时保持 null，不至于因断网把 tab 藏掉。
-    var hasLists by remember { mutableStateOf<Boolean?>(null) }
-    var hasDownloads by remember { mutableStateOf<Boolean?>(null) }
-    val visibleTabs = remember(currentIsFileSource, hasLists, hasDownloads) {
-        MainTab.entries.filter { it.visibleFor(currentIsFileSource, hasLists, hasDownloads) }
+    val visibleTabs = remember(currentIsFileSource) {
+        MainTab.entries.filter { it.visibleFor(currentIsFileSource) }
     }
     // 恢复/切换后兜底：当前 tab 若不在可见集合内（如来源切换/连接被删），回落到第一个可见 tab。
     LaunchedEffect(visibleTabs) {
@@ -647,7 +623,7 @@ private fun KomgaMainScreen(
         currentSourceId = entry.id
         storagePreferences.browseSourceId.set(entry.id)
         // SY: 跳过 Sources 仪表盘——「首个可见 tab」指来源的内容首页（Komga=Home / 文件型=浏览）。
-        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource, hasLists, hasDownloads) }.ordinal
+        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource) }.ordinal
     }
 
     // SY --> Komiho: 来源仪表盘点卡——无论该来源是否已是当前来源，都切换并落到其内容首页
@@ -656,7 +632,7 @@ private fun KomgaMainScreen(
     fun openSourceFromDashboard(entry: SourceEntry) {
         currentSourceId = entry.id
         storagePreferences.browseSourceId.set(entry.id)
-        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource, hasLists, hasDownloads) }.ordinal
+        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource) }.ordinal
     }
     // SY <--
 
@@ -708,30 +684,6 @@ private fun KomgaMainScreen(
     val refreshTick by refreshSignal.collectAsState()
     // Komga 连接状态跟随 onResume 复查（从 KomgaConnectActivity 添加完返回时生效）。
     LaunchedEffect(refreshTick) { komgaConnected = prefs.hasConnection() }
-    // SY: 列表 tab 空数据自动隐藏——探测服务器是否有阅读列表 / 收藏。
-    // 两个请求都失败时保持 null（未知），不把 tab 藏掉——断网时仍可进 tab 看错误与重试。
-    LaunchedEffect(komgaConnected, refreshTick) {
-        if (!komgaConnected) {
-            hasLists = false
-            return@LaunchedEffect
-        }
-        hasLists = withContext(Dispatchers.IO) {
-            val readlists = runCatching { client.getReadlists() }.getOrNull()
-            val collections = runCatching { client.getCollections() }.getOrNull()
-            if (readlists == null && collections == null) {
-                null
-            } else {
-                (readlists?.isNotEmpty() ?: false) || (collections?.isNotEmpty() ?: false)
-            }
-        }
-    }
-    // SY: 下载 tab 空数据自动隐藏——纯本地查询（SharedPreferences），每次回到前台复查，
-    // 这样下完第一本后 tab 会自己冒出来。
-    LaunchedEffect(refreshTick) {
-        hasDownloads = withContext(Dispatchers.IO) {
-            KomgaDownloadStore(context.applicationContext).allDownloaded().isNotEmpty()
-        }
-    }
     // M3.12: search collapsed to an icon in the title row; expands the field.
     var searchOpen by remember { mutableStateOf(false) }
 
@@ -975,8 +927,7 @@ private fun KomgaMainScreen(
                     }
                     // SY --> Komiho Phase4: 搜索是 Komga 语义，文件型来源（本地/WebDAV/SMB）下不显示。
                     if (!currentIsFileSource &&
-                        currentTabEnum != MainTab.Settings &&
-                        currentTabEnum != MainTab.Downloads
+                        currentTabEnum != MainTab.Settings
                     ) {
                         androidx.compose.material3.IconButton(onClick = { searchOpen = !searchOpen }) {
                             Icon(
@@ -1153,9 +1104,7 @@ private fun KomgaMainScreen(
                                     .putExtra("collectionName", cName),
                             )
                         },
-                    )
-                    MainTab.Downloads -> DownloadsTab(
-                        client = client,
+                        // SY: 下载分段的点书回调（原 Downloads tab 的回调，原样搬过来）。
                         onBookClick = { bookId ->
                             runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                 .onFailure {
@@ -3187,6 +3136,7 @@ private fun ListsTab(
     client: KomgaApiClient,
     onReadlistClick: (String, String) -> Unit,
     onCollectionClick: (String, String) -> Unit,
+    onBookClick: suspend (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -3196,6 +3146,8 @@ private fun ListsTab(
     var error by remember { mutableStateOf<String?>(null) }
     // 删除确认弹窗状态：待删除项的类型与 id/名称
     var pendingDelete by remember { mutableStateOf<DeleteTarget?>(null) }
+    // SY: 三段合一——0 下载 / 1 收藏 / 2 阅读列表（顺序按使用频率）。跨配置变更记住所选段。
+    var segment by rememberSaveable { mutableIntStateOf(0) }
 
     fun load() {
         loading = true
@@ -3229,187 +3181,200 @@ private fun ListsTab(
 
     LaunchedEffect(Unit) { load() }
 
-    Box(Modifier.fillMaxSize()) {
-        when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-            error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(error ?: "", color = MaterialTheme.colorScheme.error)
-                    Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = { load() }) { Text(composeStringResource(R.string.retry)) }
-                }
-            }
-            readlists.isEmpty() && collections.isEmpty() ->
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(composeStringResource(R.string.no_readlists))
-                }
-            else -> LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                if (readlists.isNotEmpty()) {
-                    item {
-                        Text(
-                            composeStringResource(R.string.section_readlists),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 4.dp),
-                        )
+    Column(Modifier.fillMaxSize()) {
+        // SY: 顶部三分段切换；下载段整体复用 DownloadsTab（自带空态、删除与打开）。
+        TabRow(selectedTabIndex = segment) {
+            Tab(
+                selected = segment == 0,
+                onClick = { segment = 0 },
+                text = { Text(composeStringResource(R.string.tab_downloads), maxLines = 1) },
+            )
+            Tab(
+                selected = segment == 1,
+                onClick = { segment = 1 },
+                text = { Text(composeStringResource(R.string.section_collections), maxLines = 1) },
+            )
+            Tab(
+                selected = segment == 2,
+                onClick = { segment = 2 },
+                text = { Text(composeStringResource(R.string.section_readlists), maxLines = 1) },
+            )
+        }
+        if (segment == 0) {
+            DownloadsTab(client = client, onBookClick = onBookClick)
+        } else {
+            Box(Modifier.fillMaxSize()) {
+                when {
+                    loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
                     }
-                    items(readlists) { rl ->
-                        var menuOpen by remember { mutableStateOf(false) }
-                        Box {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .combinedClickable(
-                                        onClick = { onReadlistClick(rl.id, rl.name) },
-                                        onLongClick = { menuOpen = true },
-                                    ),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    val firstBookId = rl.bookIds.firstOrNull()
-                                    if (firstBookId != null) {
-                                        KomgaCover(
-                                            client = client,
-                                            url = client.bookThumbnailUrl(firstBookId),
-                                            modifier = Modifier.width(42.dp).height(56.dp),
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .width(42.dp)
-                                                .height(56.dp)
-                                                .background(
-                                                    MaterialTheme.colorScheme.surfaceContainerHighest,
-                                                    RoundedCornerShape(6.dp),
-                                                ),
-                                        )
-                                    }
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(rl.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                                        Spacer(Modifier.height(2.dp))
-                                        Text(
-                                            text = composeStringResource(R.string.books_count, rl.booksCount),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Text(
-                                        text = "›",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                            DropdownMenu(
-                                expanded = menuOpen,
-                                onDismissRequest = { menuOpen = false },
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text(composeStringResource(R.string.delete)) },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Filled.Delete,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    onClick = {
-                                        menuOpen = false
-                                        pendingDelete = DeleteTarget("readlist", rl.id, rl.name)
-                                    },
-                                )
-                            }
+                    error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(error ?: "", color = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.height(12.dp))
+                            TextButton(onClick = { load() }) { Text(composeStringResource(R.string.retry)) }
                         }
                     }
-                }
-                if (collections.isNotEmpty()) {
-                    item {
-                        Text(
-                            composeStringResource(R.string.section_collections),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-                        )
-                    }
-                    items(collections) { c ->
-                        var menuOpen by remember { mutableStateOf(false) }
-                        Box {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .combinedClickable(
-                                        onClick = { onCollectionClick(c.id, c.name) },
-                                        onLongClick = { menuOpen = true },
-                                    ),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    val firstSeriesId = c.seriesIds.firstOrNull()
-                                    if (firstSeriesId != null) {
-                                        KomgaCover(
-                                            client = client,
-                                            url = client.seriesThumbnailUrl(firstSeriesId),
-                                            modifier = Modifier.width(42.dp).height(56.dp),
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .width(42.dp)
-                                                .height(56.dp)
-                                                .background(
-                                                    MaterialTheme.colorScheme.surfaceContainerHighest,
-                                                    RoundedCornerShape(6.dp),
-                                                ),
+                    segment == 1 && collections.isEmpty() ->
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(composeStringResource(R.string.no_collections))
+                        }
+                    segment == 2 && readlists.isEmpty() ->
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(composeStringResource(R.string.no_readlists))
+                        }
+                    else -> LazyColumn(
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        // SY: 分段后由顶部 tab 表明是哪一类，段内不再重复标题。
+                        if (segment == 2) {
+                            items(readlists) { rl ->
+                                var menuOpen by remember { mutableStateOf(false) }
+                                Box {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .combinedClickable(
+                                                onClick = { onReadlistClick(rl.id, rl.name) },
+                                                onLongClick = { menuOpen = true },
+                                            ),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            val firstBookId = rl.bookIds.firstOrNull()
+                                            if (firstBookId != null) {
+                                                KomgaCover(
+                                                    client = client,
+                                                    url = client.bookThumbnailUrl(firstBookId),
+                                                    modifier = Modifier.width(42.dp).height(56.dp),
+                                                )
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .width(42.dp)
+                                                        .height(56.dp)
+                                                        .background(
+                                                            MaterialTheme.colorScheme.surfaceContainerHighest,
+                                                            RoundedCornerShape(6.dp),
+                                                        ),
+                                                )
+                                            }
+                                            Spacer(Modifier.width(12.dp))
+                                            Column(Modifier.weight(1f)) {
+                                                Text(rl.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                                Spacer(Modifier.height(2.dp))
+                                                Text(
+                                                    text = composeStringResource(R.string.books_count, rl.booksCount),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                            Text(
+                                                text = "›",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = menuOpen,
+                                        onDismissRequest = { menuOpen = false },
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(composeStringResource(R.string.delete)) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Delete,
+                                                    contentDescription = null,
+                                                )
+                                            },
+                                            onClick = {
+                                                menuOpen = false
+                                                pendingDelete = DeleteTarget("readlist", rl.id, rl.name)
+                                            },
                                         )
                                     }
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(c.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                                        Spacer(Modifier.height(2.dp))
-                                        Text(
-                                            text = composeStringResource(R.string.series_in_collection, c.seriesIds.size),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Text(
-                                        text = "›",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
                                 }
                             }
-                            DropdownMenu(
-                                expanded = menuOpen,
-                                onDismissRequest = { menuOpen = false },
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text(composeStringResource(R.string.delete)) },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Filled.Delete,
-                                            contentDescription = null,
+                        }
+                        if (segment == 1) {
+                            items(collections) { c ->
+                                var menuOpen by remember { mutableStateOf(false) }
+                                Box {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .combinedClickable(
+                                                onClick = { onCollectionClick(c.id, c.name) },
+                                                onLongClick = { menuOpen = true },
+                                            ),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            val firstSeriesId = c.seriesIds.firstOrNull()
+                                            if (firstSeriesId != null) {
+                                                KomgaCover(
+                                                    client = client,
+                                                    url = client.seriesThumbnailUrl(firstSeriesId),
+                                                    modifier = Modifier.width(42.dp).height(56.dp),
+                                                )
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .width(42.dp)
+                                                        .height(56.dp)
+                                                        .background(
+                                                            MaterialTheme.colorScheme.surfaceContainerHighest,
+                                                            RoundedCornerShape(6.dp),
+                                                        ),
+                                                )
+                                            }
+                                            Spacer(Modifier.width(12.dp))
+                                            Column(Modifier.weight(1f)) {
+                                                Text(c.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                                Spacer(Modifier.height(2.dp))
+                                                Text(
+                                                    text = composeStringResource(R.string.series_in_collection, c.seriesIds.size),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                            Text(
+                                                text = "›",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = menuOpen,
+                                        onDismissRequest = { menuOpen = false },
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(composeStringResource(R.string.delete)) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Delete,
+                                                    contentDescription = null,
+                                                )
+                                            },
+                                            onClick = {
+                                                menuOpen = false
+                                                pendingDelete = DeleteTarget("collection", c.id, c.name)
+                                            },
                                         )
-                                    },
-                                    onClick = {
-                                        menuOpen = false
-                                        pendingDelete = DeleteTarget("collection", c.id, c.name)
-                                    },
-                                )
+                                    }
+                                }
                             }
                         }
                     }
