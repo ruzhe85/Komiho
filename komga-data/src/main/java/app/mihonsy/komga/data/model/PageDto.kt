@@ -17,11 +17,19 @@ data class PageDto(
 data class ReadingListDto(
     val id: String,
     val name: String,
-    @SerialName("booksCount") val booksCount: Int = 0,
     @SerialName("bookIds") val bookIds: List<String> = emptyList(),
     val url: String? = null,
     @SerialName("filtered") val filtered: Boolean = false,
-)
+) {
+    /**
+     * 阅读列表里的本数。
+     *
+     * Komga 的 `ReadListDto` **没有** `booksCount` 字段（只有 `bookIds`）——Web 端显示的
+     * 数量同样是前端用 `bookIds.length` 算的。这里若声明成可反序列化字段，服务端不返回
+     * 就会一直落默认值 0（表现：列表永远「0 本」，Web 端却正常）。故改为派生属性。
+     */
+    val booksCount: Int get() = bookIds.size
+}
 
 /** Komga collection (收藏). Matches the keiyoushi extension's CollectionDto. */
 @Serializable
