@@ -258,6 +258,10 @@
     <!-- SY: Komiho 新增來源流程 -->
     <string name="addsrc_back_cd">返回</string>
     <string name="addsrc_title">來源管理</string>
+    <string name="addsrc_add">新增</string>
+    <string name="addsrc_added">已新增</string>
+    <string name="addsrc_builtin">內建</string>
+    <string name="addsrc_conn_count">%1$d 個連線</string>
     <string name="addsrc_select_type">選擇來源類型</string>
     <string name="addsrc_type_local">本地</string>
     <string name="addsrc_delete_title">刪除來源</string>

@@ -266,6 +266,10 @@
     <!-- SY: Komiho add source flow -->
     <string name="addsrc_back_cd">Back</string>
     <string name="addsrc_title">Manage sources</string>
+    <string name="addsrc_add">Add</string>
+    <string name="addsrc_added">Added</string>
+    <string name="addsrc_builtin">Built-in</string>
+    <string name="addsrc_conn_count">%1$d connections</string>
     <string name="addsrc_select_type">Choose a source type</string>
     <string name="addsrc_type_local">Local storage</string>
     <string name="addsrc_delete_title">Delete source</string>

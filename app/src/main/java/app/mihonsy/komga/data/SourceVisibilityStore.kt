@@ -35,6 +35,18 @@ object SourceVisibilityStore {
         prefs.getStringSet(Preference.appStateKey("source_hidden_ids_v1"), emptySet())
     }
 
+    /** 用户自定义来源顺序：逗号分隔的 id 列表。空 = 沿用 buildSourceEntries 的固定规则。 */
+    private val orderPref: Preference<String> by lazy {
+        prefs.getString(Preference.appStateKey("source_order_v1"), "")
+    }
+
+    fun sourceOrder(): List<String> = orderPref.get().takeIf { it.isNotBlank() }
+        ?.split(',')?.filter { it.isNotBlank() } ?: emptyList()
+
+    fun setSourceOrder(ids: List<String>) {
+        orderPref.set(ids.joinToString(","))
+    }
+
     fun hiddenIds(): Set<String> = hidden.get()
 
     /** 默认可见：未被记录为隐藏即显示。 */
