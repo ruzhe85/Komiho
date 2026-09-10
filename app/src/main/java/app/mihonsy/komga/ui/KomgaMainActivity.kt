@@ -362,14 +362,14 @@ internal enum class SourceKind {
     val isFileSource: Boolean get() = this != Komga
 }
 
-private data class SourceEntry(val id: String, val kind: SourceKind, val name: String)
+internal data class SourceEntry(val id: String, val kind: SourceKind, val name: String)
 
-private const val SOURCE_ID_KOMGA = SourceVisibilityStore.ID_KOMGA
-private const val SOURCE_ID_LOCAL = SourceVisibilityStore.ID_LOCAL
-private const val SOURCE_ID_WEBDAV_PREFIX = SourceVisibilityStore.ID_WEBDAV_PREFIX
+internal const val SOURCE_ID_KOMGA = SourceVisibilityStore.ID_KOMGA
+internal const val SOURCE_ID_LOCAL = SourceVisibilityStore.ID_LOCAL
+internal const val SOURCE_ID_WEBDAV_PREFIX = SourceVisibilityStore.ID_WEBDAV_PREFIX
 // SY --> Komiho Phase7: SMB 来源条目 id 前缀（章节 url 是 `smb://<connId>/...`，来源 id 是
 // `smb:<connId>`——单冒号，避免与章节 url 的 scheme 混淆）。
-private const val SOURCE_ID_SMB_PREFIX = SourceVisibilityStore.ID_SMB_PREFIX
+internal const val SOURCE_ID_SMB_PREFIX = SourceVisibilityStore.ID_SMB_PREFIX
 // SY <--
 
 /**
@@ -377,7 +377,7 @@ private const val SOURCE_ID_SMB_PREFIX = SourceVisibilityStore.ID_SMB_PREFIX
  * 同级按名称升序。未「添加」的来源不显示——Komga 仅在已配置服务器连接（[komgaConnected]）
  * 时出现，WebDAV / SMB 每条连接一条。
  */
-private fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, localName: String): List<SourceEntry> {
+internal fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, localName: String): List<SourceEntry> {
     val entries = mutableListOf(
         SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName),
     )
@@ -392,7 +392,12 @@ private fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, local
         .sortedBy { it.displayName().lowercase() }
         .forEach { entries.add(SourceEntry(SOURCE_ID_SMB_PREFIX + it.id, SourceKind.Smb, it.displayName())) }
     // SY <--
-    return entries
+    // 用户自定义顺序：已记录的 id 按记录序前置，未记录的新源按固定规则追加其后。
+    // 单一权威点——顶栏来源菜单与「最近阅读」卡片读同一份，排序同步生效。
+    val order = SourceVisibilityStore.sourceOrder()
+    if (order.isEmpty()) return entries
+    val rank = order.withIndex().associate { it.value to it.index }
+    return entries.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
 }
 
 /**

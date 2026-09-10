@@ -272,6 +272,10 @@
     <!-- SY: Komiho 来源管理流程（AddSourceFlow） -->
     <string name="addsrc_back_cd">返回</string>
     <string name="addsrc_title">来源管理</string>
+    <string name="addsrc_add">添加</string>
+    <string name="addsrc_added">已添加</string>
+    <string name="addsrc_builtin">内置</string>
+    <string name="addsrc_conn_count">%1$d 个连接</string>
     <string name="addsrc_select_type">选择来源类型</string>
     <string name="addsrc_type_local">本地</string>
     <string name="addsrc_delete_title">删除来源</string>
