@@ -175,7 +175,7 @@
     <string name="settings_home_summary">Home, preview images &amp; cache</string>
     <string name="settings_home_page">Home</string>
     <string name="settings_home_page_summary">Section layout &amp; display</string>
-    <string name="settings_preview_images">Preview images</string>
+    <string name="settings_preview_images">Clear preview images</string>
     <string name="settings_preview_images_summary">Cache settings</string>
     <string name="settings_clear_cover_cache">Clear preview image cache</string>
     <string name="settings_cover_cache_cleared">Preview image cache cleared</string>

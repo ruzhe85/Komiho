@@ -170,7 +170,7 @@
     <string name="settings_home_summary">主頁、預覽圖與快取</string>
     <string name="settings_home_page">主頁</string>
     <string name="settings_home_page_summary">區塊調整與顯示</string>
-    <string name="settings_preview_images">預覽圖</string>
+    <string name="settings_preview_images">清除預覽圖</string>
     <string name="settings_preview_images_summary">快取設定</string>
     <string name="settings_clear_cover_cache">清空預覽圖快取</string>
     <string name="settings_cover_cache_cleared">預覽圖快取已清空</string>

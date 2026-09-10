@@ -31,7 +31,7 @@ import kotlin.math.max
  *
  * 与 Komga 封面的差异：
  *  - 缓存隔离：本地封面落 `filesDir`（自管、跨冷启动稳定），Komga 封面走 HTTP + 全局
- *    Coil DiskCache（cacheDir/komga_covers，受 coverCacheLimitBytes 上限控制，0 = 实时模式关缓存）。
+ *    Coil DiskCache（cacheDir/komga_covers，Coil 默认 LRU 淘汰；上限已取消，不再有「0=实时模式」，本设置项「清除预览图」整行点击即清）。
  *    两者互不挤占、互不 LRU 淘汰。
  *  - 数据来源：本地没有"封面 URL"，封面来源有三类——
  *    目录取首张图、归档（CBZ/ZIP）取首张图条目、单图文件本身；epub 无封面。

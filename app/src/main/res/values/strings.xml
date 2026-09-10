@@ -181,7 +181,7 @@
     <string name="settings_home_summary">主页、预览图与缓存</string>
     <string name="settings_home_page">主页</string>
     <string name="settings_home_page_summary">区块调整与显示</string>
-    <string name="settings_preview_images">预览图</string>
+    <string name="settings_preview_images">清除预览图</string>
     <string name="settings_preview_images_summary">缓存设置</string>
     <string name="settings_clear_cover_cache">清空预览图缓存</string>
     <string name="settings_cover_cache_cleared">预览图缓存已清空</string>
