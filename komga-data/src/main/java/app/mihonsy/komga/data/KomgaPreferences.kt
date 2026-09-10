@@ -64,6 +64,16 @@ class KomgaPreferences(context: Context) {
         get() = prefs.getString(KEY_LIBRARY_SORT, "name,asc").orEmpty()
         set(v) = prefs.edit().putString(KEY_LIBRARY_SORT, v).apply()
 
+    /**
+     * Last library the user opened in the Library tab — restored on the next
+     * launch instead of always falling back to the first library.
+     * Empty = nothing remembered yet (fresh install / cleared data).
+     * Stale ids (library deleted server-side) are ignored by the caller.
+     */
+    var lastLibraryId: String
+        get() = prefs.getString(KEY_LAST_LIBRARY_ID, "").orEmpty()
+        set(v) = prefs.edit().putString(KEY_LAST_LIBRARY_ID, v).apply()
+
     /** Home tab: how many series/books each section shows. Default 10, max 50. */
     var homeSectionLimit: Int
         get() = prefs.getInt(KEY_HOME_SECTION_LIMIT, 10).coerceIn(1, 50)
@@ -272,6 +282,7 @@ class KomgaPreferences(context: Context) {
         const val KEY_LIBRARY_DISPLAY_MODE = "library_display_mode"
         const val KEY_BOOK_DISPLAY_MODE = "book_display_mode"
         const val KEY_LIBRARY_SORT = "library_sort"
+        const val KEY_LAST_LIBRARY_ID = "last_library_id"
         const val KEY_LIBRARY_PORTRAIT_COLUMNS = "library_portrait_columns"
         const val KEY_LIBRARY_LANDSCAPE_COLUMNS = "library_landscape_columns"
         const val KEY_HOME_SECTION_LIMIT = "home_section_limit"
