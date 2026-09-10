@@ -3952,7 +3952,6 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
     ) {
         TextPreferenceWidget(
             title = composeStringResource(R.string.storage_all_files_access),
-            icon = Icons.Outlined.Storage,
             onPreferenceClick = {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     launchManageAllFilesAccess(context)
