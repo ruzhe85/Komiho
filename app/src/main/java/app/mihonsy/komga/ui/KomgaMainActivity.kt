@@ -195,6 +195,9 @@ import app.mihonsy.komga.data.KomgaDbBridge
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.SourceVisibilityStore
+// SY --> Komiho: KomgaConnection.displayName()（名称空则回落 host），来源列表按连接展开时用。
+import app.mihonsy.komga.data.displayName
+// SY <--
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 // SY --> Komiho Phase7: SMB 来源接入。
 import app.mihonsy.komga.data.smb.SmbBrowse
@@ -364,7 +367,16 @@ internal enum class SourceKind {
 
 internal data class SourceEntry(val id: String, val kind: SourceKind, val name: String)
 
-internal const val SOURCE_ID_KOMGA = SourceVisibilityStore.ID_KOMGA
+// SY --> Komiho: Komga 与 WebDAV / SMB 同构——「一条连接 = 一条独立来源」，
+// 条目 id = 前缀 + connId；该前缀同时就是 SourceVisibilityStore 里连接级显隐开关的
+// key 前缀，天然复用同一份可见性数据。
+internal const val SOURCE_ID_KOMGA_PREFIX = SourceVisibilityStore.ID_KOMGA_CONN_PREFIX
+/**
+ * 旧版「单一 Komga 来源」条目 id（"komga"）。**仅用于存量迁移**：升级前可能已写进
+ * browseSourceId / sourceOrder，读到它时映射为激活连接的 `komga:<connId>`。
+ */
+internal const val SOURCE_ID_KOMGA_LEGACY = SourceVisibilityStore.ID_KOMGA
+// SY <--
 internal const val SOURCE_ID_LOCAL = SourceVisibilityStore.ID_LOCAL
 internal const val SOURCE_ID_WEBDAV_PREFIX = SourceVisibilityStore.ID_WEBDAV_PREFIX
 // SY --> Komiho Phase7: SMB 来源条目 id 前缀（章节 url 是 `smb://<connId>/...`，来源 id 是
@@ -373,17 +385,26 @@ internal const val SOURCE_ID_SMB_PREFIX = SourceVisibilityStore.ID_SMB_PREFIX
 // SY <--
 
 /**
- * 来源菜单排序：本地是唯一内置来源、固定置顶；其余按优先级 Komga > WebDAV > SMB，
- * 同级按名称升序。未「添加」的来源不显示——Komga 仅在已配置服务器连接（[komgaConnected]）
- * 时出现，WebDAV / SMB 每条连接一条。
+ * 来源菜单排序：本地是唯一内置来源、固定置顶；Komga / WebDAV / SMB 统一为
+ * 「**一条连接 = 一条独立来源**」，同级按名称升序。未「添加」的来源不显示。
+ *
+ * 单一权威点——顶栏来源菜单、来源管理页、聚合页卡片读同一份列表，
+ * 用户的拖拽排序（[SourceVisibilityStore.sourceOrder]）在这里统一生效。
  */
-internal fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, localName: String): List<SourceEntry> {
+internal fun buildSourceEntries(komgaConns: List<KomgaConnection>, localName: String): List<SourceEntry> {
     val entries = mutableListOf(
         SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName),
     )
-    if (komgaConnected) {
-        entries.add(SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, komgaName))
-    }
+    // Komga：每连接一条（id = komga:<connId>），与 WebDAV / SMB 完全同构。
+    // id 兜底：saveConnection 恒写 UUID，但历史数据若为空串则回落 baseUrl，
+    // 避免多条连接塌成同一个 id。
+    komgaConns
+        .sortedBy { it.displayName().lowercase() }
+        .forEach {
+            entries.add(
+                SourceEntry(SOURCE_ID_KOMGA_PREFIX + it.id.ifBlank { it.baseUrl }, SourceKind.Komga, it.displayName()),
+            )
+        }
     WebDavConnectionStore.all()
         .sortedBy { it.displayName().lowercase() }
         .forEach { entries.add(SourceEntry(SOURCE_ID_WEBDAV_PREFIX + it.id, SourceKind.WebDav, it.displayName())) }
@@ -397,24 +418,26 @@ internal fun buildSourceEntries(komgaConnected: Boolean, komgaName: String, loca
     val order = SourceVisibilityStore.sourceOrder()
     if (order.isEmpty()) return entries
     val rank = order.withIndex().associate { it.value to it.index }
-    return entries.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
+    // 存量兜底：旧版把整个 Komga 记成一条 "komga"，升级后条目 id 变成
+    // "komga:<connId>"，直接查 rank 会落空而掉到末尾——这里让它继承旧记录的位次
+    // （多条 Komga 同 rank，稳定排序保持其相对顺序）。
+    fun rankOf(id: String): Int = rank[id]
+        ?: if (id.startsWith(SOURCE_ID_KOMGA_PREFIX)) {
+            rank[SOURCE_ID_KOMGA_LEGACY] ?: Int.MAX_VALUE
+        } else {
+            Int.MAX_VALUE
+        }
+    return entries.sortedBy { rankOf(it.id) }
 }
 
 /**
  * 聚合页是否展示该来源卡片——管理页「显示」开关为开才显示（[SourceVisibilityStore]）。
- * - 本地：内置唯一来源，也可隐藏（管理页本地卡右侧的眼睛开关）；
- * - Komga：聚合页只有一张卡，管理页按连接列，故任一条连接可见即显示、全关才隐藏；
- * - WebDAV / SMB：按连接 id 的开关决定。
+ * 一条来源 id 恰好就是一个开关 id：本地 "local"、Komga "komga:<connId>"、
+ * WebDAV "webdav:<connId>"、SMB "smb:<connId>"，故无需再按来源类型分支。
  *
  * 注意：只过滤聚合页卡片，**不动**顶栏来源菜单——隐藏的来源仍可在菜单里切过去。
  */
-private fun SourceEntry.visibleOnDashboard(prefs: KomgaPreferences): Boolean = when (id) {
-    SOURCE_ID_LOCAL -> SourceVisibilityStore.isVisible(SourceVisibilityStore.ID_LOCAL)
-    SOURCE_ID_KOMGA -> prefs.connections().let { conns ->
-        conns.isEmpty() || conns.any { SourceVisibilityStore.isVisible(SourceVisibilityStore.ID_KOMGA_CONN_PREFIX + it.id) }
-    }
-    else -> SourceVisibilityStore.isVisible(id)
-}
+private fun SourceEntry.visibleOnDashboard(): Boolean = SourceVisibilityStore.isVisible(id)
 
 private enum class MainTab(
     @StringRes val labelRes: Int,
@@ -460,24 +483,8 @@ private fun KomgaMainScreen(
 ) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
-    // SY --> Komiho: 懒构造客户端。欢迎页「开始使用」/ 仅 WebDAV / 仅本地进入主界面时，
-    // 无条件构造会在 init 的 require(baseUrl)（「服务器地址不能为空」）直接崩溃。
-    // b3ec421 首版懒构造仍被首帧组合触碰（currentTab 记忆值 Home 先于 tab 修正
-    // LaunchedEffect 组合 HomeTab），翻车于此。三层兜底：①初始 tab 按有无连接落点；
-    // ②无连接时 Komga 专属 tab 重定向本地浏览（见 safeTab）；③此处构造永不抛——
-    // 无连接用占位连接，请求自然失败，绝不在组合期 throw。
-    val client: KomgaApiClient by remember {
-        lazy {
-            val conn = prefs.connection()
-            KomgaApiClient(
-                if (conn.baseUrl.isNotBlank()) {
-                    conn
-                } else {
-                    KomgaConnection(baseUrl = "http://127.0.0.1:1")
-                },
-            )
-        }
-    }
+    // SY: KomgaApiClient 的定义已下移到「当前来源」确定之后——Komga 现为
+    // 「一条连接 = 一条独立来源」，client 必须随来源 id 重建（见下方 `val client`）。
 
     // SY --> Komiho P0: 本地浏览所需状态。
     // 用户所选文件夹**即**漫画根目录（不再有 local 子目录这一层）；目录未选择时
@@ -588,28 +595,54 @@ private fun KomgaMainScreen(
     // KomgaConnectActivity 添加完连接返回的场景。
     var komgaConnected by remember { mutableStateOf(prefs.hasConnection()) }
     val localName = composeStringResource(R.string.source_local)
-    // Komga 条目名 = 激活连接的来源名称（用户自定义，如「QNAP」），为空回落 host。
-    val komgaName = remember(sourceVersion, komgaConnected) {
-        if (komgaConnected) {
-            prefs.connection().let { c -> c.name.ifBlank { c.baseUrl.substringAfter("//").substringBefore("/") } }
-        } else {
-            ""
-        }
-    }
-    val sourceEntries = remember(sourceVersion, komgaConnected, komgaName, localName) {
-        buildSourceEntries(komgaConnected, komgaName, localName)
+    // Komga 每连接一条来源（与 WebDAV / SMB 同构）；连接增删后由 sourceVersion++ 触发重算。
+    val komgaConns = remember(sourceVersion, komgaConnected) { prefs.connections() }
+    val sourceEntries = remember(sourceVersion, komgaConns, localName) {
+        buildSourceEntries(komgaConns, localName)
     }
     // SY: 聚合页只展示「显示」开关为开的来源（管理页关闭后 sourceVersion++ 触发重算）。
-    val dashboardEntries = remember(sourceEntries, sourceVersion) {
-        sourceEntries.filter { it.visibleOnDashboard(prefs) }
+    val dashboardEntries = remember(sourceEntries) {
+        sourceEntries.filter { it.visibleOnDashboard() }
     }
+    // 来源 id 迁移：旧版单一 Komga 来源（"komga"）→ 激活连接的 "komga:<connId>"；
+    // 空值则默认落到 Komga 激活连接（已有连接时）或本地。
     var currentSourceId by remember {
-        mutableStateOf(
-            storagePreferences.browseSourceId.get().ifBlank {
-                if (prefs.hasConnection()) SOURCE_ID_KOMGA else SOURCE_ID_LOCAL
-            },
-        )
+        val stored = storagePreferences.browseSourceId.get()
+        val restored = when {
+            stored == SOURCE_ID_KOMGA_LEGACY ->
+                if (prefs.hasConnection()) SOURCE_ID_KOMGA_PREFIX + prefs.connection().id else SOURCE_ID_LOCAL
+            stored.isNotBlank() -> stored
+            prefs.hasConnection() -> SOURCE_ID_KOMGA_PREFIX + prefs.connection().id
+            else -> SOURCE_ID_LOCAL
+        }
+        mutableStateOf(restored)
     }
+    // 迁移结果落盘一次，避免每次启动重复判断（写失败也无害）。
+    LaunchedEffect(Unit) {
+        if (storagePreferences.browseSourceId.get() != currentSourceId) {
+            storagePreferences.browseSourceId.set(currentSourceId)
+        }
+    }
+    // SY --> Komiho: 懒构造客户端，**随当前来源重建**——Komga 现为「一条连接 = 一条来源」，
+    // 切换 Komga 来源即切换服务器连接，Home / Library 等必须跟着换 client。
+    // 欢迎页「开始使用」/ 仅 WebDAV / 仅本地进入主界面时，无条件构造会在 init 的
+    // require(baseUrl)（「服务器地址不能为空」）直接崩溃。b3ec421 首版懒构造仍被首帧组合
+    // 触碰（currentTab 记忆值 Home 先于 tab 修正 LaunchedEffect 组合 HomeTab），翻车于此。
+    // 三层兜底：①初始 tab 按有无连接落点；②无连接时 Komga 专属 tab 重定向本地浏览
+    // （见 safeTab）；③此处构造永不抛——无连接用占位连接，请求自然失败，绝不在组合期 throw。
+    val client: KomgaApiClient by remember(currentSourceId, sourceVersion) {
+        lazy {
+            val conn = prefs.connection()
+            KomgaApiClient(
+                if (conn.baseUrl.isNotBlank()) {
+                    conn
+                } else {
+                    KomgaConnection(baseUrl = "http://127.0.0.1:1")
+                },
+            )
+        }
+    }
+    // SY <--
     val currentSourceEntry = sourceEntries.firstOrNull { it.id == currentSourceId } ?: sourceEntries.first()
     val currentIsFileSource = currentSourceEntry.kind.isFileSource
     val visibleTabs = remember(currentIsFileSource) {
@@ -623,8 +656,22 @@ private fun KomgaMainScreen(
     }
     // 注：不在此处重置 searchOpen ——下方 LaunchedEffect(currentTab) 已负责，
     // 且切换来源必定改变 currentTab（两类来源的首个可见 tab 不同）。
+    /**
+     * Komga 来源切换时同步激活对应的服务器连接——Home / Library 等页面都读
+     * [KomgaPreferences.connection]。必须在改 currentSourceId **之前**调用，
+     * 这样下方 `remember(currentSourceId, ...)` 重建 client 时已指向新连接。
+     */
+    fun activateKomgaConnection(entry: SourceEntry) {
+        if (entry.kind != SourceKind.Komga) return
+        val connId = entry.id.removePrefix(SOURCE_ID_KOMGA_PREFIX)
+        if (connId.isNotBlank() && connId != prefs.activeConnectionId) {
+            prefs.setActiveConnection(connId)
+        }
+    }
+
     fun selectSource(entry: SourceEntry) {
         if (entry.id == currentSourceId) return
+        activateKomgaConnection(entry)
         currentSourceId = entry.id
         storagePreferences.browseSourceId.set(entry.id)
         // SY: 跳过 Sources 仪表盘——「首个可见 tab」指来源的内容首页（Komga=Home / 文件型=浏览）。
@@ -635,6 +682,7 @@ private fun KomgaMainScreen(
     //（Komga=Home / 文件型=浏览）。与 selectSource 的区别：同源不早退（仪表盘上点当前来源
     // 的卡片，预期也是「进去」而不是没反应）。
     fun openSourceFromDashboard(entry: SourceEntry) {
+        activateKomgaConnection(entry)
         currentSourceId = entry.id
         storagePreferences.browseSourceId.set(entry.id)
         currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource) }.ordinal
@@ -772,7 +820,10 @@ private fun KomgaMainScreen(
         if (!filterPair?.first.isNullOrBlank() && !filterPair?.second.isNullOrBlank()) {
             // SY --> Komiho P0: 过滤数据来自 Komga 系列页，先切回 Komga 来源；
             // 否则若当前停在文件型来源，会跳到一个被隐藏的 Library tab。
-            selectSource(SourceEntry(SOURCE_ID_KOMGA, SourceKind.Komga, "Komga"))
+            // Komga 现为「每连接一条来源」，切到激活连接那一条。
+            if (prefs.hasConnection()) {
+                selectSource(SourceEntry(SOURCE_ID_KOMGA_PREFIX + prefs.connection().id, SourceKind.Komga, ""))
+            }
             // SY <--
             currentTab = MainTab.Library.ordinal
         }
@@ -1236,7 +1287,7 @@ private fun KomgaMainScreen(
                             sourceVersion++
                             komgaConnected = prefs.hasConnection()
                             // 用关闭后的最新来源列表校验（sourceEntries 还是旧快照）。
-                            if (buildSourceEntries(prefs.hasConnection(), "", "").none { it.id == currentSourceId }) {
+                            if (buildSourceEntries(prefs.connections(), "").none { it.id == currentSourceId }) {
                                 selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName))
                             }
                         },
@@ -6861,7 +6912,11 @@ private fun SourceDashboardPane(
                         .take(limit)
             }
             val local = Agg()
-            val komga = Agg()
+            // SY: Komga 同样是「每连接一条来源」，但本地历史统一挂在 KomgaSource.ID 下、
+            // url 不带 connId，无法反查是哪条连接读的——故历史先全部归入这个回落池，
+            // 只有「激活连接」的卡片会拿它补齐（见下方 komgaCards 的构建）。
+            val komgaLocal = Agg()
+            val komgaConns = KomgaPreferences(context.applicationContext).connections()
             val webdav = mutableMapOf<String, Agg>()
             // SY --> Komiho Phase7: SMB 摘要分桶（smb://<connId>/<relPath> → smb:<connId>）。
             val smb = mutableMapOf<String, Agg>()
@@ -6888,8 +6943,8 @@ private fun SourceDashboardPane(
                     else -> local.add(item)
                 }
             }
-            // Komga：独立来源 ID（无记录时卡片回落引导语）。
-            runCatching { repo.getHistoryBySourceDetailed(KomgaSource.ID).first() }.getOrDefault(emptyList()).forEach { komga.add(it) }
+            // Komga：历史统一挂在 KomgaSource.ID 下（无记录时卡片回落引导语）。
+            runCatching { repo.getHistoryBySourceDetailed(KomgaSource.ID).first() }.getOrDefault(emptyList()).forEach { komgaLocal.add(it) }
             // SY: 封面回退链与历史/书签行同口径（本地文件 → WebDAV 缓存 → SMB 缓存）。
             // 注意：Komga 封面不走 coverOf（需挂起解析 Manga + 鉴权 fetcher），单独在下方 suspend 块处理。
             val coverOf: (LocalHistoryItem?) -> Any? = { item ->
@@ -6912,7 +6967,7 @@ private fun SourceDashboardPane(
             // 补偿：升级前插入的旧记录 ogThumbnailUrl=null，按连接 baseUrl 即时补全并落库，
             // 这样无需重新打开书，聚合页 Komga 卡片也能立刻出封面。
             var komgaCover: Any? = null
-            val komgaLast = komga.last
+            val komgaLast = komgaLocal.last
             if (komgaLast != null) {
                 var manga = runCatching { getManga.await(komgaLast.mangaId) }.getOrNull()
                 if (manga != null) {
@@ -6960,14 +7015,21 @@ private fun SourceDashboardPane(
             // 时回落到本地历史（与改动前完全一致）。
             // Komga 本地历史行的封面走 coverOf 会拿到 null（Komga url 不进本地封面回退链），
             // 首条补上按 series 解析出的 Komga 封面，与改动前的卡片封面一致。
-            val komgaLocalRecents = toRecents(komga.recents(recentLimit * 2)).mapIndexed { i, r ->
+            // 本地历史回落只给「激活连接」那张卡（本地历史无法区分是哪个连接读的，
+            // 若每张卡都塞同一份，两张卡内容会完全一样）。
+            val activeKomgaConnId = runCatching {
+                KomgaPreferences(context.applicationContext).activeConnectionId
+            }.getOrNull().orEmpty()
+            val komgaLocalRecents = toRecents(komgaLocal.recents(recentLimit * 2)).mapIndexed { i, r ->
                 if (i == 0 && r.coverModel == null) r.copy(coverModel = komgaCover) else r
             }
-            var komgaCard = SourceCardSummary(komgaLocalRecents.take(recentLimit))
-            runCatching {
-                val prefs = KomgaPreferences(context.applicationContext)
-                if (prefs.hasConnection()) {
-                    val client = KomgaApiClient(prefs.connection())
+            // 每条 Komga 连接一张卡：主体按**该连接**拉服务器「进行中」记录。
+            val komgaCards = komgaConns.associate { conn ->
+                val key = SOURCE_ID_KOMGA_PREFIX + conn.id.ifBlank { conn.baseUrl }
+                val fallback = if (conn.id == activeKomgaConnId) komgaLocalRecents else emptyList()
+                var card = SourceCardSummary(fallback.take(recentLimit))
+                runCatching {
+                    val client = KomgaApiClient(conn)
                     val books = client.getBooks(
                         readStatus = "IN_PROGRESS",
                         sort = "readProgress.readDate,desc",
@@ -7005,18 +7067,17 @@ private fun SourceDashboardPane(
                         // 服务器「进行中」不足 N 条时用本地历史补齐（同一本按 chapterId 去重），
                         // 仍按最后阅读时间倒序，保证卡片列表时间单调。
                         val serverIds = serverRecents.map { it.chapterId }.toHashSet()
-                        komgaCard = SourceCardSummary(
-                            (serverRecents + komgaLocalRecents.filter { it.chapterId !in serverIds })
+                        card = SourceCardSummary(
+                            (serverRecents + fallback.filter { it.chapterId !in serverIds })
                                 .sortedByDescending { it.readAt }
                                 .take(recentLimit),
                         )
                     }
                 }
+                key to card
             }
-            mapOf(
-                SOURCE_ID_LOCAL to build(local),
-                SOURCE_ID_KOMGA to komgaCard,
-            ) + webdav.mapValues { (_, agg) -> build(agg) } +
+            mapOf(SOURCE_ID_LOCAL to build(local)) + komgaCards +
+                webdav.mapValues { (_, agg) -> build(agg) } +
                 // SY --> Komiho Phase7: SMB 卡片摘要。
                 smb.mapValues { (_, agg) -> build(agg) }
             // SY <--

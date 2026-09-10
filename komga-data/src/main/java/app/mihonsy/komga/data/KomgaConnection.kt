@@ -29,6 +29,14 @@ data class KomgaConnection(
 )
 
 /**
+ * 来源 / 卡片显示名：用户自定义名称，为空回落服务器 host。
+ * 与 WebDAV / SMB 连接的 displayName 口径一致——每家连接在「来源管理」里都是
+ * 一条独立来源，名称即用户的标签。
+ */
+fun KomgaConnection.displayName(): String =
+    name.ifBlank { baseUrl.substringAfter("//").substringBefore("/") }
+
+/**
  * 认证状态：成功后持有会话 token（X-Auth-Token），后续请求复用。
  */
 data class KomgaSession(
