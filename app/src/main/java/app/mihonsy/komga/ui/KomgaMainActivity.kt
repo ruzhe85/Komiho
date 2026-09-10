@@ -1092,7 +1092,6 @@ private fun KomgaMainScreen(
                     // SY --> Komiho: 来源仪表盘（方案 B 启动首页）。
                     MainTab.Sources -> SourceDashboardPane(
                         entries = dashboardEntries,
-                        currentSourceId = currentSourceId,
                         refreshTick = refreshTick,
                         onOpenSource = ::openSourceFromDashboard,
                         onResumeReading = { entry, mangaId, chapterId, page ->
@@ -6876,7 +6875,6 @@ private data class SourceCardSummary(
 @Composable
 private fun SourceDashboardPane(
     entries: List<SourceEntry>,
-    currentSourceId: String,
     refreshTick: Int,
     onOpenSource: (SourceEntry) -> Unit,
     /** 续读：先把来源切过去（退出阅读器后落在该来源，避免「来源不对」），再带页码进阅读器。 */
@@ -7092,22 +7090,20 @@ private fun SourceDashboardPane(
     ) {
         entries.forEach { entry ->
             val recents = summaries[entry.id]?.recents.orEmpty()
-            val isCurrent = entry.id == currentSourceId
             val typeLabel = when (entry.kind) {
                 SourceKind.Komga -> "Komga"
                 SourceKind.WebDav -> "WebDAV"
                 SourceKind.Smb -> "SMB"
                 SourceKind.Local -> composeStringResource(R.string.source_local)
             }
+            // SY: 卡片不再区分「当前来源」底色——启动时当前来源恢复自上次浏览，
+            // 单独把一张卡染成主色看起来像「默认选中了最后阅读的那个来源」，观感奇怪。
+            // 现在所有卡片统一底色。
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isCurrent) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    },
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 ),
             ) {
                 // 卡片头 = 来源（名称 + 类型 chip）+ 进入来源按钮。整卡不再可点：点行才是续读。
@@ -7122,11 +7118,7 @@ private fun SourceDashboardPane(
                     Text(
                         text = entry.name,
                         style = MaterialTheme.typography.titleMedium,
-                        color = if (isCurrent) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     // SY: 来源名与类型文案相同时不再渲染类型 chip——本地源名就叫「本地」，
                     // 否则卡片头会显示成「本地 本地」。
@@ -7134,20 +7126,12 @@ private fun SourceDashboardPane(
                         Spacer(Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = if (isCurrent) {
-                                MaterialTheme.colorScheme.surface
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
+                            color = MaterialTheme.colorScheme.surface,
                         ) {
                             Text(
                                 text = typeLabel,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (isCurrent) {
-                                    MaterialTheme.colorScheme.onSurface
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                             )
                         }
