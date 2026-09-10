@@ -86,7 +86,6 @@ import app.mihonsy.komga.data.KomgaApiClient
 // SY --> Komiho Phase4: 来源拖拽排序依赖 sh.calvin.reorderable。
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.draggableHandle
 import sh.calvin.reorderable.rememberReorderableLazyListState
 // SY <--
 import app.mihonsy.komga.data.KomgaAuthType
