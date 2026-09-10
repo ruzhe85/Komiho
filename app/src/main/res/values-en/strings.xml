@@ -30,7 +30,7 @@
     <string name="settings_dashboard_recent">Recent items per source</string>
     <string name="settings_dashboard_recent_summary">%1$d recent reading records</string>
     <string name="tab_library">Library</string>
-    <string name="tab_lists">Lists</string>
+    <string name="tab_lists">Collections &amp; Read Lists</string>
     <string name="tab_downloads">Downloads</string>
     <string name="tab_local">Local</string>
     <string name="tab_browse">Local</string>
