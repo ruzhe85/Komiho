@@ -3154,11 +3154,17 @@ private fun ListsTab(
         error = null
         scope.launch {
             runCatching {
-                // 列表端点通常不返回 booksCount（computed 字段被省略），逐条用详情覆盖。
+                // Komga 的 ReadListDto 只有 bookIds（无 booksCount），本数 = bookIds.size。
+                // 列表端点已带 bookIds，只有为空时才逐条拉详情兜底（老版本/精简响应），
+                // 避免每个阅读列表都多打一次详情请求。
                 readlists = client.getReadlists().map { list ->
-                    runCatching { client.getReadlist(list.id) }.getOrNull()?.let { detail ->
-                        list.copy(booksCount = detail.booksCount, bookIds = detail.bookIds)
-                    } ?: list
+                    if (list.bookIds.isNotEmpty()) {
+                        list
+                    } else {
+                        runCatching { client.getReadlist(list.id) }.getOrNull()?.let { detail ->
+                            list.copy(bookIds = detail.bookIds)
+                        } ?: list
+                    }
                 }
                 // 收藏统计用 seriesIds.size；列表端点已返回，但同样用详情兜底保证准确。
                 collections = client.getCollections().map { col ->
