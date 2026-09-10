@@ -392,21 +392,15 @@ private fun TypeSelectContent(
     // SY <--
 ) {
     val komgaConnected = prefs.hasConnection()
-    val komgaName = remember(komgaConnected, listTick) {
-        if (komgaConnected) {
-            prefs.connection().let { c -> c.name.ifBlank { c.baseUrl.substringAfter("//").substringBefore("/") } }
-        } else {
-            ""
-        }
-    }
     val localName = composeStringResource(R.string.source_local)
-    val komgaConns = remember(listTick) { prefs.connections() }
+    val komgaConns = remember(listTick, komgaConnected) { prefs.connections() }
     val webdavConns = remember(listTick) { WebDavConnectionStore.all() }
     val smbConns = remember(listTick) { SmbConnectionStore.all() }
 
-    // 可拖拽顺序（与顶栏来源菜单、最近阅读同源，来自 buildSourceEntries）。
-    val ordered = remember(listTick, komgaConnected, komgaName) {
-        mutableStateListOf<SourceEntry>().apply { addAll(buildSourceEntries(komgaConnected, komgaName, localName)) }
+    // 可拖拽顺序（与顶栏来源菜单、聚合页卡片同源，来自 buildSourceEntries）。
+    // Komga 与 WebDAV / SMB 同构：一条连接 = 一条来源。
+    val ordered = remember(listTick, komgaConns) {
+        mutableStateListOf<SourceEntry>().apply { addAll(buildSourceEntries(komgaConns, localName)) }
     }
 
     val lazyListState = rememberLazyListState()
@@ -608,9 +602,9 @@ private fun AddSourceCard(
 
 /**
  * 「已添加」列表的单个可拖拽来源行。
- * - 本地：仅显隐开关，点击管理本地。
- * - Komga：点击进来源管理；多连接作为不可拖拽子行（显隐/编辑/删除）列在下方。
- * - WebDAV / SMB：按连接的来源条目本身即一行，含显隐 + 编辑 + 删除 + 拖拽手柄。
+ * Komga / WebDAV / SMB **完全同构**——一条连接 = 一条独立来源，每行都是
+ * 显隐 + 编辑 + 删除 + 拖拽手柄，可各自显隐、各自排序，没有「子连接」层级。
+ * 本地是唯一内置来源，只有显隐开关（点行进入本地设置）。
  */
 @Composable
 private fun ReorderableCollectionItemScope.SourceManageRow(
@@ -630,23 +624,15 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
         SourceKind.WebDav -> SourceBadgeSpec.Icon(Icons.Filled.CloudQueue)
         SourceKind.Smb -> SourceBadgeSpec.Icon(Icons.Filled.Lan)
     }
-    // SY: Komga 只有 1 个连接时扁平化为一行（与 WebDAV / SMB 行同构），不再渲染
-    // 「主行 + 同名子行」两层——来源名与右侧图标只出现一次；≥2 个连接才保留
-    // 来源主行 + 每连接子行的结构。
-    val singleKomgaConn = if (entry.kind == SourceKind.Komga) komgaConns.singleOrNull() else null
-    // 连接 id：WebDAV / SMB 从条目 id 剥前缀；Komga 单连接即该连接；本地无连接。
+    // 连接 id：Komga / WebDAV / SMB 一律从条目 id 剥掉各自前缀（条目 id = 前缀 + connId）。
     val connId = when (entry.kind) {
+        SourceKind.Komga -> entry.id.removePrefix(SourceVisibilityStore.ID_KOMGA_CONN_PREFIX)
         SourceKind.WebDav -> entry.id.removePrefix(SourceVisibilityStore.ID_WEBDAV_PREFIX)
         SourceKind.Smb -> entry.id.removePrefix(SourceVisibilityStore.ID_SMB_PREFIX)
-        SourceKind.Komga -> singleKomgaConn?.id
         SourceKind.Local -> null
     }
-    // 显隐开关 id：本地=内置 id；WebDAV / SMB = 条目 id（前缀 + connId）；Komga 单连接=连接级 id。
-    val visId = when (entry.kind) {
-        SourceKind.Local -> SourceVisibilityStore.ID_LOCAL
-        SourceKind.Komga -> singleKomgaConn?.let { SourceVisibilityStore.ID_KOMGA_CONN_PREFIX + it.id }
-        else -> entry.id
-    }
+    // 显隐开关 id：本地 = 内置 id；其余条目 id 本身就等于连接级开关 id（前缀 + connId）。
+    val visId = if (entry.kind == SourceKind.Local) SourceVisibilityStore.ID_LOCAL else entry.id
     // 每个分支先落到具体类型的局部 val 再 let，确保返回类型恒为 (() -> Unit)?，
     // 不会像 if/else 那样把公共类型退化成 Any?（此前踩过的坑）。
     val deleteAction: (() -> Unit)? = when (entry.kind) {
@@ -659,7 +645,7 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
             c?.let { { onRequestDeleteSmb(it) } }
         }
         SourceKind.Komga -> {
-            val c = singleKomgaConn
+            val c = komgaConns.firstOrNull { it.id == connId }
             c?.let { { onRequestDeleteKomga(it) } }
         }
         SourceKind.Local -> null
@@ -678,15 +664,12 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text(entry.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                    val sub = when (entry.kind) {
-                        SourceKind.Local -> composeStringResource(R.string.addsrc_builtin)
-                        // 单连接已扁平化成一行，无需再提示「1 个连接」；多连接才显示数量。
-                        SourceKind.Komga -> if (komgaConns.size > 1) {
-                            composeStringResource(R.string.addsrc_conn_count, komgaConns.size)
-                        } else {
-                            null
-                        }
-                        else -> null
+                    // 只有本地需要「内置」说明；Komga / WebDAV / SMB 每连接已是一条独立来源，
+                    // 名称本身就是身份，不再需要副标题。
+                    val sub = if (entry.kind == SourceKind.Local) {
+                        composeStringResource(R.string.addsrc_builtin)
+                    } else {
+                        null
                     }
                     if (sub != null) {
                         Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -696,14 +679,12 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
         }
         // SY: 操作区固定 4 个 32dp 槽位（显隐 / 编辑 / 删除 / 拖拽手柄）。不适用的槽位用
         // Spacer 占位，保证各行图标横向右对齐——修掉原先「动作数不同导致图标漂移、错乱」。
-        if (visId != null) {
-            var visible by remember(visId) { mutableStateOf(SourceVisibilityStore.isVisible(visId)) }
-            VisibilityToggle(visible) {
-                visible = !visible
-                SourceVisibilityStore.setVisible(visId, visible)
-            }
-        } else {
-            Spacer(Modifier.size(32.dp))
+        // 所有来源都有显隐开关：本地用内置来源 id，Komga / WebDAV / SMB 用连接级 id
+        // （即条目 id），因此这里恒有值，无需占位分支。
+        var visible by remember(visId) { mutableStateOf(SourceVisibilityStore.isVisible(visId)) }
+        VisibilityToggle(visible) {
+            visible = !visible
+            SourceVisibilityStore.setVisible(visId, visible)
         }
         if (connId != null) {
             IconButton(onClick = { onOpen(connId) }, modifier = Modifier.size(32.dp)) {
@@ -720,80 +701,6 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
             Spacer(Modifier.size(32.dp))
         }
         dragHandle()
-    }
-    // Komga 多连接（≥2）：不可拖拽子行（显隐 / 编辑 / 删除）；单连接已在上方扁平化，
-    // 不再列子行，避免「黑猫」来源名重复出现两次。
-    if (entry.kind == SourceKind.Komga && komgaConns.size > 1) {
-        komgaConns.forEach { conn ->
-            // 变量名刻意不同于外层 visId，避免命名遮蔽告警。
-            val connVisId = SourceVisibilityStore.ID_KOMGA_CONN_PREFIX + conn.id
-            var visible by remember(connVisId) { mutableStateOf(SourceVisibilityStore.isVisible(connVisId)) }
-            AddedSourceRow(
-                name = connDisplayName(conn.name, conn.baseUrl),
-                visible = visible,
-                onToggleVisible = {
-                    visible = !visible
-                    SourceVisibilityStore.setVisible(connVisId, visible)
-                },
-                onEdit = { onOpen(conn.id) },
-                onDelete = { onRequestDeleteKomga(conn) },
-            )
-        }
-    }
-}
-
-/** 已添加来源条目行：名称居左，右侧「显示 / 编辑 / 删除」图标按钮成组靠右（删除红色）。 */
-@Composable
-private fun AddedSourceRow(
-    name: String,
-    visible: Boolean,
-    onToggleVisible: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 24.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            name,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        // SY: 聚合页显示开关——开（眼睛）才在聚合页显示该来源卡片，关（斜杠眼）则隐藏。
-        IconButton(onClick = onToggleVisible, modifier = Modifier.size(32.dp)) {
-            Icon(
-                if (visible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                contentDescription = composeStringResource(R.string.addsrc_toggle_visible_cd),
-                modifier = Modifier.size(16.dp),
-                tint = if (visible) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-        IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-            Icon(
-                Icons.Filled.Edit,
-                contentDescription = composeStringResource(R.string.addsrc_edit_cd),
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-            Icon(
-                Icons.Filled.Delete,
-                contentDescription = composeStringResource(R.string.addsrc_delete_cd),
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.error,
-            )
-        }
     }
 }
 
