@@ -3697,10 +3697,19 @@ private fun SettingsTab(
     var showAppearance by remember { mutableStateOf(false) }
     var showHome by remember { mutableStateOf(false) }
     var showHomePage by remember { mutableStateOf(false) }
-    var showPreview by remember { mutableStateOf(false) }
     var showReaderSettings by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var showLocalStorage by remember { mutableStateOf(false) }
+
+    // SY: 「预览图」设置项改为「清除预览图」整行点击弹确认框（取消上限滑块）。
+    // 实时统计 komga_covers 磁盘池占用，作为「已使用：XXMB」小字。
+    val previewCacheDir = java.io.File(context.cacheDir, "komga_covers")
+    fun previewCacheSizeBytes(): Long {
+        if (!previewCacheDir.exists()) return 0L
+        return previewCacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
+    var previewUsedBytes by remember { mutableStateOf(previewCacheSizeBytes()) }
+    var showClearPreview by remember { mutableStateOf(false) }
 
     // MihonSY 风格：分类行列表，点击进入子页面（不再平铺展开全部选项）。
     Column(
@@ -3763,9 +3772,9 @@ private fun SettingsTab(
                 item {
                     TextPreferenceWidget(
                         title = composeStringResource(R.string.settings_preview_images),
-                        subtitle = composeStringResource(R.string.settings_preview_images_summary),
-                        icon = Icons.Filled.Image,
-                        onPreferenceClick = { showPreview = true },
+                        subtitle = composeStringResource(R.string.storage_cache_usage) + formatCacheSize(previewUsedBytes),
+                        icon = Icons.Filled.Delete,
+                        onPreferenceClick = { showClearPreview = true },
                     )
                 }
             }
@@ -3776,12 +3785,6 @@ private fun SettingsTab(
             onDismiss = { showHomePage = false },
             title = composeStringResource(R.string.settings_home_page),
         ) { padding -> KomgaHomeSectionsSettings(Modifier.padding(padding), context) }
-    }
-    if (showPreview) {
-        SettingsCategoryDialog(
-            onDismiss = { showPreview = false },
-            title = composeStringResource(R.string.settings_preview_images),
-        ) { padding -> KomgaPreviewSettings(Modifier.padding(padding), context) }
     }
     if (showAbout) {
         SettingsCategoryDialog(
@@ -3794,6 +3797,34 @@ private fun SettingsTab(
             onDismiss = { showLocalStorage = false },
             title = composeStringResource(R.string.storage_title),
         ) { padding -> KomgaLocalStorageSettings(Modifier.padding(padding), context) }
+    }
+    // SY: 「清除预览图」确认对话框（komga_covers 磁盘池）。架构与存储设置的远程/封面缓存一致。
+    if (showClearPreview) {
+        AlertDialog(
+            onDismissRequest = { showClearPreview = false },
+            title = { Text(composeStringResource(R.string.settings_preview_images)) },
+            text = { Text(composeStringResource(R.string.storage_clear_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearPreview = false
+                    runCatching {
+                        coil3.ImageLoader(context.applicationContext).diskCache?.clear()
+                        previewCacheDir.deleteRecursively()
+                    }
+                    previewUsedBytes = 0L
+                    Toast.makeText(
+                        context.applicationContext,
+                        context.getString(R.string.settings_cover_cache_cleared),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }) { Text(composeStringResource(R.string.storage_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearPreview = false }) {
+                    Text(composeStringResource(R.string.storage_cancel))
+                }
+            },
+        )
     }
     if (showReaderSettings) {
         Dialog(
@@ -4332,84 +4363,6 @@ private fun KomgaHomeSectionsSettings(modifier: Modifier, context: android.conte
     }
 }
 
-/**
- * 书库 → 预览图 → 缓存设置。
- * 缓存上限滑块（0 = 不缓存/实时，最高 500M，默认 100M）+ 清空预览图缓存按钮。
- */
-@Composable
-private fun KomgaPreviewSettings(modifier: Modifier, context: android.content.Context) {
-    val prefs = remember { KomgaPreferences(context.applicationContext) }
-    var cacheLimitMb by remember { mutableStateOf((prefs.coverCacheLimitBytes / (1024 * 1024)).toInt()) }
-
-    // 磁盘缓存大小（bytes），用于展示当前占用。
-    val diskCacheDir = java.io.File(context.cacheDir, "komga_covers")
-    fun diskCacheSizeMb(): Long {
-        if (!diskCacheDir.exists()) return 0L
-        return diskCacheDir.walkTopDown().filter { it.isFile }.map { it.length() }.sum() / (1024 * 1024)
-    }
-    var cacheUsedMb by remember { mutableStateOf(diskCacheSizeMb()) }
-
-    LazyColumn(modifier.fillMaxSize()) {
-        item {
-            Text(
-                text = composeStringResource(R.string.settings_cache_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-        }
-        item {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Text(
-                    text = composeStringResource(R.string.settings_cache_limit_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(4.dp))
-                Slider(
-                    value = cacheLimitMb.toFloat(),
-                    onValueChange = {
-                        val mb = it.toInt().coerceIn(0, 500)
-                        cacheLimitMb = mb
-                        prefs.coverCacheLimitBytes = mb * 1024L * 1024L
-                    },
-                    valueRange = 0f..500f,
-                    steps = 9, // 0,50,100,...,500
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    text = if (cacheLimitMb == 0) {
-                        composeStringResource(R.string.settings_cache_preview_none)
-                    } else {
-                        composeStringResource(R.string.settings_cache_preview, cacheLimitMb, cacheUsedMb)
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        item {
-            TextPreferenceWidget(
-                title = composeStringResource(R.string.settings_clear_cover_cache),
-                icon = Icons.Filled.Delete,
-                onPreferenceClick = {
-                    // 清空 Coil 磁盘缓存（komga_covers）。设置变更下次重建时生效，
-                    // 这里直接清现有目录，立即释放空间。
-                    runCatching {
-                        coil3.ImageLoader(context.applicationContext).diskCache?.clear()
-                        diskCacheDir.deleteRecursively()
-                    }
-                    cacheUsedMb = 0L
-                    Toast.makeText(
-                        context.applicationContext,
-                        context.getString(R.string.settings_cover_cache_cleared),
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                },
-            )
-        }
-    }
-}
 
 @Composable
 private fun HomeLayoutChip(

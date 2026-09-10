@@ -275,20 +275,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             )
 
             // SY: Cover disk cache shared by Komga covers AND local (file-source)
-            // covers — both go through Coil, so one pool and one limit govern
-            // every preview image in the app. Decoded thumbnails persist across
-            // screen changes and app restarts (LRU). Size comes from the
-            // user's "cache limit" preference (default 100 MiB, max 500 MiB),
-            // set under 书库 → 预览图. HTTP-level revalidation (etag/304) is
-            // handled by NetworkHelper's OkHttp cache, so a changed server
-            // cover is picked up automatically. Local covers invalidate via
-            // lastModified in their cache key (see LocalCoverKeyer).
-            val coverCacheLimit = app.mihonsy.komga.data.KomgaPreferences(context.applicationContext)
-                .coverCacheLimitBytes
+            // 预览图（Komga 封面走 Coil 同一磁盘池 komga_covers）不再设用户上限：
+            // 取消「书库 → 预览图」里的缓存上限滑块，Coil 用自身默认策略做 LRU 淘汰；
+            // 本设置项改为「清除预览图」整行点击弹确认框。HTTP 层 etag/304 协商与
+            // 本地封面 lastModified 失效逻辑不变。
             diskCache(
                 DiskCache.Builder()
                     .directory(File(context.cacheDir, "komga_covers").toOkioPath())
-                    .maxSizeBytes(coverCacheLimit)
                     .build(),
             )
 
