@@ -7067,25 +7067,29 @@ private fun SourceDashboardPane(
                             MaterialTheme.colorScheme.onSurface
                         },
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (isCurrent) {
-                            MaterialTheme.colorScheme.surface
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                    ) {
-                        Text(
-                            text = typeLabel,
-                            style = MaterialTheme.typography.labelSmall,
+                    // SY: 来源名与类型文案相同时不再渲染类型 chip——本地源名就叫「本地」，
+                    // 否则卡片头会显示成「本地 本地」。
+                    if (typeLabel != entry.name) {
+                        Spacer(Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
                             color = if (isCurrent) {
-                                MaterialTheme.colorScheme.onSurface
+                                MaterialTheme.colorScheme.surface
                             } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
+                                MaterialTheme.colorScheme.surfaceVariant
                             },
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                        )
+                        ) {
+                            Text(
+                                text = typeLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isCurrent) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                            )
+                        }
                     }
                     Spacer(Modifier.weight(1f))
                     // SY: 右侧按钮恒为「进入来源」（切到该来源的内容首页，保留最后浏览目录记忆）。

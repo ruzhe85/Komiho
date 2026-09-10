@@ -73,6 +73,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -80,6 +81,7 @@ import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.KomgaApiClient
@@ -408,15 +410,15 @@ private fun TypeSelectContent(
     }
 
     val lazyListState = rememberLazyListState()
+    // SY: onMove 采用库官方写法 `add(to.index, removeAt(from.index))`，**不要**再做
+    // 「toIndex > fromIndex 则 -1」的修正：那样拖拽项永远插在目标项之前、无法越过它，
+    // 表现为只能一格一格挪。这里用 key 反查 index（而非 from.index/to.index），
+    // 天然规避了列表前方 add_header/divider/added_label 三个固定项造成的索引偏移。
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val fromId = from.key.toString()
-        val toId = to.key.toString()
-        val fromIndex = ordered.indexOfFirst { it.id == fromId }
-        val toIndex = ordered.indexOfFirst { it.id == toId }
+        val fromIndex = ordered.indexOfFirst { it.id == from.key.toString() }
+        val toIndex = ordered.indexOfFirst { it.id == to.key.toString() }
         if (fromIndex == -1 || toIndex == -1) return@rememberReorderableLazyListState
-        val moved = ordered.removeAt(fromIndex)
-        val insertAt = if (toIndex > fromIndex) toIndex - 1 else toIndex
-        ordered.add(insertAt, moved)
+        ordered.add(toIndex, ordered.removeAt(fromIndex))
         SourceVisibilityStore.setSourceOrder(ordered.map { it.id })
     }
 
@@ -433,11 +435,32 @@ private fun TypeSelectContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(10.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                CircleAddButton(icon = Icons.Filled.Folder, label = localName) { onSelect(AddSourceScreen.Local) }
-                CircleAddButton(letter = "K", label = "Komga") { onSelect(AddSourceScreen.Komga(null)) }
-                CircleAddButton(icon = Icons.Filled.CloudQueue, label = "WebDAV") { onSelect(AddSourceScreen.WebDav(null)) }
-                CircleAddButton(icon = Icons.Filled.Lan, label = "SMB") { onSelect(AddSourceScreen.Smb(null)) }
+            // SY: 方案 D —— 单行 4 张等宽卡片（weight(1f) + spacedBy(8dp)）。
+            // 相比原「SpaceEvenly 4 个孤圈」，卡片边界 + 等分贴边让四边对齐、不再显空。
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AddSourceCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Filled.Folder,
+                    label = localName,
+                ) { onSelect(AddSourceScreen.Local) }
+                AddSourceCard(
+                    modifier = Modifier.weight(1f),
+                    letter = "K",
+                    label = "Komga",
+                ) { onSelect(AddSourceScreen.Komga(null)) }
+                AddSourceCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Filled.CloudQueue,
+                    label = "WebDAV",
+                ) { onSelect(AddSourceScreen.WebDav(null)) }
+                AddSourceCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Filled.Lan,
+                    label = "SMB",
+                ) { onSelect(AddSourceScreen.Smb(null)) }
             }
         }
         item(key = "divider") { HorizontalDivider() }
@@ -471,9 +494,10 @@ private fun TypeSelectContent(
                     onRequestDeleteSmb = onRequestDeleteSmb,
                     dragHandle = {
                         // 双横线拖拽手柄（落在 ReorderableCollectionItemScope）。
+                        // 槽位尺寸固定 32dp，与前面显隐/编辑/删除三个槽一致，保证各行右对齐。
                         Box(
                             modifier = Modifier
-                                .size(width = 20.dp, height = 16.dp)
+                                .size(32.dp)
                                 .draggableHandle(),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -531,26 +555,54 @@ private fun VisibilityToggle(visible: Boolean, onToggle: () -> Unit) {
     }
 }
 
-/** 「添加」区圆框按钮：图标在圆内，一眼可点。 */
+/**
+ * 「添加」区单个等宽卡片：描边圆图标 + 名称，整卡可点（热区 ≥48dp）。
+ * 方案 D——由 Row 用 weight(1f) 等分，配合 spacedBy(8dp)，保证四边对齐；
+ * 名称单行省略，避免长文案（如 en 的 Local storage）撑破等宽。
+ */
 @Composable
-private fun CircleAddButton(icon: ImageVector? = null, letter: String? = null, label: String, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (icon != null) {
-                    Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                } else {
-                    Text(letter.orEmpty(), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                }
+private fun AddSourceCard(
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    letter: String? = null,
+    label: String,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .clickable(onClick = onClick)
+            .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+            .padding(vertical = 12.dp, horizontal = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (icon != null) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                Text(letter.orEmpty(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             }
         }
-        Spacer(Modifier.height(2.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -578,6 +630,40 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
         SourceKind.WebDav -> SourceBadgeSpec.Icon(Icons.Filled.CloudQueue)
         SourceKind.Smb -> SourceBadgeSpec.Icon(Icons.Filled.Lan)
     }
+    // SY: Komga 只有 1 个连接时扁平化为一行（与 WebDAV / SMB 行同构），不再渲染
+    // 「主行 + 同名子行」两层——来源名与右侧图标只出现一次；≥2 个连接才保留
+    // 来源主行 + 每连接子行的结构。
+    val singleKomgaConn = if (entry.kind == SourceKind.Komga) komgaConns.singleOrNull() else null
+    // 连接 id：WebDAV / SMB 从条目 id 剥前缀；Komga 单连接即该连接；本地无连接。
+    val connId = when (entry.kind) {
+        SourceKind.WebDav -> entry.id.removePrefix(SourceVisibilityStore.ID_WEBDAV_PREFIX)
+        SourceKind.Smb -> entry.id.removePrefix(SourceVisibilityStore.ID_SMB_PREFIX)
+        SourceKind.Komga -> singleKomgaConn?.id
+        SourceKind.Local -> null
+    }
+    // 显隐开关 id：本地=内置 id；WebDAV / SMB = 条目 id（前缀 + connId）；Komga 单连接=连接级 id。
+    val visId = when (entry.kind) {
+        SourceKind.Local -> SourceVisibilityStore.ID_LOCAL
+        SourceKind.Komga -> singleKomgaConn?.let { SourceVisibilityStore.ID_KOMGA_CONN_PREFIX + it.id }
+        else -> entry.id
+    }
+    // 每个分支先落到具体类型的局部 val 再 let，确保返回类型恒为 (() -> Unit)?，
+    // 不会像 if/else 那样把公共类型退化成 Any?（此前踩过的坑）。
+    val deleteAction: (() -> Unit)? = when (entry.kind) {
+        SourceKind.WebDav -> {
+            val c = webdavConns.firstOrNull { it.id == connId }
+            c?.let { { onRequestDeleteWebDav(it) } }
+        }
+        SourceKind.Smb -> {
+            val c = smbConns.firstOrNull { it.id == connId }
+            c?.let { { onRequestDeleteSmb(it) } }
+        }
+        SourceKind.Komga -> {
+            val c = singleKomgaConn
+            c?.let { { onRequestDeleteKomga(it) } }
+        }
+        SourceKind.Local -> null
+    }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -594,7 +680,12 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
                     Text(entry.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                     val sub = when (entry.kind) {
                         SourceKind.Local -> composeStringResource(R.string.addsrc_builtin)
-                        SourceKind.Komga -> composeStringResource(R.string.addsrc_conn_count, komgaConns.size)
+                        // 单连接已扁平化成一行，无需再提示「1 个连接」；多连接才显示数量。
+                        SourceKind.Komga -> if (komgaConns.size > 1) {
+                            composeStringResource(R.string.addsrc_conn_count, komgaConns.size)
+                        } else {
+                            null
+                        }
                         else -> null
                     }
                     if (sub != null) {
@@ -603,51 +694,46 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
                 }
             }
         }
-        if (entry.kind == SourceKind.Local) {
-            val visId = SourceVisibilityStore.ID_LOCAL
+        // SY: 操作区固定 4 个 32dp 槽位（显隐 / 编辑 / 删除 / 拖拽手柄）。不适用的槽位用
+        // Spacer 占位，保证各行图标横向右对齐——修掉原先「动作数不同导致图标漂移、错乱」。
+        if (visId != null) {
             var visible by remember(visId) { mutableStateOf(SourceVisibilityStore.isVisible(visId)) }
             VisibilityToggle(visible) {
                 visible = !visible
                 SourceVisibilityStore.setVisible(visId, visible)
             }
+        } else {
+            Spacer(Modifier.size(32.dp))
         }
-        if (entry.kind == SourceKind.WebDav || entry.kind == SourceKind.Smb) {
-            val prefix = if (entry.kind == SourceKind.WebDav) SourceVisibilityStore.ID_WEBDAV_PREFIX else SourceVisibilityStore.ID_SMB_PREFIX
-            val connId = entry.id.removePrefix(prefix)
-            val visId = prefix + connId
-            var visible by remember(visId) { mutableStateOf(SourceVisibilityStore.isVisible(visId)) }
-            VisibilityToggle(visible) {
-                visible = !visible
-                SourceVisibilityStore.setVisible(visId, visible)
-            }
+        if (connId != null) {
             IconButton(onClick = { onOpen(connId) }, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Filled.Edit, contentDescription = composeStringResource(R.string.addsrc_edit_cd), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            val deleteAction: (() -> Unit)? = if (entry.kind == SourceKind.WebDav) {
-                webdavConns.firstOrNull { it.id == connId }?.let { { onRequestDeleteWebDav(it) } }
-            } else {
-                smbConns.firstOrNull { it.id == connId }?.let { { onRequestDeleteSmb(it) } }
-            }
-            IconButton(
-                onClick = { deleteAction?.invoke() },
-                modifier = Modifier.size(32.dp),
-            ) {
+        } else {
+            Spacer(Modifier.size(32.dp))
+        }
+        if (deleteAction != null) {
+            IconButton(onClick = { deleteAction.invoke() }, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Filled.Delete, contentDescription = composeStringResource(R.string.addsrc_delete_cd), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
             }
+        } else {
+            Spacer(Modifier.size(32.dp))
         }
         dragHandle()
     }
-    // Komga 多连接：不可拖拽子行（显隐 / 编辑 / 删除）。
-    if (entry.kind == SourceKind.Komga) {
+    // Komga 多连接（≥2）：不可拖拽子行（显隐 / 编辑 / 删除）；单连接已在上方扁平化，
+    // 不再列子行，避免「黑猫」来源名重复出现两次。
+    if (entry.kind == SourceKind.Komga && komgaConns.size > 1) {
         komgaConns.forEach { conn ->
-            val visId = SourceVisibilityStore.ID_KOMGA_CONN_PREFIX + conn.id
-            var visible by remember(visId) { mutableStateOf(SourceVisibilityStore.isVisible(visId)) }
+            // 变量名刻意不同于外层 visId，避免命名遮蔽告警。
+            val connVisId = SourceVisibilityStore.ID_KOMGA_CONN_PREFIX + conn.id
+            var visible by remember(connVisId) { mutableStateOf(SourceVisibilityStore.isVisible(connVisId)) }
             AddedSourceRow(
                 name = connDisplayName(conn.name, conn.baseUrl),
                 visible = visible,
                 onToggleVisible = {
                     visible = !visible
-                    SourceVisibilityStore.setVisible(visId, visible)
+                    SourceVisibilityStore.setVisible(connVisId, visible)
                 },
                 onEdit = { onOpen(conn.id) },
                 onDelete = { onRequestDeleteKomga(conn) },
