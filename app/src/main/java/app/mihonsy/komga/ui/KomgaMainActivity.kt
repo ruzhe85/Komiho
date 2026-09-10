@@ -926,13 +926,24 @@ private fun KomgaMainScreen(
                         }
                     }
                     // SY --> Komiho Phase4: 搜索是 Komga 语义，文件型来源（本地/WebDAV/SMB）下不显示。
+                    // SY: 聚合页（最近阅读）同样不显示——它是跨来源概览，要搜该进对应来源的库里搜。
                     if (!currentIsFileSource &&
-                        currentTabEnum != MainTab.Settings
+                        currentTabEnum != MainTab.Settings &&
+                        currentTabEnum != MainTab.Sources
                     ) {
                         androidx.compose.material3.IconButton(onClick = { searchOpen = !searchOpen }) {
                             Icon(
                                 imageVector = if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
                                 contentDescription = if (searchOpen) composeStringResource(R.string.cd_close_search) else composeStringResource(R.string.cd_search),
+                            )
+                        }
+                    }
+                    // SY: 来源管理入口——原底部「+ 来源管理」卡改为顶栏图标（仅聚合页出现）。
+                    if (currentTabEnum == MainTab.Sources) {
+                        androidx.compose.material3.IconButton(onClick = { showAddSource = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Tune,
+                                contentDescription = composeStringResource(R.string.source_add),
                             )
                         }
                     }
@@ -1027,7 +1038,6 @@ private fun KomgaMainScreen(
                         entries = dashboardEntries,
                         currentSourceId = currentSourceId,
                         refreshTick = refreshTick,
-                        onAddSource = { showAddSource = true },
                         onOpenSource = ::openSourceFromDashboard,
                         onResumeReading = { entry, mangaId, chapterId, page ->
                             // 先切源（退出阅读器后落回该来源），再与历史 tab 同口径带上次页码进阅读器（page 为 0-based）。
@@ -6882,7 +6892,6 @@ private fun SourceDashboardPane(
     entries: List<SourceEntry>,
     currentSourceId: String,
     refreshTick: Int,
-    onAddSource: () -> Unit,
     onOpenSource: (SourceEntry) -> Unit,
     /** 续读：先把来源切过去（退出阅读器后落在该来源，避免「来源不对」），再带页码进阅读器。 */
     onResumeReading: (entry: SourceEntry, mangaId: Long, chapterId: Long, page: Int) -> Unit,
@@ -7185,30 +7194,7 @@ private fun SourceDashboardPane(
                 }
             }
         }
-        // 「添加来源」卡：进入来源管理全屏流程（与顶栏 ☰ 菜单、设置入口同一流程）。
-        Card(
-            modifier = Modifier.fillMaxWidth().clickable { onAddSource() },
-            shape = MaterialTheme.shapes.large,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(14.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = composeStringResource(R.string.source_add),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
+        // SY: 原底部「+ 来源管理」卡已移除，入口改为顶栏图标（见 KomgaMainScreen 的 actions）。
     }
 }
 

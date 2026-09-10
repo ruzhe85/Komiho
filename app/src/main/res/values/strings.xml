@@ -6,7 +6,7 @@
     <!-- 底部导航 tab -->
     <string name="tab_home">主页</string>
     <!-- SY: Komiho 来源仪表盘 -->
-    <string name="tab_sources">来源</string>
+    <string name="tab_sources">最近阅读</string>
     <!-- SY --> Komiho Onboarding: 首启欢迎页 -->
     <string name="onboarding_title">欢迎使用 Komiho</string>
     <string name="onboarding_subtitle">选择你的漫画来源，之后随时可以在设置里添加更多</string>
