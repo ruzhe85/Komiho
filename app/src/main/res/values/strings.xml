@@ -31,7 +31,7 @@
     <string name="settings_dashboard_recent">每个来源显示最近</string>
     <string name="settings_dashboard_recent_summary">%1$d 条最近阅读记录</string>
     <string name="tab_library">库</string>
-    <string name="tab_lists">列表</string>
+    <string name="tab_lists">收藏与阅读列表</string>
     <string name="tab_downloads">下载</string>
     <string name="tab_local">本地</string>
     <string name="tab_browse">本地</string>

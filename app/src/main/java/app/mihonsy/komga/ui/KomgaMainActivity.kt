@@ -438,10 +438,30 @@ private enum class MainTab(
     Settings(R.string.tab_settings, Icons.Filled.Settings),
     ;
 
-    fun visibleFor(isFileSource: Boolean): Boolean = when {
-        komgaOnly -> !isFileSource
-        fileOnly -> isFileSource
-        else -> true
+    /**
+     * @param isFileSource 当前来源是否文件型（本地 / WebDAV / SMB）。
+     * @param hasLists 是否有阅读列表或收藏；null = 尚未探测完。
+     * @param hasDownloads 是否有已下载条目；null = 尚未探测完。
+     *
+     * 列表 / 下载这两个 tab 在**确认没有数据**后自动隐藏；数据尚未探测完（null）
+     * 一律先显示，避免启动瞬间先隐藏再冒出来造成闪烁。
+     */
+    fun visibleFor(
+        isFileSource: Boolean,
+        hasLists: Boolean? = null,
+        hasDownloads: Boolean? = null,
+    ): Boolean {
+        val base = when {
+            komgaOnly -> !isFileSource
+            fileOnly -> isFileSource
+            else -> true
+        }
+        if (!base) return false
+        return when (this) {
+            Lists -> hasLists != false
+            Downloads -> hasDownloads != false
+            else -> true
+        }
     }
 
     @Composable
@@ -607,8 +627,12 @@ private fun KomgaMainScreen(
     }
     val currentSourceEntry = sourceEntries.firstOrNull { it.id == currentSourceId } ?: sourceEntries.first()
     val currentIsFileSource = currentSourceEntry.kind.isFileSource
-    val visibleTabs = remember(currentIsFileSource) {
-        MainTab.entries.filter { it.visibleFor(currentIsFileSource) }
+    // SY: 列表 / 下载 tab 的「有无数据」探测结果。null = 还没探测完（先显示，避免闪烁）；
+    // true / false = 已确认有 / 无数据。请求失败时保持 null，不至于因断网把 tab 藏掉。
+    var hasLists by remember { mutableStateOf<Boolean?>(null) }
+    var hasDownloads by remember { mutableStateOf<Boolean?>(null) }
+    val visibleTabs = remember(currentIsFileSource, hasLists, hasDownloads) {
+        MainTab.entries.filter { it.visibleFor(currentIsFileSource, hasLists, hasDownloads) }
     }
     // 恢复/切换后兜底：当前 tab 若不在可见集合内（如来源切换/连接被删），回落到第一个可见 tab。
     LaunchedEffect(visibleTabs) {
@@ -623,7 +647,7 @@ private fun KomgaMainScreen(
         currentSourceId = entry.id
         storagePreferences.browseSourceId.set(entry.id)
         // SY: 跳过 Sources 仪表盘——「首个可见 tab」指来源的内容首页（Komga=Home / 文件型=浏览）。
-        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource) }.ordinal
+        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource, hasLists, hasDownloads) }.ordinal
     }
 
     // SY --> Komiho: 来源仪表盘点卡——无论该来源是否已是当前来源，都切换并落到其内容首页
@@ -632,7 +656,7 @@ private fun KomgaMainScreen(
     fun openSourceFromDashboard(entry: SourceEntry) {
         currentSourceId = entry.id
         storagePreferences.browseSourceId.set(entry.id)
-        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource) }.ordinal
+        currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource, hasLists, hasDownloads) }.ordinal
     }
     // SY <--
 
@@ -684,6 +708,30 @@ private fun KomgaMainScreen(
     val refreshTick by refreshSignal.collectAsState()
     // Komga 连接状态跟随 onResume 复查（从 KomgaConnectActivity 添加完返回时生效）。
     LaunchedEffect(refreshTick) { komgaConnected = prefs.hasConnection() }
+    // SY: 列表 tab 空数据自动隐藏——探测服务器是否有阅读列表 / 收藏。
+    // 两个请求都失败时保持 null（未知），不把 tab 藏掉——断网时仍可进 tab 看错误与重试。
+    LaunchedEffect(komgaConnected, refreshTick) {
+        if (!komgaConnected) {
+            hasLists = false
+            return@LaunchedEffect
+        }
+        hasLists = withContext(Dispatchers.IO) {
+            val readlists = runCatching { client.getReadlists() }.getOrNull()
+            val collections = runCatching { client.getCollections() }.getOrNull()
+            if (readlists == null && collections == null) {
+                null
+            } else {
+                (readlists?.isNotEmpty() ?: false) || (collections?.isNotEmpty() ?: false)
+            }
+        }
+    }
+    // SY: 下载 tab 空数据自动隐藏——纯本地查询（SharedPreferences），每次回到前台复查，
+    // 这样下完第一本后 tab 会自己冒出来。
+    LaunchedEffect(refreshTick) {
+        hasDownloads = withContext(Dispatchers.IO) {
+            KomgaDownloadStore(context.applicationContext).allDownloaded().isNotEmpty()
+        }
+    }
     // M3.12: search collapsed to an icon in the title row; expands the field.
     var searchOpen by remember { mutableStateOf(false) }
 
