@@ -66,6 +66,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -82,6 +83,12 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.KomgaApiClient
+// SY --> Komiho Phase4: 来源拖拽排序依赖 sh.calvin.reorderable。
+import sh.calvin.reorderable.ReorderableCollectionItemScope
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.draggableHandle
+import sh.calvin.reorderable.rememberReorderableLazyListState
+// SY <--
 import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
@@ -445,6 +452,8 @@ private fun TypeSelectContent(
         }
         items(ordered, key = { it.id }) { entry ->
             ReorderableItem(reorderableState, entry.id) {
+                // 此内容 lambda 的 receiver 即 ReorderableCollectionItemScope，
+                // dragHandle 的 receiver lambda 同作用域，draggableHandle() 可直接解析。
                 SourceManageRow(
                     entry = entry,
                     komgaConns = komgaConns,
@@ -462,12 +471,26 @@ private fun TypeSelectContent(
                     onRequestDeleteWebDav = onRequestDeleteWebDav,
                     onRequestDeleteSmb = onRequestDeleteSmb,
                     dragHandle = {
-                        Icon(
-                            Icons.Outlined.DragHandle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.draggableHandle(),
-                        )
+                        // 双横线拖拽手柄（落在 ReorderableCollectionItemScope）。
+                        Box(
+                            modifier = Modifier
+                                .size(width = 20.dp, height = 16.dp)
+                                .draggableHandle(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                HorizontalDivider(
+                                    modifier = Modifier.width(16.dp),
+                                    thickness = 2.dp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                HorizontalDivider(
+                                    modifier = Modifier.width(16.dp),
+                                    thickness = 2.dp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     },
                 )
             }
@@ -539,7 +562,7 @@ private fun CircleAddButton(icon: ImageVector? = null, letter: String? = null, l
  * - WebDAV / SMB：按连接的来源条目本身即一行，含显隐 + 编辑 + 删除 + 拖拽手柄。
  */
 @Composable
-private fun SourceManageRow(
+private fun ReorderableCollectionItemScope.SourceManageRow(
     entry: SourceEntry,
     komgaConns: List<KomgaConnection>,
     webdavConns: List<WebDavConnection>,
@@ -548,7 +571,7 @@ private fun SourceManageRow(
     onRequestDeleteKomga: (KomgaConnection) -> Unit,
     onRequestDeleteWebDav: (WebDavConnection) -> Unit,
     onRequestDeleteSmb: (SmbConnection) -> Unit,
-    dragHandle: @Composable () -> Unit,
+    dragHandle: @Composable ReorderableCollectionItemScope.() -> Unit,
 ) {
     val badgeSpec = when (entry.kind) {
         SourceKind.Local -> SourceBadgeSpec.Icon(Icons.Filled.Folder)
@@ -601,9 +624,13 @@ private fun SourceManageRow(
             IconButton(onClick = { onOpen(connId) }, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Filled.Edit, contentDescription = composeStringResource(R.string.addsrc_edit_cd), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            val conn = if (entry.kind == SourceKind.WebDav) webdavConns.firstOrNull { it.id == connId } else smbConns.firstOrNull { it.id == connId }
+            val deleteAction: (() -> Unit)? = if (entry.kind == SourceKind.WebDav) {
+                webdavConns.firstOrNull { it.id == connId }?.let { { onRequestDeleteWebDav(it) } }
+            } else {
+                smbConns.firstOrNull { it.id == connId }?.let { { onRequestDeleteSmb(it) } }
+            }
             IconButton(
-                onClick = { conn?.let { if (entry.kind == SourceKind.WebDav) onRequestDeleteWebDav(it) else onRequestDeleteSmb(it) } },
+                onClick = { deleteAction?.invoke() },
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(Icons.Filled.Delete, contentDescription = composeStringResource(R.string.addsrc_delete_cd), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
