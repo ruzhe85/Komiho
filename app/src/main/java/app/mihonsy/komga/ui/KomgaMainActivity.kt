@@ -3878,11 +3878,9 @@ internal fun launchManageAllFilesAccess(context: android.content.Context) {
  *  Phase4-②：新增 WebDAV 整本缓存管理（上限滑条 200MB~4GB / 当前占用 / 清除缓存）。 */
 @Composable
 private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.content.Context) {
-    val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
-    val storagePrefs = remember { Injekt.get<StoragePreferences>() }
     val webdavCacheDir = remember { File(context.cacheDir, "webdav_fallback") }
     // SY --> Komiho Phase5/Phase7: 页级缓存目录（WebDAV/SMB 共用 remote_pages）并入
-    // usage 统计与清除（上限共用同一滑条值）。旧 webdav_pages 目录已废弃移除。
+    // usage 统计与清除。旧 webdav_pages 目录已废弃移除。
     val remotePageCacheDir = remember { File(context.cacheDir, "remote_pages") }
     // SY <--
     // SY: 本地/SMB/WebDAV 三套封面缓存（filesDir 各自隔离，可直接删目录重建）。
@@ -3896,11 +3894,10 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
         )
     }
     var coverUsageBytes by remember { mutableStateOf(0L) }
-    var cacheMaxMb by remember {
-        mutableStateOf(storagePrefs.webdavCacheMaxBytes.get() / (1024f * 1024f))
-    }
     var usageBytes by remember { mutableStateOf(0L) }
     var usageTick by remember { mutableStateOf(0) }
+    var showRemoteConfirm by remember { mutableStateOf(false) }
+    var showCoverConfirm by remember { mutableStateOf(false) }
     LaunchedEffect(usageTick) {
         usageBytes = withContext(Dispatchers.IO) {
             val fallbackBytes = webdavCacheDir.listFiles()
@@ -3924,11 +3921,6 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
     ) {
         TextPreferenceWidget(
             title = composeStringResource(R.string.storage_all_files_access),
-            subtitle = if (hasAllFilesAccess) {
-                composeStringResource(R.string.storage_perm_granted_desc)
-            } else {
-                composeStringResource(R.string.storage_perm_denied_desc)
-            },
             icon = Icons.Outlined.Storage,
             onPreferenceClick = {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -3937,45 +3929,58 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             },
         )
 
-        // SY --> Komiho Phase4-②: WebDAV 整本缓存（rar/7z 强制回退）管理
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(
-                composeStringResource(R.string.storage_webdav_cache),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                composeStringResource(R.string.storage_webdav_cache_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                composeStringResource(R.string.storage_cache_limit) +
-                    formatCacheSize((cacheMaxMb * 1024f * 1024f).toLong()),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            Slider(
-                value = cacheMaxMb,
-                onValueChange = { cacheMaxMb = it },
-                onValueChangeFinished = {
-                    storagePrefs.webdavCacheMaxBytes.set((cacheMaxMb * 1024f * 1024f).toLong())
-                },
-                valueRange = 200f..4000f,
-                steps = 18, // 200MB 一档：200..4000 共 20 档
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                composeStringResource(R.string.storage_cache_range),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                composeStringResource(R.string.storage_cache_usage) + formatCacheSize(usageBytes),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            TextButton(
-                onClick = {
+        // SY --> Komiho Phase4-②: 远程缓存（WebDAV/SMB 页缓存 + rar/7z 整本回退）清除入口。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showRemoteConfirm = true }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    composeStringResource(R.string.storage_webdav_cache),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    composeStringResource(R.string.storage_cache_usage) + formatCacheSize(usageBytes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        // SY <--
+        // SY: 封面缓存（本地 / SMB / WebDAV 三套 filesDir 缓存）清除入口。
+        // Komga 的 Coil 磁盘池不在此列——它独立存在，归「书库 → 预览图」管理。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showCoverConfirm = true }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    composeStringResource(R.string.storage_cover_cache),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    composeStringResource(R.string.storage_cache_usage) + formatCacheSize(coverUsageBytes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        // SY -->
+    }
+    if (showRemoteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRemoteConfirm = false },
+            title = { Text(composeStringResource(R.string.storage_webdav_cache)) },
+            text = { Text(composeStringResource(R.string.storage_clear_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRemoteConfirm = false
                     scope.launch {
                         val freed = withContext(Dispatchers.IO) {
                             val fallbackTotal = webdavCacheDir.listFiles()?.sumOf { it.length() } ?: 0L
@@ -3996,33 +4001,21 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                             android.widget.Toast.LENGTH_SHORT,
                         ).show()
                     }
-                },
-                enabled = usageBytes > 0L,
-            ) {
-                Text(composeStringResource(R.string.storage_clear_cache))
-            }
-        }
-        // SY <--
-        // SY: 封面缓存卡片（本地 / SMB / WebDAV 三套 filesDir 缓存）。
-        // 此前这三套没有任何清理入口，只能靠上限 LRU 淘汰或清 app 数据。
-        // Komga 的 Coil 磁盘池不在此列——它独立存在，归「书库 → 预览图」管理。
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(
-                composeStringResource(R.string.storage_cover_cache),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                composeStringResource(R.string.storage_cover_cache_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                composeStringResource(R.string.storage_cache_usage) + formatCacheSize(coverUsageBytes),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            TextButton(
-                onClick = {
+                }) { Text(composeStringResource(R.string.storage_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoteConfirm = false }) { Text(composeStringResource(R.string.storage_cancel)) }
+            },
+        )
+    }
+    if (showCoverConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCoverConfirm = false },
+            title = { Text(composeStringResource(R.string.storage_cover_cache)) },
+            text = { Text(composeStringResource(R.string.storage_clear_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCoverConfirm = false
                     scope.launch {
                         val freed = withContext(Dispatchers.IO) {
                             // 只清本地/SMB/WebDAV 三套 filesDir 缓存；Komga 的 Coil 磁盘池
@@ -4045,13 +4038,12 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                             android.widget.Toast.LENGTH_SHORT,
                         ).show()
                     }
-                },
-                enabled = coverUsageBytes > 0L,
-            ) {
-                Text(composeStringResource(R.string.storage_clear_cache))
-            }
-        }
-        // SY -->
+                }) { Text(composeStringResource(R.string.storage_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCoverConfirm = false }) { Text(composeStringResource(R.string.storage_cancel)) }
+            },
+        )
     }
 }
 
