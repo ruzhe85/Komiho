@@ -733,9 +733,16 @@ private fun KomgaMainScreen(
             runCatching { client.getLibraries() }
                 .onSuccess { libs ->
                     libraries = libs
-                    if (selectedLibraryId == null) {
-                        selectedLibraryId = libs.firstOrNull()?.id
+                    // SY: 默认进「最后一次访问的库」——本会话已选过则保留（含旋转后重跑本
+                    // effect 的恢复），否则取偏好里记住的库；记住的库若在服务器上已被删除
+                    // 或尚未记忆，才回落第一个库。
+                    val remembered = prefs.lastLibraryId.takeIf { id ->
+                        id.isNotBlank() && libs.any { lib -> lib.id == id }
                     }
+                    selectedLibraryId = selectedLibraryId
+                        ?.takeIf { id -> libs.any { lib -> lib.id == id } }
+                        ?: remembered
+                        ?: libs.firstOrNull()?.id
                     // SY: 并发拉每库系列数（size=1 只为 totalElements），失败留空不阻塞库列表。
                     libraryCounts = coroutineScope {
                         libs.map { lib ->
@@ -1050,6 +1057,8 @@ private fun KomgaMainScreen(
                             currentName = currentLibName,
                             onSelect = { id ->
                                 selectedLibraryId = id
+                                // SY: 记住本次选择，下次进入 Library 直接落在这个库。
+                                prefs.lastLibraryId = id
                                 libraryDrawerOpen = false
                             },
                         ) {
