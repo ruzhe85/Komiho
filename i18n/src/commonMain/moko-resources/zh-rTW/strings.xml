@@ -420,6 +420,7 @@
     <string name="no_pinned_sources">你尚未釘選任何來源</string>
     <string name="page_list_empty_error">沒有任何頁面</string>
     <string name="loader_epub_no_images_error">該 EPUB 不含圖片頁，看起來是純文字書。本地閱讀目前僅支援圖片型 EPUB，請透過 Komga 伺服器閱讀。</string>
+    <string name="komga_book_profile_epub_unsupported">這本書在 Komga 上是 EPUB 格式（含文字內容），Komga 不提供圖片頁，閱讀器無法開啟。請改用支援 EPUB 的閱讀器，或把檔案放到本機 / WebDAV / SMB 來源閱讀。</string>
     <string name="backup_restore_missing_sources">未安裝擴充套件：</string>
     <string name="backup_restore_missing_trackers">未登入歷程平臺：</string>
     <string name="channel_progress">進度</string>

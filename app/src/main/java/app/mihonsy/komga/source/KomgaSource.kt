@@ -12,6 +12,8 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.Credentials
 import okhttp3.Headers
 import rx.Observable
+import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.i18n.MR
 
 /**
  * Komiho V2 (R-1): app-internal Komga data source.
@@ -94,6 +96,22 @@ class KomgaSource(private val context: Context) : HttpSource() {
         val bookId = chapter.url.removePrefix(BOOK_URL_PREFIX)
         val client = client()
         val pageDtos = runBlocking { client.getBookPages(bookId) }
+
+        // Komiho: Komga 对 mediaProfile = EPUB 的书（含文字的 EPUB 电子书）**不提供图片页**。
+        // 实测：GET /books/{id}/pages 返回空数组、GET /books/{id}/pages/{n}
+        // 直接 500（"Epub profile does not support getting page content"）。只有「纯图片型」
+        // 的 EPUB 才会被 Komga 判为 DIVINA 并暴露图片页。
+        // 这里在页列表为空时补一次书本信息查询，给出明确原因，避免阅读器只报通用的
+        // 「没有图片」或者一直卡在加载态。
+        if (pageDtos.isEmpty()) {
+            val profile = runCatching {
+                runBlocking { client.getBook(bookId) }.media.mediaProfile
+            }.getOrNull()
+            if (profile.equals("EPUB", ignoreCase = true)) {
+                throw Exception(context.stringResource(MR.strings.komga_book_profile_epub_unsupported))
+            }
+        }
+
         pageDtos.mapIndexed { index, p ->
             val imageUrl = client.pageImageUrl(bookId, p.number)
             Page(index, url = imageUrl, imageUrl = imageUrl)
