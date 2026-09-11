@@ -4,6 +4,7 @@ import android.content.Context
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.data.withAppLanguage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
@@ -108,7 +109,12 @@ class KomgaSource(private val context: Context) : HttpSource() {
                 runBlocking { client.getBook(bookId) }.media.mediaProfile
             }.getOrNull()
             if (profile.equals("EPUB", ignoreCase = true)) {
-                throw Exception(context.stringResource(MR.strings.komga_book_profile_epub_unsupported))
+                // 语言要跟随「应用语言」——本类的 context 是 AndroidSourceManager 传进来的
+                // application context，未套用 KomgaBaseActivity 的语言包装，直接取会落到
+                // 系统语言（表现：应用内切成中文，这条提示仍是英文）。
+                throw Exception(
+                    context.withAppLanguage().stringResource(MR.strings.komga_book_profile_epub_unsupported),
+                )
             }
         }
 
