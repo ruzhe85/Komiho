@@ -4,8 +4,8 @@
 
 ![Komiho](.github/readme-images/app-icon.png)
 
-**纯 [Komga](https://github.com/gotson/komga) 安卓漫画阅读客户端**
-
+**功能完整的 Android 漫画阅读器**
+支持 **Komga、本地文件、WebDAV、SMB** 等多种漫画来源
 包名 `cn.ruzhe.komiho` ｜ 版本 1.0.6 (7) ｜ Android 8.0+
 
 [中文](./README.md) | [English](./README.en.md)
@@ -14,80 +14,64 @@
 
 ---
 
-## 简介
+## ✨ 特性
 
-Komiho 是基于 [MihonSY](https://github.com/ruzhe85/MihonSY) 改造的 **Komga 专用漫画阅读器**。它砍掉了上游的多源 / 插件 / 追踪体系，**以 Komga 服务器作为唯一数据源**，把 MihonSY 成熟的阅读器能力直接对接 Komga API（v1.26.3）。
+### 📚 多来源阅读
 
-- 连接自托管的 Komga 服务器（URL + API-Key），支持多服务器切换
-- 浏览库 / 系列 / 书，阅读进度实时回写 Komga
-- 复用 MihonSY 完整阅读器（翻页 / 条漫 / RTL / 双页 / 缩放 / 图像增强）
+Komiho 将不同来源的漫画统一到同一套浏览与阅读体验中：
 
-> ⚠️ Komiho 需要你自建或已有可用的 **Komga 服务器**，本应用本身不提供漫画内容。
+* **Komga** — 连接自托管 Komga，浏览书库、系列和漫画，支持多服务器、多书库与阅读进度同步。
+* **本地文件** — 直接浏览和阅读设备上的漫画文件。
+* **WebDAV** — 连接 NAS 等 WebDAV 服务，在线浏览并直接阅读远程漫画，无需整本下载。
+* **SMB / CIFS** — 访问局域网共享文件夹，直接阅读网络漫画。
+
+### 📦 支持的格式
+
+不同来源对格式的支持略有差异：
+
+* **本地 / WebDAV / SMB 直读**：漫画归档 `CBZ` `CBR` `CB7` `CBT` `ZIP` `RAR` `7Z` `TAR`、`EPUB`，以及**散图文件夹**（目录内直接放图片即可）。
+* **通过 Komga 服务器**：由 Komga 服务端负责转页，支持 Komga 所支持的全部格式（含 `PDF` 等），客户端按图片页读取。
+
+> 💡 本地 / WebDAV / SMB 直读暂不支持 `PDF`，需经 Komga 服务器读取（由服务端将 PDF 转为图片页）。
+
+### 📖 完整阅读体验
+
+基于 MihonSY 的漫画阅读器，并针对实际阅读体验持续优化：
+
+* 横向翻页 / 垂直翻页 / 条漫
+* LTR / RTL
+* 单页 / 双页
+* 缩放与手势操作
+* 流畅的点击翻页与动画体验
+* 可调节阅读动画与滚动行为
+* 阅读进度记忆
+* 历史记录与书签
+
+### 🕘 历史与书签
+
+完善的历史记录、阅读进度和书签功能，方便快速继续阅读、查找最近阅读内容以及保存重要页面。
+
+### 🖼️ 图像增强
+
+内置图像增强，提供：
+
+**1.5× / 2× / 2.5× / 3×**
+
+针对漫画线条进行优化，在画质、速度和内存占用之间取得平衡。
+
+### 🖥️ 平板与大屏
+
+针对手机、平板和大屏设备提供自适应布局，并支持底部、左侧或右侧导航。
 
 ---
 
-## ✨ 核心功能
+## ⚠️ 注意
 
-### 1. 服务器连接（多 Komga）
-
-- **连接管理**：通过 URL + API-Key（`X-API-Key`）连接自托管 Komga 服务器，连接前自动校验。
-- **多服务器**：可添加多个 Komga 服务器，设置内一键切换激活；每条可编辑 / 删除。
-
-
-### 2. 书库浏览
-
-- **库 / 系列 / 书** 三层模型，对齐 Komga（Series = 书，Book = 章节）。
-- 库列表（支持多库）、系列网格（封面来自 Komga thumbnail）、系列详情（书按序排列）。
-- **Home 聚合**：Keep Reading / On Deck 等区块，语义对齐 Komga Web Dashboard。
-- 顶栏库选择器（DropdownMenu）快速切换当前库。
-
-### 3. 阅读器（MihonSY 全能力）
-
-- 翻页（LTR / RTL / 垂直）、条漫（webtoon）、双击捏合缩放、双页。
-- 阅读设置、进度记忆、滚轮 / 按键翻页等完整交互。
-- **进度回写**：读到末页置 `completed`，book 级 + series 级（`/api/v2/series/{id}/read-progress/tachiyomi`）进度节流回写，Komga Web 端可见。
-
-### 4. 图像增强（轻量）
-
-| 算法 | 类型 | 档位 |
-|------|------|------|
-| **Lanczos3** | 经典插值 | 1.5x / 2x / 2.5x / 3x |
-
-- 针对漫画 / 条漫线条优化，加载快、内存占用低，不含 waifu2x / Anime4K 等重型模型。
-- 入口：设置 → 阅读器 → 图像增强。
-
-### 5. 搜索与筛选
-
-- 全局关键词搜索（`/api/v1/series?search=`）。
-- 按 **标签 / 作者** 筛选；主页搜索范围为所有库，库内选择为当前库。
-- 搜索结果复用库的显示模式）。
----
-
-## 🗂️ 项目结构
-
-| 路径 | 说明 |
-|------|------|
-| `komga-data/` | Komga API 客户端（OkHttp + X-API-Key）、DTO、连接偏好 |
-| `app/src/main/java/app/mihonsy/komga/ui/` | Komiho 自有 UI（连接 / Home / 系列 / 阅读器 / 设置） |
-| `app/src/main/java/eu/kanade/tachiyomi/ui/reader/` | 复用的 MihonSY 阅读器 |
-| `i18n/` | 多平台资源（应用名 `Komiho` 等） |
-| `.github/workflows/build.yml` | GitHub Actions 构建配置 |
+Komga 功能需要连接你自己的 **Komga 服务器**。
+Komiho 不提供任何漫画内容，请遵守相关版权规定。
 
 ---
 
 ## 📝 更新记录
 
 详见 [CHANGELOG.md](./CHANGELOG.md)（[English](./CHANGELOG.en.md)）。
-
----
-
-## ⚠️ 注意事项
-
-- 仅用于个人学习与使用，请勿用于商业用途。
-- 请遵守所阅读漫画的版权规定。
-- 本应用需要可用的 Komga 服务器，且需自行承担服务器数据安全责任。
-- 问题请在本仓库 Issue 讨论。
-
----
-
-
