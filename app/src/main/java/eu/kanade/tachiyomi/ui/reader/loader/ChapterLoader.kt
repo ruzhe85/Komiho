@@ -233,6 +233,8 @@ class ChapterLoader(
         val target = SmbConnectionStore.resolve(remoteUrl)
             ?: throw IOException("SMB 连接不存在（可能已删除）: $remoteUrl")
         val dirRel = SmbConnectionStore.extractRelPath(remoteUrl).trim('/')
+        // SY: 打开散图目录章节时「顺便」生成历史/书签封面（缺缓存才拉，失败静默）。
+        SmbCoverCache.generateAsync(context, remoteUrl)
         return SmbDirectoryPageLoader(target.conn, target.password, dirRel)
     }
     // SY <--
@@ -247,6 +249,8 @@ class ChapterLoader(
             ?: throw IOException("WebDAV 连接不存在（可能已删除）: $remoteUrl")
         val dirUrl = WebDavConnectionStore.extractFullUrl(remoteUrl)
             .let { if (it.endsWith('/')) it else "$it/" }
+        // SY: 打开散图目录章节时「顺便」生成历史/书签封面（缺缓存才拉，失败静默）。
+        WebDavCoverCache.generateAsync(context, remoteUrl)
         return WebDavDirectoryPageLoader(conn, dirUrl)
     }
     // SY <--

@@ -6,6 +6,8 @@ import android.graphics.BitmapFactory
 import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+// SY: 散图目录封面需在后台上列目录（SmbBrowse.list 为 suspend）。
+import kotlinx.coroutines.runBlocking
 import logcat.LogPriority
 import logcat.logcat
 import mihon.core.common.archive.ArchiveHandle
@@ -61,10 +63,18 @@ object SmbCoverCache {
         synchronized(inFlight) {
             if (!inFlight.add(chapterUrl)) return
         }
+        // SY: 散图目录章节（URL 尾斜杠）没有归档句柄，走「拉目录首图」分支；
+        // 归档章节仍走原来的「拆包取首图」。
+        val isDirectory = chapterUrl.endsWith('/')
         val app = context.applicationContext
         thread(name = "smb-cover", isDaemon = true) {
             // 先移出去：失败后下次打开还能重试。
             synchronized(inFlight) { inFlight.remove(chapterUrl) }
+            if (isDirectory) {
+                runCatching { generateFromDirectory(chapterUrl, target) }
+                    .onFailure { logcat(LogPriority.INFO) { "[SmbCover] 目录封面生成失败：${it.message}" } }
+                return@thread
+            }
             runCatching { generate(app, chapterUrl, target) }
                 .onFailure { logcat(LogPriority.INFO) { "[SmbCover] 封面生成失败：${it.message}" } }
         }
@@ -111,21 +121,49 @@ object SmbCoverCache {
                 h.getInputStream(firstName)?.use { it.readBytes() }
             }.getOrNull() ?: return
             val bmp = decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX) ?: return
-            runCatching {
-                val tmp = File(target.parentFile, target.nameWithoutExtension + ".tmp")
-                ByteArrayOutputStream().use { out ->
-                    bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-                    tmp.writeBytes(out.toByteArray())
-                }
-                if (tmp.renameTo(target)) {
-                    tmp.delete()
-                } else {
-                    tmp.copyTo(target, overwrite = true)
-                    tmp.delete()
-                }
-            }
-            bmp.recycle()
+            writeCover(bmp, target)
         }
+    }
+
+    /**
+     * SY: 散图目录章节的封面 —— 列目录 → 自然序取第一张图（与阅读器首页同口径）→
+     * 读该图字节 → 采样压缩落盘。目录章节没有归档句柄，故单独一条路径。
+     */
+    private fun generateFromDirectory(chapterUrl: String, target: File) {
+        val resolved = SmbConnectionStore.resolve(chapterUrl)
+            ?: throw IllegalStateException("SMB 连接不存在（可能已删除）: $chapterUrl")
+        val dirRel = SmbConnectionStore.extractRelPath(chapterUrl).trim('/')
+        val firstPath = runBlocking {
+            SmbBrowse.list(resolved.conn, resolved.password, dirRel)
+                .filter { it.isImage }
+                .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                .firstOrNull()?.path
+        } ?: return
+        // smbj 的 File 是句柄不是 InputStream：getInputStream() 取实时流再读全量。
+        val raw = SmbSessionManager.openFile(resolved.conn, resolved.password, firstPath).use { f ->
+            f.getInputStream().buffered().use { it.readBytes() }
+        }
+        check(raw.isNotEmpty()) { "封面图片为空：$firstPath" }
+        val bmp = decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX) ?: return
+        writeCover(bmp, target)
+    }
+
+    /** 采样压缩落盘（临时文件 + rename，rename 失败回落 copy）。 */
+    private fun writeCover(bmp: Bitmap, target: File) {
+        runCatching {
+            val tmp = File(target.parentFile, target.nameWithoutExtension + ".tmp")
+            ByteArrayOutputStream().use { out ->
+                bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                tmp.writeBytes(out.toByteArray())
+            }
+            if (tmp.renameTo(target)) {
+                tmp.delete()
+            } else {
+                tmp.copyTo(target, overwrite = true)
+                tmp.delete()
+            }
+        }
+        bmp.recycle()
     }
 
     /** 两次 decode：先读边界算 inSampleSize，再采样解码（与 LocalCoverFetcher 同策略）。 */
