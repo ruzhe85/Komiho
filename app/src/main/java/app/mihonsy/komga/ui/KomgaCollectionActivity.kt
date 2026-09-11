@@ -56,12 +56,20 @@ class KomgaCollectionActivity : KomgaBaseActivity() {
         super.onCreate(savedInstanceState)
         val collectionId = intent.getStringExtra("collectionId").orEmpty()
         val collectionName = intent.getStringExtra("collectionName").orEmpty()
-        setContent { KomihoTheme { KomgaCollectionScreen(collectionId, collectionName) } }
+        setContent {
+            KomihoTheme {
+                // Komiho: 二级页面复用主界面的 rail（平板 AUTO/左/右 时），不再「全屏无导航」。
+                val navPrefs = remember { KomgaPreferences(applicationContext) }
+                KomgaSecondaryNavHost(navPrefs) { modifier ->
+                    KomgaCollectionScreen(collectionId, collectionName, modifier)
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun KomgaCollectionScreen(collectionId: String, collectionName: String) {
+private fun KomgaCollectionScreen(collectionId: String, collectionName: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
@@ -101,6 +109,7 @@ private fun KomgaCollectionScreen(collectionId: String, collectionName: String) 
     }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text(collection?.name ?: collectionName) },

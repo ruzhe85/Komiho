@@ -74,12 +74,18 @@ class KomgaSeriesActivity : KomgaBaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val seriesId = intent.getStringExtra("seriesId").orEmpty()
-        setContent { KomihoTheme { KomgaSeriesScreen(seriesId) } }
+        setContent {
+            KomihoTheme {
+                // Komiho: 二级页面复用主界面的 rail（平板 AUTO/左/右 时），不再「全屏无导航」。
+                val navPrefs = remember { KomgaPreferences(applicationContext) }
+                KomgaSecondaryNavHost(navPrefs) { modifier -> KomgaSeriesScreen(seriesId, modifier) }
+            }
+        }
     }
 }
 
 @Composable
-private fun KomgaSeriesScreen(seriesId: String) {
+private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
@@ -136,6 +142,7 @@ private fun KomgaSeriesScreen(seriesId: String) {
     }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text(series?.name ?: "系列") },

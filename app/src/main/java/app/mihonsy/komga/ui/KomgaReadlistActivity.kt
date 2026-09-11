@@ -50,12 +50,20 @@ class KomgaReadlistActivity : KomgaBaseActivity() {
         super.onCreate(savedInstanceState)
         val readlistId = intent.getStringExtra("readlistId").orEmpty()
         val readlistName = intent.getStringExtra("readlistName").orEmpty()
-        setContent { KomihoTheme { KomgaReadlistScreen(readlistId, readlistName) } }
+        setContent {
+            KomihoTheme {
+                // Komiho: 二级页面复用主界面的 rail（平板 AUTO/左/右 时），不再「全屏无导航」。
+                val navPrefs = remember { KomgaPreferences(applicationContext) }
+                KomgaSecondaryNavHost(navPrefs) { modifier ->
+                    KomgaReadlistScreen(readlistId, readlistName, modifier)
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun KomgaReadlistScreen(readlistId: String, readlistName: String) {
+private fun KomgaReadlistScreen(readlistId: String, readlistName: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
@@ -96,6 +104,7 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String) {
     LaunchedEffect(readlistId) { reload() }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text(readlist?.name ?: readlistName) },

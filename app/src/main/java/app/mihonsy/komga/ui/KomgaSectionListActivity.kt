@@ -64,12 +64,20 @@ class KomgaSectionListActivity : KomgaBaseActivity() {
         val section = runCatching { HomeSection.valueOf(sectionName) }.getOrDefault(
             HomeSection.RecentlyUpdatedSeries,
         )
-        setContent { KomihoTheme { KomgaSectionListScreen(section) } }
+        setContent {
+            KomihoTheme {
+                // Komiho: 二级页面复用主界面的 rail（平板 AUTO/左/右 时），不再「全屏无导航」。
+                val navPrefs = remember { KomgaPreferences(applicationContext) }
+                KomgaSecondaryNavHost(navPrefs) { modifier ->
+                    KomgaSectionListScreen(section, modifier)
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun KomgaSectionListScreen(section: HomeSection) {
+private fun KomgaSectionListScreen(section: HomeSection, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     val client = remember { KomgaApiClient(prefs.connection()) }
@@ -127,6 +135,7 @@ private fun KomgaSectionListScreen(section: HomeSection) {
     var displayOpen by remember { mutableStateOf(false) }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text(section.labelText()) },
