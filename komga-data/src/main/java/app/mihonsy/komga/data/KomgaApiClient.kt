@@ -43,6 +43,10 @@ class KomgaApiClient(
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
+        // Komga 在不同版本 / 媒体类型下会把一些字段返回成 null（实测：PDF 书的
+        // /pages 里 "sizeBytes": null）。开启后 null 落到非空属性时回落到默认值，
+        // 而不是让整个响应反序列化失败（那会让整本书打不开）。
+        coerceInputValues = true
     }
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
