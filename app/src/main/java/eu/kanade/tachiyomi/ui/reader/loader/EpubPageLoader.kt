@@ -4,19 +4,21 @@ import android.content.Context
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.util.storage.EpubFile
-import mihon.core.common.archive.ArchiveReader
+import mihon.core.common.archive.ArchiveHandle
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.i18n.MR
 
 /**
  * Loader used to load a chapter from a .epub file.
  *
- * Komiho: 本地 EPUB 走的是「抽取图片页」路径（[EpubFile] 只解析 OPF/spine 里的
- * `<img>`/`<image xlink:href>`），因此纯文字书（小说）会得到 0 页 —— 这是设计限制，
- * 不是文件损坏。这里给出明确提示，避免上层用通用的「No pages found」含糊带过。
+ * Komiho: 本地 / WebDAV / SMB 的 EPUB 都走这里（参数为窄接口 [ArchiveHandle]，
+ * 本地是 ArchiveReader，远程是 RemoteZipReader / CachingArchiveHandle）。
+ * 阅读方式是「抽取图片页」—— [EpubFile] 只解析 OPF/spine 里的 `<img>`/`<image xlink:href>`，
+ * 因此纯文字书（小说）会得到 0 页，这是设计限制，不是文件损坏；
+ * 这里给出明确提示，避免上层用通用的「No pages found」含糊带过。
  */
 internal class EpubPageLoader(
-    reader: ArchiveReader,
+    reader: ArchiveHandle,
     private val context: Context,
 ) : PageLoader() {
 
