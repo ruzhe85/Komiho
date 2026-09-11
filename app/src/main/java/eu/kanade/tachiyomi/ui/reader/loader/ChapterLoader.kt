@@ -156,6 +156,9 @@ class ChapterLoader(
                             is Format.RemoteArchive -> when {
                                 smbIsDirectoryChapter(format.remoteUrl) -> smbDirectoryLoader(format.remoteUrl)
                                 webDavIsDirectoryChapter(format.remoteUrl) -> webDavDirectoryLoader(format.remoteUrl)
+                                // Komiho: 远程 .epub 也必须走 EPUB 解析（按 OPF/spine 抽图片），
+                                // 否则会被当普通 zip 读、按条目顺序显示一堆 html/css。
+                                isRemoteEpubChapter(format.remoteUrl) -> EpubPageLoader(remoteArchiveHandle(format.remoteUrl), context)
                                 else -> ArchivePageLoader(remoteArchiveHandle(format.remoteUrl))
                             }
                             // SY <--
@@ -182,6 +185,9 @@ class ChapterLoader(
                     is Format.RemoteArchive -> when {
                         smbIsDirectoryChapter(format.remoteUrl) -> smbDirectoryLoader(format.remoteUrl)
                         webDavIsDirectoryChapter(format.remoteUrl) -> webDavDirectoryLoader(format.remoteUrl)
+                        // Komiho: 远程 .epub 也必须走 EPUB 解析（按 OPF/spine 抽图片），
+                        // 否则会被当普通 zip 读、按条目顺序显示一堆 html/css。
+                        isRemoteEpubChapter(format.remoteUrl) -> EpubPageLoader(remoteArchiveHandle(format.remoteUrl), context)
                         else -> ArchivePageLoader(remoteArchiveHandle(format.remoteUrl))
                     }
                     // SY <--
@@ -254,6 +260,10 @@ class ChapterLoader(
         return WebDavDirectoryPageLoader(conn, dirUrl)
     }
     // SY <--
+
+    // Komiho: 远程 URL 是否指向 EPUB。散图目录章节以 `/` 结尾，不会命中这里。
+    private fun isRemoteEpubChapter(remoteUrl: String): Boolean =
+        remoteUrl.substringBefore('?').lowercase().endsWith(".epub")
 
     // SY --> Komiho Phase7: 远程归档按 URL 方案分派（webdav: / smb://）。
     private fun remoteArchiveHandle(remoteUrl: String): ArchiveHandle =
