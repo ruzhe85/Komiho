@@ -196,10 +196,10 @@
     <string name="settings_amoled">深色 AMOLED 純黑</string>
     <string name="settings_app_language">應用語言</string>
     <string name="settings_nav_bar_position">導覽列位置</string>
+    <string name="nav_pos_auto">自動</string>
     <string name="nav_pos_bottom">底部</string>
     <string name="nav_pos_left">左側</string>
     <string name="nav_pos_right">右側</string>
-    <string name="nav_pos_tablet_only">僅在平板（最小寬度 ≥ 600dp）生效</string>
     <string name="lang_default">自動（跟隨系統）</string>
     <string name="lang_zh_cn">簡體中文</string>
     <string name="lang_zh_tw">繁體中文</string>
