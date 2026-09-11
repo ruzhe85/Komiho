@@ -13,7 +13,8 @@ data class BookDto(
     @SerialName("seriesTitle") val seriesTitle: String? = null,
     val libraryId: String? = null,
     val deleted: Boolean = false,
-    @SerialName("sizeBytes") val sizeBytes: Long = 0,
+    // 同 PageDto：Komga 可能返回 null，保持可空以免整个响应反序列化失败。
+    @SerialName("sizeBytes") val sizeBytes: Long? = null,
     val media: MediaDto = MediaDto(),
     val metadata: BookMetadataDto = BookMetadataDto(),
     @SerialName("readProgress") val readProgress: ReadProgressDto? = null,

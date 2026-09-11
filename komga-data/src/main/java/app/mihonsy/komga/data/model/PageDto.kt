@@ -10,7 +10,11 @@ data class PageDto(
     @SerialName("mediaType") val mediaType: String? = null,
     val width: Int = 0,
     val height: Int = 0,
-    @SerialName("sizeBytes") val sizeBytes: Long = 0,
+    // Komiho fix: Komga 对「由 PDF 转页」的书会返回 "sizeBytes": null（实测 2757127.pdf）。
+    // 这里必须可空，否则 kotlinx.serialization 会抛
+    // "Unexpected symbol 'n' in numeric literal"，表现是整本书打不开
+    // （阅读器弹 JSON 解析错误）。
+    @SerialName("sizeBytes") val sizeBytes: Long? = null,
 )
 
 @Serializable
