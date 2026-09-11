@@ -191,6 +191,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -2204,9 +2205,12 @@ private fun KomgaNavRail(
     // 用 Surface + Column，而不是直接 material3.NavigationRail：后者的条目固定从顶部
     // 往下排列（Arrangement.Top），没法让整组居中。这里 spacedBy 的 alignment 参数
     // 指定的就是「整组」的对齐方式，与 MihonSY 的 center-aligned rail 同一做法。
+    // 参考 MihonSY：Surface 加 tonalElevation = 3.dp，让 rail 与内容区（同为 surface）
+    // 在色调 / 阴影上形成明显区分；图标 28dp、文字 13sp 比默认稍大，更易点按。
     Surface(
         modifier = modifier.fillMaxHeight(),
         color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp,
     ) {
         Column(
             modifier = Modifier
@@ -2214,19 +2218,26 @@ private fun KomgaNavRail(
                 // rail 现在贯穿全屏高度，需自己避让状态栏/手势条（外层 Scaffold 的内边距
                 // 只作用于内容区，管不到这里）。
                 .windowInsetsPadding(WindowInsets.systemBars)
-                .widthIn(min = 80.dp)
+                .widthIn(min = 88.dp)
                 .selectableGroup(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.CenterVertically),
+            verticalArrangement = Arrangement.spacedBy(8.dp, alignment = Alignment.CenterVertically),
         ) {
             tabs.forEach { tab ->
                 NavigationRailItem(
                     selected = selectedOrdinal == tab.ordinal,
                     onClick = { onTabClick(tab) },
-                    icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
+                    icon = {
+                        Icon(
+                            tab.icon,
+                            contentDescription = tab.labelText(),
+                            modifier = Modifier.size(28.dp),
+                        )
+                    },
                     label = {
                         Text(
                             text = tab.labelText(),
+                            fontSize = 13.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
