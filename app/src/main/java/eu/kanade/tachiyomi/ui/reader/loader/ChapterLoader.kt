@@ -150,7 +150,7 @@ class ChapterLoader(
                         when (format) {
                             is Format.Directory -> DirectoryPageLoader(format.file)
                             is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
-                            is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
+                            is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
                             // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）
                             // SY: SMB 且 URL 以 / 结尾 = 散图目录章节（点目录内图片打开）。
                             is Format.RemoteArchive -> when {
@@ -176,7 +176,7 @@ class ChapterLoader(
                 when (format) {
                     is Format.Directory -> DirectoryPageLoader(format.file)
                     is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
-                    is Format.Epub -> EpubPageLoader(format.file.archiveReader(context))
+                    is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
                     // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）
                     // SY: SMB 且 URL 以 / 结尾 = 散图目录章节（点目录内图片打开）。
                     is Format.RemoteArchive -> when {
