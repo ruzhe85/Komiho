@@ -214,6 +214,7 @@ import app.mihonsy.komga.data.smb.SmbCoverCache
 import app.mihonsy.komga.data.smb.SMB_IMAGE_EXTS
 // SY <--
 import app.mihonsy.komga.data.smb.SmbEntry
+import app.mihonsy.komga.data.smb.SmbSessionManager
 // SY <--
 import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
 import app.mihonsy.komga.data.webdav.WebDavConnection
@@ -679,6 +680,17 @@ private fun KomgaMainScreen(
         if (visibleTabs.any { it.ordinal == target }) {
             currentTab = target
             tabSignal.value = null
+        }
+    }
+    // Komiho: SMB 会话预热 —— 进入「目录」tab 时在后台把各 SMB 连接的会话（未配置共享时
+    // 连共享枚举）先建好，把首次浏览的建连成本提前做掉（NAS 慢时这段能有十几秒）。
+    // 失败静默：真正访问时会自己重连，不影响功能。
+    LaunchedEffect(currentTab, sourceVersion) {
+        if (currentTab != MainTab.Browse.ordinal) return@LaunchedEffect
+        val conns = withContext(Dispatchers.IO) { SmbConnectionStore.all() }
+        conns.forEach { c ->
+            val pw = withContext(Dispatchers.IO) { WebDavCredentialCrypto.decryptStored(c.passEnc) }
+            withContext(Dispatchers.IO) { SmbSessionManager.prewarm(c, pw) }
         }
     }
     // 注：不在此处重置 searchOpen ——下方 LaunchedEffect(currentTab) 已负责，
@@ -6346,6 +6358,8 @@ private fun SmbBrowsePane(
     var columnCount by remember { mutableStateOf(prefs.webdavBrowseColumns.get()) }
     // SY: 封面开关（默认关——归档首图/单图都要开 SMB 会话拉取，filesDir 缓存兜底）。
     var showCover by remember { mutableStateOf(prefs.smbBrowseShowCover.get()) }
+    // Komiho: 首次浏览要建 SMB 会话（NAS 慢时可达十几秒），给出明确反馈，避免无提示白等。
+    val smbConnectingMsg = composeStringResource(R.string.smb_connecting)
     var showOptions by remember { mutableStateOf(false) }
 
     val rootLabel = remember(conn.id) { conn.name.ifBlank { conn.host } }
@@ -6462,7 +6476,17 @@ private fun SmbBrowsePane(
         }
 
         when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = smbConnectingMsg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             errorText != null -> Column(
                 Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
