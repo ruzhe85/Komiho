@@ -4,7 +4,8 @@
 
 ![Komiho](.github/readme-images/app-icon.png)
 
-**A dedicated [Komga](https://github.com/gotson/komga) manga reader**
+**A full-featured Android manga reader**
+Supports **Komga, local files, WebDAV, SMB** and more comic sources
 
 Package `cn.ruzhe.komiho` ｜ Version 1.0.6 (7) ｜ Android 8.0+
 
@@ -14,86 +15,64 @@ Package `cn.ruzhe.komiho` ｜ Version 1.0.6 (7) ｜ Android 8.0+
 
 ---
 
-## About
+## ✨ Features
 
-Komiho is a **Komga-only manga reader** rebuilt from [MihonSY](https://github.com/ruzhe85/MihonSY). It removes the upstream multi-source / extension / tracker stack and uses a **Komga server as the single data source**, wiring MihonSY's mature reader directly to the Komga API (v1.26.3).
+### 📚 Multi-source reading
 
-- Connect to a self-hosted Komga server (URL + API-Key), with multi-server switching
-- Browse libraries / series / books, with reading progress written back to Komga in real time
-- Reuses the full MihonSY reader (paged / webtoon / RTL / double-page / zoom / image enhancement)
+Komiho unifies comics from different sources into a single browsing and reading experience:
 
-> ⚠️ Komiho requires an available **Komga server** (self-hosted or otherwise); it does not provide comic content by itself.
+* **Komga** — Connect to a self-hosted Komga server; browse libraries, series and books, with multi-server and multi-library support and reading-progress sync.
+* **Local files** — Browse and read comic files directly on your device.
+* **WebDAV** — Connect to WebDAV services (e.g. a NAS) and read remote comics online without downloading the whole book.
+* **SMB / CIFS** — Access shared folders on your LAN and read networked comics directly.
 
----
+### 📦 Supported formats
 
-## ✨ Core Features
+Format support differs slightly by source:
 
-### 1. Server Connections (multi-Komga)
+* **Local / WebDAV / SMB direct reading**: comic archives `CBZ` `CBR` `CB7` `CBT` `ZIP` `RAR` `7Z` `TAR`, `EPUB`, and **loose-image folders** (just drop images into a directory).
+* **Via a Komga server**: Komga does the page conversion server-side, so any format Komga supports (including `PDF`) works — the client reads the converted image pages.
 
-- **Connection management**: connect to a self-hosted Komga server via URL + API-Key (`X-API-Key`), validated before saving.
-- **Multiple servers**: add several Komga servers and switch the active one in settings; each can be edited / deleted.
+> 💡 Local / WebDAV / SMB direct reading does not yet support `PDF`; read PDF through a Komga server (Komga converts it to image pages).
 
-### 2. Library Browsing
+### 📖 Full reading experience
 
-- **Library / Series / Book** three-tier model, aligned with Komga (Series = book, Book = chapter).
-- Library list (multi-library), series grid (covers from Komga thumbnails), series detail (books in order).
-- **Home aggregation**: Keep Reading / On Deck sections, semantically aligned with the Komga Web Dashboard.
-- Top-bar library selector (DropdownMenu) to switch the current library quickly.
+Built on the MihonSY reader, and continuously optimized for real reading:
 
-### 3. Reader (full MihonSY capability)
+* Horizontal paging / vertical paging / webtoon
+* LTR / RTL
+* Single page / double page
+* Zoom and gesture control
+* Smooth tap-to-page and animation
+* Adjustable reading animation and scroll behavior
+* Reading progress memory
+* History and bookmarks
 
-- Paged (LTR / RTL / vertical), webtoon, double-tap pinch zoom, double-page.
-- Reading settings, progress memory, wheel / key paging, and the full interaction set.
-- **Progress write-back**: marks `completed` at the last page; book-level + series-level
-  (`/api/v2/series/{id}/read-progress/tachiyomi`) progress is throttled back, visible on the Komga Web side.
+### 🕘 History & bookmarks
 
-### 4. Image Enhancement (lightweight)
+Full-featured history, reading progress and bookmarks, so you can quickly resume reading, find recently read items, and save important pages.
 
-| Algorithm | Type | Presets |
-|-----------|------|---------|
-| **Lanczos3** | Classic resampling | 1.5x / 2x / 2.5x / 3x |
+### 🖼️ Image enhancement
 
-- Tuned for manga / webtoon line art; fast to load and low memory usage — no heavy models like waifu2x / Anime4K.
-- **Where**: Settings → Reader → Image enhancement.
+Built-in image enhancement provides:
 
-### 5. Search & Filter
+**1.5× / 2× / 2.5× / 3×**
 
-- Global keyword search (`/api/v1/series?search=`).
-- Filter by **tag / author**; on the home search the scope is all libraries, inside a library it is the current library.
-- Search results reuse the library display mode (no longer a fixed flat layout).
+Tuned for manga line art, balancing quality, speed and memory usage.
 
-### 6. Settings & About
+### 🖥️ Tablet & large screen
 
-- Appearance (theme / language), Reader, Server connections (multi-server manager).
-- **About** page: show version, check for updates (targeting `ruzhe85/Komiho`), and a GitHub source link.
-
-
----
-
-## 🗂️ Project Structure
-
-| Path | Description |
-|------|-------------|
-| `komga-data/` | Komga API client (OkHttp + X-API-Key), DTOs, connection preferences |
-| `app/src/main/java/app/mihonsy/komga/ui/` | Komiho's own UI (connect / home / series / reader / settings) |
-| `app/src/main/java/eu/kanade/tachiyomi/ui/reader/` | Reused MihonSY reader |
-| `i18n/` | Multiplatform resources (app name `Komiho`, etc.) |
-| `.github/workflows/build.yml` | GitHub Actions build configuration |
-
----
-
-## 📝 Changelog
-
-See [CHANGELOG.en.md](./CHANGELOG.en.md).
+Adaptive layouts for phones, tablets and large screens, with navigation that can sit at the bottom, left or right.
 
 ---
 
 ## ⚠️ Notes
 
-- For personal learning and use only; do not use commercially.
-- Please respect the copyright of the manga you read.
-- This app requires an available Komga server; you are responsible for your server's data safety.
-- This fork is not affiliated with the upstream project; for issues please open an Issue in this repository.
+The Komga feature requires connecting to your own **Komga server**.
+Komiho does not provide any comic content; please respect copyright.
 
 ---
 
+## 📝 Changelog
+
+See [CHANGELOG.en.md](./CHANGELOG.en.md) ([中文](./CHANGELOG.md)).
