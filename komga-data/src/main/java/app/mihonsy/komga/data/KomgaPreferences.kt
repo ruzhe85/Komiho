@@ -65,13 +65,14 @@ class KomgaPreferences(context: Context) {
         set(v) = prefs.edit().putString(KEY_LIBRARY_SORT, v).apply()
 
     /**
-     * 导航栏位置：`"BOTTOM"` / `"LEFT"` / `"RIGHT"`（默认 LEFT）。
+     * 导航栏位置：`"AUTO"` / `"BOTTOM"` / `"LEFT"` / `"RIGHT"`（默认 AUTO）。
      *
-     * 只在「最小宽度 ≥ 600dp」的真平板上生效——小屏一律回落底部，
-     * 避免左右 rail 挤占本就紧张的宽度。仅影响主界面的导航栏形态。
+     * `AUTO` = 按屏幕最小宽度自动决定：≥ 600dp（真平板）用左侧 rail，否则底部栏。
+     * 显式选 `LEFT` / `RIGHT` 时**不再受屏宽限制**——小屏（手机）也会用 rail。
+     * 仅影响主界面的导航栏形态。
      */
     var navBarPosition: String
-        get() = prefs.getString(KEY_NAV_BAR_POSITION, "LEFT").orEmpty()
+        get() = prefs.getString(KEY_NAV_BAR_POSITION, "AUTO").orEmpty()
         set(v) = prefs.edit().putString(KEY_NAV_BAR_POSITION, v).apply()
 
     /**

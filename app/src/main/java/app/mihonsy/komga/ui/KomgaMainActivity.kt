@@ -869,13 +869,18 @@ private fun KomgaMainScreen(
     // SY --> Komiho: 历史 tab「清除历史」dialog 开关（按钮挂在 TopAppBar，状态提到本层）。
     var localHistoryClearOpen by remember { mutableStateOf(false) }
 
-    // SY --> Komiho: 平板导航栏位置（设置 → 外观 可改，默认左侧）。
-    // 只在「最小宽度 ≥ 600dp」的真平板生效——手机（含横屏）一律底部，避免左右 rail
-    // 挤占本就紧张的宽度；选 BOTTOM 或非平板时仍是原来的底部 NavigationBar。
-    val navBarPosition = prefs.navBarPosition
-    val useNavRail = LocalConfiguration.current.smallestScreenWidthDp >= 600 &&
-        navBarPosition != "BOTTOM" &&
-        !showAddSource
+    // SY --> Komiho: 导航栏位置（设置 → 外观 可改，默认「自动」）。
+    // AUTO = 按屏幕最小宽度自动：≥ 600dp（真平板）用左侧 rail，否则底部栏。
+    // 显式选 LEFT / RIGHT 时不受屏宽限制——小屏（手机）也用 rail。这里把 AUTO 解析成
+    // 「有效位置」，下游只认 LEFT / RIGHT / BOTTOM 三个值。
+    val navBarPosition = prefs.navBarPosition.let {
+        if (it == "AUTO" || it.isBlank()) {
+            if (LocalConfiguration.current.smallestScreenWidthDp >= 600) "LEFT" else "BOTTOM"
+        } else {
+            it
+        }
+    }
+    val useNavRail = navBarPosition != "BOTTOM" && !showAddSource
     /** 底部栏与 rail 共用的 tab 点击逻辑：重复点库 tab = 开/关抽屉（手机）或侧栏（平板）。 */
     fun onNavTabClick(tab: MainTab) {
         if (currentTab == tab.ordinal) {
@@ -4295,14 +4300,16 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                 onPreferenceClick = { showAppLanguage = true },
             )
         }
-        // SY --> Komiho: 平板导航栏位置（底部 / 左侧 / 右侧）。
+        // SY --> Komiho: 导航栏位置（自动 / 底部 / 左侧 / 右侧）。
         item {
             TextPreferenceWidget(
                 title = composeStringResource(R.string.settings_nav_bar_position),
                 subtitle = when (prefs.navBarPosition) {
                     "BOTTOM" -> composeStringResource(R.string.nav_pos_bottom)
+                    "LEFT" -> composeStringResource(R.string.nav_pos_left)
                     "RIGHT" -> composeStringResource(R.string.nav_pos_right)
-                    else -> composeStringResource(R.string.nav_pos_left)
+                    // AUTO（及历史空值）显示为「自动」。
+                    else -> composeStringResource(R.string.nav_pos_auto)
                 },
                 onPreferenceClick = { showNavBarPos = true },
             )
@@ -4371,10 +4378,11 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
         )
     }
 
-    // SY --> Komiho: 导航栏位置选择（底部 / 左侧 / 右侧）。仅平板（最小宽度 ≥ 600dp）
-    // 真正生效；改完 recreate 一次让主界面立即切换（与主题切换同款做法，低频操作可接受）。
+    // SY --> Komiho: 导航栏位置选择（自动 / 底部 / 左侧 / 右侧）。改完 recreate 一次让主界面
+    // 立即切换（与主题切换同款做法，低频操作可接受）。
     if (showNavBarPos) {
         val navPosOptions = listOf(
+            "AUTO" to composeStringResource(R.string.nav_pos_auto),
             "BOTTOM" to composeStringResource(R.string.nav_pos_bottom),
             "LEFT" to composeStringResource(R.string.nav_pos_left),
             "RIGHT" to composeStringResource(R.string.nav_pos_right),
@@ -4408,12 +4416,6 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                             }
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = composeStringResource(R.string.nav_pos_tablet_only),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             },
             confirmButton = {},

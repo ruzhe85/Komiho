@@ -201,10 +201,10 @@
     <string name="settings_amoled">Pure black AMOLED</string>
     <string name="settings_app_language">App language</string>
     <string name="settings_nav_bar_position">Navigation bar position</string>
+    <string name="nav_pos_auto">Auto</string>
     <string name="nav_pos_bottom">Bottom</string>
     <string name="nav_pos_left">Left</string>
     <string name="nav_pos_right">Right</string>
-    <string name="nav_pos_tablet_only">Only applies on tablets (smallest width ≥ 600dp)</string>
     <string name="lang_default">Auto (system)</string>
     <string name="lang_zh_cn">简体中文</string>
     <string name="lang_zh_tw">繁體中文</string>
