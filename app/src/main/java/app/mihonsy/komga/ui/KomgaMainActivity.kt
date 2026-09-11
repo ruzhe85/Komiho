@@ -808,7 +808,10 @@ private fun KomgaMainScreen(
 
     // Komga 现为可选来源（未添加不显示）：不再强制跳转连接页，未连接时停在本地浏览；
     // 添加完 Komga 连接返回（komgaConnected 翻转）后补拉一次库列表。
-    LaunchedEffect(komgaConnected) {
+    // Komiho: key 里必须带上 refreshTick —— Activity onResume（含从后台切回 app）与
+    // tab 重按都会 bump 它。此前只挂 komgaConnected，于是服务端改了库 / 新增了库之后，
+    // 回到 app 看到的仍是首次进入时的快照，必须杀进程重进才会更新。
+    LaunchedEffect(komgaConnected, refreshTick) {
         if (prefs.hasConnection()) {
             runCatching { client.getLibraries() }
                 .onSuccess { libs ->
