@@ -419,6 +419,7 @@
     <string name="loader_not_implemented_error">找不到來源</string>
     <string name="no_pinned_sources">你尚未釘選任何來源</string>
     <string name="page_list_empty_error">沒有任何頁面</string>
+    <string name="loader_epub_no_images_error">該 EPUB 不含圖片頁，看起來是純文字書。本地閱讀目前僅支援圖片型 EPUB，請透過 Komga 伺服器閱讀。</string>
     <string name="backup_restore_missing_sources">未安裝擴充套件：</string>
     <string name="backup_restore_missing_trackers">未登入歷程平臺：</string>
     <string name="channel_progress">進度</string>
