@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
 import android.content.Context
+import app.mihonsy.komga.data.withAppLanguage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.util.storage.EpubFile
@@ -29,7 +30,9 @@ internal class EpubPageLoader(
     override suspend fun getPages(): List<ReaderPage> {
         val images = epub.getImagesFromPages()
         if (images.isEmpty()) {
-            throw Exception(context.stringResource(MR.strings.loader_epub_no_images_error))
+            // withAppLanguage()：reader 的 context 来自 ReaderActivity（Mihon 的 BaseActivity），
+            // 不经过 Komiho 的语言包装，直接取会落到系统语言。
+            throw Exception(context.withAppLanguage().stringResource(MR.strings.loader_epub_no_images_error))
         }
         return images.mapIndexed { i, path ->
             val streamFn = { epub.getInputStream(path)!! }
