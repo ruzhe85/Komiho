@@ -6,7 +6,7 @@
     <!-- 底部导航 tab -->
     <string name="tab_home">主页</string>
     <!-- SY: Komiho 来源仪表盘 -->
-    <string name="tab_sources">最近阅读</string>
+    <string name="tab_sources">最近</string>
     <!-- SY --> Komiho Onboarding: 首启欢迎页 -->
     <string name="onboarding_title">欢迎使用 Komiho</string>
     <string name="onboarding_subtitle">选择你的漫画来源，之后随时可以在设置里添加更多</string>
@@ -34,7 +34,7 @@
     <string name="tab_lists">列表</string>
     <string name="tab_downloads">下载</string>
     <string name="tab_local">本地</string>
-    <string name="tab_browse">本地</string>
+    <string name="tab_browse">目录</string>
     <string name="tab_history">历史</string>
     <string name="tab_bookmarks">书签</string>
     <string name="tab_settings">设置</string>
