@@ -5,7 +5,7 @@
     <!-- Bottom nav tabs -->
     <string name="tab_home">Home</string>
     <!-- SY: Komiho source dashboard -->
-    <string name="tab_sources">Recent reading</string>
+    <string name="tab_sources">Recent</string>
     <!-- SY --> Komiho Onboarding: first-launch welcome -->
     <string name="onboarding_title">Welcome to Komiho</string>
     <string name="onboarding_subtitle">Pick your manga source — you can add more anytime in Settings</string>
@@ -33,7 +33,7 @@
     <string name="tab_lists">Lists</string>
     <string name="tab_downloads">Downloads</string>
     <string name="tab_local">Local</string>
-    <string name="tab_browse">Local</string>
+    <string name="tab_browse">Folders</string>
     <string name="tab_history">History</string>
     <string name="tab_bookmarks">Bookmarks</string>
     <string name="tab_settings">Settings</string>
