@@ -324,13 +324,18 @@ class KomgaMainActivity : KomgaBaseActivity() {
     // initial onCreate and on subsequent onNewIntent (CLEAR_TOP+SINGLE_TOP
     // reuses this instance, so onCreate won't run again).
     private val filterSignal = MutableStateFlow<Pair<String, String>?>(null)
+    // Komiho: 二级页面（系列 / 收藏 / 阅读列表 / section 全列表）点 rail 上的 tab 时，
+    // 用 CLEAR_TOP + SINGLE_TOP 复用本实例并带上目标 tab；首次进入走 onCreate、
+    // 复用实例走 onNewIntent，两处都要消费。
+    private val tabSignal = MutableStateFlow<Int?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val t = intent?.getStringExtra("filterType")
         val v = intent?.getStringExtra("filterValue")
         if (!t.isNullOrBlank() && !v.isNullOrBlank()) filterSignal.value = t to v
-        setContent { KomihoTheme { KomgaMainScreen(refreshSignal, filterSignal) } }
+        intent?.getIntExtra(EXTRA_TAB, -1)?.takeIf { it >= 0 }?.let { tabSignal.value = it }
+        setContent { KomihoTheme { KomgaMainScreen(refreshSignal, filterSignal, tabSignal) } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -339,6 +344,7 @@ class KomgaMainActivity : KomgaBaseActivity() {
         val t = intent.getStringExtra("filterType")
         val v = intent.getStringExtra("filterValue")
         if (!t.isNullOrBlank() && !v.isNullOrBlank()) filterSignal.value = t to v
+        intent.getIntExtra(EXTRA_TAB, -1).takeIf { it >= 0 }?.let { tabSignal.value = it }
     }
 
     override fun onResume() {
@@ -451,7 +457,7 @@ internal fun buildSourceEntries(komgaConns: List<KomgaConnection>, localName: St
  */
 private fun SourceEntry.visibleOnDashboard(): Boolean = SourceVisibilityStore.isVisible(id)
 
-private enum class MainTab(
+internal enum class MainTab(
     @StringRes val labelRes: Int,
     val icon: ImageVector,
     /** 仅在 Komga 来源下出现（库/系列语义）。 */
@@ -492,6 +498,7 @@ private enum class MainTab(
 private fun KomgaMainScreen(
     refreshSignal: MutableStateFlow<Int>,
     filterSignal: MutableStateFlow<Pair<String, String>?>,
+    tabSignal: MutableStateFlow<Int?>,
 ) {
     val context = LocalContext.current
     val prefs = remember { KomgaPreferences(context.applicationContext) }
@@ -664,6 +671,14 @@ private fun KomgaMainScreen(
     LaunchedEffect(visibleTabs) {
         if (visibleTabs.none { it.ordinal == currentTab }) {
             currentTab = visibleTabs.first().ordinal
+        }
+    }
+    // Komiho: 二级页面 rail 点 tab 跳过来的目标 tab（不可见则忽略），消费后清空。
+    LaunchedEffect(tabSignal, visibleTabs) {
+        val target = tabSignal.value ?: return@LaunchedEffect
+        if (visibleTabs.any { it.ordinal == target }) {
+            currentTab = target
+            tabSignal.value = null
         }
     }
     // 注：不在此处重置 searchOpen ——下方 LaunchedEffect(currentTab) 已负责，
@@ -2196,7 +2211,7 @@ private fun HomeSeriesListItem(
  * 条目组垂直居中；因贯穿全屏高度，自行用 windowInsetsPadding 避让系统栏。
  */
 @Composable
-private fun KomgaNavRail(
+internal fun KomgaNavRail(
     tabs: List<MainTab>,
     selectedOrdinal: Int,
     onTabClick: (MainTab) -> Unit,
