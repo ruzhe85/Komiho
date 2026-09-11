@@ -65,6 +65,16 @@ class KomgaPreferences(context: Context) {
         set(v) = prefs.edit().putString(KEY_LIBRARY_SORT, v).apply()
 
     /**
+     * 导航栏位置：`"BOTTOM"` / `"LEFT"` / `"RIGHT"`（默认 LEFT）。
+     *
+     * 只在「最小宽度 ≥ 600dp」的真平板上生效——小屏一律回落底部，
+     * 避免左右 rail 挤占本就紧张的宽度。仅影响主界面的导航栏形态。
+     */
+    var navBarPosition: String
+        get() = prefs.getString(KEY_NAV_BAR_POSITION, "LEFT").orEmpty()
+        set(v) = prefs.edit().putString(KEY_NAV_BAR_POSITION, v).apply()
+
+    /**
      * Last library the user opened in the Library tab — restored on the next
      * launch instead of always falling back to the first library.
      * Empty = nothing remembered yet (fresh install / cleared data).
@@ -272,6 +282,8 @@ class KomgaPreferences(context: Context) {
         const val KEY_LIBRARY_DISPLAY_MODE = "library_display_mode"
         const val KEY_BOOK_DISPLAY_MODE = "book_display_mode"
         const val KEY_LIBRARY_SORT = "library_sort"
+        /** 导航栏位置（大屏 rail）：BOTTOM / LEFT / RIGHT。 */
+        const val KEY_NAV_BAR_POSITION = "nav_bar_position"
         const val KEY_LAST_LIBRARY_ID = "last_library_id"
         const val KEY_LIBRARY_PORTRAIT_COLUMNS = "library_portrait_columns"
         const val KEY_LIBRARY_LANDSCAPE_COLUMNS = "library_landscape_columns"

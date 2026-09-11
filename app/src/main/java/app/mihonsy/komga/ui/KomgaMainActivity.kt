@@ -131,6 +131,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+// SY --> Komiho: 平板导航 rail（图标 + 文字，左/右可选，见 navBarPosition）。
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+// SY <--
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Button
@@ -864,6 +868,31 @@ private fun KomgaMainScreen(
     // SY --> Komiho: 历史 tab「清除历史」dialog 开关（按钮挂在 TopAppBar，状态提到本层）。
     var localHistoryClearOpen by remember { mutableStateOf(false) }
 
+    // SY --> Komiho: 平板导航栏位置（设置 → 外观 可改，默认左侧）。
+    // 只在「最小宽度 ≥ 600dp」的真平板生效——手机（含横屏）一律底部，避免左右 rail
+    // 挤占本就紧张的宽度；选 BOTTOM 或非平板时仍是原来的底部 NavigationBar。
+    val navBarPosition = prefs.navBarPosition
+    val useNavRail = LocalConfiguration.current.smallestScreenWidthDp >= 600 &&
+        navBarPosition != "BOTTOM" &&
+        !showAddSource
+    /** 底部栏与 rail 共用的 tab 点击逻辑：重复点库 tab = 开/关抽屉（手机）或侧栏（平板）。 */
+    fun onNavTabClick(tab: MainTab) {
+        if (currentTab == tab.ordinal) {
+            if (tab == MainTab.Library) {
+                if (isMedium) {
+                    libraryRailOpen = !libraryRailOpen
+                } else {
+                    libraryDrawerOpen = !libraryDrawerOpen
+                }
+            } else {
+                refreshSignal.update { it + 1 }
+            }
+        } else {
+            currentTab = tab.ordinal
+        }
+    }
+    // SY <--
+
     Scaffold(
         topBar = {
             // 来源管理流程（AddSourceFlow）为全屏 overlay：打开时隐藏顶栏/底栏，
@@ -1031,28 +1060,14 @@ private fun KomgaMainScreen(
         bottomBar = {
             // Icon-only tabs: a compact bar — the default 80dp NavigationBar
             // leaves large empty areas above/below the icons.
-            if (!showAddSource) {
+            // SY: 平板且选了左/右 rail 时不再渲染底部栏（导航交给 KomgaNavRail）。
+            if (!showAddSource && !useNavRail) {
                 NavigationBar(modifier = Modifier.height(60.dp)) {
                     // SY --> Komiho P0: 只渲染当前来源下可见的 tab。
                     visibleTabs.forEach { tab ->
                         NavigationBarItem(
                             selected = currentTab == tab.ordinal,
-                            onClick = {
-                                if (currentTab == tab.ordinal) {
-                                    // SY: 重复点库 tab = 开/关抽屉（手机）或侧栏（平板）；其余 tab 重复点击仍触发刷新。
-                                    if (tab == MainTab.Library) {
-                                        if (isMedium) {
-                                            libraryRailOpen = !libraryRailOpen
-                                        } else {
-                                            libraryDrawerOpen = !libraryDrawerOpen
-                                        }
-                                    } else {
-                                        refreshSignal.update { it + 1 }
-                                    }
-                                } else {
-                                    currentTab = tab.ordinal
-                                }
-                            },
+                            onClick = { onNavTabClick(tab) },
                             icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
                             label = null,
                         )
@@ -1062,10 +1077,20 @@ private fun KomgaMainScreen(
             }
         },
     ) { padding ->
-        Column(
+        // SY --> Komiho: 平板导航 rail —— 与内容并排（顶栏仍全宽，rail 从顶栏下方开始）。
+        // 注：Column 与其 body 保持原有缩进（只是多包一层 Row），让 diff 最小、风险最低。
+        Row(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize(),
+        ) {
+            if (useNavRail && navBarPosition == "LEFT") {
+                KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onNavTabClick(it) })
+            }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
         ) {
             // SY --> Komiho Phase4: 旧来源切换 chip 已移除——来源切换升级为顶栏标题位的
             // 「来源按钮 + 下拉菜单」（SourceSwitchButton），设置页除外。
@@ -1323,6 +1348,10 @@ private fun KomgaMainScreen(
                     )
                 }
                 // SY <--
+            }
+        }
+            if (useNavRail && navBarPosition == "RIGHT") {
+                KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onNavTabClick(it) })
             }
         }
     }
@@ -2142,6 +2171,44 @@ private fun HomeSeriesListItem(
 }
 
 // ---------- Library tab ----------
+
+// ---------- 平板导航 rail ----------
+
+/**
+ * 主界面导航 rail（平板：最小宽度 ≥ 600dp 且「导航栏位置」选了左/右侧时使用）。
+ *
+ * 图标 + 文字标签，条目数随当前来源动态增减（传入的 [tabs] 就是 visibleTabs）。
+ * 与底部 NavigationBar 共用同一份 [onTabClick]，点按行为完全一致。
+ * windowInsets 传 0：外层 Scaffold 的 padding 已含顶栏与系统栏内边距，避免双重叠加。
+ */
+@Composable
+private fun KomgaNavRail(
+    tabs: List<MainTab>,
+    selectedOrdinal: Int,
+    onTabClick: (MainTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    NavigationRail(
+        modifier = modifier.fillMaxHeight(),
+        containerColor = MaterialTheme.colorScheme.surface,
+        windowInsets = WindowInsets(0, 0, 0, 0),
+    ) {
+        tabs.forEach { tab ->
+            NavigationRailItem(
+                selected = selectedOrdinal == tab.ordinal,
+                onClick = { onTabClick(tab) },
+                icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
+                label = {
+                    Text(
+                        text = tab.labelText(),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+            )
+        }
+    }
+}
 
 // ---------- Library drawer / rail (方案 B) ----------
 // 手机：临时 modal 抽屉；平板（≥600dp）：可收起常驻侧栏。两形态复用同一份库列表内容。
@@ -4154,6 +4221,9 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
     var appThemeSel by remember { mutableStateOf(appThemeEnum) }
     var amoledSel by remember { mutableStateOf(prefs.themeDarkAmoled) }
     var showAppLanguage by remember { mutableStateOf(false) }
+    // SY --> Komiho: 平板导航栏位置（底部/左侧/右侧）选择对话框开关。
+    var showNavBarPos by remember { mutableStateOf(false) }
+    // SY <--
     var showDashboardRecent by remember { mutableStateOf(false) }
     var dashboardRecentSel by remember { mutableIntStateOf(DashboardPreferences.limitValue()) }
 
@@ -4209,6 +4279,19 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                 onPreferenceClick = { showAppLanguage = true },
             )
         }
+        // SY --> Komiho: 平板导航栏位置（底部 / 左侧 / 右侧）。
+        item {
+            TextPreferenceWidget(
+                title = composeStringResource(R.string.settings_nav_bar_position),
+                subtitle = when (prefs.navBarPosition) {
+                    "BOTTOM" -> composeStringResource(R.string.nav_pos_bottom)
+                    "RIGHT" -> composeStringResource(R.string.nav_pos_right)
+                    else -> composeStringResource(R.string.nav_pos_left)
+                },
+                onPreferenceClick = { showNavBarPos = true },
+            )
+        }
+        // SY <--
         // SY: 聚合页（来源仪表盘）显示设置——每个来源列出几条最近阅读。
         item { PreferenceGroupHeader(composeStringResource(R.string.settings_group_dashboard)) }
         item {
@@ -4271,6 +4354,56 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
             confirmButton = {},
         )
     }
+
+    // SY --> Komiho: 导航栏位置选择（底部 / 左侧 / 右侧）。仅平板（最小宽度 ≥ 600dp）
+    // 真正生效；改完 recreate 一次让主界面立即切换（与主题切换同款做法，低频操作可接受）。
+    if (showNavBarPos) {
+        val navPosOptions = listOf(
+            "BOTTOM" to composeStringResource(R.string.nav_pos_bottom),
+            "LEFT" to composeStringResource(R.string.nav_pos_left),
+            "RIGHT" to composeStringResource(R.string.nav_pos_right),
+        )
+        AlertDialog(
+            onDismissRequest = { showNavBarPos = false },
+            title = { Text(composeStringResource(R.string.settings_nav_bar_position)) },
+            text = {
+                Column {
+                    navPosOptions.forEach { (value, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (prefs.navBarPosition != value) {
+                                        prefs.navBarPosition = value
+                                        activity?.recreate()
+                                    }
+                                    showNavBarPos = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(label, modifier = Modifier.weight(1f))
+                            if (prefs.navBarPosition == value) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = composeStringResource(R.string.nav_pos_tablet_only),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {},
+        )
+    }
+    // SY <--
 
     // SY: 聚合页每个来源显示的最近阅读条数（1/3/5/10）。写进 DashboardPreferences，
     // 聚合页用 changes() 流直连，改完回去卡片条数立刻变，无需重启。
