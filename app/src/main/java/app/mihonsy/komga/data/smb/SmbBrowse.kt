@@ -60,16 +60,21 @@ object SmbBrowse {
             val listStart = System.currentTimeMillis()
             try {
                 val out = listOnce(conn, password, relPath)
-                logcat(LogPriority.INFO) { "[Smb] 列目录 $relPath 完成，${out.size} 项，耗时 ${System.currentTimeMillis() - listStart}ms" }
+                val cost = System.currentTimeMillis() - listStart
+                // 慢 → WARN：release 版日志级别（WARN）会吞掉 INFO，而「慢」正是要取证的现场。
+                if (cost >= SmbSessionManager.SLOW_LOG_MS) {
+                    logcat(LogPriority.WARN) { "[Smb] 列目录 $relPath 完成，${out.size} 项，耗时 ${cost}ms（慢）" }
+                } else {
+                    logcat(LogPriority.INFO) { "[Smb] 列目录 $relPath 完成，${out.size} 项，耗时 ${cost}ms" }
+                }
                 out
             } catch (e: Exception) {
-                logcat(LogPriority.INFO) { "[Smb] 列目录 $relPath 失败（${System.currentTimeMillis() - listStart}ms），作废会话重试: ${e.message}" }
+                logcat(LogPriority.WARN) { "[Smb] 列目录 $relPath 失败（${System.currentTimeMillis() - listStart}ms），作废会话重试: ${e.message}" }
                 // 会话可能已断（NAS 休眠/换网）：作废后重试一次，仍失败才上抛。
-                logcat(LogPriority.DEBUG) { "[Smb] 列目录失败，作废会话重试: ${e.message}" }
                 SmbSessionManager.invalidate(conn)
                 val retryStart = System.currentTimeMillis()
                 val out = listOnce(conn, password, relPath)
-                logcat(LogPriority.INFO) { "[Smb] 列目录 $relPath 重试成功，${out.size} 项，耗时 ${System.currentTimeMillis() - retryStart}ms" }
+                logcat(LogPriority.WARN) { "[Smb] 列目录 $relPath 重试成功，${out.size} 项，耗时 ${System.currentTimeMillis() - retryStart}ms" }
                 out
             }
         }
@@ -80,7 +85,7 @@ object SmbBrowse {
             try {
                 SmbSessionManager.listShares(conn, password)
             } catch (e: Exception) {
-                logcat(LogPriority.DEBUG) { "[Smb] 共享枚举失败，作废会话重试: ${e.message}" }
+                logcat(LogPriority.WARN) { "[Smb] 共享枚举失败，作废会话重试: ${e.message}" }
                 SmbSessionManager.invalidate(conn)
                 SmbSessionManager.listShares(conn, password)
             }
