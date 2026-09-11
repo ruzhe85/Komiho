@@ -8,6 +8,8 @@ import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
 // SY <--
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+// SY: 散图目录封面需在后台上拉目录（PROPFIND 为 suspend）。
+import kotlinx.coroutines.runBlocking
 import logcat.LogPriority
 import logcat.logcat
 import mihon.core.common.archive.ArchiveHandle
@@ -68,10 +70,19 @@ object WebDavCoverCache {
         synchronized(inFlight) {
             if (!inFlight.add(chapterUrl)) return
         }
+        // SY: 散图目录章节（URL 尾斜杠）没有归档句柄，走「拉目录首图」分支；
+        // 归档章节仍走原来的「拆包取首图」。
+        val isDirectory = WebDavConnectionStore.extractFullUrl(chapterUrl).endsWith('/')
         val app = context.applicationContext
         thread(name = "webdav-cover", isDaemon = true) {
             // 先移出去：失败后下次打开还能重试。
             synchronized(inFlight) { inFlight.remove(chapterUrl) }
+            if (isDirectory) {
+                // 散图每页独立 GET，不存在整本缓存竞态，无需延迟。
+                runCatching { generateFromDirectory(chapterUrl, target) }
+                    .onFailure { logcat(LogPriority.INFO) { "[WebDavCover] 目录封面生成失败：${it.message}" } }
+                return@thread
+            }
             // 延迟 3s 再拉：避开与阅读线程同时整本缓存下载的竞态（rar/7z 无 Range 场景
             // ensureFallbackFile 无跨实例互斥）；Range 服务器无此问题，延迟无感。
             Thread.sleep(3000)
@@ -130,21 +141,64 @@ object WebDavCoverCache {
                 h.getInputStream(firstName)?.use { it.readBytes() }
             }.getOrNull() ?: return
             val bmp = decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX) ?: return
-            runCatching {
-                val tmp = File(target.parentFile, target.nameWithoutExtension + ".tmp")
-                ByteArrayOutputStream().use { out ->
-                    bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-                    tmp.writeBytes(out.toByteArray())
-                }
-                if (tmp.renameTo(target)) {
-                    tmp.delete()
-                } else {
-                    tmp.copyTo(target, overwrite = true)
-                    tmp.delete()
-                }
-            }
-            bmp.recycle()
+            writeCover(bmp, target)
         }
+    }
+
+    /**
+     * SY: 散图目录章节的封面 —— 列目录（PROPFIND）→ 自然序取第一张图（与阅读器首页同口径）
+     * → GET 该图 → 采样压缩落盘。只发 1 次列表 + 1 次图片请求。
+     * 目录章节没有归档句柄，无法复用 [generate] 的拆包逻辑，故单独一条路径。
+     */
+    private fun generateFromDirectory(chapterUrl: String, target: File) {
+        val connId = chapterUrl.removePrefix(WebDavConnectionStore.CONN_URL_PREFIX).substringBefore('/')
+        val conn = WebDavConnectionStore.all().firstOrNull { it.id == connId }
+            ?: throw IllegalStateException("WebDAV 连接不存在（可能已删除）: $chapterUrl")
+        val dirUrl = WebDavConnectionStore.extractFullUrl(chapterUrl)
+            .let { if (it.endsWith('/')) it else "$it/" }
+        val firstUrl = runBlocking {
+            WebDavPropfind.list(conn, dirUrl)
+                .filter { it.isImage }
+                .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                .firstOrNull()?.url
+        } ?: return
+        val raw = fetchBytes(conn, firstUrl)
+        val bmp = decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX) ?: return
+        writeCover(bmp, target)
+    }
+
+    /** 单图 GET（Basic 认证；复用阅读器同一条 OkHttpClient，防风控口径与页面读取一致）。 */
+    private fun fetchBytes(conn: WebDavConnection, url: String): ByteArray {
+        val builder = okhttp3.Request.Builder().url(url)
+        val pass = WebDavCredentialCrypto.decryptStored(conn.passEnc)
+        if (conn.user.isNotBlank()) {
+            builder.header("Authorization", okhttp3.Credentials.basic(conn.user, pass))
+        }
+        val bytes = WebDavRandomAccessSource.sharedHttpClient().newCall(builder.build())
+            .execute().use { resp ->
+                if (!resp.isSuccessful) throw IllegalStateException("封面图片下载失败 HTTP ${resp.code}: $url")
+                resp.body?.bytes() ?: ByteArray(0)
+            }
+        check(bytes.isNotEmpty()) { "封面图片为空：$url" }
+        return bytes
+    }
+
+    /** 采样压缩落盘（临时文件 + rename，rename 失败回落 copy）。 */
+    private fun writeCover(bmp: Bitmap, target: File) {
+        runCatching {
+            val tmp = File(target.parentFile, target.nameWithoutExtension + ".tmp")
+            ByteArrayOutputStream().use { out ->
+                bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                tmp.writeBytes(out.toByteArray())
+            }
+            if (tmp.renameTo(target)) {
+                tmp.delete()
+            } else {
+                tmp.copyTo(target, overwrite = true)
+                tmp.delete()
+            }
+        }
+        bmp.recycle()
     }
 
     /** 两次 decode：先读边界算 inSampleSize，再采样解码（与 LocalCoverFetcher 同策略）。 */
