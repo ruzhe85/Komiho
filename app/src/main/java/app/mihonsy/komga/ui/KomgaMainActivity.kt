@@ -390,6 +390,12 @@ internal const val SOURCE_ID_SMB_PREFIX = SourceVisibilityStore.ID_SMB_PREFIX
 // SY <--
 
 /**
+ * Komga `/api/v1/series` 的单页条数。库网格、检索等「要取全量」的地方按此逐页拉取——
+ * 只请求第 0 页会在大库（> 200 部）上被静默截断。
+ */
+private const val SERIES_PAGE_SIZE = 200
+
+/**
  * 来源菜单排序：本地是唯一内置来源、固定置顶；Komga / WebDAV / SMB 统一为
  * 「**一条连接 = 一条独立来源**」，同级按名称升序。未「添加」的来源不显示。
  *
@@ -2507,15 +2513,34 @@ private fun LibraryTab(
         }
         loading = true
         runCatching {
-            client.getSeries(
-                libraryId = if (isCrossLibraryFilter) null else selectedLibraryId,
-                readStatus = readFilter.komgaValue,
-                tag = if (filterType == "tag") listOf(filterValue ?: "") else null,
-                genre = if (filterType == "genre") listOf(filterValue ?: "") else null,
-                author = if (filterType == "author") listOf(filterValue ?: "") else null,
-                sort = sort.komgaSort,
-                size = 200,
-            ).content
+            // SY: /api/v1/series 是分页接口 —— 以前只请求第 0 页（size = 200），库里的系列
+            // 超过 200 部时网格就被截断；而库侧栏/抽屉里的数量用的是 totalElements（真总数），
+            // 于是出现「计数 415、实际只有 200」的落差。这里按页拉全，与「加入阅读列表」
+            // （SeriesReadlistPickerDialog.createAndAdd）的取全口径一致。
+            // 循环条件同时看 totalPages 与 totalElements：服务器若没回 totalPages 也能靠
+            // 已取条数收敛；两者都存在时也不会多打一次空请求。
+            val all = mutableListOf<SeriesDto>()
+            var page = 0
+            while (true) {
+                val resp = client.getSeries(
+                    libraryId = if (isCrossLibraryFilter) null else selectedLibraryId,
+                    readStatus = readFilter.komgaValue,
+                    tag = if (filterType == "tag") listOf(filterValue ?: "") else null,
+                    genre = if (filterType == "genre") listOf(filterValue ?: "") else null,
+                    author = if (filterType == "author") listOf(filterValue ?: "") else null,
+                    sort = sort.komgaSort,
+                    page = page,
+                    size = SERIES_PAGE_SIZE,
+                )
+                all += resp.content
+                page++
+                if (resp.content.isEmpty() ||
+                    (page >= resp.totalPages && all.size >= resp.totalElements)
+                ) {
+                    break
+                }
+            }
+            all
         }
             .onSuccess { series = it; error = null }
             .onFailure { error = context.getString(R.string.load_series_failed, it.message) }
