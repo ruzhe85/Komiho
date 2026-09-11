@@ -64,7 +64,9 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -132,7 +134,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 // SY --> Komiho: 平板导航 rail（图标 + 文字，左/右可选，见 navBarPosition）。
-import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 // SY <--
 import androidx.compose.material3.OutlinedTextField
@@ -893,7 +894,16 @@ private fun KomgaMainScreen(
     }
     // SY <--
 
+    // SY --> Komiho: 平板导航 rail 与 Scaffold 平级并排，rail 占满整屏高度（顶栏只盖内容区）。
+    // 旧做法把 rail 塞在 Scaffold 内容区里，顶栏全宽时最左的标题（☰ + 名称）正好压在
+    // rail 那一列上方，看上去像 rail 的标题；改为并排后 rail 上下贯通、标题回到内容区。
+    // 注：Scaffold 保持原缩进（只是多包一层 Row），让 diff 最小、风险最低。
+    Row(modifier = Modifier.fillMaxSize()) {
+        if (useNavRail && navBarPosition == "LEFT") {
+            KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onNavTabClick(it) })
+        }
     Scaffold(
+        modifier = Modifier.weight(1f),
         topBar = {
             // 来源管理流程（AddSourceFlow）为全屏 overlay：打开时隐藏顶栏/底栏，
             // 避免 overlay 只盖住内容区而顶栏来源按钮仍可点。
@@ -1077,20 +1087,11 @@ private fun KomgaMainScreen(
             }
         },
     ) { padding ->
-        // SY --> Komiho: 平板导航 rail —— 与内容并排（顶栏仍全宽，rail 从顶栏下方开始）。
-        // 注：Column 与其 body 保持原有缩进（只是多包一层 Row），让 diff 最小、风险最低。
-        Row(
+        // SY --> Komiho: rail 已提到 Scaffold 外层并排（见上方），此处只剩原来的内容 Column。
+        Column(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize(),
-        ) {
-            if (useNavRail && navBarPosition == "LEFT") {
-                KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onNavTabClick(it) })
-            }
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight(),
         ) {
             // SY --> Komiho Phase4: 旧来源切换 chip 已移除——来源切换升级为顶栏标题位的
             // 「来源按钮 + 下拉菜单」（SourceSwitchButton），设置页除外。
@@ -1350,9 +1351,9 @@ private fun KomgaMainScreen(
                 // SY <--
             }
         }
-            if (useNavRail && navBarPosition == "RIGHT") {
-                KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onNavTabClick(it) })
-            }
+    }
+        if (useNavRail && navBarPosition == "RIGHT") {
+            KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onNavTabClick(it) })
         }
     }
 
@@ -2179,7 +2180,8 @@ private fun HomeSeriesListItem(
  *
  * 图标 + 文字标签，条目数随当前来源动态增减（传入的 [tabs] 就是 visibleTabs）。
  * 与底部 NavigationBar 共用同一份 [onTabClick]，点按行为完全一致。
- * windowInsets 传 0：外层 Scaffold 的 padding 已含顶栏与系统栏内边距，避免双重叠加。
+ * 位置：与 Scaffold 平级并排（左/右），占满整屏高度 —— 顶栏只盖内容区，不与 rail 同列。
+ * 条目组垂直居中；因贯穿全屏高度，自行用 windowInsetsPadding 避让系统栏。
  */
 @Composable
 private fun KomgaNavRail(
@@ -2188,24 +2190,38 @@ private fun KomgaNavRail(
     onTabClick: (MainTab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    NavigationRail(
+    // 用 Surface + Column，而不是直接 material3.NavigationRail：后者的条目固定从顶部
+    // 往下排列（Arrangement.Top），没法让整组居中。这里 spacedBy 的 alignment 参数
+    // 指定的就是「整组」的对齐方式，与 MihonSY 的 center-aligned rail 同一做法。
+    Surface(
         modifier = modifier.fillMaxHeight(),
-        containerColor = MaterialTheme.colorScheme.surface,
-        windowInsets = WindowInsets(0, 0, 0, 0),
+        color = MaterialTheme.colorScheme.surface,
     ) {
-        tabs.forEach { tab ->
-            NavigationRailItem(
-                selected = selectedOrdinal == tab.ordinal,
-                onClick = { onTabClick(tab) },
-                icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
-                label = {
-                    Text(
-                        text = tab.labelText(),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                // rail 现在贯穿全屏高度，需自己避让状态栏/手势条（外层 Scaffold 的内边距
+                // 只作用于内容区，管不到这里）。
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .widthIn(min = 80.dp)
+                .selectableGroup(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.CenterVertically),
+        ) {
+            tabs.forEach { tab ->
+                NavigationRailItem(
+                    selected = selectedOrdinal == tab.ordinal,
+                    onClick = { onTabClick(tab) },
+                    icon = { Icon(tab.icon, contentDescription = tab.labelText()) },
+                    label = {
+                        Text(
+                            text = tab.labelText(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                )
+            }
         }
     }
 }
