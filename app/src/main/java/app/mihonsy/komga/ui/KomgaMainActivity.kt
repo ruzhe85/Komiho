@@ -1037,10 +1037,16 @@ private fun KomgaMainScreen(
                                         prefs.libraryPortraitColumns = newColumns
                                     }
                                 },
-                                sort = librarySortMode,
-                                onSortModeChange = {
-                                    librarySortMode = it
-                                    prefs.librarySort = it.toPref()
+                                sortOptions = LibrarySortBy.entries.map {
+                                    SortOptionUi(it.labelText(), it.prefKey, it.defaultDescending)
+                                },
+                                currentSortKey = librarySortMode.sortBy.prefKey,
+                                sortDescending = librarySortMode.descending,
+                                onSortChange = { key, desc ->
+                                    val by = LibrarySortBy.entries.find { it.prefKey == key } ?: LibrarySortBy.Name
+                                    val next = LibrarySort(by, desc)
+                                    librarySortMode = next
+                                    prefs.librarySort = next.toPref()
                                 },
                                 readFilter = libraryReadFilter,
                                 onReadFilterChange = { libraryReadFilter = it },
@@ -2821,102 +2827,6 @@ private fun LibraryTab(
  * replacing the old separate funnel dropdown + display dialog.
  */
 @Composable
-private fun ShelfOptionsMenu(
-    expanded: Boolean,
-    onDismiss: () -> Unit,
-    displayMode: LibraryDisplayMode,
-    onDisplayModeChange: (LibraryDisplayMode) -> Unit,
-    columns: Int,
-    onColumnChange: (Int) -> Unit,
-    sort: LibrarySort,
-    onSortModeChange: (LibrarySort) -> Unit,
-    readFilter: ReadFilter,
-    onReadFilterChange: (ReadFilter) -> Unit,
-) {
-    if (!expanded) return
-
-    val tabTitles = listOf(
-        composeStringResource(R.string.read_status_header),
-        composeStringResource(R.string.sort_header),
-        composeStringResource(R.string.display_mode_header),
-    )
-
-    TabbedDialog(
-        onDismissRequest = onDismiss,
-        tabTitles = tabTitles,
-    ) { page ->
-        Column(
-            modifier = Modifier
-                .padding(vertical = 8.dp)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            when (page) {
-                0 -> {
-                    ReadFilter.entries.forEach { f ->
-                        CheckboxItem(
-                            label = f.labelText(),
-                            checked = readFilter == f,
-                            onClick = { onReadFilterChange(f) },
-                        )
-                    }
-                }
-                1 -> {
-                    LibrarySortBy.entries.forEach { m ->
-                        SortItem(
-                            label = m.labelText(),
-                            sortDescending = if (sort.sortBy == m) sort.descending else null,
-                            onClick = {
-                                onSortModeChange(
-                                    if (sort.sortBy == m) {
-                                        sort.copy(descending = !sort.descending)
-                                    } else {
-                                        LibrarySort(m, m.defaultDescending)
-                                    },
-                                )
-                            },
-                        )
-                    }
-                }
-                2 -> {
-                    Text(
-                        text = composeStringResource(R.string.display_mode_header),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        LibraryDisplayMode.entries.forEach { m ->
-                            FilterChip(
-                                selected = displayMode == m,
-                                onClick = { onDisplayModeChange(m) },
-                                label = { Text(m.labelText()) },
-                            )
-                        }
-                    }
-                    if (displayMode != LibraryDisplayMode.List) {
-                        SliderItem(
-                            value = columns,
-                            valueRange = 0..10,
-                            label = composeStringResource(R.string.pref_library_columns),
-                            valueString = if (columns > 0) {
-                                columns.toString()
-                            } else {
-                                composeStringResource(R.string.label_auto)
-                            },
-                            onChange = onColumnChange,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 /** Sortable fields on the library shelf, aligned with Komga WebUI. */
 private enum class LibrarySortBy(
     @StringRes val labelRes: Int,
@@ -8323,16 +8233,6 @@ private fun DownloadsTab(
  * M3: read-status filter for the Library tab.
  * Maps to Komga's `read_status` query parameter on GET /series.
  */
-private enum class ReadFilter(@StringRes val labelRes: Int, val komgaValue: String?) {
-    All(R.string.filter_all, null),
-    Unread(R.string.filter_unread, "UNREAD"),
-    InProgress(R.string.filter_in_progress, "IN_PROGRESS"),
-    Read(R.string.filter_read, "READ"),
-    ;
-
-    @Composable
-    fun labelText(): String = composeStringResource(labelRes)
-}
 
 @Composable
 fun SeriesCard(client: KomgaApiClient, series: SeriesDto, onClick: () -> Unit) {

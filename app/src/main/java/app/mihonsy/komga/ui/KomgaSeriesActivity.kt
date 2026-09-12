@@ -24,9 +24,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import eu.kanade.presentation.util.isTabletUi
-import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -103,11 +104,17 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
     val isLandscape = remember(configuration) {
         configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     }
-    // Column count for this page's grid (0 = auto).
-    val columns = if (isLandscape) prefs.libraryLandscapeColumns else prefs.libraryPortraitColumns
+    // 每行数量（0 = 自动）。沿用库的列数偏好——网格密度属全局审美设置，不按页拆分。
+    var portraitColumns by remember { mutableStateOf(prefs.libraryPortraitColumns) }
+    var landscapeColumns by remember { mutableStateOf(prefs.libraryLandscapeColumns) }
+    val columns = if (isLandscape) landscapeColumns else portraitColumns
     // U3: book-level display mode (independent from the series shelf).
-    val mode = LibraryDisplayMode.fromPref(prefs.bookDisplayMode)
-    var displayOpen by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.bookDisplayMode)) }
+    // SY: 书籍列表的排序 / 阅读状态筛选。偏好独立于库页（bookSort），
+    // 仅按钮形式与库一致——共用一个三页对话框（ShelfOptionsMenu）。
+    var bookSort by remember { mutableStateOf(BookSort.fromPref(prefs.bookSort)) }
+    var readFilter by remember { mutableStateOf(ReadFilter.All) }
+    var optionsOpen by remember { mutableStateOf(false) }
     // 平板 / 手机布局分支：与 MihonSY 一致，smallestScreenWidthDp ≥ 阈值即平板。
     // 手机：整页随书籍一起滚动；平板：左简介（固定可滚）/ 右书籍分栏。
     val isTablet = isTabletUi()
@@ -120,14 +127,17 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
         loadScope.launch {
             runCatching {
                 val s = client.getSeriesDetail(seriesId)
-                // Komga 默认按名称字符串字典序返回（第100话排在第1话前），
-                // 客户端用自然排序（数字按数值比）重排，得到 第0话/第1话/第2话… 正确顺序。
-                val b = client.getSeriesBooks(seriesId, size = 200).content
-                    .sortedWith { a, b ->
-                        (a.metadata.title ?: a.name).compareToCaseInsensitiveNaturalOrder(
-                            b.metadata.title ?: b.name,
-                        )
-                    }
+                // SY: 排序与阅读状态筛选都交给 Komga 服务端（与库页同口径）：
+                //  - sort=metadata.numberSort 才得到 第1话/第2话… 的正确卷序
+                //    （不传时 Komga 按名称字典序返回，第100话会排在第1话前）；
+                //  - read_status 直接过滤 UNREAD / READ / IN_PROGRESS。
+                // 因此这里不再做客户端重排，否则会覆盖服务端排序结果。
+                val b = client.getSeriesBooks(
+                    seriesId = seriesId,
+                    size = 200,
+                    sort = bookSort.komgaSort,
+                    readStatus = readFilter.komgaValue,
+                ).content
                 s to b
             }.onSuccess {
                 series = it.first
@@ -139,7 +149,7 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
         }
     }
 
-    LaunchedEffect(seriesId) { load() }
+    LaunchedEffect(seriesId, bookSort, readFilter) { load() }
 
     // 从阅读器返回（阅读进度变化）时自动刷新列表。
     val lifecycleContext = LocalContext.current
@@ -163,7 +173,13 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                 title = { Text(series?.name ?: "系列") },
                 actions = {
                     if (series != null) {
-                        ShelfModeToggle(mode) { displayOpen = true }
+                        // SY: 与库页同款的三合一菜单（阅读状态 / 排序 / 显示模式）。
+                        IconButton(onClick = { optionsOpen = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Tune,
+                                contentDescription = composeStringResource(R.string.cd_display_options),
+                            )
+                        }
                     }
                 },
             )
@@ -307,26 +323,37 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
         }
     }
 
-    var dialogMode by remember { mutableStateOf(mode) }
-    var dialogColumns by remember {
-        mutableStateOf(if (isLandscape) prefs.libraryLandscapeColumns else prefs.libraryPortraitColumns)
-    }
-    if (displayOpen) {
-        DisplaySettingsDialog(
-            displayMode = dialogMode,
-            onModeChange = {
-                dialogMode = it
-                prefs.bookDisplayMode = it.prefValue
-            },
-            columnCount = dialogColumns,
-            isLandscape = isLandscape,
-            onColumnChange = {
-                dialogColumns = it
-                if (isLandscape) prefs.libraryLandscapeColumns = it else prefs.libraryPortraitColumns = it
-            },
-            onDismiss = { displayOpen = false },
-        )
-    }
+    ShelfOptionsMenu(
+        expanded = optionsOpen,
+        onDismiss = { optionsOpen = false },
+        displayMode = mode,
+        onDisplayModeChange = {
+            mode = it
+            prefs.bookDisplayMode = it.prefValue
+        },
+        columns = columns,
+        onColumnChange = { newColumns ->
+            if (isLandscape) {
+                landscapeColumns = newColumns
+                prefs.libraryLandscapeColumns = newColumns
+            } else {
+                portraitColumns = newColumns
+                prefs.libraryPortraitColumns = newColumns
+            }
+        },
+        sortOptions = BookSortBy.entries.map {
+            SortOptionUi(it.labelText(), it.prefKey, it.defaultDescending)
+        },
+        currentSortKey = bookSort.sortBy.prefKey,
+        sortDescending = bookSort.descending,
+        onSortChange = { key, desc ->
+            val next = BookSort(BookSortBy.fromPrefKey(key), desc)
+            bookSort = next
+            prefs.bookSort = next.toPref()
+        },
+        readFilter = readFilter,
+        onReadFilterChange = { readFilter = it },
+    )
 }
 
 /**

@@ -66,6 +66,14 @@ class KomgaPreferences(context: Context) {
         set(v) = prefs.edit().putString(KEY_LIBRARY_SORT, v).apply()
 
     /**
+     * Book-level (series detail) sort — independent from the series shelf, same
+     * "key,asc|desc" shape. Keys come from BookSortBy (number / name / dateAdded / dateRead).
+     */
+    var bookSort: String
+        get() = prefs.getString(KEY_BOOK_SORT, "number,asc").orEmpty()
+        set(v) = prefs.edit().putString(KEY_BOOK_SORT, v).apply()
+
+    /**
      * 导航栏位置：`"AUTO"` / `"BOTTOM"` / `"LEFT"` / `"RIGHT"`（默认 AUTO）。
      *
      * `AUTO` = 按屏幕最小宽度自动决定：≥ 600dp（真平板）用左侧 rail，否则底部栏。
@@ -308,6 +316,7 @@ class KomgaPreferences(context: Context) {
         const val KEY_LIBRARY_DISPLAY_MODE = "library_display_mode"
         const val KEY_BOOK_DISPLAY_MODE = "book_display_mode"
         const val KEY_LIBRARY_SORT = "library_sort"
+        const val KEY_BOOK_SORT = "book_sort"
         /** 导航栏位置（大屏 rail）：BOTTOM / LEFT / RIGHT。 */
         const val KEY_NAV_BAR_POSITION = "nav_bar_position"
         const val KEY_LAST_LIBRARY_ID = "last_library_id"
