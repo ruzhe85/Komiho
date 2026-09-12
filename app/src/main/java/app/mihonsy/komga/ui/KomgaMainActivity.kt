@@ -4374,8 +4374,6 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
     // SY --> Komiho: 平板导航栏位置（底部/左侧/右侧）选择对话框开关。
     var showNavBarPos by remember { mutableStateOf(false) }
     // SY <--
-    var showDashboardRecent by remember { mutableStateOf(false) }
-    var dashboardRecentSel by remember { mutableIntStateOf(DashboardPreferences.limitValue()) }
 
     val currentLangLabel = when (prefs.appLanguage) {
         "zh-CN" -> composeStringResource(R.string.lang_zh_cn)
@@ -4444,18 +4442,6 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
             )
         }
         // SY <--
-        // SY: 聚合页（来源仪表盘）显示设置——每个来源列出几条最近阅读。
-        item { PreferenceGroupHeader(composeStringResource(R.string.settings_group_dashboard)) }
-        item {
-            TextPreferenceWidget(
-                title = composeStringResource(R.string.settings_dashboard_recent),
-                subtitle = composeStringResource(
-                    R.string.settings_dashboard_recent_summary,
-                    dashboardRecentSel,
-                ),
-                onPreferenceClick = { showDashboardRecent = true },
-            )
-        }
     }
 
     if (showAppLanguage) {
@@ -4552,47 +4538,6 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
     }
     // SY <--
 
-    // SY: 聚合页每个来源显示的最近阅读条数（1/3/5/10）。写进 DashboardPreferences，
-    // 聚合页用 changes() 流直连，改完回去卡片条数立刻变，无需重启。
-    if (showDashboardRecent) {
-        AlertDialog(
-            onDismissRequest = { showDashboardRecent = false },
-            title = { Text(composeStringResource(R.string.settings_dashboard_recent)) },
-            text = {
-                Column {
-                    DashboardPreferences.RECENT_OPTIONS.forEach { count ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    DashboardPreferences.setLimit(count)
-                                    dashboardRecentSel = count
-                                    showDashboardRecent = false
-                                }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = composeStringResource(
-                                    R.string.settings_dashboard_recent_summary,
-                                    count,
-                                ),
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (dashboardRecentSel == count) {
-                                Icon(
-                                    imageVector = Icons.Filled.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-        )
-    }
 }
 
 private const val HOME_SECTION_DIVIDER = "__HOME_SECTION_DIVIDER__"
@@ -7125,7 +7070,7 @@ private data class MergedBook(
 /** 历史 tab：按卷（chapterUrl）合并的最近阅读；3-dot 菜单提供「汇聚」与「删除记录」。 */
 // SY --> Komiho: 来源仪表盘（方案 B 启动首页）。
 // 每来源一张卡：卡片头是来源（名称 + 类型 + 进入来源），下面是最近 N 条阅读记录
-// （N 见 [DashboardPreferences.recentLimit]，默认 3）。每条只给四件事：
+// （N 为该来源的「最近显示」条数，来源管理眼睛弹窗设置；默认回落全局 3）。每条只给四件事：
 // 名称（书名 · 章节）、进度（页码 / 总页数 + 百分比）、最后阅读时间、续读入口。
 // 旧版的「读过 X 本」已移除——它数的是历史章节数，口径既不是本也不是章，误导。
 //
@@ -7176,9 +7121,10 @@ private fun SourceDashboardPane(
     onResumeReading: (entry: SourceEntry, mangaId: Long, chapterId: Long, page: Int) -> Unit,
 ) {
     val context = LocalContext.current
-    // SY: 每个来源显示几条最近阅读（设置项，Flow 直连——改完立刻生效）。
-    val recentLimit by remember { DashboardPreferences.recentLimit.changes() }
-        .collectAsState(initial = DashboardPreferences.limitValue())
+    // SY: 每个来源显示几条最近阅读 —— 已改为按来源独立配置（来源管理眼睛弹窗，0=隐藏），
+    // 这里只监听版本号流（任意来源改动时 bump）触发重算；未设置的来源回落旧全局值。
+    val dashVersion by remember { DashboardPreferences.versionChanges() }
+        .collectAsState(initial = DashboardPreferences.versionValue)
     val scope = rememberCoroutineScope()
     // 行内「删除记录」后重算摘要（produceState 的 key）。
     var deleteTick by remember { mutableIntStateOf(0) }
@@ -7186,7 +7132,7 @@ private fun SourceDashboardPane(
         emptyMap(),
         entries,
         refreshTick,
-        recentLimit,
+        dashVersion,
         deleteTick,
     ) {
         value = withContext(Dispatchers.IO) {
@@ -7300,8 +7246,10 @@ private fun SourceDashboardPane(
                     )
                 }
             }
-            val build: (Agg) -> SourceCardSummary = { agg ->
-                SourceCardSummary(toRecents(agg.recents(recentLimit)))
+            // SY: build 带上该来源的 per-source 条数（0 已被 visibleOnDashboard 过滤，
+            // 这里只会拿到 1..7；未设置的来源回落旧全局值）。
+            val build: (Agg, Int) -> SourceCardSummary = { agg, limit ->
+                SourceCardSummary(toRecents(agg.recents(limit)))
             }
             // Komiho: Komga 卡优先取「服务器最后一次阅读」——readProgress.readDate 最新的
             // 进行中书籍（与 Home 的「继续阅读」同口径）；没有进行中的书 / 断网 / 未连接
@@ -7313,27 +7261,31 @@ private fun SourceDashboardPane(
             val activeKomgaConnId = runCatching {
                 KomgaPreferences(context.applicationContext).activeConnectionId
             }.getOrNull().orEmpty()
-            val komgaLocalRecents = toRecents(komgaLocal.recents(recentLimit * 2)).mapIndexed { i, r ->
+            val activeKomgaLimit = DashboardPreferences.limitFor(
+                SOURCE_ID_KOMGA_PREFIX + activeKomgaConnId,
+            ).coerceAtLeast(1)
+            val komgaLocalRecents = toRecents(komgaLocal.recents(activeKomgaLimit * 2)).mapIndexed { i, r ->
                 if (i == 0 && r.coverModel == null) r.copy(coverModel = komgaCover) else r
             }
             // 每条 Komga 连接一张卡：主体按**该连接**拉服务器「进行中」记录。
             val komgaCards = komgaConns.associate { conn ->
                 val key = SOURCE_ID_KOMGA_PREFIX + conn.id.ifBlank { conn.baseUrl }
                 val fallback = if (conn.id == activeKomgaConnId) komgaLocalRecents else emptyList()
-                var card = SourceCardSummary(fallback.take(recentLimit))
+                val n = DashboardPreferences.limitFor(key).coerceAtLeast(1)
+                var card = SourceCardSummary(fallback.take(n))
                 runCatching {
                     val client = KomgaApiClient(conn)
                     val books = client.getBooks(
                         readStatus = "IN_PROGRESS",
                         sort = "readProgress.readDate,desc",
-                        size = recentLimit,
+                        size = n,
                     ).content
                     // 同一系列只解析一次：ensureChapters 会拉整系列书籍，别为同系列多本书重复拉。
                     val seriesCache = HashMap<String, Triple<String, Manga, List<Chapter>>>()
                     val serverRecents = mutableListOf<DashboardRecent>()
                     books.forEach { book ->
                         val seriesId = book.seriesId
-                        if (seriesId.isNullOrBlank() || serverRecents.size >= recentLimit) return@forEach
+                        if (seriesId.isNullOrBlank() || serverRecents.size >= n) return@forEach
                         val (seriesName, manga, chapters) = seriesCache.getOrPut(seriesId) {
                             val detail = client.getSeriesDetail(seriesId)
                             val m = KomgaDbBridge.ensureManga(client, seriesId, detail.name)
@@ -7363,16 +7315,16 @@ private fun SourceDashboardPane(
                         card = SourceCardSummary(
                             (serverRecents + fallback.filter { it.chapterId !in serverIds })
                                 .sortedByDescending { it.readAt }
-                                .take(recentLimit),
+                                .take(n),
                         )
                     }
                 }
                 key to card
             }
-            mapOf(SOURCE_ID_LOCAL to build(local)) + komgaCards +
-                webdav.mapValues { (_, agg) -> build(agg) } +
+            mapOf(SOURCE_ID_LOCAL to build(local, DashboardPreferences.limitFor(SOURCE_ID_LOCAL))) + komgaCards +
+                webdav.mapValues { (key, agg) -> build(agg, DashboardPreferences.limitFor(key)) } +
                 // SY --> Komiho Phase7: SMB 卡片摘要。
-                smb.mapValues { (_, agg) -> build(agg) }
+                smb.mapValues { (key, agg) -> build(agg, DashboardPreferences.limitFor(key)) }
             // SY <--
         }
     }

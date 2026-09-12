@@ -29,6 +29,8 @@
     <string name="settings_group_dashboard">Dashboard</string>
     <string name="settings_dashboard_recent">Recent items per source</string>
     <string name="settings_dashboard_recent_summary">%1$d recent reading records</string>
+    <string name="dashboard_recent_hidden">Hidden</string>
+    <string name="dashboard_recent_done">OK</string>
     <string name="tab_library">Library</string>
     <string name="tab_lists">Lists</string>
     <string name="tab_downloads">Downloads</string>
