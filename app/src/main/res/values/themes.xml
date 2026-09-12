@@ -97,7 +97,7 @@
 
     <!-- SY: Komiho —— 全 Activity 窗口转场 = 纯 fade（打开 200ms 淡入 / 关闭 150ms 淡出）。
          无平移 → 一二级页切换时 rail 不再随窗口左右滑动。 -->
-    <style name="Animation.Komiho.WindowFade">
+    <style name="Animation.Komiho.WindowFade" parent="">
         <item name="android:activityOpenEnterAnimation">@anim/komiho_fade_in</item>
         <item name="android:activityOpenExitAnimation">@anim/komiho_fade_out</item>
         <item name="android:activityCloseEnterAnimation">@anim/komiho_fade_in</item>
