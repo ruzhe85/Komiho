@@ -3,6 +3,7 @@ package app.mihonsy.komga.data.backup
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
+import app.cash.sqldelight.async.coroutines.awaitAsOne
 import app.mihonsy.komga.data.DashboardPreferences
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaCredentialCrypto
@@ -391,38 +392,42 @@ object KomihoBackup {
                 chapterRepo.addAll(listOf(buildChapter(mangaId, b)))
                 chapterRepo.getChapterByUrlAndMangaId(b.url, mangaId)
             } ?: continue
-            chapterIdByKey[b.mangaUrl to b.chapterUrl] = ch.id
+            chapterIdByKey[b.mangaUrl to b.url] = ch.id
         }
 
         var historyCount = 0
         var bookmarkCount = 0
-        for (h in payload.localHistory) {
-            val chId = chapterIdByKey[h.mangaUrl to h.chapterUrl] ?: continue
-            db.historyQueries.upsert(chId, Date(h.lastRead ?: 0L), h.timeRead).execute()
-            historyCount++
-        }
-        for (bk in payload.localBookmarks) {
-            val chId = chapterIdByKey[bk.mangaUrl to bk.chapterUrl] ?: continue
-            if (db.bookmarksQueries.countByChapterAndPage(chId, bk.page).execute() == 0L) {
-                db.bookmarksQueries.insert(chId, bk.page, bk.createdAt).execute()
-                bookmarkCount++
+        db.transaction {
+            for (h in payload.localHistory) {
+                val chId = chapterIdByKey[h.mangaUrl to h.chapterUrl] ?: continue
+                db.historyQueries.upsert(chId, Date(h.lastRead ?: 0L), h.timeRead)
+                historyCount++
             }
-        }
+            for (bk in payload.localBookmarks) {
+                val chId = chapterIdByKey[bk.mangaUrl to bk.chapterUrl] ?: continue
+                if (db.bookmarksQueries.countByChapterAndPage(chId, bk.page).awaitAsOne() == 0L) {
+                    db.bookmarksQueries.insert(chId, bk.page, bk.createdAt)
+                    bookmarkCount++
+                }
+            }
 
-        val oldToNew = mutableMapOf<Long, Long>()
-        for (c in payload.categories) {
-            // categories.insert 实际签名为 (name, order, flags, version, uid, last_modified_at)，
-            // manga_order 在 .sq 中固定为 ""（空列表），不是绑定参数。
-            val newId = db.categoriesQueries.insert(c.name, c.sort.toLong(), c.flags.toLong(), 1L, 0L, 0L).execute()
-            if (newId <= 0L) continue
-            oldToNew[c.id] = newId
-        }
+            val oldToNew = mutableMapOf<Long, Long>()
+            for (c in payload.categories) {
+                // categories.insert 实际签名为 (name, order, flags, version, uid, last_modified_at)，
+                // manga_order 在 .sq 中固定为 ""（空列表），不是绑定参数。
+                val newId = db.categoriesQueries.insert(c.name, c.sort.toLong(), c.flags.toLong(), 1L, 0L, 0L).awaitAsOne()
+                if (newId <= 0L) continue
+                oldToNew[c.id] = newId
+            }
 
-        val linksByManga = payload.categoryLinks.groupBy { it.mangaUrl }
-        for ((mangaUrl, links) in linksByManga) {
-            val mangaId = mangaIdByUrl[mangaUrl] ?: continue
-            val catIds = links.mapNotNull { oldToNew[it.categoryId] }.distinct()
-            if (catIds.isNotEmpty()) mangaRepo.setMangaCategories(mangaId, catIds)
+            val linksByManga = payload.categoryLinks.groupBy { it.mangaUrl }
+            for ((mangaUrl, links) in linksByManga) {
+                val mangaId = mangaIdByUrl[mangaUrl] ?: continue
+                val catIds = links.mapNotNull { oldToNew[it.categoryId] }.distinct()
+                for (catId in catIds) {
+                    db.mangas_categoriesQueries.insert(mangaId, catId)
+                }
+            }
         }
 
         return BackupSummary(
@@ -460,7 +465,7 @@ object KomihoBackup {
         favoriteModifiedAt = null,
         version = b.version,
         notes = b.notes,
-        memo = runCatching { json.decodeFromString<JsonObject>(b.memo) }.getOrDefault(JsonObject.EMPTY),
+        memo = runCatching { json.decodeFromString<JsonObject>(b.memo) }.getOrDefault(JsonObject(emptyMap())),
     )
 
     private fun buildChapter(mangaId: Long, b: BkChapter): Chapter = Chapter.create().copy(
@@ -479,7 +484,7 @@ object KomihoBackup {
         scanlator = b.scanlator,
         lastModifiedAt = 0L,
         version = b.version,
-        memo = runCatching { json.decodeFromString<JsonObject>(b.memo) }.getOrDefault(JsonObject.EMPTY),
+        memo = runCatching { json.decodeFromString<JsonObject>(b.memo) }.getOrDefault(JsonObject(emptyMap())),
     )
 
     // ---------------------------------------------------------------- 加密
