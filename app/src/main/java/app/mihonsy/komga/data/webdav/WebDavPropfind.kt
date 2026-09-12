@@ -2,6 +2,7 @@ package app.mihonsy.komga.data.webdav
 
 import android.util.Xml
 import eu.kanade.tachiyomi.network.await
+import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
@@ -138,7 +139,7 @@ object WebDavPropfind {
         }
         out.sortWith(
             compareBy<WebDavEntry> { !it.isDir }
-                .thenComparator { a, b -> a.name.compareTo(b.name, ignoreCase = true) },
+                .thenComparator { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) },
         )
         return out
     }
