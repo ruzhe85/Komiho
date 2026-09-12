@@ -119,8 +119,8 @@ class SmbCoverFetcher(
     }
 
     /** 归档首图字节：RemoteZipReader 中央目录直读（每页流量=条目本身），失败回落 libarchive。 */
-    private fun readArchiveFirstImage(password: String): ByteArray? {
-        val source = SmbRandomAccessSource(data.conn, password, data.relPath)
+    private fun readArchiveFirstImage(password: String, relPath: String = data.relPath): ByteArray? {
+        val source = SmbRandomAccessSource(data.conn, password, relPath)
         val delegate: ArchiveHandle = try {
             RemoteZipReader(source)
         } catch (e: Exception) {
@@ -142,17 +142,25 @@ class SmbCoverFetcher(
         }
     }
 
-    /** 散图目录封面字节：列目录 → cover 优先/自然序取第一张图 → 读该图字节。 */
+    /** 目录封面字节：列目录 → cover 优先/自然序取第一张散图 → 读该图字节；
+     *  目录内无散图（只有归档/子目录）时回落目录内第一个归档的首图。 */
     private suspend fun readDirectoryFirstImageBytes(password: String): ByteArray? {
         val entries = runCatching { SmbBrowse.list(data.conn, password, data.relPath) }
             .getOrNull() ?: return null
         val imgs = entries.filter { !it.isDir && it.isImage }
-        val picked = pickCoverFirstImage(imgs.map { it.name }) ?: return null
-        val path = imgs.firstOrNull { it.name == picked }?.path ?: return null
-        // smbj 的 File 是句柄不是 InputStream：getInputStream() 取实时流再读全量。
-        return SmbSessionManager.openFile(data.conn, password, path).use { f ->
-            f.getInputStream().buffered().use { it.readBytes() }
-        }.takeIf { it.isNotEmpty() }
+        val picked = pickCoverFirstImage(imgs.map { it.name })
+        if (picked != null) {
+            val path = imgs.firstOrNull { it.name == picked }?.path ?: return null
+            // smbj 的 File 是句柄不是 InputStream：getInputStream() 取实时流再读全量。
+            return SmbSessionManager.openFile(data.conn, password, path).use { f ->
+                f.getInputStream().buffered().use { it.readBytes() }
+            }.takeIf { it.isNotEmpty() }
+        }
+        // 回落：目录内第一个归档（cover 优先/自然序）→ 拆包取其首图。
+        val archives = entries.filter { !it.isDir && it.isArchive }
+        val archName = pickCoverFirstImage(archives.map { it.name }) ?: return null
+        val archPath = archives.firstOrNull { it.name == archName }?.path ?: return null
+        return readArchiveFirstImage(password, archPath)
     }
 
     /** 两次 decode：先读边界算 inSampleSize，再采样解码。 */

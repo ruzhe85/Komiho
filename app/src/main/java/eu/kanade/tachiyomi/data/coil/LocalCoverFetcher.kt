@@ -106,11 +106,30 @@ class LocalCoverFetcher(
         // 两分支统一走 pickCoverFirstImage（见 ImageCoverPicker.kt）。
         val bitmap = when {
             file.isDirectory -> {
-                val imgs = file.listFiles().orEmpty()
-                    .filter { it.isFile && ImageUtil.isImage(it.name) }
-                pickCoverFirstImage(imgs.mapNotNull { it.name })?.let { picked ->
-                    imgs.firstOrNull { it.name == picked }?.let { f ->
-                        decodeSampled({ f.openInputStream() }, MAX_PX)
+                // SY: 目录封面 —— 散图优先（cover 优先/自然序取第一张）；
+                // 目录内无散图（只有归档）时回落目录内第一个归档的首图（与 SMB 目录封面同口径）。
+                val files = file.listFiles().orEmpty().filter { it.isFile }
+                val imgs = files.filter { ImageUtil.isImage(it.name) }
+                val pickedImg = pickCoverFirstImage(imgs.mapNotNull { it.name })?.let { picked ->
+                    imgs.firstOrNull { it.name == picked }
+                }
+                when {
+                    pickedImg != null -> decodeSampled({ pickedImg.openInputStream() }, MAX_PX)
+                    else -> files.firstOrNull { Archive.isSupported(it) }?.let { f ->
+                        f.archiveReader(context).use { reader ->
+                            val name = reader.useEntries { seq ->
+                                pickCoverFirstImage(
+                                    seq.filter { it.isFile && ImageUtil.isImage(it.name) }
+                                        .map { it.name }.toList(),
+                                )
+                            } ?: return@use null
+                            reader.getInputStream(name)?.use { stream ->
+                                // 先整段读入内存再解码：archiveReader 的 PFD 会在 .use 结束时关闭，
+                                // 若把流带出去二次开档读 mmap 会触发 native 闪退。
+                                val raw = stream.readBytes()
+                                decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX)
+                            }
+                        }
                     }
                 }
             }
