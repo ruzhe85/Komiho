@@ -1337,6 +1337,12 @@ private fun KomgaMainScreen(
                     MainTab.Settings -> SettingsTab(
                         context,
                         onOpenSourceManagement = { showAddSource = true },
+                        // SY: 分类子页 Dialog 内复刻 rail 所需的导航状态。
+                        visibleTabs = visibleTabs,
+                        currentOrdinal = currentTab,
+                        useNavRail = useNavRail,
+                        navBarPosition = navBarPosition,
+                        onNavTabClick = { onNavTabClick(it) },
                     )
                 }
                 // SY --> Komiho Phase4: 「来源管理」全屏流程（类型选择 / 表单 / 删除确认全在内）。
@@ -3901,6 +3907,12 @@ private fun EmbeddedSearch(
 private fun SettingsTab(
     context: android.content.Context,
     onOpenSourceManagement: () -> Unit,
+    // SY: 分类子页（全屏 Dialog）内复刻 rail 所需的导航状态，与主布局 rail 同源。
+    visibleTabs: List<MainTab>,
+    currentOrdinal: Int,
+    useNavRail: Boolean,
+    navBarPosition: String,
+    onNavTabClick: (MainTab) -> Unit,
 ) {
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     var showAppearance by remember { mutableStateOf(false) }
@@ -3919,6 +3931,29 @@ private fun SettingsTab(
     }
     var previewUsedBytes by remember { mutableStateOf(previewCacheSizeBytes()) }
     var showClearPreview by remember { mutableStateOf(false) }
+
+    // SY: 分类子页内的 rail —— 与主布局同款 KomgaNavRail；点击其它 tab 先关掉全部
+    // 设置子页（Dialog 层层叠着，只关当前层会被上层挡住），再执行跳转。
+    fun closeAllSubPages() {
+        showAppearance = false
+        showHome = false
+        showHomePage = false
+        showReaderSettings = false
+        showAbout = false
+        showLocalStorage = false
+        showClearPreview = false
+    }
+    val settingsRail: (@Composable () -> Unit)? = if (useNavRail) ({
+        KomgaNavRail(
+            tabs = visibleTabs,
+            selectedOrdinal = currentOrdinal,
+            onTabClick = { tab ->
+                closeAllSubPages()
+                onNavTabClick(tab)
+            },
+        )
+    }) else null
+    val railOnRight = navBarPosition == "RIGHT"
 
     // MihonSY 风格：分类行列表，点击进入子页面（不再平铺展开全部选项）。
     Column(
@@ -3960,12 +3995,16 @@ private fun SettingsTab(
 
     if (showAppearance) {
         SettingsCategoryDialog(
+            rail = settingsRail,
+            railOnRight = railOnRight,
             onDismiss = { showAppearance = false },
             title = composeStringResource(R.string.settings_appearance),
         ) { padding -> KomgaAppearanceSettings(Modifier.padding(padding), context) }
     }
     if (showHome) {
         SettingsCategoryDialog(
+            rail = settingsRail,
+            railOnRight = railOnRight,
             onDismiss = { showHome = false },
             title = composeStringResource(R.string.settings_home),
         ) { padding ->
@@ -3991,18 +4030,24 @@ private fun SettingsTab(
     }
     if (showHomePage) {
         SettingsCategoryDialog(
+            rail = settingsRail,
+            railOnRight = railOnRight,
             onDismiss = { showHomePage = false },
             title = composeStringResource(R.string.settings_home_page),
         ) { padding -> KomgaHomeSectionsSettings(Modifier.padding(padding), context) }
     }
     if (showAbout) {
         SettingsCategoryDialog(
+            rail = settingsRail,
+            railOnRight = railOnRight,
             onDismiss = { showAbout = false },
             title = composeStringResource(R.string.about),
         ) { padding -> KomgaAbout(Modifier.padding(padding), context) }
     }
     if (showLocalStorage) {
         SettingsCategoryDialog(
+            rail = settingsRail,
+            railOnRight = railOnRight,
             onDismiss = { showLocalStorage = false },
             title = composeStringResource(R.string.storage_title),
         ) { padding -> KomgaLocalStorageSettings(Modifier.padding(padding), context) }
@@ -4043,20 +4088,31 @@ private fun SettingsTab(
                 decorFitsSystemWindows = false,
             ),
         ) {
+            // SY: 阅读设置子页同样复刻 rail（与 SettingsCategoryDialog 同口径）。
             CompositionLocalProvider(LocalBackPress provides { showReaderSettings = false }) {
                 Surface(Modifier.fillMaxSize()) {
-                    Navigator(SettingsReaderScreen)
+                    Row(Modifier.fillMaxSize()) {
+                        if (settingsRail != null && !railOnRight) settingsRail()
+                        Box(Modifier.weight(1f)) {
+                            Navigator(SettingsReaderScreen)
+                        }
+                        if (settingsRail != null && railOnRight) settingsRail()
+                    }
                 }
             }
         }
     }
 }
 
-/** 通用分类子页面容器：全屏对话框 + 顶栏返回键（MihonSY 子页面风格）。 */
+/** 通用分类子页面容器：全屏对话框 + 顶栏返回键（MihonSY 子页面风格）。
+ *  SY: 分类子页是独立 Dialog 窗口，会盖住主窗口的 rail——在此窗口内复刻同一份 rail
+ *  （位置/选中态与主布局一致），子页内点 rail 其它 tab 先关子页再跳转，导航不中断。 */
 @Composable
 private fun SettingsCategoryDialog(
     onDismiss: () -> Unit,
     title: String,
+    rail: (@Composable () -> Unit)? = null,
+    railOnRight: Boolean = false,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Dialog(
@@ -4067,19 +4123,24 @@ private fun SettingsCategoryDialog(
         ),
     ) {
         Surface(Modifier.fillMaxSize()) {
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = { Text(title) },
-                        navigationIcon = {
-                            IconButton(onClick = onDismiss) {
-                                Icon(Icons.Filled.ArrowBack, contentDescription = null)
-                            }
-                        },
-                    )
-                },
-                content = content,
-            )
+            Row(Modifier.fillMaxSize()) {
+                if (rail != null && !railOnRight) rail()
+                Scaffold(
+                    modifier = Modifier.weight(1f),
+                    topBar = {
+                        TopAppBar(
+                            title = { Text(title) },
+                            navigationIcon = {
+                                IconButton(onClick = onDismiss) {
+                                    Icon(Icons.Filled.ArrowBack, contentDescription = null)
+                                }
+                            },
+                        )
+                    },
+                    content = content,
+                )
+                if (rail != null && railOnRight) rail()
+            }
         }
     }
 }
