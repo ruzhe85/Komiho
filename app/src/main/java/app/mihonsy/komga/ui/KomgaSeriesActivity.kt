@@ -17,9 +17,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import eu.kanade.presentation.util.isTabletUi
+import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -103,6 +109,9 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
     // U3: book-level display mode (independent from the series shelf).
     val mode = LibraryDisplayMode.fromPref(prefs.bookDisplayMode)
     var displayOpen by remember { mutableStateOf(false) }
+    // 平板 / 手机布局分支：与 MihonSY 一致，smallestScreenWidthDp ≥ 阈值即平板。
+    // 手机：整页随书籍一起滚动；平板：左简介（固定可滚）/ 右书籍分栏。
+    val isTablet = isTabletUi()
 
     val loadScope = rememberCoroutineScope()
 
@@ -112,7 +121,14 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
         loadScope.launch {
             runCatching {
                 val s = client.getSeriesDetail(seriesId)
+                // Komga 默认按名称字符串字典序返回（第100话排在第1话前），
+                // 客户端用自然排序（数字按数值比）重排，得到 第0话/第1话/第2话… 正确顺序。
                 val b = client.getSeriesBooks(seriesId, size = 200).content
+                    .sortedWith { a, b ->
+                        (a.metadata.title ?: a.name).compareToCaseInsensitiveNaturalOrder(
+                            b.metadata.title ?: b.name,
+                        )
+                    }
                 s to b
             }.onSuccess {
                 series = it.first
@@ -163,117 +179,121 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
             }
             series != null -> {
                 val s = series!!
-                Column(Modifier.fillMaxSize().padding(padding)) {
-                    val downloadStore = remember { KomgaDownloadStore(context) }
-                    val downloader = remember { KomgaBookDownloader(context, client, downloadStore) }
-                    val downloadStates = remember { mutableStateOf<Map<String, DownloadUiState>>(emptyMap()) }
-                    fun startDownload(bookId: String) {
-                        val book = books.firstOrNull { it.id == bookId }
-                        loadScope.launch {
-                            downloader.downloadBook(
-                                bookId,
-                                s.name,
-                                s.id,
-                                bookName = book?.name ?: "",
-                                number = book?.number ?: 0,
-                                coverUrl = client.seriesThumbnailUrl(s.id),
-                            ).collect { ev ->
-                                val cur = downloadStates.value.toMutableMap()
-                                when (ev) {
-                                    is KomgaDownloadEvent.Queued -> cur[ev.bookId] = DownloadUiState.QUEUED
-                                    is KomgaDownloadEvent.Progress -> cur[ev.bookId] = DownloadUiState.DOWNLOADING
-                                    is KomgaDownloadEvent.Completed -> {
-                                        cur[ev.bookId] = DownloadUiState.DOWNLOADED
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            context.getString(R.string.download_complete),
-                                            android.widget.Toast.LENGTH_SHORT,
-                                        ).show()
-                                    }
-                                    is KomgaDownloadEvent.Error -> {
-                                        cur[ev.bookId] = DownloadUiState.ERROR
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            context.getString(R.string.download_failed, ev.message),
-                                            android.widget.Toast.LENGTH_LONG,
-                                        ).show()
-                                    }
-                                    is KomgaDownloadEvent.Canceled -> cur.remove(ev.bookId)
+                val downloadStore = remember { KomgaDownloadStore(context) }
+                val downloader = remember { KomgaBookDownloader(context, client, downloadStore) }
+                val downloadStates = remember { mutableStateOf<Map<String, DownloadUiState>>(emptyMap()) }
+                fun startDownload(bookId: String) {
+                    val book = books.firstOrNull { it.id == bookId }
+                    loadScope.launch {
+                        downloader.downloadBook(
+                            bookId,
+                            s.name,
+                            s.id,
+                            bookName = book?.name ?: "",
+                            number = book?.number ?: 0,
+                            coverUrl = client.seriesThumbnailUrl(s.id),
+                        ).collect { ev ->
+                            val cur = downloadStates.value.toMutableMap()
+                            when (ev) {
+                                is KomgaDownloadEvent.Queued -> cur[ev.bookId] = DownloadUiState.QUEUED
+                                is KomgaDownloadEvent.Progress -> cur[ev.bookId] = DownloadUiState.DOWNLOADING
+                                is KomgaDownloadEvent.Completed -> {
+                                    cur[ev.bookId] = DownloadUiState.DOWNLOADED
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        context.getString(R.string.download_complete),
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
                                 }
-                                downloadStates.value = cur
+                                is KomgaDownloadEvent.Error -> {
+                                    cur[ev.bookId] = DownloadUiState.ERROR
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        context.getString(R.string.download_failed, ev.message),
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                                is KomgaDownloadEvent.Canceled -> cur.remove(ev.bookId)
                             }
+                            downloadStates.value = cur
                         }
                     }
-                    // Fixed header: metadata + resume button + section title.
-                    SeriesHeader(
-                        client = client,
-                        series = s,
-                        books = books,
-                        onChipClick = { type, value ->
-                            // Komga WebUI parity: tap a tag/author → open the Library
-                            // filtered by it. DO NOT finish() this SeriesActivity and DO
-                            // NOT use CLEAR_TOP: we must keep the series page underneath in
-                            // the back stack so the back gesture returns to it. (Back =
-                            // previous series page; the chip ✕ = clear filter and stay.)
-                            val intent = android.content.Intent(context, KomgaMainActivity::class.java)
-                                .putExtra("filterType", type)
-                                .putExtra("filterValue", value)
-                            context.startActivity(intent)
-                        },
-                    )
-                    val nextBook = books.firstOrNull { it.readProgress?.completed != true }
-                    if (nextBook != null) {
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedButton(
-                            onClick = {
-                                loadScope.launch {
-                                    runCatching { KomgaReaderLauncher.open(context, client, nextBook.id) }
-                                        .onFailure {
-                                            android.widget.Toast.makeText(
-                                                context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
-                                            ).show()
-                                        }
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
+                }
+
+                fun openBook(bookId: String) {
+                    loadScope.launch {
+                        runCatching { KomgaReaderLauncher.open(context, client, bookId) }
+                            .onFailure {
+                                android.widget.Toast.makeText(
+                                    context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                    }
+                }
+
+                val onChipClick: (String, String) -> Unit = { type, value ->
+                    // Komga WebUI parity: tap a tag/author → open the Library filtered by it.
+                    val intent = android.content.Intent(context, KomgaMainActivity::class.java)
+                        .putExtra("filterType", type)
+                        .putExtra("filterValue", value)
+                    context.startActivity(intent)
+                }
+                val nextBook = books.firstOrNull { it.readProgress?.completed != true }
+
+                // 手机：整页随书籍一起滚动（简介作为书架列表首个 item）；
+                // 平板：左侧固定简介区（自身可滚）/ 右侧书籍滚动，分栏。
+                if (isTablet) {
+                    Row(Modifier.fillMaxSize().padding(padding)) {
+                        Column(
+                            Modifier
+                                .weight(0.38f)
+                                .fillMaxHeight()
+                                .verticalScroll(rememberScrollState()),
                         ) {
-                            Text("继续阅读${nextBook.metadata.number?.let { " · 第 $it 话" } ?: ""}")
+                            SeriesDetailHeader(
+                                client = client,
+                                series = s,
+                                books = books,
+                                nextBook = nextBook,
+                                onChipClick = onChipClick,
+                                onContinueClick = { openBook(it) },
+                            )
                         }
-                    } else {
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            text = "已全部读完",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
+                        Box(Modifier.weight(0.62f)) {
+                            BookShelf(
+                                client = client,
+                                books = books,
+                                mode = mode,
+                                columns = columns,
+                                onBookClick = { openBook(it) },
+                                onDataChanged = { load() },
+                                showDownload = false,
+                                downloadState = { bookId ->
+                                    downloadStates.value[bookId]
+                                        ?: if (downloadStore.isDownloaded(bookId)) DownloadUiState.DOWNLOADED else DownloadUiState.NONE
+                                },
+                                onDownloadClick = { startDownload(it) },
+                            )
+                        }
                     }
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = "书籍（${books.size}）",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    // Unified shelf — grid or list, same as everywhere else.
-                    Box(Modifier.weight(1f)) {
+                } else {
+                    Box(Modifier.fillMaxSize().padding(padding)) {
                         BookShelf(
                             client = client,
                             books = books,
                             mode = mode,
                             columns = columns,
-                            onBookClick = { bookId ->
-                                loadScope.launch {
-                                    runCatching { KomgaReaderLauncher.open(context, client, bookId) }
-                                        .onFailure {
-                                            android.widget.Toast.makeText(
-                                                context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
-                                            ).show()
-                                        }
-                                }
+                            header = {
+                                SeriesDetailHeader(
+                                    client = client,
+                                    series = s,
+                                    books = books,
+                                    nextBook = nextBook,
+                                    onChipClick = onChipClick,
+                                    onContinueClick = { openBook(it) },
+                                )
                             },
+                            onBookClick = { openBook(it) },
                             onDataChanged = { load() },
                             showDownload = false,
                             downloadState = { bookId ->
@@ -308,6 +328,48 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
             onDismiss = { displayOpen = false },
         )
     }
+}
+
+/**
+ * 系列详情头部（封面/作者/状态/标签/简介 + 继续阅读 + 书籍标题）。
+ * 手机端作为书架列表首个 item 一起滚动；平板端放在固定左栏（自身可滚）。
+ */
+@Composable
+private fun SeriesDetailHeader(
+    client: KomgaApiClient,
+    series: SeriesDto,
+    books: List<BookDto>,
+    nextBook: BookDto?,
+    onChipClick: (String, String) -> Unit = { _, _ -> },
+    onContinueClick: (String) -> Unit = {},
+) {
+    SeriesHeader(client = client, series = series, books = books, onChipClick = onChipClick)
+    if (nextBook != null) {
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = { onContinueClick(nextBook.id) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        ) {
+            Text("继续阅读${nextBook.metadata.number?.let { " · 第 $it 话" } ?: ""}")
+        }
+    } else {
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "已全部读完",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+    }
+    Spacer(Modifier.height(16.dp))
+    Text(
+        text = "书籍（${books.size}）",
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+    Spacer(Modifier.height(4.dp))
 }
 
 @Composable
