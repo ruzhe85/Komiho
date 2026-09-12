@@ -6614,11 +6614,13 @@ private fun SmbCoverThumb(
     modifier: Modifier = Modifier,
     iconSize: Dp,
 ) {
-    if (showCover && !entry.isDir) {
+    if (showCover) {
         val context = LocalContext.current
+        // SY: 2026-09 对齐本地——目录也显示封面（散图目录 = 目录内第一张图，cover 优先）；
+        // 取不到封面/加载中回落 fileKindIcon（目录仍是文件夹图标）。
         SubcomposeAsyncImage(
             model = ImageRequest.Builder(context)
-                .data(SmbCoverData(conn, entry.path, entry.lastModified, entry.isImage))
+                .data(SmbCoverData(conn, entry.path, entry.lastModified, entry.isImage, entry.isDir))
                 .build(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
