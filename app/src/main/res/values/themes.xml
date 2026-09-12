@@ -7,6 +7,8 @@
 
     <!--== Theme Base ==-->
     <style name="Base.Theme.Tachiyomi" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- SY: Komiho —— Activity 转场改纯淡入淡出（二级页整窗平移会带着 rail 滑动，改为 fade 后 rail 视觉原地不动） -->
+        <item name="android:windowAnimationStyle">@style/Animation.Komiho.WindowFade</item>
         <!-- Disallow "Force dark theme" -->
         <item name="android:forceDarkAllowed" tools:targetApi="Q">false</item>
 
@@ -92,6 +94,23 @@
 
     <!--== Default Theme ==-->
     <style name="Theme.Tachiyomi" parent="Base.Theme.Tachiyomi" />
+
+    <!-- SY: Komiho —— 全 Activity 窗口转场 = 纯 fade（打开 200ms 淡入 / 关闭 150ms 淡出）。
+         无平移 → 一二级页切换时 rail 不再随窗口左右滑动。 -->
+    <style name="Animation.Komiho.WindowFade">
+        <item name="android:activityOpenEnterAnimation">@anim/komiho_fade_in</item>
+        <item name="android:activityOpenExitAnimation">@anim/komiho_fade_out</item>
+        <item name="android:activityCloseEnterAnimation">@anim/komiho_fade_in</item>
+        <item name="android:activityCloseExitAnimation">@anim/komiho_fade_out</item>
+        <item name="android:taskOpenEnterAnimation">@anim/komiho_fade_in</item>
+        <item name="android:taskOpenExitAnimation">@anim/komiho_fade_out</item>
+        <item name="android:taskCloseEnterAnimation">@anim/komiho_fade_in</item>
+        <item name="android:taskCloseExitAnimation">@anim/komiho_fade_out</item>
+        <item name="android:taskToFrontEnterAnimation">@anim/komiho_fade_in</item>
+        <item name="android:taskToFrontExitAnimation">@anim/komiho_fade_out</item>
+        <item name="android:taskToBackEnterAnimation">@anim/komiho_fade_out</item>
+        <item name="android:taskToBackExitAnimation">@anim/komiho_fade_in</item>
+    </style>
 
     <!-- Monet theme only support S+ -->
     <style name="Theme.Tachiyomi.Monet" />
