@@ -3,6 +3,7 @@
 <resources>
 
     <!-- SY: 聚合頁最近顯示（來源管理眼睛彈窗） -->
+    <string name="settings_dashboard_recent">最近顯示記錄數</string>
     <string name="dashboard_recent_hidden">不顯示</string>
     <string name="dashboard_recent_done">確定</string>
 
