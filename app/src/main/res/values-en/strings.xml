@@ -27,7 +27,7 @@
     <string name="dashboard_recent_page">Page %1$d</string>
     <string name="dashboard_recent_from_start">Read from start</string>
     <string name="settings_group_dashboard">Dashboard</string>
-    <string name="settings_dashboard_recent">Recent items per source</string>
+    <string name="settings_dashboard_recent">Recent items count</string>
     <string name="settings_dashboard_recent_summary">%1$d recent reading records</string>
     <string name="dashboard_recent_hidden">Hidden</string>
     <string name="dashboard_recent_done">OK</string>

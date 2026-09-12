@@ -584,13 +584,6 @@ private fun RecentLimitSliderDialog(
                     valueRange = 0f..DashboardPreferences.RECENT_MAX.toFloat(),
                     steps = DashboardPreferences.RECENT_MAX - 1,
                 )
-                Text(
-                    text = "0 = " + composeStringResource(R.string.dashboard_recent_hidden) +
-                        "，1..${DashboardPreferences.RECENT_MAX} = " +
-                        composeStringResource(R.string.settings_dashboard_recent),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         },
         confirmButton = {
