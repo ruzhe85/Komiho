@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TopAppBarDefaults
@@ -41,6 +42,7 @@ import dev.icerock.moko.resources.StringResource
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.more.settings.screen.about.AboutScreen
+import eu.kanade.presentation.more.settings.screen.SettingsKomihoBackupScreen
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.presentation.util.Screen
@@ -220,6 +222,15 @@ object SettingsMainScreen : Screen() {
             icon = Icons.Outlined.Storage,
             screen = SettingsDataScreen,
         ),
+        // SY --> Komiho：本地备份与恢复（自写轻量 JSON）作为顶级入口
+        Item(
+            titleRes = MR.strings.label_backup,
+            subtitleRes = MR.strings.pref_backup_summary,
+            formatSubtitle = { "来源列表 · 个性化 · 本地阅读历史 · 书签 · 收藏分类" },
+            icon = Icons.Outlined.Backup,
+            screen = SettingsKomihoBackupScreen,
+        ),
+        // SY <--
         Item(
             titleRes = MR.strings.pref_category_security,
             subtitleRes = MR.strings.pref_security_summary,
