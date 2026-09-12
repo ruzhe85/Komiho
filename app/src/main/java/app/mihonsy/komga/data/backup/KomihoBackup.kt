@@ -28,8 +28,14 @@ import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.source.local.LocalSource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.io.ByteArrayInputStream
+import java.io.InputStream
+import java.io.OutputStream
 import java.security.SecureRandom
 import java.util.Date
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -96,6 +102,47 @@ object KomihoBackup {
     /** 仅解析外层信封，判断是否加密（用于决定导入时是否弹密码框）。 */
     fun peekEncrypted(rawJson: String): Boolean =
         runCatching { json.decodeFromString<BackupEnvelope>(rawJson).encrypted }.getOrDefault(false)
+
+    // ---------------------------------------------------------------- zip 容器
+
+    /** zip 内的备份条目名（内容 = 旧版 .json 的整份文本，一字不改）。 */
+    private const val BACKUP_ENTRY = "backup.json"
+
+    /** zip 本地文件头魔数 `PK\x03\x04`。 */
+    private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
+
+    /**
+     * 导出为 zip（内含单个条目 [BACKUP_ENTRY]），内容与旧版 .json 完全一致，只是多一层压缩打包。
+     * JSON 是高度重复的纯文本，压缩率通常 80%+；加密备份因密文不可压缩，只能压掉 base64 冗余（约 25%）。
+     */
+    suspend fun writeBackupZip(context: Context, password: String?, os: OutputStream) {
+        val text = exportBackup(context, password)
+        ZipOutputStream(os.buffered()).use { zos ->
+            zos.putNextEntry(ZipEntry(BACKUP_ENTRY))
+            zos.write(text.toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+        }
+    }
+
+    /**
+     * 读取备份文本：自动识别 zip（解包 [BACKUP_ENTRY]）或旧版纯 .json 文件，向后兼容老备份。
+     */
+    fun readBackupText(input: InputStream): String = decodeBackupBytes(input.readBytes())
+
+    private fun decodeBackupBytes(bytes: ByteArray): String {
+        if (bytes.size >= ZIP_MAGIC.size && bytes.copyOf(ZIP_MAGIC.size).contentEquals(ZIP_MAGIC)) {
+            ZipInputStream(ByteArrayInputStream(bytes)).use { zis ->
+                while (true) {
+                    val entry = zis.nextEntry ?: break
+                    if (!entry.isDirectory && entry.name == BACKUP_ENTRY) {
+                        return zis.readBytes().toString(Charsets.UTF_8)
+                    }
+                }
+            }
+            throw Exception("zip 内未找到 $BACKUP_ENTRY")
+        }
+        return bytes.toString(Charsets.UTF_8)
+    }
 
     // ---------------------------------------------------------------- 导出
 

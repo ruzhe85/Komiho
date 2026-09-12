@@ -51,16 +51,15 @@ object SettingsKomihoBackupScreen : SearchableSettings {
         var pendingImportJson by remember { mutableStateOf<String?>(null) }
 
         val exportLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.CreateDocument("application/json"),
+            ActivityResultContracts.CreateDocument("application/zip"),
         ) { uri ->
             uri ?: return@rememberLauncherForActivityResult
             val password = pendingExportPassword
             pendingExportPassword = null
             scope.launch(Dispatchers.IO) {
                 try {
-                    val data = KomihoBackup.exportBackup(context, password)
                     context.contentResolver.openOutputStream(uri)?.use { os ->
-                        os.write(data.toByteArray(Charsets.UTF_8))
+                        KomihoBackup.writeBackupZip(context, password, os)
                     }
                     withUIContext { context.toast("备份已导出") }
                 } catch (e: Exception) {
@@ -76,8 +75,9 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             uri ?: return@rememberLauncherForActivityResult
             scope.launch(Dispatchers.IO) {
                 try {
+                    // zip 与旧版 .json 都支持：readBackupText 按文件头自动识别。
                     val json = context.contentResolver.openInputStream(uri)
-                        ?.use { it.bufferedReader().readText() }.orEmpty()
+                        ?.use { KomihoBackup.readBackupText(it) }.orEmpty()
                     if (json.isBlank()) {
                         withUIContext { context.toast("文件为空或无法读取") }
                         return@launch
@@ -105,7 +105,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                     showExportPwd = false
                     pendingExportPassword = pwd
                     val name = "komiho-backup-" +
-                        SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".json"
+                        SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".zip"
                     runCatching { exportLauncher.launch(name) }
                         .onFailure { context.toast(MR.strings.file_picker_error) }
                 },
