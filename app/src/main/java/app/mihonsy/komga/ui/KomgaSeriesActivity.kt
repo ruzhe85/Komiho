@@ -28,13 +28,15 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallExtendedFloatingActionButton
+import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -48,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import app.mihonsy.komga.data.download.KomgaBookDownloader
@@ -166,6 +169,22 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
         }
     }
 
+    // 下一本未读完的书（FAB「继续阅读」的目标）；全部读完时为 null → 不显示 FAB。
+    val nextBook = books.firstOrNull { it.readProgress?.completed != true }
+    // 已读过任意一本 → FAB 文案为「继续阅读」，否则「开始阅读」。
+    val isReading = books.any { it.readProgress != null }
+
+    fun openBook(bookId: String) {
+        loadScope.launch {
+            runCatching { KomgaReaderLauncher.open(context, client, bookId) }
+                .onFailure {
+                    android.widget.Toast.makeText(
+                        context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+        }
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -182,6 +201,24 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                         }
                     }
                 },
+            )
+        },
+        // SY: MihonSY 口径的「继续阅读」浮动按钮——原先是 header 里的整宽 OutlinedButton，
+        // 在手机端与简介区叠在一起（还抢走了「收回」的点击）。改成右下角 FAB 后两者都消失。
+        floatingActionButton = {
+            SmallExtendedFloatingActionButton(
+                text = {
+                    Text(
+                        text = if (isReading) "继续阅读" else "开始阅读",
+                    )
+                },
+                icon = { Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null) },
+                onClick = { nextBook?.let { openBook(it.id) } },
+                expanded = true,
+                modifier = Modifier.animateFloatingActionButton(
+                    visible = nextBook != null,
+                    alignment = Alignment.BottomEnd,
+                ),
             )
         },
     ) { padding ->
@@ -235,17 +272,6 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                     }
                 }
 
-                fun openBook(bookId: String) {
-                    loadScope.launch {
-                        runCatching { KomgaReaderLauncher.open(context, client, bookId) }
-                            .onFailure {
-                                android.widget.Toast.makeText(
-                                    context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
-                                ).show()
-                            }
-                    }
-                }
-
                 val onChipClick: (String, String) -> Unit = { type, value ->
                     // Komga WebUI parity: tap a tag/author → open the Library filtered by it.
                     val intent = android.content.Intent(context, KomgaMainActivity::class.java)
@@ -253,7 +279,6 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                         .putExtra("filterValue", value)
                     context.startActivity(intent)
                 }
-                val nextBook = books.firstOrNull { it.readProgress?.completed != true }
 
                 // 手机：整页随书籍一起滚动（简介作为书架列表首个 item）；
                 // 平板：左侧固定简介区（自身可滚）/ 右侧书籍滚动，分栏。
@@ -269,9 +294,7 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                 client = client,
                                 series = s,
                                 books = books,
-                                nextBook = nextBook,
                                 onChipClick = onChipClick,
-                                onContinueClick = { openBook(it) },
                             )
                         }
                         Box(Modifier.weight(0.62f)) {
@@ -280,6 +303,14 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                 books = books,
                                 mode = mode,
                                 columns = columns,
+                                header = {
+                                    Text(
+                                        text = "书籍（${books.size}）",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                },
                                 onBookClick = { openBook(it) },
                                 onDataChanged = { load() },
                                 showDownload = false,
@@ -303,9 +334,13 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                     client = client,
                                     series = s,
                                     books = books,
-                                    nextBook = nextBook,
                                     onChipClick = onChipClick,
-                                    onContinueClick = { openBook(it) },
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "书籍（${books.size}）",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.padding(horizontal = 16.dp),
                                 )
                             },
                             onBookClick = { openBook(it) },
@@ -357,45 +392,19 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * 系列详情头部（封面/作者/状态/标签/简介 + 继续阅读 + 书籍标题）。
+ * 系列详情头部（封面/作者/状态/标签/简介 + 书籍标题）。
  * 手机端作为书架列表首个 item 一起滚动；平板端放在固定左栏（自身可滚）。
+ * 「继续阅读」不再放在这里——MihonSY 口径改为右下角浮动按钮（见 Scaffold.floatingActionButton）。
  */
 @Composable
 private fun SeriesDetailHeader(
     client: KomgaApiClient,
     series: SeriesDto,
     books: List<BookDto>,
-    nextBook: BookDto?,
     onChipClick: (String, String) -> Unit = { _, _ -> },
-    onContinueClick: (String) -> Unit = {},
 ) {
     SeriesHeader(client = client, series = series, books = books, onChipClick = onChipClick)
-    if (nextBook != null) {
-        Spacer(Modifier.height(12.dp))
-        OutlinedButton(
-            onClick = { onContinueClick(nextBook.id) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-        ) {
-            Text("继续阅读${nextBook.metadata.number?.let { " · 第 $it 话" } ?: ""}")
-        }
-    } else {
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = "已全部读完",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-    }
     Spacer(Modifier.height(16.dp))
-    Text(
-        text = "书籍（${books.size}）",
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(horizontal = 16.dp),
-    )
-    Spacer(Modifier.height(4.dp))
 }
 
 @Composable
@@ -477,20 +486,20 @@ private fun SeriesHeader(
 }
 
 /**
- * Mihon-style expandable summary: defaults to FULLY expanded so the whole
- * description is visible on open. Once the text exceeds [collapsedMaxLines]
- * a "收回" (collapse) button appears — tapping it folds the text back to
- * [collapsedMaxLines] and swaps the button to "展开" (expand) again.
+ * MihonSY-style expandable summary: 默认全展开，点击简介或底部按钮切换 展开/收回。
+ *
+ * 关键点：是否显示切换按钮由 [overflow] 决定，而它**只会被置 true、从不重置**——
+ * 早期版本用 `onTextLayout { canCollapse = lineCount > maxLines }`，收回后文本被裁剪到
+ * collapsedMaxLines，lineCount 刚好等于阈值 → canCollapse 变 false → 按钮直接消失，
+ * 于是「收回后无法再展开」（平板长简介必现）。
  */
 @Composable
 private fun ExpandableSummary(
     text: String,
     collapsedMaxLines: Int = 6,
 ) {
-    var expanded by remember { mutableStateOf(true) }
-    // True only after the first layout pass, when we know how many lines the
-    // text actually takes — this avoids flashing the toggle for short blurbs.
-    var canCollapse by remember { mutableStateOf(false) }
+    var expanded by rememberSaveable { mutableStateOf(true) }
+    var overflow by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -499,10 +508,13 @@ private fun ExpandableSummary(
             maxLines = if (expanded) Int.MAX_VALUE else collapsedMaxLines,
             overflow = TextOverflow.Ellipsis,
             onTextLayout = { result: TextLayoutResult ->
-                canCollapse = result.lineCount > collapsedMaxLines
+                // 只在「确实溢出」时置位。展开态（maxLines=MAX）不会溢出，
+                // 但 overflow 已为 true 就不会被清掉，按钮得以常驻。
+                if (result.hasVisualOverflow) overflow = true
             },
+            modifier = Modifier.clickable { expanded = !expanded },
         )
-        if (canCollapse) {
+        if (overflow) {
             Spacer(Modifier.height(2.dp))
             Row(
                 modifier = Modifier
