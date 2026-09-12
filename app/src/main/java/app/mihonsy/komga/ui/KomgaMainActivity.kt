@@ -917,7 +917,9 @@ private fun KomgaMainScreen(
             it
         }
     }
-    val useNavRail = navBarPosition != "BOTTOM" && !showAddSource
+    // SY: 来源管理全屏流程（AddSourceFlow 在 Scaffold 内容区内铺满）也显示 rail——
+    // 它与各 tab 同窗口渲染，rail 列天然并存；此前显式排除导致来源管理无 rail。
+    val useNavRail = navBarPosition != "BOTTOM"
     /** 底部栏与 rail 共用的 tab 点击逻辑：重复点库 tab = 开/关抽屉（手机）或侧栏（平板）。 */
     fun onNavTabClick(tab: MainTab) {
         if (currentTab == tab.ordinal) {
