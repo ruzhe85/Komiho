@@ -2,6 +2,7 @@ package app.mihonsy.komga.data.smb
 
 import com.hierynomus.msdtyp.FileTime
 import com.hierynomus.smbj.share.DiskShare
+import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
@@ -137,7 +138,7 @@ object SmbBrowse {
         }
         out.sortWith(
             compareBy<SmbEntry> { !it.isDir }
-                .thenComparator { a, b -> a.name.compareTo(b.name, ignoreCase = true) },
+                .thenComparator { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) },
         )
         return out
     }

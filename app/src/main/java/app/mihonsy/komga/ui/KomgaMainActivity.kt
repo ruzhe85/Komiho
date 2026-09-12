@@ -5130,7 +5130,8 @@ private val LOCAL_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", 
 private fun localEntryComparator(sort: LocalFileSort): Comparator<LocalEntry> {
     val dirFirst = compareBy<LocalEntry> { !it.isDirectory }
     val field: Comparator<LocalEntry> = when (sort.sortBy) {
-        LocalFileSortBy.Name -> compareBy { it.name.lowercase() }
+        // SY: 名称改自然排序（Chapter2 < Chapter10），与 Komga 书列表 / 阅读器页序同一口径。
+        LocalFileSortBy.Name -> Comparator<LocalEntry> { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
         LocalFileSortBy.DateModified -> compareBy { it.lastModified }
         LocalFileSortBy.Size -> compareBy { if (it.isDirectory) 0L else it.size }
     }
@@ -6215,7 +6216,8 @@ private fun WebDavGridItem(entry: WebDavEntry, onClick: () -> Unit) {
 private fun webDavEntryComparator(sort: LocalFileSort): Comparator<WebDavEntry> {
     val dirFirst = compareBy<WebDavEntry> { !it.isDir }
     val field: Comparator<WebDavEntry> = when (sort.sortBy) {
-        LocalFileSortBy.Name -> compareBy { it.name.lowercase() }
+        // SY: 名称改自然排序（Chapter2 < Chapter10），与 Komga 书列表 / 阅读器页序同一口径。
+        LocalFileSortBy.Name -> Comparator<WebDavEntry> { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
         LocalFileSortBy.DateModified -> compareBy { it.lastModified }
         LocalFileSortBy.Size -> compareBy { if (it.isDir) 0L else it.size }
     }
@@ -6615,7 +6617,8 @@ private fun SmbBrowsePane(
 private fun smbEntryComparator(sort: LocalFileSort): Comparator<SmbEntry> {
     val dirFirst = compareBy<SmbEntry> { !it.isDir }
     val field: Comparator<SmbEntry> = when (sort.sortBy) {
-        LocalFileSortBy.Name -> compareBy { it.name.lowercase() }
+        // SY: 名称改自然排序（Chapter2 < Chapter10），与 Komga 书列表 / 阅读器页序同一口径。
+        LocalFileSortBy.Name -> Comparator<SmbEntry> { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
         LocalFileSortBy.DateModified -> compareBy { it.lastModified }
         LocalFileSortBy.Size -> compareBy { if (it.isDir) 0L else it.size }
     }
