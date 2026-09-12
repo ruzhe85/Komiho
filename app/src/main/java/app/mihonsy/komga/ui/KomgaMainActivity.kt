@@ -2821,12 +2821,6 @@ private fun LibraryTab(
     }
 }
 
-/**
- * M3.11 / UI simplification: the single toolbar "display options" (Tune)
- * button opens a MihonSY-style tabbed bottom sheet — Filter · Sort · Display —
- * replacing the old separate funnel dropdown + display dialog.
- */
-@Composable
 /** Sortable fields on the library shelf, aligned with Komga WebUI. */
 private enum class LibrarySortBy(
     @StringRes val labelRes: Int,

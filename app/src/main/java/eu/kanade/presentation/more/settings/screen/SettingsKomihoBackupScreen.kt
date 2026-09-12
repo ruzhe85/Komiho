@@ -37,12 +37,10 @@ object SettingsKomihoBackupScreen : SearchableSettings {
     override fun getTitleRes() = MR.strings.label_backup
 
     @Composable
-    override fun getPreferences(): List<Preference> {
-        return listOf(getKomihoBackupGroup())
-    }
+    override fun getPreferences(): List<Preference> = buildBackupPreferences()
 
     @Composable
-    private fun getKomihoBackupGroup(): Preference.PreferenceGroup {
+    private fun buildBackupPreferences(): List<Preference> {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
 
