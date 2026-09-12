@@ -5,7 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
-import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import eu.kanade.tachiyomi.util.pickCoverFirstImage
 // SY: 散图目录封面需在后台上列目录（SmbBrowse.list 为 suspend）。
 import kotlinx.coroutines.runBlocking
 import logcat.LogPriority
@@ -46,7 +46,8 @@ object SmbCoverCache {
     /** 封面缓存文件（不管存在与否）。 */
     private fun coverFile(context: Context, chapterUrl: String): File {
         val dir = File(context.filesDir, DIR).apply { mkdirs() }
-        return File(dir, sha256(chapterUrl) + ".jpg")
+        // v2 前缀：封面选取规则改为 cover 优先（此前是自然序第一），旧缓存口径不同，作废重生成。
+        return File(dir, "v2-" + sha256(chapterUrl) + ".jpg")
     }
 
     /** 已生成的封面文件（历史/书签行用；null = 显示占位图标，不发请求）。 */
@@ -109,12 +110,12 @@ object SmbCoverCache {
             // 加密包：无密码（null）或密码错误（true）时首图读不出来，直接放弃
             //（阅读器会弹密码框，输对后下次打开自然能生成）。
             if (h.encrypted && h.wrongPassword != false) return
-            // 「首页」必须与阅读器同一口径：自然排序（2.jpg < 10.jpg）取第一个图片条目。
+            // 「首页」口径与浏览封面一致：cover 优先（文件名含 cover），无 cover 则自然序第一。
             val firstName = runCatching {
                 h.useEntries { seq ->
-                    seq.filter { it.isFile && ImageUtil.isImage(it.name) }
-                        .sortedWith { f1, f2 -> f1.name.compareToCaseInsensitiveNaturalOrder(f2.name) }
-                        .firstOrNull()?.name
+                    pickCoverFirstImage(
+                        seq.filter { it.isFile && ImageUtil.isImage(it.name) }.map { it.name },
+                    )
                 }
             }.getOrNull() ?: return
             val raw = runCatching {
@@ -126,7 +127,7 @@ object SmbCoverCache {
     }
 
     /**
-     * SY: 散图目录章节的封面 —— 列目录 → 自然序取第一张图（与阅读器首页同口径）→
+     * SY: 散图目录章节的封面 —— 列目录 → cover 优先/自然序取第一张图（与浏览封面同口径）→
      * 读该图字节 → 采样压缩落盘。目录章节没有归档句柄，故单独一条路径。
      */
     private fun generateFromDirectory(chapterUrl: String, target: File) {
@@ -134,10 +135,11 @@ object SmbCoverCache {
             ?: throw IllegalStateException("SMB 连接不存在（可能已删除）: $chapterUrl")
         val dirRel = SmbConnectionStore.extractRelPath(chapterUrl).trim('/')
         val firstPath = runBlocking {
-            SmbBrowse.list(resolved.conn, resolved.password, dirRel)
+            val imgs = SmbBrowse.list(resolved.conn, resolved.password, dirRel)
                 .filter { it.isImage }
-                .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
-                .firstOrNull()?.path
+            pickCoverFirstImage(imgs.map { it.name })?.let { picked ->
+                imgs.firstOrNull { it.name == picked }?.path
+            }
         } ?: return
         // smbj 的 File 是句柄不是 InputStream：getInputStream() 取实时流再读全量。
         val raw = SmbSessionManager.openFile(resolved.conn, resolved.password, firstPath).use { f ->

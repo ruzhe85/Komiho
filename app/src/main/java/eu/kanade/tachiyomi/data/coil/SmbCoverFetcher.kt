@@ -11,11 +11,12 @@ import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
 import coil3.key.Keyer
 import coil3.request.Options
+import app.mihonsy.komga.data.smb.SmbBrowse
 import app.mihonsy.komga.data.smb.SmbConnection
 import app.mihonsy.komga.data.smb.SmbRandomAccessSource
 import app.mihonsy.komga.data.smb.SmbSessionManager
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
-import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import eu.kanade.tachiyomi.util.pickCoverFirstImage
 import mihon.core.common.archive.ArchiveHandle
 import mihon.core.common.archive.ArchiveReader
 import mihon.core.common.archive.RemoteZipReader
@@ -30,7 +31,8 @@ import java.security.MessageDigest
 import kotlin.math.max
 
 // SY --> Komiho Phase7: SMB 浏览列表封面 —— 对齐本地模式（LocalCoverFetcher）：
-// 归档拆包取首图、单图文件直接显示，自带 filesDir 文件级缓存（先采样再压缩 450px/JPEG q80），
+// 归档拆包取首图、单图文件直接显示、目录列目录取首图（cover 优先，2026-09 对齐本地），
+// 自带 filesDir 文件级缓存（先采样再压缩 450px/JPEG q80），
 // 与本地（komiho_local_covers）/阅读器打开时生成的（komiho_smb_covers）互不混用。
 // 缓存键含 lastModified：远端文件被替换后自动失效。
 class SmbCoverFetcher(
@@ -56,8 +58,8 @@ class SmbCoverFetcher(
         )
     }
 
-    /** 缓存键：connId + relPath + lastModified（远端文件替换后自动失效）。 */
-    private val cacheKey: String get() = "${data.conn.id};${data.relPath};${data.lastModified}"
+    /** 缓存键：v2 前缀（封面规则改 cover 优先作废旧缓存）+ connId + relPath + lastModified（远端文件替换后自动失效）。 */
+    private val cacheKey: String get() = "v2;${data.conn.id};${data.relPath};${data.lastModified}"
 
     private fun cacheFile(): File {
         val dir = File(context.filesDir, "komiho_smb_browse_covers").apply { mkdirs() }
@@ -86,18 +88,25 @@ class SmbCoverFetcher(
         return md.digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 
-    private fun readCoverBytes(): ByteArray? {
+    private suspend fun readCoverBytes(): ByteArray? {
         val password = WebDavCredentialCrypto.decryptStored(data.conn.passEnc)
-        val bitmap = if (data.isImage) {
-            // 单图：直接读文件字节。
-            SmbSessionManager.openFile(data.conn, password, data.relPath).use { f ->
-                f.getInputStream().buffered().use { it.readBytes() }
-            }.let { raw -> decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX) }
-        } else {
-            // 归档：首图与阅读器同一口径（自然排序 2<10）。
-            readArchiveFirstImage(password)?.let { raw ->
+        val bitmap = when {
+            // SY: 散图目录当封面（对齐本地 LocalCoverFetcher 目录分支）：列目录 →
+            // cover 优先/自然序取第一张图 → 读该图字节。目录封面多一次列目录请求，
+            // 生成后走 filesDir 缓存，不再重复发起。
+            data.isDir -> readDirectoryFirstImageBytes(password)?.let { raw ->
                 decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX)
             }
+            data.isImage ->
+                // 单图：直接读文件字节。
+                SmbSessionManager.openFile(data.conn, password, data.relPath).use { f ->
+                    f.getInputStream().buffered().use { it.readBytes() }
+                }.let { raw -> decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX) }
+            else ->
+                // 归档：首图与阅读器同一口径（cover 优先，无 cover 则自然序 2<10）。
+                readArchiveFirstImage(password)?.let { raw ->
+                    decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX)
+                }
         }
         return bitmap?.let { bmp ->
             runCatching {
@@ -124,13 +133,26 @@ class SmbCoverFetcher(
             if (h.encrypted && h.wrongPassword != false) return null
             val firstName = runCatching {
                 h.useEntries { seq ->
-                    seq.filter { it.isFile && ImageUtil.isImage(it.name) }
-                        .sortedWith { f1, f2 -> f1.name.compareToCaseInsensitiveNaturalOrder(f2.name) }
-                        .firstOrNull()?.name
+                    pickCoverFirstImage(
+                        seq.filter { it.isFile && ImageUtil.isImage(it.name) }.map { it.name },
+                    )
                 }
             }.getOrNull() ?: return null
             h.getInputStream(firstName)?.use { it.readBytes() }
         }
+    }
+
+    /** 散图目录封面字节：列目录 → cover 优先/自然序取第一张图 → 读该图字节。 */
+    private suspend fun readDirectoryFirstImageBytes(password: String): ByteArray? {
+        val entries = runCatching { SmbBrowse.list(data.conn, password, data.relPath) }
+            .getOrNull() ?: return null
+        val imgs = entries.filter { !it.isDir && it.isImage }
+        val picked = pickCoverFirstImage(imgs.map { it.name }) ?: return null
+        val path = imgs.firstOrNull { it.name == picked }?.path ?: return null
+        // smbj 的 File 是句柄不是 InputStream：getInputStream() 取实时流再读全量。
+        return SmbSessionManager.openFile(data.conn, password, path).use { f ->
+            f.getInputStream().buffered().use { it.readBytes() }
+        }.takeIf { it.isNotEmpty() }
     }
 
     /** 两次 decode：先读边界算 inSampleSize，再采样解码。 */
@@ -159,17 +181,19 @@ class SmbCoverFetcher(
     }
 }
 
-/** SMB 浏览封面请求体：连接 + 共享内相对路径 + 修改时间（缓存失效）+ 是否单图。 */
+/** SMB 浏览封面请求体：连接 + 共享内相对路径 + 修改时间（缓存失效）+ 是否单图/目录。 */
 data class SmbCoverData(
     val conn: SmbConnection,
     val relPath: String,
     val lastModified: Long,
     val isImage: Boolean,
+    /** SY: 目录条目（散图目录封面 = 目录内第一张图，cover 优先）。 */
+    val isDir: Boolean = false,
 )
 
 class SmbCoverKeyer : Keyer<SmbCoverData> {
     override fun key(data: SmbCoverData, options: Options): String {
-        return "${data.conn.id};${data.relPath};${data.lastModified}"
+        return "v2;${data.conn.id};${data.relPath};${data.lastModified}"
     }
 }
 // SY <--
