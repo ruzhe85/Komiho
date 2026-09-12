@@ -78,6 +78,13 @@ import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.ReadingListDto
 import app.mihonsy.komga.data.model.SeriesDto
 import eu.kanade.tachiyomi.R
+import eu.kanade.presentation.components.TabbedDialog
+import tachiyomi.presentation.core.components.CheckboxItem
+import tachiyomi.presentation.core.components.SliderItem
+import tachiyomi.presentation.core.components.SortItem
+import androidx.annotation.StringRes
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import kotlinx.coroutines.launch
 
 // 划动选择命中检测已移除（长按圈选废弃）。
@@ -89,6 +96,165 @@ import kotlinx.coroutines.launch
  *  - CompactGrid / ComfortableGrid → adaptive LazyVerticalGrid
  *  - List → LazyColumn of row cards
  */
+
+// SY --> Komiho：书架工具菜单（阅读状态 / 排序 / 显示模式）。
+//
+// 原先只存在于 KomgaMainActivity（private），系列详情页无法复用。现抽到本文件供
+// 库页（系列级）与系列详情（书籍级）共用同一个三页对话框；两者的排序字段不同
+// （库=LibrarySortBy，书籍=BookSortBy），故把排序项参数化成 [SortOptionUi]。
+// 偏好各自独立存储（详见 KomgaPreferences.bookSort / bookDisplayMode）。
+
+/** 阅读状态筛选；[komgaValue] 直接作为 Komga 的 read_status 查询参数。 */
+enum class ReadFilter(@StringRes val labelRes: Int, val komgaValue: String?) {
+    All(R.string.filter_all, null),
+    Unread(R.string.filter_unread, "UNREAD"),
+    InProgress(R.string.filter_in_progress, "IN_PROGRESS"),
+    Read(R.string.filter_read, "READ"),
+    ;
+
+    @Composable
+    fun labelText(): String = composeStringResource(labelRes)
+}
+
+/** 书籍（系列详情）可排序字段。komgaField 传给 Komga 的 sort 参数，由服务端排序。 */
+enum class BookSortBy(
+    @StringRes val labelRes: Int,
+    val prefKey: String,
+    val komgaField: String,
+    val defaultDescending: Boolean,
+) {
+    Number(R.string.sort_book_number, "number", "metadata.numberSort", false),
+    Name(R.string.sort_name, "name", "name", false),
+    DateAdded(R.string.sort_date_added, "dateAdded", "createdDate", true),
+    DateRead(R.string.sort_date_read, "dateRead", "readDate", true),
+    ;
+
+    @Composable
+    fun labelText(): String = composeStringResource(labelRes)
+
+    companion object {
+        fun fromPrefKey(v: String): BookSortBy = entries.find { it.prefKey == v } ?: Number
+    }
+}
+
+/** 书籍排序状态（字段 + 方向），与 pref 字符串 "key,asc|desc" 互转。 */
+data class BookSort(val sortBy: BookSortBy, val descending: Boolean = sortBy.defaultDescending) {
+    val komgaSort: String get() = "${sortBy.komgaField},${if (descending) "desc" else "asc"}"
+
+    fun toPref(): String = "${sortBy.prefKey},${if (descending) "desc" else "asc"}"
+
+    companion object {
+        fun fromPref(v: String): BookSort {
+            val key = v.substringBefore(',')
+            val desc = v.substringAfter(',', "asc").equals("desc", ignoreCase = true)
+            return BookSort(BookSortBy.fromPrefKey(key), desc)
+        }
+    }
+}
+
+/** 菜单里一页排序项的通用描述（库与书籍各自映射自己的枚举）。 */
+data class SortOptionUi(val label: String, val key: String, val defaultDescending: Boolean)
+
+/**
+ * 三页工具菜单：阅读状态 / 排序 / 显示模式（+ 每行列数）。
+ * 库页与系列详情页共用；排序项由调用方传入，因此两者的排序字段可以不同。
+ */
+@Composable
+fun ShelfOptionsMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    displayMode: LibraryDisplayMode,
+    onDisplayModeChange: (LibraryDisplayMode) -> Unit,
+    columns: Int,
+    onColumnChange: (Int) -> Unit,
+    sortOptions: List<SortOptionUi>,
+    currentSortKey: String,
+    sortDescending: Boolean,
+    onSortChange: (key: String, descending: Boolean) -> Unit,
+    readFilter: ReadFilter,
+    onReadFilterChange: (ReadFilter) -> Unit,
+) {
+    if (!expanded) return
+
+    val tabTitles = listOf(
+        composeStringResource(R.string.read_status_header),
+        composeStringResource(R.string.sort_header),
+        composeStringResource(R.string.display_mode_header),
+    )
+
+    TabbedDialog(
+        onDismissRequest = onDismiss,
+        tabTitles = tabTitles,
+    ) { page ->
+        Column(
+            modifier = Modifier
+                .padding(vertical = 8.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            when (page) {
+                0 -> {
+                    ReadFilter.entries.forEach { f ->
+                        CheckboxItem(
+                            label = f.labelText(),
+                            checked = readFilter == f,
+                            onClick = { onReadFilterChange(f) },
+                        )
+                    }
+                }
+                1 -> {
+                    sortOptions.forEach { opt ->
+                        SortItem(
+                            label = opt.label,
+                            sortDescending = if (currentSortKey == opt.key) sortDescending else null,
+                            onClick = {
+                                onSortChange(
+                                    opt.key,
+                                    if (currentSortKey == opt.key) !sortDescending else opt.defaultDescending,
+                                )
+                            },
+                        )
+                    }
+                }
+                2 -> {
+                    Text(
+                        text = composeStringResource(R.string.display_mode_header),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        LibraryDisplayMode.entries.forEach { m ->
+                            FilterChip(
+                                selected = displayMode == m,
+                                onClick = { onDisplayModeChange(m) },
+                                label = { Text(m.labelText()) },
+                            )
+                        }
+                    }
+                    if (displayMode != LibraryDisplayMode.List) {
+                        SliderItem(
+                            value = columns,
+                            valueRange = 0..10,
+                            label = composeStringResource(R.string.pref_library_columns),
+                            valueString = if (columns > 0) {
+                                columns.toString()
+                            } else {
+                                composeStringResource(R.string.label_auto)
+                            },
+                            onChange = onColumnChange,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+// SY <--
 
 /** Grid/list toggle button for TopAppBar actions. */
 @Composable

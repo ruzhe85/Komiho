@@ -150,8 +150,18 @@ class KomgaApiClient(
         seriesId: String,
         page: Int = 0,
         size: Int = 100,
+        // SY: 书籍列表的排序/阅读状态筛选走服务端（与 /api/v1/series 同口径）。
+        // sort 形如 "metadata.numberSort,asc"；read_status 取 UNREAD / READ / IN_PROGRESS。
+        readStatus: String? = null,
+        sort: String? = null,
     ): PageableDto<BookDto> {
-        return get("/api/v1/series/$seriesId/books", PageableSerializer(), mapOf("page" to page.toString(), "size" to size.toString()))
+        val params = buildMap<String, Any> {
+            put("page", page.toString())
+            put("size", size.toString())
+            readStatus?.let { put("read_status", it) }
+            sort?.let { put("sort", it) }
+        }
+        return get("/api/v1/series/$seriesId/books", PageableSerializer(), params)
     }
 
     // ---------- 书 ----------
