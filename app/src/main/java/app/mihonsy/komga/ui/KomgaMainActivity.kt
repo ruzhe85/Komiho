@@ -938,13 +938,31 @@ private fun KomgaMainScreen(
     }
     // SY <--
 
+
+    // SY: 来源管理（AddSourceFlow）是铺满内容区的 overlay，rail 点击若只切 tab，
+    // 画面仍被 overlay 盖住而「无反应」。与设置子页 rail 同一套先关后跳：
+    // 点 rail 先按 onDismiss 语义关闭来源管理，再执行 tab 跳转。
+    fun closeAddSourceFlow() {
+        showAddSource = false
+        sourceVersion++
+        komgaConnected = prefs.hasConnection()
+        // 用关闭后的最新来源列表校验（sourceEntries 还是旧快照）。
+        if (buildSourceEntries(prefs.connections(), "").none { it.id == currentSourceId }) {
+            selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName))
+        }
+    }
+    fun onRailTabClick(tab: MainTab) {
+        if (showAddSource) closeAddSourceFlow()
+        onNavTabClick(tab)
+    }
+
     // SY --> Komiho: 平板导航 rail 与 Scaffold 平级并排，rail 占满整屏高度（顶栏只盖内容区）。
     // 旧做法把 rail 塞在 Scaffold 内容区里，顶栏全宽时最左的标题（☰ + 名称）正好压在
     // rail 那一列上方，看上去像 rail 的标题；改为并排后 rail 上下贯通、标题回到内容区。
     // 注：Scaffold 保持原缩进（只是多包一层 Row），让 diff 最小、风险最低。
     Row(modifier = Modifier.fillMaxSize()) {
         if (useNavRail && navBarPosition == "LEFT") {
-            KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onNavTabClick(it) })
+            KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onRailTabClick(it) })
         }
     Scaffold(
         modifier = Modifier.weight(1f),
@@ -1358,13 +1376,8 @@ private fun KomgaMainScreen(
                         onPickLocalFolder = { pickLocalFolder.launch(null) },
                         onManageAccess = { launchManageAllFilesAccess(context) },
                         onDismiss = {
-                            showAddSource = false
-                            sourceVersion++
-                            komgaConnected = prefs.hasConnection()
-                            // 用关闭后的最新来源列表校验（sourceEntries 还是旧快照）。
-                            if (buildSourceEntries(prefs.connections(), "").none { it.id == currentSourceId }) {
-                                selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName))
-                            }
+                            // SY: 关闭逻辑收敛到 closeAddSourceFlow（rail 点击复用同一份）。
+                            closeAddSourceFlow()
                         },
                     )
                 }
@@ -1403,7 +1416,7 @@ private fun KomgaMainScreen(
         }
     }
         if (useNavRail && navBarPosition == "RIGHT") {
-            KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onNavTabClick(it) })
+            KomgaNavRail(tabs = visibleTabs, selectedOrdinal = currentTab, onTabClick = { onRailTabClick(it) })
         }
     }
 
