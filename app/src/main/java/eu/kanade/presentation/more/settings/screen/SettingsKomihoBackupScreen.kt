@@ -98,8 +98,8 @@ object SettingsKomihoBackupScreen : SearchableSettings {
 
         if (showExportPwd) {
             PasswordDialog(
-                title = "设置备份密码（可选）",
-                placeholder = "留空则不加密；设置密码会加密整个备份文件（含 SMB/WebDAV 密码）",
+                title = "设置备份密码",
+                placeholder = "留空不加密",
                 confirmLabel = "导出",
                 onConfirm = { pwd ->
                     showExportPwd = false
@@ -145,12 +145,10 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             preferenceItems = listOf(
                 Preference.PreferenceItem.TextPreference(
                     title = "导出备份",
-                    subtitle = "来源列表 / 个性化 / 本地阅读历史 / 书签 / 收藏分类",
                     onClick = { showExportPwd = true },
                 ),
                 Preference.PreferenceItem.TextPreference(
                     title = "导入备份",
-                    subtitle = "从本地文件恢复以上数据（不覆盖 Komga 服务端记录）",
                     onClick = { importLauncher.launch("*/*") },
                 ),
             ),
