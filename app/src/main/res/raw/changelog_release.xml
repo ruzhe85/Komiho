@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.1.0" changeDate="September 12,2026">
+        <changelogtext>[b]Komiho 1.1.0 (8)[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 本地文件浏览</changelogtext>
+        <changelogtext>[b]新增[/b] WEBDAV共享浏览</changelogtext>
+        <changelogtext>[b]新增[/b] SMB/CIFS共享浏览</changelogtext>
+        <changelogtext>[b]新增[/b] 本地书签与历史</changelogtext>
+        <changelogtext>[b]新增[/b] 来源管理，多来源统一管理入口</changelogtext>
+        <changelogtext>[b]新增[/b] 最近，作为初始启动页</changelogtext>
+        <changelogtext>[b]优化[/b] Komga UI 重做，现在更适合使用了</changelogtext>
+        <changelogtext>[b]优化[/b] 漫画阅读器性能优化</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.0.6" changeDate="August 26,2026">
         <changelogtext>[b]Komiho 1.0.6 (7)[/b]</changelogtext>
         <changelogtext>[b]新增[/b] 多 Komga 服务器：可添加多个服务器，设置内一键切换激活，每条可编辑 / 删除</changelogtext>

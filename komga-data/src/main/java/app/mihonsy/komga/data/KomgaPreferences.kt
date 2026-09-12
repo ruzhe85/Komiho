@@ -6,7 +6,8 @@ import kotlinx.serialization.json.Json
 
 /**
  * Komga 服务器连接配置持久化。
- * 凭据敏感信息存储于 SharedPreferences（后续可迁移到 EncryptedSharedPreferences）。
+ * 凭据（apiKey / username / password）经 [KomgaCredentialCrypto] 静态加密（Android
+ * Keystore AES-CBC-PKCS7，设备绑定）落盘，读取时解密——关掉「设备内明文凭据」缺口。
  */
 class KomgaPreferences(context: Context) {
 
@@ -182,6 +183,7 @@ class KomgaPreferences(context: Context) {
         if (raw.isNullOrBlank()) return emptyList()
         return runCatching { json.decodeFromString<List<KomgaConnection>>(raw) }
             .getOrDefault(emptyList())
+            .map { it.decryptCredentials() }
     }
 
     var activeConnectionId: String
@@ -238,7 +240,7 @@ class KomgaPreferences(context: Context) {
     }
 
     private fun persist(list: List<KomgaConnection>) {
-        prefs.edit().putString(KEY_CONNECTIONS, json.encodeToString(list)).apply()
+        prefs.edit().putString(KEY_CONNECTIONS, json.encodeToString(list.map { it.encryptCredentials() })).apply()
     }
 
     private fun ensureMigrated() {
@@ -258,6 +260,13 @@ class KomgaPreferences(context: Context) {
             )
             persist(listOf(conn))
             activeConnectionId = conn.id
+            // 迁移后清除遗留的明文凭据旧键（api_key/username/password），避免明文残留；
+            // 非敏感的 base_url / auth_type 保留不动。
+            prefs.edit()
+                .remove(KEY_API_KEY)
+                .remove(KEY_USERNAME)
+                .remove(KEY_PASSWORD)
+                .apply()
         }
     }
 
@@ -267,6 +276,22 @@ class KomgaPreferences(context: Context) {
             u.host.takeIf { it.isNotBlank() } ?: url
         }.getOrDefault(url)
     }
+
+    /** 落盘前对敏感字段加密（空串不加密，保持兼容）。 */
+    private fun KomgaConnection.encryptCredentials(): KomgaConnection =
+        copy(
+            apiKey = KomgaCredentialCrypto.encrypt(apiKey),
+            username = KomgaCredentialCrypto.encrypt(username),
+            password = KomgaCredentialCrypto.encrypt(password),
+        )
+
+    /** 读取后对敏感字段解密（无 enc1: 前缀的历史明文原样透传）。 */
+    private fun KomgaConnection.decryptCredentials(): KomgaConnection =
+        copy(
+            apiKey = KomgaCredentialCrypto.decryptStored(apiKey),
+            username = KomgaCredentialCrypto.decryptStored(username),
+            password = KomgaCredentialCrypto.decryptStored(password),
+        )
 
     fun clear() {
         prefs.edit().clear().apply()
