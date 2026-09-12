@@ -48,7 +48,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
 
         var showExportPwd by remember { mutableStateOf(false) }
         var showImportPwd by remember { mutableStateOf(false) }
-        var pendingImportJson by remember { mutableStateOf<String?>(null) }
+        var pendingImportBytes by remember { mutableStateOf<ByteArray?>(null) }
 
         val exportLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("application/zip"),
@@ -59,7 +59,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             scope.launch(Dispatchers.IO) {
                 try {
                     context.contentResolver.openOutputStream(uri)?.use { os ->
-                        KomihoBackup.writeBackupZip(context, password, os)
+                        KomihoBackup.writeBackupFile(context, password, os)
                     }
                     withUIContext { context.toast("备份已导出") }
                 } catch (e: Exception) {
@@ -75,17 +75,17 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             uri ?: return@rememberLauncherForActivityResult
             scope.launch(Dispatchers.IO) {
                 try {
-                    // zip 与旧版 .json 都支持：readBackupText 按文件头自动识别。
-                    val json = context.contentResolver.openInputStream(uri)
-                        ?.use { KomihoBackup.readBackupText(it) }.orEmpty()
-                    if (json.isBlank()) {
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes == null || bytes.isEmpty()) {
                         withUIContext { context.toast("文件为空或无法读取") }
                         return@launch
                     }
-                    if (KomihoBackup.peekEncrypted(json)) {
-                        pendingImportJson = json
+                    if (KomihoBackup.isEncrypted(bytes)) {
+                        // 加密容器：先留住字节，等用户输入密码再解密 + 解压。
+                        pendingImportBytes = bytes
                         withUIContext { showImportPwd = true }
                     } else {
+                        val json = KomihoBackup.readBackupBytes(bytes, null)
                         val summary = KomihoBackup.importBackup(context, json, null)
                         withUIContext { context.toast(summary.toString()) }
                     }
@@ -104,8 +104,10 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                 onConfirm = { pwd ->
                     showExportPwd = false
                     pendingExportPassword = pwd
+                    // 无密码 → 标准 zip；有密码 → KMH1 私有容器（后缀区分，免得被当 zip 解压失败）。
+                    val ext = if (pwd.isBlank()) "zip" else "komiho"
                     val name = "komiho-backup-" +
-                        SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".zip"
+                        SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".$ext"
                     runCatching { exportLauncher.launch(name) }
                         .onFailure { context.toast(MR.strings.file_picker_error) }
                 },
@@ -120,11 +122,12 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                 confirmLabel = "导入",
                 onConfirm = { pwd ->
                     showImportPwd = false
-                    val json = pendingImportJson
-                    pendingImportJson = null
-                    if (json == null) return@PasswordDialog
+                    val bytes = pendingImportBytes
+                    pendingImportBytes = null
+                    if (bytes == null) return@PasswordDialog
                     scope.launch(Dispatchers.IO) {
                         try {
+                            val json = KomihoBackup.readBackupBytes(bytes, pwd)
                             val summary = KomihoBackup.importBackup(context, json, pwd)
                             withUIContext { context.toast(summary.toString()) }
                         } catch (e: Exception) {
