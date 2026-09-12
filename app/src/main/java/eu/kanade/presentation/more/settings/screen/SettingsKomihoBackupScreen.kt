@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import app.mihonsy.komga.data.backup.KomihoBackup
+import eu.kanade.presentation.more.settings.Preference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import logcat.LogPriority
@@ -106,7 +107,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                     val name = "komiho-backup-" +
                         SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".json"
                     runCatching { exportLauncher.launch(name) }
-                        .onFailure { withUIContext { context.toast(MR.strings.file_picker_error) } }
+                        .onFailure { context.toast(MR.strings.file_picker_error) }
                 },
                 onDismiss = { showExportPwd = false },
             )

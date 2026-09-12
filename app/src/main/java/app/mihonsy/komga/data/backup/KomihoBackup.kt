@@ -3,10 +3,6 @@ package app.mihonsy.komga.data.backup
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
-import app.cash.sqldelight.async.coroutines.awaitAsList
-import app.cash.sqldelight.async.coroutines.awaitAsOne
-import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
-import app.cash.sqldelight.async.coroutines.transaction
 import app.mihonsy.komga.data.DashboardPreferences
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaCredentialCrypto
@@ -22,13 +18,17 @@ import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.data.Database
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.repository.BookmarkRepository
 import tachiyomi.domain.chapter.repository.ChapterRepository
+import tachiyomi.domain.category.repository.CategoryRepository
+import tachiyomi.domain.history.repository.HistoryRepository
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.source.local.LocalSource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.security.SecureRandom
+import java.util.Date
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -126,14 +126,16 @@ object KomihoBackup {
         // 4) 聚合页每来源条数
         val dashboard = readDashboard(prefStore)
 
-        // 5) 非 Komga 本地数据
-        val db = Injekt.get<Database>()
+        // 5) 非 Komga 本地数据（用 domain Repository，字段名与 domain 模型一致）
+        val mangaRepo = Injekt.get<MangaRepository>()
+        val chapterRepo = Injekt.get<ChapterRepository>()
+        val historyRepo = Injekt.get<HistoryRepository>()
+        val bookmarkRepo = Injekt.get<BookmarkRepository>()
+        val categoryRepo = Injekt.get<CategoryRepository>()
         val komgaId = KomgaSource.ID
-        val localMangas = db.mangasQueries.getAll().awaitAsList().filter { it.source != komgaId }
+        val localMangas = mangaRepo.getAll().filter { it.source != komgaId }
 
-        val chaptersByManga = localMangas.associateWith { m ->
-            db.chaptersQueries.getChaptersByMangaId(m.id).awaitAsList()
-        }
+        val chaptersByManga = localMangas.associateWith { m -> chapterRepo.getChapterByMangaId(m.id) }
         // chapter_id -> (mangaUrl, chapterUrl) 用于历史/书签重新关联
         val chapterRefById = mutableMapOf<Long, Pair<String, String>>()
         chaptersByManga.forEach { (m, chs) ->
@@ -154,22 +156,22 @@ object KomihoBackup {
         }
 
         val localHistory = localMangas.flatMap { m ->
-            db.historyQueries.getHistoryByMangaId(m.id).awaitAsList().mapNotNull { h ->
-                val key = chapterRefById[h.chapter_id] ?: return@mapNotNull null
-                BkHistory(key.first, key.second, h.last_read, h.time_read)
+            historyRepo.getHistoryByMangaId(m.id).mapNotNull { h ->
+                val key = chapterRefById[h.chapterId] ?: return@mapNotNull null
+                BkHistory(key.first, key.second, h.readAt?.time, h.readDuration)
             }
         }
 
-        val localBookmarks = db.bookmarksQueries.bookmarksBySource(LocalSource.ID).awaitAsList().map { b ->
-            BkBookmark(b.mangaUrl, b.chapterUrl, b.page, b.createdAt)
+        val localBookmarks = bookmarkRepo.getBookmarksBySource(LocalSource.ID).map { b ->
+            BkBookmark(b.mangaUrl, b.chapterUrl, b.page.toLong(), b.createdAt)
         }
 
-        val categories = db.categoriesQueries.getCategories().awaitAsList()
+        val categories = categoryRepo.getAll()
             .filter { it.id > 0 }
-            .map { BkCategory(it.id, it.name, it.order, it.flags) }
+            .map { BkCategory(it.id, it.name, it.order.toInt(), it.flags.toInt()) }
 
         val categoryLinks = localMangas.flatMap { m ->
-            db.categoriesQueries.getCategoriesByMangaId(m.id).awaitAsList()
+            categoryRepo.getCategoriesByMangaId(m.id)
                 .filter { it.id > 0 }
                 .map { BkCategoryLink(m.url, it.id) }
         }
@@ -278,7 +280,7 @@ object KomihoBackup {
     }
 
     private fun appVersion(context: Context): String =
-        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrDefault("")
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrDefault("") ?: ""
 
     // ---------------------------------------------------------------- 导入
 
@@ -394,25 +396,25 @@ object KomihoBackup {
 
         var historyCount = 0
         var bookmarkCount = 0
-        db.transaction {
-            for (h in payload.localHistory) {
-                val chId = chapterIdByKey[h.mangaUrl to h.chapterUrl] ?: continue
-                db.historyQueries.upsert(chId, h.lastRead ?: 0L, h.timeRead)
-                historyCount++
-            }
-            for (bk in payload.localBookmarks) {
-                val chId = chapterIdByKey[bk.mangaUrl to bk.chapterUrl] ?: continue
-                if (db.bookmarksQueries.countByChapterAndPage(chId, bk.page).awaitAsOne() == 0L) {
-                    db.bookmarksQueries.insert(chId, bk.page, bk.createdAt)
-                    bookmarkCount++
-                }
+        for (h in payload.localHistory) {
+            val chId = chapterIdByKey[h.mangaUrl to h.chapterUrl] ?: continue
+            db.historyQueries.upsert(chId, Date(h.lastRead ?: 0L), h.timeRead).execute()
+            historyCount++
+        }
+        for (bk in payload.localBookmarks) {
+            val chId = chapterIdByKey[bk.mangaUrl to bk.chapterUrl] ?: continue
+            if (db.bookmarksQueries.countByChapterAndPage(chId, bk.page).execute() == 0L) {
+                db.bookmarksQueries.insert(chId, bk.page, bk.createdAt).execute()
+                bookmarkCount++
             }
         }
 
         val oldToNew = mutableMapOf<Long, Long>()
         for (c in payload.categories) {
-            val newId = db.categoriesQueries.insert(c.name, c.sort, c.flags, "", 1, 0, 0)
-                .awaitAsOneOrNull() ?: continue
+            // categories.insert 实际签名为 (name, order, flags, version, uid, last_modified_at)，
+            // manga_order 在 .sq 中固定为 ""（空列表），不是绑定参数。
+            val newId = db.categoriesQueries.insert(c.name, c.sort.toLong(), c.flags.toLong(), 1L, 0L, 0L).execute()
+            if (newId <= 0L) continue
             oldToNew[c.id] = newId
         }
 
@@ -616,7 +618,7 @@ object KomihoBackup {
 
     @Serializable
     data class BkBookmark(
-        val mangaUrl: String, val chapterUrl: String, val page: Int, val createdAt: Long,
+        val mangaUrl: String, val chapterUrl: String, val page: Long, val createdAt: Long,
     )
 
     @Serializable
