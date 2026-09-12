@@ -2,7 +2,6 @@ package app.mihonsy.komga.data.backup
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Base64
 import app.cash.sqldelight.async.coroutines.awaitAsOne
 import app.mihonsy.komga.data.DashboardPreferences
 import app.mihonsy.komga.data.KomgaConnection
@@ -29,7 +28,7 @@ import tachiyomi.source.local.LocalSource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.ByteArrayInputStream
-import java.io.InputStream
+import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.security.SecureRandom
 import java.util.Date
@@ -67,81 +66,98 @@ object KomihoBackup {
 
     // ---------------------------------------------------------------- 公开 API
 
-    /** 导出：返回完整备份文件文本（已加密或明文 JSON 包裹）。password 可空=不加密。 */
-    suspend fun exportBackup(context: Context, password: String?): String {
+    /**
+     * 导出：返回备份信封 JSON 文本。**内容始终为明文**——
+     * 加密不在这里做，而是由 [writeBackupFile] 对「压缩后的 zip 字节」整体加一次密，
+     * 这样才能先压缩再加密（密文不可压缩，反过来做体积会大 4~5 倍）。
+     */
+    suspend fun exportBackup(context: Context): String {
         val payload = buildPayload(context)
         val plain = json.encodeToString(payload)
         val ver = appVersion(context)
-        return if (!password.isNullOrBlank()) {
-            val env = BackupCrypto.encrypt(plain, password, ver)
-            json.encodeToString(env)
-        } else {
-            json.encodeToString(
-                BackupEnvelope(
-                    appVersion = ver,
-                    encrypted = false,
-                    data = plain,
-                ),
-            )
-        }
+        return json.encodeToString(
+            BackupEnvelope(
+                appVersion = ver,
+                data = plain,
+            ),
+        )
     }
 
-    /** 导入：解析备份文件并恢复。password 在文件加密时必须提供。返回恢复统计。 */
+    /** 导入：解析备份文本并恢复。password 在加密备份（KMH1 容器）时必须提供。返回恢复统计。 */
     suspend fun importBackup(context: Context, rawJson: String, password: String?): BackupSummary {
         val envelope = json.decodeFromString<BackupEnvelope>(rawJson)
-        val plain = if (envelope.encrypted) {
-            require(!password.isNullOrBlank()) { "该备份已加密，请输入密码" }
-            BackupCrypto.decrypt(envelope.salt, envelope.iv, envelope.data, password)
-        } else {
-            envelope.data
-        }
-        val payload = json.decodeFromString<BackupPayload>(plain)
-        return restorePayload(context, payload, envelope.encrypted)
+        val payload = json.decodeFromString<BackupPayload>(envelope.data)
+        // 加密备份 = 出过设备，凭据要按本设备密钥重新落库（才能跨设备恢复）；明文备份则原样。
+        return restorePayload(context, payload, !password.isNullOrBlank())
     }
 
-    /** 仅解析外层信封，判断是否加密（用于决定导入时是否弹密码框）。 */
-    fun peekEncrypted(rawJson: String): Boolean =
-        runCatching { json.decodeFromString<BackupEnvelope>(rawJson).encrypted }.getOrDefault(false)
+    // ---------------------------------------------------------------- 文件容器
 
-    // ---------------------------------------------------------------- zip 容器
-
-    /** zip 内的备份条目名（内容 = 旧版 .json 的整份文本，一字不改）。 */
+    /** zip 内的备份条目名（内容 = 备份信封 JSON 文本）。 */
     private const val BACKUP_ENTRY = "backup.json"
 
-    /** zip 本地文件头魔数 `PK\x03\x04`。 */
+    /** 标准 zip 本地文件头魔数 `PK\x03\x04`（无密码导出）。 */
     private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 
+    /** 加密备份容器魔数 `KMH1`：先把整份 zip 字节压缩好，再整体 AES/GCM 加密。 */
+    private val ENC_MAGIC = byteArrayOf(0x4B, 0x4D, 0x48, 0x31)
+
     /**
-     * 导出为 zip（内含单个条目 [BACKUP_ENTRY]），内容与旧版 .json 完全一致，只是多一层压缩打包。
-     * JSON 是高度重复的纯文本，压缩率通常 80%+；加密备份因密文不可压缩，只能压掉 base64 冗余（约 25%）。
+     * 导出备份文件。两种形态都是「先压缩」，故体积都约为原始 JSON 的 15~20%：
+     *  - 无密码 → 标准 zip（内含 [BACKUP_ENTRY]），任何解压工具都能打开查看
+     *  - 有密码 → `KMH1` 私有容器：压缩后的 zip 字节整体加密，密文同样只有压缩后的大小
+     *    （对比「先加密再打包」的方案，密文不可压缩，体积会大 4~5 倍）
      */
-    suspend fun writeBackupZip(context: Context, password: String?, os: OutputStream) {
-        val text = exportBackup(context, password)
-        ZipOutputStream(os.buffered()).use { zos ->
+    suspend fun writeBackupFile(context: Context, password: String?, os: OutputStream) {
+        val text = exportBackup(context)
+        val zipBytes = zipBytes(text)
+        if (password.isNullOrBlank()) {
+            os.write(zipBytes)
+        } else {
+            os.write(ENC_MAGIC + BackupCrypto.encryptRaw(zipBytes, password))
+        }
+    }
+
+    /** 该备份文件是否为加密容器（决定导入时是否要弹密码框）。 */
+    fun isEncrypted(bytes: ByteArray): Boolean = startsWith(bytes, ENC_MAGIC)
+
+    /**
+     * 读取备份文本，按文件头自动分流：
+     * `KMH1` 容器（需 [password]，解密后再解压）→ 标准 zip（解压）→ 其余按纯 JSON 文本读。
+     */
+    fun readBackupBytes(bytes: ByteArray, password: String?): String = when {
+        startsWith(bytes, ENC_MAGIC) -> {
+            require(!password.isNullOrBlank()) { "该备份已加密，请输入密码" }
+            val body = bytes.copyOfRange(ENC_MAGIC.size, bytes.size)
+            unzipBytes(BackupCrypto.decryptRaw(body, password))
+        }
+        startsWith(bytes, ZIP_MAGIC) -> unzipBytes(bytes)
+        else -> bytes.toString(Charsets.UTF_8)
+    }
+
+    private fun startsWith(bytes: ByteArray, magic: ByteArray): Boolean =
+        bytes.size >= magic.size && bytes.copyOf(magic.size).contentEquals(magic)
+
+    private fun zipBytes(text: String): ByteArray {
+        val bos = ByteArrayOutputStream()
+        ZipOutputStream(bos).use { zos ->
             zos.putNextEntry(ZipEntry(BACKUP_ENTRY))
             zos.write(text.toByteArray(Charsets.UTF_8))
             zos.closeEntry()
         }
+        return bos.toByteArray()
     }
 
-    /**
-     * 读取备份文本：自动识别 zip（解包 [BACKUP_ENTRY]）或旧版纯 .json 文件，向后兼容老备份。
-     */
-    fun readBackupText(input: InputStream): String = decodeBackupBytes(input.readBytes())
-
-    private fun decodeBackupBytes(bytes: ByteArray): String {
-        if (bytes.size >= ZIP_MAGIC.size && bytes.copyOf(ZIP_MAGIC.size).contentEquals(ZIP_MAGIC)) {
-            ZipInputStream(ByteArrayInputStream(bytes)).use { zis ->
-                while (true) {
-                    val entry = zis.nextEntry ?: break
-                    if (!entry.isDirectory && entry.name == BACKUP_ENTRY) {
-                        return zis.readBytes().toString(Charsets.UTF_8)
-                    }
+    private fun unzipBytes(bytes: ByteArray): String {
+        ZipInputStream(ByteArrayInputStream(bytes)).use { zis ->
+            while (true) {
+                val entry = zis.nextEntry ?: break
+                if (!entry.isDirectory && entry.name == BACKUP_ENTRY) {
+                    return zis.readBytes().toString(Charsets.UTF_8)
                 }
             }
-            throw Exception("zip 内未找到 $BACKUP_ENTRY")
         }
-        return bytes.toString(Charsets.UTF_8)
+        throw Exception("备份文件内未找到 $BACKUP_ENTRY")
     }
 
     // ---------------------------------------------------------------- 导出
@@ -541,33 +557,39 @@ object KomihoBackup {
         private const val KEY_BITS = 256
         private const val GCM_IV = 12
         private const val GCM_TAG = 128
+        private const val SALT_BYTES = 16
 
-        fun encrypt(plainJson: String, password: String, appVersion: String): BackupEnvelope {
-            val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
-            val iv = ByteArray(GCM_IV).also { SecureRandom().nextBytes(it) }
+        /** [encryptRaw] 的逆操作。 */
+        fun decryptRaw(body: ByteArray, password: String): ByteArray {
+            require(body.size > SALT_BYTES + GCM_IV + GCM_TAG / 8) { "备份文件已损坏或长度不足" }
+            val salt = body.copyOfRange(0, SALT_BYTES)
+            val iv = body.copyOfRange(SALT_BYTES, SALT_BYTES + GCM_IV)
+            val ct = body.copyOfRange(SALT_BYTES + GCM_IV, body.size)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
-                init(Cipher.ENCRYPT_MODE, SecretKeySpec(deriveKey(password, salt), "AES"),
-                    GCMParameterSpec(GCM_TAG, iv))
+                init(
+                    Cipher.DECRYPT_MODE,
+                    SecretKeySpec(deriveKey(password, salt), "AES"),
+                    GCMParameterSpec(GCM_TAG, iv),
+                )
             }
-            val ct = cipher.doFinal(plainJson.toByteArray(Charsets.UTF_8))
-            return BackupEnvelope(
-                appVersion = appVersion,
-                encrypted = true,
-                kdf = KdfInfo(Base64.encodeToString(salt, Base64.NO_WRAP), ITERATIONS),
-                iv = Base64.encodeToString(iv, Base64.NO_WRAP),
-                data = Base64.encodeToString(ct, Base64.NO_WRAP),
-            )
+            return cipher.doFinal(ct)
         }
 
-        fun decrypt(saltB64: String?, ivB64: String?, dataB64: String?, password: String): String {
-            val salt = Base64.decode(saltB64, Base64.NO_WRAP)
-            val iv = Base64.decode(ivB64, Base64.NO_WRAP)
-            val ct = Base64.decode(dataB64, Base64.NO_WRAP)
+        /**
+         * 加密原始字节 → `[salt 16B][iv 12B][密文]`，**不做 base64**（省掉 33% 体积膨胀）。
+         * 密文不可压缩，所以调用方必须先压缩再调这里。
+         */
+        fun encryptRaw(plain: ByteArray, password: String): ByteArray {
+            val salt = ByteArray(SALT_BYTES).also { SecureRandom().nextBytes(it) }
+            val iv = ByteArray(GCM_IV).also { SecureRandom().nextBytes(it) }
             val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
-                init(Cipher.DECRYPT_MODE, SecretKeySpec(deriveKey(password, salt), "AES"),
-                    GCMParameterSpec(GCM_TAG, iv))
+                init(
+                    Cipher.ENCRYPT_MODE,
+                    SecretKeySpec(deriveKey(password, salt), "AES"),
+                    GCMParameterSpec(GCM_TAG, iv),
+                )
             }
-            return String(cipher.doFinal(ct), Charsets.UTF_8)
+            return salt + iv + cipher.doFinal(plain)
         }
 
         private fun deriveKey(password: String, salt: ByteArray): ByteArray {
@@ -583,15 +605,9 @@ object KomihoBackup {
         val format: String = "komiho-backup",
         val version: Int = 1,
         val appVersion: String = "",
-        val encrypted: Boolean = false,
-        val kdf: KdfInfo? = null,
-        val salt: String? = null,
-        val iv: String? = null,
+        // 加密不在信封层：见 [writeBackupFile]，整份 zip 字节在外层一次性加密。
         val data: String = "",
     )
-
-    @Serializable
-    data class KdfInfo(val salt: String, val iterations: Int, val alg: String = "PBKDF2WithHmacSHA256")
 
     @Serializable
     data class BackupPayload(
