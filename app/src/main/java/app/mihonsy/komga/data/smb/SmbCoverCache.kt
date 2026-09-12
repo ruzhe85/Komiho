@@ -114,7 +114,7 @@ object SmbCoverCache {
             val firstName = runCatching {
                 h.useEntries { seq ->
                     pickCoverFirstImage(
-                        seq.filter { it.isFile && ImageUtil.isImage(it.name) }.map { it.name },
+                        seq.filter { it.isFile && ImageUtil.isImage(it.name) }.map { it.name }.toList(),
                     )
                 }
             }.getOrNull() ?: return

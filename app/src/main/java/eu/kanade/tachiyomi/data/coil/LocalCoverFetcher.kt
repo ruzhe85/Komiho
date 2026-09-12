@@ -117,7 +117,7 @@ class LocalCoverFetcher(
             Archive.isSupported(file) -> file.archiveReader(context).use { reader ->
                 val name = reader.useEntries { seq ->
                     pickCoverFirstImage(
-                        seq.filter { it.isFile && ImageUtil.isImage(it.name) }.map { it.name },
+                        seq.filter { it.isFile && ImageUtil.isImage(it.name) }.map { it.name }.toList(),
                     )
                 }
                 if (name == null) {
