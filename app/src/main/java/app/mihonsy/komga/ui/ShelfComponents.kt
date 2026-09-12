@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
@@ -176,6 +177,8 @@ fun BookShelf(
     showDownload: Boolean = false,
     downloadState: (String) -> DownloadUiState = { DownloadUiState.NONE },
     onDownloadClick: (String) -> Unit = {},
+    // 可选头部（如系列详情的简介区）：手机端作为列表首个 item 随书籍一起滚动。
+    header: @Composable (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -278,6 +281,7 @@ fun BookShelf(
                     .fillMaxSize()
                     .then(if (inSelection) Modifier.weight(1f) else Modifier)
             ) {
+                if (header != null) item { header() }
                 items(books, key = { it.id }) { b ->
                     BookShelfListRow(
                         client = client,
@@ -314,6 +318,7 @@ fun BookShelf(
                     .fillMaxSize()
                     .then(if (inSelection) Modifier.weight(1f) else Modifier)
             ) {
+                if (header != null) item(span = { GridItemSpan(maxLineSpan) }) { header() }
                 gridItems(books, key = { it.id }) { b ->
                     BookShelfCard(
                         client = client,
