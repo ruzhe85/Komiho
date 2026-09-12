@@ -4214,9 +4214,9 @@ internal fun launchManageAllFilesAccess(context: android.content.Context) {
 // —— 注意备份入口必须挂在本文件的设置页，Mihon 遗留的 SettingsMainScreen 在 Komiho 中不可达。
 @Composable
 private fun KomgaBackupSettings(modifier: Modifier = Modifier) {
-    val groups = SettingsKomihoBackupScreen.getPreferences()
+    val items = SettingsKomihoBackupScreen.getPreferences()
     LazyColumn(modifier = modifier.fillMaxSize()) {
-        groups.forEach { pref ->
+        items.forEach { pref ->
             when (pref) {
                 is Preference.PreferenceGroup -> {
                     if (pref.title.isNotBlank()) {
@@ -4232,6 +4232,18 @@ private fun KomgaBackupSettings(modifier: Modifier = Modifier) {
                                 onPreferenceClick = item.onClick,
                             )
                         }
+                    }
+                }
+                // 不用分组时条目直接平铺在顶层（见 SettingsKomihoBackupScreen.getPreferences）。
+                is Preference.PreferenceItem.TextPreference -> {
+                    item {
+                        TextPreferenceWidget(
+                            title = pref.title,
+                            subtitle = pref.subtitle,
+                            icon = pref.icon,
+                            widget = pref.widget,
+                            onPreferenceClick = pref.onClick,
+                        )
                     }
                 }
                 else -> Unit

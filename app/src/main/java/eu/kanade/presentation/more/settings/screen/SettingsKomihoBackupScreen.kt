@@ -140,17 +140,15 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             )
         }
 
-        return Preference.PreferenceGroup(
-            title = "Komiho 备份与恢复",
-            preferenceItems = listOf(
-                Preference.PreferenceItem.TextPreference(
-                    title = "导出备份",
-                    onClick = { showExportPwd = true },
-                ),
-                Preference.PreferenceItem.TextPreference(
-                    title = "导入备份",
-                    onClick = { importLauncher.launch("*/*") },
-                ),
+        // 不用分组：直接平铺「导出 / 导入」两条，省掉多余的分组标题行。
+        return listOf(
+            Preference.PreferenceItem.TextPreference(
+                title = "导出备份",
+                onClick = { showExportPwd = true },
+            ),
+            Preference.PreferenceItem.TextPreference(
+                title = "导入备份",
+                onClick = { importLauncher.launch("*/*") },
             ),
         )
     }
