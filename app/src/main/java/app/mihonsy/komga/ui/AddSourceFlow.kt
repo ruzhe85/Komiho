@@ -93,6 +93,10 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
+import androidx.compose.material3.Slider
+import app.mihonsy.komga.data.DashboardPreferences
+import kotlin.math.roundToInt
+import androidx.compose.runtime.mutableFloatStateOf
 import app.mihonsy.komga.data.SourceVisibilityStore
 // SY --> Komiho Phase7: SMB 表单接入。
 import app.mihonsy.komga.data.smb.SmbBrowse
@@ -549,6 +553,59 @@ private fun VisibilityToggle(visible: Boolean, onToggle: () -> Unit) {
     }
 }
 
+/** SY: 聚合页「最近显示」滑块弹窗（来源管理眼睛点击触发）。
+ *  0 = 不显示该来源卡片（闭眼），1..7 = 显示 N 条最近阅读（睁眼）。
+ *  确认时写 per-source 条数 + 同步可见性（与聚合页 visibleOnDashboard 同一存储）。 */
+@Composable
+private fun RecentLimitSliderDialog(
+    sourceName: String,
+    initial: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit,
+) {
+    var value by remember { mutableFloatStateOf(initial.toFloat()) }
+    val selected = value.roundToInt()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(composeStringResource(R.string.settings_dashboard_recent)) },
+        text = {
+            Column {
+                Text(
+                    text = "$sourceName · " + if (selected == 0) {
+                        composeStringResource(R.string.dashboard_recent_hidden)
+                    } else {
+                        composeStringResource(R.string.settings_dashboard_recent_summary, selected)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Slider(
+                    value = value,
+                    onValueChange = { value = it },
+                    valueRange = 0f..DashboardPreferences.RECENT_MAX.toFloat(),
+                    steps = DashboardPreferences.RECENT_MAX - 1,
+                )
+                Text(
+                    text = "0 = " + composeStringResource(R.string.dashboard_recent_hidden) +
+                        "，1..${DashboardPreferences.RECENT_MAX} = " +
+                        composeStringResource(R.string.settings_dashboard_recent),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(selected) }) {
+                Text(composeStringResource(R.string.dashboard_recent_done))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(composeStringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
 /**
  * 「添加」区单个等宽卡片：描边圆图标 + 名称，整卡可点（热区 ≥48dp）。
  * 方案 D——由 Row 用 weight(1f) 等分，配合 spacedBy(8dp)，保证四边对齐；
@@ -681,10 +738,22 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
         // Spacer 占位，保证各行图标横向右对齐——修掉原先「动作数不同导致图标漂移、错乱」。
         // 所有来源都有显隐开关：本地用内置来源 id，Komga / WebDAV / SMB 用连接级 id
         // （即条目 id），因此这里恒有值，无需占位分支。
+        // SY: 眼睛点击改为弹「聚合页最近显示」滑块弹窗（0 = 隐藏 = 闭眼，1..7 = 条数）；
+        // 眼睛开合状态跟随弹窗确认结果，行 UI 其余部分不变。
         var visible by remember(visId) { mutableStateOf(SourceVisibilityStore.isVisible(visId)) }
-        VisibilityToggle(visible) {
-            visible = !visible
-            SourceVisibilityStore.setVisible(visId, visible)
+        var showRecentSlider by remember(visId) { mutableStateOf(false) }
+        VisibilityToggle(visible) { showRecentSlider = true }
+        if (showRecentSlider) {
+            RecentLimitSliderDialog(
+                sourceName = entry.name,
+                initial = DashboardPreferences.limitFor(visId),
+                onDismiss = { showRecentSlider = false },
+            ) { value ->
+                DashboardPreferences.setLimitFor(visId, value)
+                SourceVisibilityStore.setVisible(visId, value > 0)
+                visible = value > 0
+                showRecentSlider = false
+            }
         }
         if (connId != null) {
             IconButton(onClick = { onOpen(connId) }, modifier = Modifier.size(32.dp)) {
