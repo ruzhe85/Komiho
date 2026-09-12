@@ -6569,7 +6569,8 @@ private fun SmbGridItem(
     onClick: () -> Unit,
 ) {
     // 未开封面：整体交给共用骨架 [FileGridCell]（自带点击/内边距，clickable=false 避免双重点击）。
-    if (!showCover || entry.isDir) {
+    // SY: 目录也走封面分支（对齐列表行 SmbCoverThumb：散图优先/无散图回落归档首图，失败回落图标）。
+    if (!showCover) {
         FileGridCell(
             name = entry.name,
             icon = fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),

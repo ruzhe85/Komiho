@@ -67,10 +67,13 @@
         <package android:name="com.google.android.youtube.tv" />
     </queries>
 
+    <!-- SY: 关闭 predictive back（enableOnBackInvokedCallback=false）—— 系统跨 Activity 预览动画
+         会覆盖主题的 windowAnimationStyle，导致返回二级页时仍走左右平移而非 fade。
+         代码无 OnBackInvokedCallback 依赖，关闭安全。 -->
     <application
         android:name=".App"
         android:allowBackup="false"
-        android:enableOnBackInvokedCallback="true"
+        android:enableOnBackInvokedCallback="false"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
