@@ -258,12 +258,15 @@ import kotlinx.coroutines.withContext
 import uy.kohesive.injekt.api.get
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Backup
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import tachiyomi.domain.release.interactor.GetApplicationRelease
 // SY --> Komiho P0: 本地浏览（文件管理器语义，非 Mihon 图源）
 import eu.kanade.presentation.more.settings.screen.SettingsDataScreen
+import eu.kanade.presentation.more.settings.screen.SettingsKomihoBackupScreen
+import eu.kanade.presentation.more.settings.Preference
 import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.source.local.io.Archive
 import tachiyomi.source.local.io.LocalSourceFileSystem
@@ -3936,6 +3939,7 @@ private fun SettingsTab(
     var showReaderSettings by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var showLocalStorage by remember { mutableStateOf(false) }
+    var showBackup by remember { mutableStateOf(false) }
 
     // SY: 「预览图」设置项改为「清除预览图」整行点击弹确认框（取消上限滑块）。
     // 实时统计 komga_covers 磁盘池占用，作为「已使用：XXMB」小字。
@@ -3956,6 +3960,7 @@ private fun SettingsTab(
         showReaderSettings = false
         showAbout = false
         showLocalStorage = false
+        showBackup = false
         showClearPreview = false
     }
     val settingsRail: (@Composable () -> Unit)? = if (useNavRail) ({
@@ -4001,6 +4006,13 @@ private fun SettingsTab(
             icon = Icons.Outlined.Storage,
             onPreferenceClick = { showLocalStorage = true },
         )
+        // SY --> Komiho：备份与恢复（自写轻量 JSON：来源列表 / 个性化 / 本地历史 / 书签 / 收藏分类）
+        TextPreferenceWidget(
+            title = "备份与还原",
+            icon = Icons.Outlined.Backup,
+            onPreferenceClick = { showBackup = true },
+        )
+        // SY <--
         TextPreferenceWidget(
             title = composeStringResource(R.string.settings_about),
             icon = Icons.Outlined.Info,
@@ -4066,6 +4078,14 @@ private fun SettingsTab(
             onDismiss = { showLocalStorage = false },
             title = composeStringResource(R.string.storage_title),
         ) { padding -> KomgaLocalStorageSettings(Modifier.padding(padding), context) }
+    }
+    if (showBackup) {
+        SettingsCategoryDialog(
+            rail = settingsRail,
+            railOnRight = railOnRight,
+            onDismiss = { showBackup = false },
+            title = "备份与还原",
+        ) { padding -> KomgaBackupSettings(Modifier.padding(padding)) }
     }
     // SY: 「清除预览图」确认对话框（komga_covers 磁盘池）。架构与存储设置的远程/封面缓存一致。
     if (showClearPreview) {
@@ -4188,6 +4208,38 @@ internal fun launchManageAllFilesAccess(context: android.content.Context) {
         }
     }
 }
+
+// SY --> Komiho：备份与恢复子页。导出/导入/密码对话框的逻辑都在
+// SettingsKomihoBackupScreen.getPreferences() 里，这里只按 Komga 设置子页的风格渲染
+// —— 注意备份入口必须挂在本文件的设置页，Mihon 遗留的 SettingsMainScreen 在 Komiho 中不可达。
+@Composable
+private fun KomgaBackupSettings(modifier: Modifier = Modifier) {
+    val groups = SettingsKomihoBackupScreen.getPreferences()
+    LazyColumn(modifier = modifier.fillMaxSize()) {
+        groups.forEach { pref ->
+            when (pref) {
+                is Preference.PreferenceGroup -> {
+                    if (pref.title.isNotBlank()) {
+                        item(key = pref.title) { PreferenceGroupHeader(pref.title) }
+                    }
+                    items(pref.preferenceItems) { item ->
+                        if (item is Preference.PreferenceItem.TextPreference) {
+                            TextPreferenceWidget(
+                                title = item.title,
+                                subtitle = item.subtitle,
+                                icon = item.icon,
+                                widget = item.widget,
+                                onPreferenceClick = item.onClick,
+                            )
+                        }
+                    }
+                }
+                else -> Unit
+            }
+        }
+    }
+}
+// SY <--
 
 /** 存储设置：所有文件访问权限（MANAGE_EXTERNAL_STORAGE）授权入口。
  *  仅此页是 Komga 用户可达的授权入口（Mihon 的"数据存储"页在 Komga 模式下不暴露）。
