@@ -163,7 +163,7 @@
     <string name="about_check_update">檢查更新</string>
     <string name="about_up_to_date">已是最新版本</string>
     <string name="about_os_too_old">目前系統版本過低，無法接收更新</string>
-    <string name="about_description">純 Komga 漫畫閱讀客戶端</string>
+    <string name="about_description">支援 Komga、本機、WebDAV、SMB 的漫畫閱讀器</string>
     <string name="about_copyright_body">Komiho © 2026 Ruzhe · 基於 Mihon 開發，以 Apache-2.0 授權</string>
 
     <!-- 設定：書庫（原「主頁設定」） -->
