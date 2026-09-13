@@ -7,7 +7,7 @@
 **A full-featured Android manga reader**
 Supports **Komga, local files, WebDAV, SMB** and more comic sources
 
-Package `cn.ruzhe.komiho` ｜ Version 1.0.6 (7) ｜ Android 8.0+
+Package `cn.ruzhe.komiho` ｜ Version 1.1.0 (8) ｜ Android 8.0+
 
 [English](./README.en.md) | [中文](./README.md)
 
