@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
@@ -68,6 +69,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Book
@@ -170,6 +172,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -232,6 +235,7 @@ import app.mihonsy.komga.data.model.AuthorDto
 import cafe.adriel.voyager.navigator.Navigator
 import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
 import eu.kanade.tachiyomi.R
+import eu.kanade.presentation.more.settings.screen.about.WhatsNewDialog
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PreferenceGroupHeader
@@ -1383,6 +1387,22 @@ private fun KomgaMainScreen(
     // 选库已改为顶栏下方的库标签条（见 LibraryTabsRow），
     // 不再使用 AlertDialog，返回键也不再被困在「选库」态。
 
+    // SY --> Komiho: 升级后首次进入自动弹一次更新日志（对齐 Mihon / MihonSY 行为）。
+    // Komiho 的启动页是 KomgaLauncherActivity → KomgaMainActivity，走不到 Mihon
+    // MainActivity 里那套 didMigration 判断，故在此按 versionCode 自行补上。
+    // 全新安装（seen == 0）只记录不弹，避免新用户一进来就被更新日志挡住。
+    var showChangelogDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val seen = prefs.lastSeenVersionCode
+        if (seen != BuildConfig.VERSION_CODE) {
+            prefs.lastSeenVersionCode = BuildConfig.VERSION_CODE
+            if (seen != 0) showChangelogDialog = true
+        }
+    }
+    if (showChangelogDialog) {
+        WhatsNewDialog(onDismissRequest = { showChangelogDialog = false })
+    }
+    // SY <--
 }
 
 // ---------- Home tab ----------
@@ -4575,81 +4595,147 @@ private fun hostOf(url: String): String {
 private fun KomgaAbout(modifier: Modifier, context: android.content.Context) {
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
-    val versionText = composeStringResource(R.string.about_version, BuildConfig.VERSION_NAME)
+    var showChangelog by remember { mutableStateOf(false) }
+
+    // SY --> Komiho: 用真实 APP 启动图标。不能用 painterResource(R.mipmap.ic_launcher)——
+    // API 26+ 会解析到 mipmap-anydpi-v26 的自适应图标 XML（AdaptiveIconDrawable），
+    // Compose painterResource 只支持 VectorDrawable/位图，直接抛 IllegalArgumentException
+    // （与 OnboardingActivity 同口径，那里已踩过 3483ad2）。改为运行时取 PackageManager
+    // 的启动图标，非位图离屏绘制成 Bitmap 再显示，任何 ROM 都稳。
+    val appIcon = remember {
+        val drawable = context.packageManager.getApplicationIcon(context.packageName)
+        if (drawable is android.graphics.drawable.BitmapDrawable) {
+            drawable.bitmap
+        } else {
+            val size = maxOf(drawable.intrinsicWidth, drawable.intrinsicHeight).takeIf { it > 0 } ?: 192
+            val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+            drawable.setBounds(0, 0, size, size)
+            drawable.draw(android.graphics.Canvas(bmp))
+            bmp
+        }
+    }
+    // SY <--
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
     ) {
-        Text("Komiho", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "$versionText · build ${BuildConfig.VERSION_CODE}",
-            style = MaterialTheme.typography.bodyMedium,
+        // ── 品牌区：应用图标 + 名称 + 版本 + 一句描述（居中）──
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Image(
+                bitmap = appIcon.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(56.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(text = "Komiho", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = composeStringResource(
+                    R.string.about_version,
+                    "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = composeStringResource(R.string.about_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // ── 操作项：与设置页其它条目同构的列表行（不再是整宽按钮）──
+        AboutActionRow(
+            title = composeStringResource(R.string.about_changelog),
+            onClick = { showChangelog = true },
         )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = composeStringResource(R.string.about_description),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        AboutActionRow(
+            title = composeStringResource(R.string.about_check_update),
+            enabled = !checking,
+            onClick = {
+                checking = true
+                scope.launch { checkForKomihoUpdate(context) { checking = false } }
+            },
+            trailing = {
+                if (checking) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
+            },
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        AboutActionRow(
+            title = composeStringResource(R.string.about_source_code),
+            onClick = { context.openInBrowser("https://github.com/ruzhe85/Komiho") },
+            trailing = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+            },
         )
 
         Spacer(Modifier.height(24.dp))
-        Button(
-            onClick = {
-                checking = true
-                scope.launch {
-                    checkForKomihoUpdate(context) { checking = false }
-                }
-            },
-            enabled = !checking,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (checking) {
-                CircularProgressIndicator(Modifier.size(20.dp))
-            } else {
-                Text(composeStringResource(R.string.about_check_update))
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        OutlinedButton(
-            onClick = { context.openInBrowser("https://github.com/ruzhe85/Komiho") },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(composeStringResource(R.string.about_open_source))
-        }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = { context.openInBrowser("https://www.apache.org/licenses/LICENSE-2.0") },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(composeStringResource(R.string.about_license))
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-
-        Text(
-            text = composeStringResource(R.string.about_copyright_title),
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(Modifier.height(8.dp))
         Text(
             text = composeStringResource(R.string.about_copyright_body),
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = composeStringResource(R.string.about_based_on),
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(8.dp))
+    }
+
+    if (showChangelog) {
+        WhatsNewDialog(onDismissRequest = { showChangelog = false })
+    }
+}
+
+/**
+ * 「关于」页的一行操作项：标题在左，尾部指示（箭头 / 图标 / 进度圈）在右。
+ * 与设置页其它列表条目视觉同构，替代此前的整宽 OutlinedButton。
+ * 未提供 [trailing] 时默认给一个右箭头。
+ */
+@Composable
+private fun AboutActionRow(
+    title: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(
-            text = composeStringResource(R.string.about_third_party),
+            text = title,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
         )
+        if (trailing != null) {
+            trailing()
+        } else {
+            Icon(
+                imageVector = Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 

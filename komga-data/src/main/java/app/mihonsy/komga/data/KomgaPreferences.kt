@@ -94,6 +94,14 @@ class KomgaPreferences(context: Context) {
         get() = prefs.getString(KEY_LAST_LIBRARY_ID, "").orEmpty()
         set(v) = prefs.edit().putString(KEY_LAST_LIBRARY_ID, v).apply()
 
+    /**
+     * 版本记忆：上次启动时记录的 versionCode，用于「升级后首次进入自动弹一次更新日志」。
+     * 0 = 尚未记录（全新安装）——此时只记录、不弹，避免新用户一进来就被更新日志挡住。
+     */
+    var lastSeenVersionCode: Int
+        get() = prefs.getInt(KEY_LAST_SEEN_VERSION_CODE, 0)
+        set(v) = prefs.edit().putInt(KEY_LAST_SEEN_VERSION_CODE, v).apply()
+
     /** Home tab: how many series/books each section shows. Default 10, max 50. */
     var homeSectionLimit: Int
         get() = prefs.getInt(KEY_HOME_SECTION_LIMIT, 10).coerceIn(1, 50)
@@ -320,6 +328,8 @@ class KomgaPreferences(context: Context) {
         /** 导航栏位置（大屏 rail）：BOTTOM / LEFT / RIGHT。 */
         const val KEY_NAV_BAR_POSITION = "nav_bar_position"
         const val KEY_LAST_LIBRARY_ID = "last_library_id"
+        /** 上次启动看到的 versionCode（升级后弹一次更新日志用）。 */
+        const val KEY_LAST_SEEN_VERSION_CODE = "last_seen_version_code"
         const val KEY_LIBRARY_PORTRAIT_COLUMNS = "library_portrait_columns"
         const val KEY_LIBRARY_LANDSCAPE_COLUMNS = "library_landscape_columns"
         const val KEY_HOME_SECTION_LIMIT = "home_section_limit"
