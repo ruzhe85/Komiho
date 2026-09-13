@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  English changelog — picked up automatically when the app / system language is English
+  (resource qualifier raw-en, resolved through KomgaBaseActivity#withAppLanguage).
+  The simplified-Chinese default lives in res/raw/changelog_release.xml.
+  Keep both files in sync when adding a release.
+-->
+<changelog bulletedList="true">
+    <changelogversion versionName="1.1.0" changeDate="September 12, 2026">
+        <changelogtext>[b]Komiho 1.1.0 (8)[/b]</changelogtext>
+        <changelogtext>[b]New[/b] Local file browsing</changelogtext>
+        <changelogtext>[b]New[/b] WebDAV share browsing</changelogtext>
+        <changelogtext>[b]New[/b] SMB/CIFS share browsing</changelogtext>
+        <changelogtext>[b]New[/b] Local bookmarks and history</changelogtext>
+        <changelogtext>[b]New[/b] Source management — one place to manage every source</changelogtext>
+        <changelogtext>[b]New[/b] Recents, now the default start page</changelogtext>
+        <changelogtext>[b]Improved[/b] Komga UI redone — much nicer to use now</changelogtext>
+        <changelogtext>[b]Improved[/b] Manga reader performance improvements</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="1.0.6" changeDate="August 26, 2026">
+        <changelogtext>[b]Komiho 1.0.6 (7)[/b]</changelogtext>
+        <changelogtext>[b]New[/b] Multiple Komga servers: add several, switch the active one from Settings, edit or delete each entry</changelogtext>
+        <changelogtext>[b]New[/b] Settings → About page: version, check for updates (repo ruzhe85/Komiho), GitHub source link</changelogtext>
+        <changelogtext>[b]Improved[/b] Search and filter: filter by tag or author; search spans all libraries on Home and the current library inside one; results reuse the library display mode</changelogtext>
+        <changelogtext>[b]Fixed[/b] Tapping "Reconfigure connection" no longer jumps back to Home; "Clear connection" clears only connection data and no longer wipes display / theme / language preferences</changelogtext>
+        <changelogtext>[b]Fixed[/b] Reader and detail pages no longer wrongly show "Open in WebView / Open in browser / Share" (Komga uses an internal scheme and is now excluded); the same option is hidden in Settings → bottom buttons</changelogtext>
+        <changelogtext>[b]Note[/b] Legacy single-connection configs are migrated automatically on first launch — nothing is lost</changelogtext>
+    </changelogversion>
+</changelog>
