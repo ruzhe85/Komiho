@@ -288,7 +288,8 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                             Modifier
                                 .weight(0.38f)
                                 .fillMaxHeight()
-                                .verticalScroll(rememberScrollState()),
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp),
                         ) {
                             SeriesDetailHeader(
                                 client = client,
@@ -308,7 +309,6 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                     Text(
                                         text = "书籍（${books.size}）",
                                         style = MaterialTheme.typography.titleMedium,
-                                        modifier = Modifier.padding(horizontal = 12.dp),
                                     )
                                     Spacer(Modifier.height(4.dp))
                                 }
@@ -343,7 +343,6 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                     Text(
                                         text = "书籍（${books.size}）",
                                         style = MaterialTheme.typography.titleMedium,
-                                        modifier = Modifier.padding(horizontal = 12.dp),
                                     )
                                 }
                             },
@@ -435,7 +434,7 @@ private fun SeriesHeader(
         books.firstOrNull()?.metadata?.authors.orEmpty()
     }
 
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth()) {
             KomgaCover(
                 client = client,
