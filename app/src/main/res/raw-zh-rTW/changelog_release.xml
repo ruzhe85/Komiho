@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  繁體中文更新日誌 —— App / 系統語言為 zh-TW 時自動命中（資源限定目錄 raw-zh-rTW）。
+  預設（簡中）在 res/raw/changelog_release.xml，英文在 res/raw-en/changelog_release.xml。
+  新增版本時三份都要同步。
+-->
+<changelog bulletedList="true">
+    <changelogversion versionName="1.1.0" changeDate="September 12, 2026">
+        <changelogtext>[b]Komiho 1.1.0 (8)[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 本機檔案瀏覽</changelogtext>
+        <changelogtext>[b]新增[/b] WEBDAV 共享瀏覽</changelogtext>
+        <changelogtext>[b]新增[/b] SMB/CIFS 共享瀏覽</changelogtext>
+        <changelogtext>[b]新增[/b] 本機書籤與歷史</changelogtext>
+        <changelogtext>[b]新增[/b] 來源管理，多來源統一管理入口</changelogtext>
+        <changelogtext>[b]新增[/b] 最近，作為初始啟動頁</changelogtext>
+        <changelogtext>[b]優化[/b] Komga UI 重做，現在更適合使用了</changelogtext>
+        <changelogtext>[b]優化[/b] 漫畫閱讀器效能最佳化</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="1.0.6" changeDate="August 26, 2026">
+        <changelogtext>[b]Komiho 1.0.6 (7)[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 多 Komga 伺服器：可新增多個伺服器，設定內一鍵切換啟用，每筆可編輯／刪除</changelogtext>
+        <changelogtext>[b]新增[/b] 設定－關於 頁：顯示版本號、檢查更新（目標倉庫 ruzhe85/Komiho）、GitHub 原始碼連結</changelogtext>
+        <changelogtext>[b]優化[/b] 搜尋篩選：依標籤／作者過濾，首頁搜尋範圍為所有書庫、書庫內為目前書庫；搜尋結果沿用書庫顯示模式</changelogtext>
+        <changelogtext>[b]修復[/b] 「重新設定連線」點擊誤重回首頁；「清除連線」僅清除連線資料，不再誤清顯示／主題／語言偏好</changelogtext>
+        <changelogtext>[b]修復[/b] 閱讀器／詳情頁誤顯示「在 WebView 開啟／在瀏覽器開啟／分享」（Komga 為內部 scheme，已對 Komga 隱藏），設定－底部按鈕同步隱藏</changelogtext>
+        <changelogtext>[b]說明[/b] 舊版單連線設定首次啟動自動移轉，原設定不會遺失</changelogtext>
+    </changelogversion>
+</changelog>
