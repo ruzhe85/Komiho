@@ -4,7 +4,8 @@
 
 ![Komiho](.github/readme-images/app-icon.png)
 
-**A full-featured Android manga reader**
+**A native Android manga reader**
+
 Supports **Komga, local files, WebDAV, SMB** and more comic sources
 
 Package `cn.ruzhe.komiho` ｜ Version 1.1.0 (8) ｜ Android 8.0+
