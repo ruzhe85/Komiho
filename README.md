@@ -4,8 +4,10 @@
 
 ![Komiho](.github/readme-images/app-icon.png)
 
-**功能完整的 Android 漫画阅读器**
+**原生 Android 漫画阅读器**
+
 支持 **Komga、本地文件、WebDAV、SMB** 等多种漫画来源
+
 包名 `cn.ruzhe.komiho` ｜ 版本 1.0.6 (7) ｜ Android 8.0+
 
 [中文](./README.md) | [English](./README.en.md)
