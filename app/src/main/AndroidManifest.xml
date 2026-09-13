@@ -45,7 +45,7 @@
     <!-- Komiho: 移除第三方 AAR 合并进来的死权限——
          CAMERA 来自 zxing-android-embedded（仅用其 Intents 常量类，无扫码功能）；
          SYSTEM_ALERT_WINDOW 来自 Shizuku api（无悬浮窗代码）；
-         QUERY_ALL_PACKAGES 为扩展扫描遗留（扩展组已隐藏，纯 Komga 客户端不保留）。 -->
+         QUERY_ALL_PACKAGES 为扩展扫描遗留（扩展组已隐藏——Komiho 已移除 source/扩展体系，不保留）。 -->
     <uses-permission
         android:name="android.permission.CAMERA"
         tools:node="remove" />

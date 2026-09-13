@@ -165,7 +165,7 @@
     <string name="about_check_update">Check for updates</string>
     <string name="about_up_to_date">You are on the latest version</string>
     <string name="about_os_too_old">Your Android version is too old for updates</string>
-    <string name="about_description">A Komga-only comic reader</string>
+    <string name="about_description">Comic reader for Komga, local files, WebDAV and SMB</string>
     <string name="about_copyright_body">Komiho © 2026 Ruzhe · Built on Mihon · Apache-2.0</string>
 
     <!-- Settings: library (was "home settings") -->
