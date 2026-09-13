@@ -120,10 +120,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.rememberDrawerState
 import eu.kanade.presentation.components.TabbedDialog
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.SliderItem
@@ -247,7 +243,6 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource as composeStringResource
 import androidx.core.os.LocaleListCompat
-import mihon.core.designsystem.utils.isMediumWidthWindow
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -805,21 +800,14 @@ private fun KomgaMainScreen(
     val isLandscape = remember(configuration) {
         configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     }
-    val isMedium = isMediumWidthWindow()
     var portraitColumns by remember { mutableStateOf(prefs.libraryPortraitColumns) }
     var landscapeColumns by remember { mutableStateOf(prefs.libraryLandscapeColumns) }
     val columns = if (isLandscape) landscapeColumns else portraitColumns
 
-    // Library selection — owned at the top level. The Library tab uses a
-    // drawer/rail (LibraryDrawerHost) listing all libraries; picking one
-    // switches the active library in place (no dialog, no extra screen).
+    // Library selection — owned at the top level. 切库改由顶栏下方的横向标签条
+    // (LibraryTabsRow) 承担：点标签即切换，选择写回 prefs 以记住最后访问的库。
     var libraries by remember { mutableStateOf<List<LibraryDto>>(emptyList()) }
     var selectedLibraryId by remember { mutableStateOf<String?>(null) }
-    // SY: 每库合计书籍数（Komiho 口径 Series=书；size=1 只取 totalElements）。
-    var libraryCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
-    // 库切换控件（方案 B）：手机 = 临时 modal 抽屉；平板 = 可收起常驻侧栏。
-    var libraryDrawerOpen by rememberSaveable { mutableStateOf(false) }
-    var libraryRailOpen by rememberSaveable { mutableStateOf(true) }
 
     // Komga 现为可选来源（未添加不显示）：不再强制跳转连接页，未连接时停在本地浏览；
     // 添加完 Komga 连接返回（komgaConnected 翻转）后补拉一次库列表。
@@ -841,17 +829,6 @@ private fun KomgaMainScreen(
                         ?.takeIf { id -> libs.any { lib -> lib.id == id } }
                         ?: remembered
                         ?: libs.firstOrNull()?.id
-                    // SY: 并发拉每库系列数（size=1 只为 totalElements），失败留空不阻塞库列表。
-                    libraryCounts = coroutineScope {
-                        libs.map { lib ->
-                            async {
-                                runCatching { client.getSeries(libraryId = lib.id, size = 1) }
-                                    .getOrNull()?.totalElements
-                            }
-                        }.awaitAll()
-                            .mapIndexed { i, count -> libs[i].id to (count?.toInt() ?: 0) }
-                            .toMap()
-                    }
                 }
         }
     }
@@ -883,7 +860,7 @@ private fun KomgaMainScreen(
     // 避免退出程序。但当本实例是被 Series 详情页调起（点 tag/作者 → 过滤库）时，
     // 它不是 task 根——Series 页在它下面，此时绝不能拦截本地 UI 态以外的返回，
     // 只拦截搜索框/菜单等本地 UI 态，其余交还系统 → 返回手势回 Series 页。
-    // 选库现已改为抽屉/侧栏（LibraryDrawerHost），不再有「选库对话框」态，
+    // 选库现为顶栏下方的库标签条（LibraryTabsRow），不再有「选库对话框/抽屉」态，
     // 因此 Library tab 上按返回直接回 Home（与 Lists/Downloads 一致）。
     // 优先级（仅根实例）：搜索框/菜单打开→关闭；非 Home tab→回 Home；
     // Home 根→交还系统默认（退出程序）。
@@ -923,18 +900,10 @@ private fun KomgaMainScreen(
     // SY: 来源管理全屏流程（AddSourceFlow 在 Scaffold 内容区内铺满）也显示 rail——
     // 它与各 tab 同窗口渲染，rail 列天然并存；此前显式排除导致来源管理无 rail。
     val useNavRail = navBarPosition != "BOTTOM"
-    /** 底部栏与 rail 共用的 tab 点击逻辑：重复点库 tab = 开/关抽屉（手机）或侧栏（平板）。 */
+    /** 底部栏与 rail 共用的 tab 点击逻辑：重复点当前 tab = 刷新（选库已改标签条，无需再开抽屉）。 */
     fun onNavTabClick(tab: MainTab) {
         if (currentTab == tab.ordinal) {
-            if (tab == MainTab.Library) {
-                if (isMedium) {
-                    libraryRailOpen = !libraryRailOpen
-                } else {
-                    libraryDrawerOpen = !libraryDrawerOpen
-                }
-            } else {
-                refreshSignal.update { it + 1 }
-            }
+            refreshSignal.update { it + 1 }
         } else {
             currentTab = tab.ordinal
         }
@@ -977,22 +946,8 @@ private fun KomgaMainScreen(
             TopAppBar(
                 title = {
                     when {
-                        // Komga 来源 + Library tab：标题行 = 平板 ☰ 开合侧栏 / 手机点按开抽屉。
-                        currentTabEnum == MainTab.Library && !currentIsFileSource -> {
-                            val currentLibName = libraries.firstOrNull { it.id == selectedLibraryId }?.name
-                            if (isMedium) {
-                                LibraryRailTitle(
-                                    currentName = currentLibName,
-                                    railOpen = libraryRailOpen,
-                                    onToggleRail = { libraryRailOpen = !libraryRailOpen },
-                                )
-                            } else {
-                                LibraryDrawerTrigger(
-                                    currentName = currentLibName,
-                                    onClick = { libraryDrawerOpen = true },
-                                )
-                            }
-                        }
+                        // Library tab：标题位只当页面名（库名不再占标题位），切库交给
+                        // 标题行下方的横向标签条（LibraryTabsRow），手机/平板一致。
                         // 设置页与来源无关，显示页名。
                         currentTabEnum == MainTab.Settings -> Text(MainTab.entries[currentTab].labelText())
                         // 来源切换（含「来源管理」入口）：Komga 首页 = Home tab，
@@ -1205,49 +1160,45 @@ private fun KomgaMainScreen(
                     ) { seriesId ->
                         context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                     }
-                    MainTab.Library -> {
-                        val currentLibName = libraries.firstOrNull { it.id == selectedLibraryId }?.name
-                        LibraryDrawerHost(
-                            isMedium = isMedium,
-                            drawerOpen = libraryDrawerOpen,
-                            onDrawerOpenChange = { libraryDrawerOpen = it },
-                            railOpen = libraryRailOpen,
-                            libraries = libraries,
-                            libraryCounts = libraryCounts,
-                            selectedLibraryId = selectedLibraryId,
-                            currentName = currentLibName,
-                            onSelect = { id ->
-                                selectedLibraryId = id
-                                // SY: 记住本次选择，下次进入 Library 直接落在这个库。
-                                prefs.lastLibraryId = id
-                                libraryDrawerOpen = false
-                            },
-                        ) {
-                            LibraryTab(
-                                client = client,
+                    MainTab.Library -> Column(Modifier.fillMaxSize()) {
+                        // 跨库筛选（点 tag/作者/类型进入）时结果不含 library_id，
+                        // 此时不显示库标签条，避免「选了库却无效」的误解。
+                        if (libraryFilterType.isNullOrBlank()) {
+                            LibraryTabsRow(
+                                libraries = libraries,
                                 selectedLibraryId = selectedLibraryId,
-                                displayMode = displayMode,
-                                columns = columns,
-                                refreshTick = refreshTick,
-                                sort = librarySortMode,
-                                onSortModeChange = { librarySortMode = it },
-                                readFilter = libraryReadFilter,
-                                onReadFilterChange = { libraryReadFilter = it },
-                                filterType = libraryFilterType,
-                                filterValue = libraryFilterValue,
-                                onFilterClear = {
-                                    // 根实例（正常库页）：清除筛选、停留库页。
-                                    // 非根实例（被 Series 详情页调起的过滤层）：✕ 等同关闭该层，回到系列页。
-                                    val act = context as? android.app.Activity
-                                    if (act != null && !act.isTaskRoot) {
-                                        act.finish()
-                                    } else {
-                                        filterSignal.value = null
-                                    }
+                                onSelect = { id ->
+                                    selectedLibraryId = id
+                                    // SY: 记住本次选择，下次进入 Library 直接落在这个库。
+                                    prefs.lastLibraryId = id
                                 },
-                            ) { seriesId ->
-                                context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
-                            }
+                            )
+                        }
+                        LibraryTab(
+                            modifier = Modifier.weight(1f),
+                            client = client,
+                            selectedLibraryId = selectedLibraryId,
+                            displayMode = displayMode,
+                            columns = columns,
+                            refreshTick = refreshTick,
+                            sort = librarySortMode,
+                            onSortModeChange = { librarySortMode = it },
+                            readFilter = libraryReadFilter,
+                            onReadFilterChange = { libraryReadFilter = it },
+                            filterType = libraryFilterType,
+                            filterValue = libraryFilterValue,
+                            onFilterClear = {
+                                // 根实例（正常库页）：清除筛选、停留库页。
+                                // 非根实例（被 Series 详情页调起的过滤层）：✕ 等同关闭该层，回到系列页。
+                                val act = context as? android.app.Activity
+                                if (act != null && !act.isTaskRoot) {
+                                    act.finish()
+                                } else {
+                                    filterSignal.value = null
+                                }
+                            },
+                        ) { seriesId ->
+                            context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                         }
                     }
                     MainTab.Lists -> ListsTab(
@@ -1429,7 +1380,7 @@ private fun KomgaMainScreen(
         }
     }
 
-    // 选库已改为抽屉/侧栏（见下方 LibraryDrawerHost 组合函数），
+    // 选库已改为顶栏下方的库标签条（见 LibraryTabsRow），
     // 不再使用 AlertDialog，返回键也不再被困在「选库」态。
 
 }
@@ -2308,205 +2259,79 @@ internal fun KomgaNavRail(
     }
 }
 
-// ---------- Library drawer / rail (方案 B) ----------
-// 手机：临时 modal 抽屉；平板（≥600dp）：可收起常驻侧栏。两形态复用同一份库列表内容。
-// 抽屉/侧栏不含搜索（库内已有搜索按钮）。
+// ---------- Library tabs (方案 D) ----------
+// 顶栏只当页面标题（不再把库名塞进标题位 + ▾/☰）；切库改为标题行下方的横向标签条，
+// 手机与平板同一形态（不再有 modal 抽屉 / 常驻侧栏）。
+// 只做「滑标签条」：左右拖是为看到更多标签，点击才切库；不做「滑内容切库」。
 
+/**
+ * 库标签条。单库（或还没拉到库列表）时整体不占位——此时标签条没有意义。
+ * 选中的库由 [KomgaPreferences.lastLibraryId] 记住（调用方负责写回）。
+ */
 @Composable
-private fun LibraryDrawerHost(
-    isMedium: Boolean,
-    drawerOpen: Boolean,
-    onDrawerOpenChange: (Boolean) -> Unit,
-    railOpen: Boolean,
+private fun LibraryTabsRow(
     libraries: List<LibraryDto>,
-    libraryCounts: Map<String, Int>,
-    selectedLibraryId: String?,
-    currentName: String?,
-    onSelect: (String) -> Unit,
-    content: @Composable () -> Unit,
-) {
-    if (isMedium) {
-        // 平板：左侧常驻侧栏，展开/收起由顶栏标题行 ☰ 切换（railOpen）；收起后内容区占满全宽。
-        Row(Modifier.fillMaxSize()) {
-            if (railOpen) {
-                LibraryRail(
-                    libraries = libraries,
-                    libraryCounts = libraryCounts,
-                    selectedLibraryId = selectedLibraryId,
-                    onSelect = onSelect,
-                    modifier = Modifier
-                        .width(220.dp)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
-                )
-            }
-            Box(Modifier.fillMaxSize().weight(1f)) { content() }
-        }
-    } else {
-        // 手机：临时 modal 抽屉，选库或点遮罩/返回后自动关闭。
-        val drawerState = rememberDrawerState(DrawerValue.Closed)
-        // SY: 抽屉开着时返回键 = 关抽屉（注册晚于主屏返回处理器，优先接管，不再回 Home tab）。
-        BackHandler(enabled = drawerOpen) { onDrawerOpenChange(false) }
-        LaunchedEffect(drawerOpen) {
-            if (drawerOpen) drawerState.open() else drawerState.close()
-        }
-        LaunchedEffect(drawerState.currentValue) {
-            if (drawerState.currentValue == DrawerValue.Closed) {
-                onDrawerOpenChange(false)
-            }
-        }
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            gesturesEnabled = true,
-            drawerContent = {
-                ModalDrawerSheet(
-                    // SY: 默认 360dp 在手机上几乎满屏，固定 240dp（再收一档，标准抽屉宽度）。
-                    modifier = Modifier.width(240.dp),
-                    drawerContainerColor = MaterialTheme.colorScheme.surface,
-                ) {
-                    LibraryRail(
-                        libraries = libraries,
-                        libraryCounts = libraryCounts,
-                        selectedLibraryId = selectedLibraryId,
-                        onSelect = onSelect,
-                        modifier = Modifier.fillMaxHeight(),
-                    )
-                }
-            },
-        ) {
-            content()
-        }
-    }
-}
-
-@Composable
-private fun LibraryRail(
-    libraries: List<LibraryDto>,
-    libraryCounts: Map<String, Int>,
     selectedLibraryId: String?,
     onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    // SY: 无头行——展开/收起由顶栏标题行 ☰ 承担，列表直接顶格。
-    Column(modifier = modifier) {
-        if (libraries.isEmpty()) {
-            Box(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text(
-                    text = composeStringResource(R.string.no_libraries),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(vertical = 8.dp, horizontal = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                items(libraries, key = { it.id }) { lib ->
-                    LibraryRailItem(
-                        lib = lib,
-                        count = libraryCounts[lib.id],
-                        selected = lib.id == selectedLibraryId,
-                        onClick = { onSelect(lib.id) },
-                    )
-                }
-            }
-        }
-    }
-}
+    if (libraries.size <= 1) return
 
-@Composable
-private fun LibraryRailItem(
-    lib: LibraryDto,
-    count: Int?,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        onClick = onClick,
-        color = if (selected) colors.primaryContainer else Color.Transparent,
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+    val listState = rememberLazyListState()
+    // 选中项自动滚进视野：库多时切库、或恢复「最后访问的库」都能看到当前标签。
+    LaunchedEffect(selectedLibraryId, libraries.size) {
+        val index = libraries.indexOfFirst { it.id == selectedLibraryId }
+        if (index >= 0) listState.animateScrollToItem(index)
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        LazyRow(
+            state = listState,
+            contentPadding = PaddingValues(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = lib.name,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (selected) colors.onPrimaryContainer else colors.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            // SY: 库内合计书籍数（Series 口径）；未拉到不显示占位。
-            if (count != null) {
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = count.toString(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (selected) colors.onPrimaryContainer.copy(alpha = 0.7f)
-                    else colors.onSurfaceVariant,
-                )
+            items(libraries, key = { it.id }) { lib ->
+                val selected = lib.id == selectedLibraryId
+                Column(
+                    modifier = Modifier
+                        .clickable { onSelect(lib.id) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = lib.name,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    // 下划线指示器：只有选中项显示；未选中用等高 Spacer 占位，保证行高一致。
+                    if (selected) {
+                        Box(
+                            Modifier
+                                .width(24.dp)
+                                .height(2.dp)
+                                .background(MaterialTheme.colorScheme.primary),
+                        )
+                    } else {
+                        Spacer(Modifier.height(2.dp))
+                    }
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun LibraryRailTitle(
-    currentName: String?,
-    railOpen: Boolean,
-    onToggleRail: () -> Unit,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        // SY: ☰ 常驻——展开时点击收起、收起时点击展开（同一按钮）。
-        IconButton(onClick = onToggleRail) {
-            Icon(
-                imageVector = Icons.Filled.Menu,
-                contentDescription = composeStringResource(
-                    if (railOpen) R.string.close_library_drawer else R.string.open_library_drawer,
-                ),
-            )
-        }
-        Text(
-            text = currentName ?: composeStringResource(R.string.select_library),
-            style = MaterialTheme.typography.titleLarge,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun LibraryDrawerTrigger(
-    currentName: String?,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = currentName ?: composeStringResource(R.string.select_library),
-            style = MaterialTheme.typography.titleLarge,
-            maxLines = 1,
-        )
-        Icon(
-            imageVector = Icons.Filled.ArrowDropDown,
-            contentDescription = composeStringResource(R.string.select_library),
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(0.5.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant),
         )
     }
 }
 
 @Composable
 private fun LibraryTab(
+    modifier: Modifier = Modifier,
     client: KomgaApiClient,
     selectedLibraryId: String?,
     displayMode: LibraryDisplayMode,
@@ -2624,7 +2449,7 @@ private fun LibraryTab(
     // `readProgress.readDate`, which the series endpoint does not recognise and silently ignores).
     val sortedSeries = series
 
-    Column(Modifier.fillMaxSize()) {
+    Column(modifier = modifier.fillMaxSize()) {
         // ── Active tag/genre/author filter chip (from Series detail page tap) ──
         if (!filterType.isNullOrBlank() && !filterValue.isNullOrBlank()) {
             val labelRes = when (filterType) {
