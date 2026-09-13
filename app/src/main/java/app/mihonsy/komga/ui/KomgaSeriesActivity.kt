@@ -417,8 +417,8 @@ private fun SeriesDetailHeader(
 private fun komgaSeriesStatusLabel(raw: String): String = when (raw.uppercase()) {
     "ONGOING" -> "连载中"
     "ENDED" -> "已完结"
-    "ABANDONED" -> "已废弃"
-    "HIATUS" -> "休刊"
+    "ABANDONED" -> "已放弃"
+    "HIATUS" -> "有生之年"
     else -> raw
 }
 
