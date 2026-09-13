@@ -3,6 +3,15 @@ name: Build Komiho V2 APK
 "on":
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '**.png'
+      - '**.jpg'
+      - '**.jpeg'
+      - '**.svg'
+      - '**.gif'
+      - '.github/readme-images/**'
+      - 'docs/**'
   workflow_dispatch:
 
 jobs:
