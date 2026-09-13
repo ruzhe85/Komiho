@@ -411,6 +411,17 @@ private fun SeriesDetailHeader(
     Spacer(Modifier.height(16.dp))
 }
 
+/**
+ * Komga 系列状态英文枚举 → 中文展示。未知值原样返回，避免服务端新增枚举时显示空白。
+ */
+private fun komgaSeriesStatusLabel(raw: String): String = when (raw.uppercase()) {
+    "ONGOING" -> "连载中"
+    "ENDED" -> "已完结"
+    "ABANDONED" -> "已废弃"
+    "HIATUS" -> "休刊"
+    else -> raw
+}
+
 @Composable
 private fun SeriesHeader(
     client: KomgaApiClient,
@@ -446,7 +457,7 @@ private fun SeriesHeader(
                         onChipClick("author", value)
                     }
                 }
-                val status = series.metadata.status
+                val status = series.metadata.status?.let(::komgaSeriesStatusLabel)
                 if (!status.isNullOrBlank()) {
                     Spacer(Modifier.height(2.dp))
                     Text(
@@ -463,22 +474,10 @@ private fun SeriesHeader(
         // Library filtered cross-library (Komga WebUI / Komelia parity).
         if (series.metadata.genres.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            Text(
-                text = composeStringResource(R.string.detail_genres_label),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(4.dp))
             FilterChipRow(series.metadata.genres.take(12)) { onChipClick("genre", it) }
         }
         if (series.metadata.tags.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            Text(
-                text = composeStringResource(R.string.detail_tags_label),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(4.dp))
             FilterChipRow(series.metadata.tags.take(12)) { onChipClick("tag", it) }
         }
         val summary = series.metadata.summary
