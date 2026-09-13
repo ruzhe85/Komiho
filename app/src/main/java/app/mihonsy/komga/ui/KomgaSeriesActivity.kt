@@ -444,12 +444,6 @@ private fun SeriesHeader(
             )
             Spacer(Modifier.width(14.dp))
             Column {
-                Text(
-                    text = "${series.booksReadCount} / ${series.booksCount} 已读 · ${series.booksUnreadCount} 未读",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(4.dp))
                 if (authors.isNotEmpty()) {
                     AuthorChips(authors) { name, role ->
                         // Komga author filter expects "name,role" format.
@@ -459,7 +453,7 @@ private fun SeriesHeader(
                 }
                 val status = series.metadata.status?.let(::komgaSeriesStatusLabel)
                 if (!status.isNullOrBlank()) {
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         text = status,
                         style = MaterialTheme.typography.bodySmall,
@@ -473,16 +467,16 @@ private fun SeriesHeader(
         // — tapping a genre filters by genre, a tag by tag. Both jump to the
         // Library filtered cross-library (Komga WebUI / Komelia parity).
         if (series.metadata.genres.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             FilterChipRow(series.metadata.genres.take(12)) { onChipClick("genre", it) }
         }
         if (series.metadata.tags.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             FilterChipRow(series.metadata.tags.take(12)) { onChipClick("tag", it) }
         }
         val summary = series.metadata.summary
         if (summary?.isNotBlank() == true) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(14.dp))
             ExpandableSummary(text = summary)
         }
     }
