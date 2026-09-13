@@ -303,14 +303,16 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                 books = books,
                                 mode = mode,
                                 columns = columns,
-                                header = {
+                            header = {
+                                Column {
                                     Text(
                                         text = "书籍（${books.size}）",
                                         style = MaterialTheme.typography.titleMedium,
-                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp),
                                     )
                                     Spacer(Modifier.height(4.dp))
-                                },
+                                }
+                            },
                                 onBookClick = { openBook(it) },
                                 onDataChanged = { load() },
                                 showDownload = false,
@@ -330,18 +332,20 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                             mode = mode,
                             columns = columns,
                             header = {
-                                SeriesDetailHeader(
-                                    client = client,
-                                    series = s,
-                                    books = books,
-                                    onChipClick = onChipClick,
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = "书籍（${books.size}）",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                )
+                                Column {
+                                    SeriesDetailHeader(
+                                        client = client,
+                                        series = s,
+                                        books = books,
+                                        onChipClick = onChipClick,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "书籍（${books.size}）",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                    )
+                                }
                             },
                             onBookClick = { openBook(it) },
                             onDataChanged = { load() },
@@ -508,9 +512,11 @@ private fun ExpandableSummary(
             maxLines = if (expanded) Int.MAX_VALUE else collapsedMaxLines,
             overflow = TextOverflow.Ellipsis,
             onTextLayout = { result: TextLayoutResult ->
-                // 只在「确实溢出」时置位。展开态（maxLines=MAX）不会溢出，
-                // 但 overflow 已为 true 就不会被清掉，按钮得以常驻。
-                if (result.hasVisualOverflow) overflow = true
+                // 默认展开态 maxLines=MAX，文本不会「溢出」，不能用 hasVisualOverflow
+                // 判定（否则按钮永不出现）。改为看真实行数是否超过 collapsedMaxLines——
+                // 超过即说明收起后会被裁剪，应常驻切换按钮（与展开态无关）。
+                val exceedsCollapsed = result.lineCount > collapsedMaxLines
+                overflow = exceedsCollapsed || result.hasVisualOverflow
             },
             modifier = Modifier.clickable { expanded = !expanded },
         )
