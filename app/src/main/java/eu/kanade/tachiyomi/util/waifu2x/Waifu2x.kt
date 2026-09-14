@@ -67,8 +67,10 @@ object Waifu2x {
     /**
      * Runs AI upscaling on [input]. **Blocking** — call it from a background thread.
      * Returns the upscaled bitmap, or null when unavailable / failed (caller keeps the original).
+     *
+     * @param tag Komiho 诊断：请求来源标识（如 `prewarm#12` / `holder#12`），只写进日志。
      */
-    fun process(context: Context, input: Bitmap, id: Int = -1): Bitmap? {
+    fun process(context: Context, input: Bitmap, id: Int = -1, tag: String = ""): Bitmap? {
         if (!libraryLoaded || input.isRecycled) return null
         if (!isInitialized && !init(context)) return null
 
@@ -101,7 +103,7 @@ object Waifu2x {
             android.util.Log.d(
                 "Waifu2xTiming",
                 "wait=${waitMs}ms inference=${procMs}ms total=${waitMs + procMs}ms " +
-                    "src=${argb.width}x${argb.height}",
+                    "src=${argb.width}x${argb.height} from=${tag.ifEmpty { "?" }}",
             )
 
             out?.takeUnless { it === argb }

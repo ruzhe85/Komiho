@@ -12,6 +12,8 @@ import coil3.size.Precision
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
+import eu.kanade.tachiyomi.data.coil.pageIndex
+import eu.kanade.tachiyomi.data.coil.prewarm
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.isStandardImageStream
@@ -134,7 +136,7 @@ object PagerPagePreparer {
                             enhanceElapsedMillis = -1L,
                             layoutApplied = false,
                         )
-                    finishLayout(viewer, itemSource, isAnimated, enhancementMode, config)
+                    finishLayout(viewer, itemSource, isAnimated, enhancementMode, config, page.index)
                 } else {
                     val itemSource = mergePure(viewer, page, extraPage, source1, source2, isAnimated, viewHeight)
                     if (itemSource == null) {
@@ -151,7 +153,7 @@ object PagerPagePreparer {
                             layoutApplied = false,
                         )
                     } else {
-                        finishLayout(viewer, itemSource, isAnimated, enhancementMode, config)
+                        finishLayout(viewer, itemSource, isAnimated, enhancementMode, config, page.index)
                     }
                 }
             } catch (e: kotlin.coroutines.cancellation.CancellationException) {
@@ -170,6 +172,7 @@ object PagerPagePreparer {
         isAnimated: Boolean,
         enhancementMode: Int,
         config: PagerConfig,
+        pageIndex: Int,
     ): PagerPreparedPage {
         val background = if (!isAnimated && config.automaticBackground) {
             ImageUtil.chooseBackground(viewer.activity, itemSource.peek())
@@ -177,7 +180,14 @@ object PagerPagePreparer {
             null
         }
         val decodeStart = android.os.SystemClock.uptimeMillis()
-        val bitmap = maybePreDecodeEnhanced(viewer, itemSource, isAnimated, enhancementMode, config.imageCropBorders)
+        val bitmap = maybePreDecodeEnhanced(
+            viewer,
+            itemSource,
+            isAnimated,
+            enhancementMode,
+            config.imageCropBorders,
+            pageIndex,
+        )
         return PagerPreparedPage(
             source = itemSource,
             source2 = null,
@@ -290,6 +300,7 @@ object PagerPagePreparer {
         isAnimated: Boolean,
         enhancementMode: Int,
         cropBorders: Boolean,
+        pageIndex: Int,
     ): Bitmap? {
         if (isAnimated || enhancementMode == 0) return null
         if (!isStandardImageStream(source)) return null
@@ -304,6 +315,9 @@ object PagerPagePreparer {
                 .diskCachePolicy(CachePolicy.DISABLED)
                 .enhanced(true)
                 .customDecoder(true)
+                // Komiho 诊断：标出「这是预载请求」+ 页号，便于与 holder 侧请求区分。
+                .prewarm(true)
+                .pageIndex(pageIndex)
                 .size(width, height)
                 .precision(Precision.INEXACT)
                 .cropBorders(cropBorders)

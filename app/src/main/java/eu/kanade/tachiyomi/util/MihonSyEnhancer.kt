@@ -168,11 +168,13 @@ object MihonSyEnhancer {
      * @param input must be an ARGB_8888 bitmap.
      * @param onComplete optional callback invoked with (enhanced != null, elapsedMillis)
      *   so callers can show a meaningful status (time taken / success).
+     * @param sourceTag Komiho 诊断：请求来源标识（`prewarm#12` / `holder#12`），仅用于日志。
      */
     fun enhance(
         input: Bitmap,
         preferences: ReaderPreferences = Injekt.get(),
         onComplete: ((enhanced: Boolean, elapsedMillis: Long) -> Unit)? = null,
+        sourceTag: String = "",
     ): Bitmap? {
         val start = SystemClock.uptimeMillis()
         if (input.isRecycled) {
@@ -238,7 +240,7 @@ object MihonSyEnhancer {
             }
 
             // Komiho: GPU AI upscale (ncnn + Vulkan). Scale is fixed by the model (2x).
-            5 -> enhanceWithGpu(input, preferences)
+            5 -> enhanceWithGpu(input, preferences, sourceTag)
 
             else -> null
         }
@@ -297,9 +299,13 @@ object MihonSyEnhancer {
      * we fall back to the CPU Lanczos3 resampler at the configured scale, so the page is
      * still enlarged instead of silently staying at its original size.
      */
-    private fun enhanceWithGpu(input: Bitmap, preferences: ReaderPreferences): Bitmap? {
+    private fun enhanceWithGpu(
+        input: Bitmap,
+        preferences: ReaderPreferences,
+        sourceTag: String = "",
+    ): Bitmap? {
         if (Waifu2x.isSupported) {
-            Waifu2x.process(Injekt.get<Application>(), input)?.let { return it }
+            Waifu2x.process(Injekt.get<Application>(), input, tag = sourceTag)?.let { return it }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
         } else {
             logcat(LogPriority.WARN) { "AI upscale unavailable for this ABI; falling back to Lanczos3" }

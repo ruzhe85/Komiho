@@ -210,6 +210,8 @@ class WebtoonPageHolder(
                 Pair(source, isAnimated)
             }
             withUIContext {
+                // Komiho 诊断：条漫页号（条漫不走 PagerPreparedCache，来源只会是 holder）。
+                frame.pageIndex = page?.index ?: -1
                 frame.setImage(
                     source,
                     isAnimated,
