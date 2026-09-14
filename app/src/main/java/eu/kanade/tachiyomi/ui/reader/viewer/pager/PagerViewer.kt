@@ -21,12 +21,14 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.sync.withLock
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
+import kotlin.math.abs
 import kotlin.math.min
 
 /**
@@ -57,6 +59,19 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
     /** 预热串行锁：避免前后两页同时跑 Lanczos 预解码打满 CPU（教训同 offscreen 调高）。 */
     private val prewarmMutex = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * Komiho P1：预热「意图代数」。每次翻页自增；排队等锁的预热任务若发现代数已变，
+     * 说明用户又翻了页、目标已过期，直接放弃（避免白跑一次 1–3 秒的 GPU 增强）。
+     */
+    private val prewarmGeneration = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Komiho P1：正在执行预热的页位置（-1 = 空闲）。翻页后若它离当前页太远，
+     * 说明 GPU 正在为一个已经没人要的页面做推理 → 主动 abort（C++ 在 tile 边界生效，很快）。
+     */
+    @Volatile
+    private var runningPrewarmPosition = -1
 
     /**
      * Adapter of the pager.
@@ -272,20 +287,32 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         }
 
         // SY（A）：相邻页预热（前+后各一页），解码好等用户翻
-        prewarmAdjacentPages()
+        prewarmAdjacentPages(forward)
     }
 
     /**
-     * 预热当前页相邻两页（offscreen=1 之外的"第 2 页"由此获得与 webtoon 同级的提前量）。
+     * 预热当前页相邻页（offscreen=1 之外的"第 2 页"由此获得与 webtoon 同级的提前量）。
      * 双页合并配置（pair.second != null）会命中副作用分支，预热无意义，跳过。
      */
-    // SY（OOM 降峰）：增强开启时预热解码含 Lanczos 全流程，峰值更高——只预热下一页
-    //（前向阅读占绝对多数），上一页回翻走实时解码，换内存安全。
+    // SY（OOM 降峰）：增强开启时预热解码含全流程，峰值更高——只预热 1 页。
+    // Komiho P1：该页的**方向跟随阅读方向**（原先固定「下一页」，导致回翻永远无预热）；
+    // 另加「意图代数 + 运行位置」两个状态：翻页后排队中的过期预热直接放弃、
+    // GPU 上正在为已跑远的目标做的推理主动 abort，避免新目标被旧任务拖住。
     private val readerPrefs: ReaderPreferences by injectLazy()
 
-    private fun prewarmAdjacentPages() {
-        val positions = if (readerPrefs.enhancementMode.get() != 0) {
-            listOf(pager.currentItem + 1)
+    private fun prewarmAdjacentPages(forward: Boolean) {
+        val enhancementOn = readerPrefs.enhancementMode.get() != 0
+        val generation = prewarmGeneration.incrementAndGet()
+
+        if (enhancementOn) {
+            val running = runningPrewarmPosition
+            if (running >= 0 && abs(running - pager.currentItem) > 1) {
+                Waifu2x.abortProcessing()
+            }
+        }
+
+        val positions = if (enhancementOn) {
+            listOf(if (forward) pager.currentItem + 1 else pager.currentItem - 1)
         } else {
             listOf(pager.currentItem + 1, pager.currentItem - 1)
         }
@@ -293,19 +320,28 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             val pair = adapter.joinedItems.getOrNull(position) ?: continue
             if (pair.second != null) continue // 双页合并模式：纯管线放弃，预热无收益
             val next = pair.first as? ReaderPage ?: continue
+            if (next is InsertPage) continue // 插入页没有自己的流，预热无意义
             val key = preparedCache.key(next, pair.second as? ReaderPage)
             if (preparedCache.get(key) != null) continue
             scope.launchIO {
                 prewarmMutex.withLock {
+                    // Komiho P1：等锁期间用户可能又翻了页 —— 目标过期就放弃，否则会白跑
+                    // 一次昂贵的增强（GPU 1–3 秒），把真正需要的页面继续往后推。
+                    if (generation != prewarmGeneration.get()) return@withLock
                     // 拿到锁后复查：可能已被相邻预热或 holder 计算填入
                     if (preparedCache.get(key) != null) return@withLock
-                    val prepared = PagerPagePreparer.preparePure(
-                        viewer = this@PagerViewer,
-                        page = next,
-                        extraPage = pair.second as? ReaderPage,
-                        viewHeight = pager.height,
-                    )
-                    prepared?.let { preparedCache.put(key, it) }
+                    runningPrewarmPosition = position
+                    try {
+                        val prepared = PagerPagePreparer.preparePure(
+                            viewer = this@PagerViewer,
+                            page = next,
+                            extraPage = pair.second as? ReaderPage,
+                            viewHeight = pager.height,
+                        )
+                        prepared?.let { preparedCache.put(key, it) }
+                    } finally {
+                        runningPrewarmPosition = -1
+                    }
                 }
             }
         }
