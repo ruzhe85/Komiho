@@ -291,7 +291,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
             // Coil spawns a new thread for every image load by default
             fetcherCoroutineContext(Dispatchers.IO.limitedParallelism(8))
-            decoderCoroutineContext(Dispatchers.IO.limitedParallelism(3))
+            // Komiho: 3 → 5。AI 超分的推理是在解码器内部同步跑的（TachiyomiImageDecoder 调
+            // MihonSyEnhancer.enhance），而原生引擎全程持一把全局锁（waifu2x_jni.cpp:143），
+            // 一次只能跑一页、每页 1–3 秒。池只有 3 时，3 页同时增强就把解码线程全占满
+            // （其中 2 条还在等锁），此时新页解码拿不到线程 → 翻页长时间卡住。
+            // 补到 5 留出余量。读数器侧活页数仍受 offscreen(=1) 限制，并发解码不会因此变多。
+            decoderCoroutineContext(Dispatchers.IO.limitedParallelism(5))
         }
             .build()
     }
