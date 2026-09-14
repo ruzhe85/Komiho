@@ -214,8 +214,9 @@ class ReaderPreferences(
     )
 
     // MihonSY image enhancement -->
-    /** 0 = Off, 1 = Anime4K (disabled), 2 = Lanczos3, 3 = Catmull-Rom, 4 = Spline36 (disabled).
-     *  Single selector so the two algorithms never conflict. Anime4K/Spline36 are retained
+    /** 0 = Off, 1 = Anime4K (disabled), 2 = Lanczos3, 3 = Catmull-Rom, 4 = Spline36 (disabled),
+     *  5 = AI upscale (Komiho: ncnn + Vulkan, fixed 2x model).
+     *  Single selector so the algorithms never conflict. Anime4K/Spline36 are retained
      *  in the index map for backward-compatible stored values but excluded from the build. */
     val enhancementMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_mode", 0)
 
@@ -333,12 +334,15 @@ class ReaderPreferences(
 
         // MihonSY image enhancement -->
         // index: 0 Off / 1 Anime4K (disabled) / 2 Lanczos3 / 3 Catmull-Rom / 4 Spline36 (disabled)
+        //        / 5 AI upscale (Komiho: ncnn + Vulkan, fixed 2x model)
         val EnhancementModes = listOf(
             MR.strings.enhancement_off,
             MR.strings.enhancement_anime4k, // retained for backward-compatible stored values; hidden in UI
             MR.strings.enhancement_lanczos3,
             MR.strings.enhancement_catmull_rom,
             MR.strings.enhancement_spline36, // retained for backward-compatible stored values; hidden in UI
+            // Komiho: GPU AI upscale. Scale is baked into the model (2x), so no scale picker.
+            MR.strings.enhancement_ai_upscale,
         )
 
         // MihonSY: Anime4K disabled — quality list no longer referenced anywhere.

@@ -360,6 +360,7 @@
     <string name="enhancement_off">關閉</string>
     <string name="enhancement_anime4k">Anime4K（GPU）</string>
     <string name="enhancement_lanczos3">Lanczos3（CPU）</string>
+    <string name="enhancement_ai_upscale">AI 超分（GPU）</string>
     <string name="pref_anime4k">Anime4K（GPU）</string>
     <string name="pref_anime4k_summary">GPU 即時放大，適合線條類漫畫，無重型模型</string>
     <string name="pref_anime4k_mode">Anime4K 檔位</string>
