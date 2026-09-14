@@ -24,7 +24,9 @@ import tachiyomi.decoder.ImageDecoder
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.BufferedInputStream
+import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * A [Decoder] that uses built-in [ImageDecoder] to decode images that is not supported by the system.
@@ -112,6 +114,34 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         decoder.recycle()
 
         check(bitmap != null) { "Failed to decode image" }
+
+        // Komiho: 把「长边 ≤ MAX_ENHANCE_SOURCE_DIMENSION」这个意图真正落实。
+        // 采样率只能取 2 的幂，所以实际解出的图可能比目标大最多一倍：源 5780×4096、
+        // 目标 2048 → calculateInSampleSize 只能给 2 → 解出 2890×2048，面积翻倍，
+        // AI 推理耗时与显存随之翻倍（实测单页 2.1s，本应约 1.05s）。
+        // 这里对非长条页按目标尺寸等比缩一次。长条（isTallStrip）绝不参与：它只按宽度
+        // 采样、高度是全高，宽度才是显示关键维度，按尺寸缩会把画面压成窄条
+        // （800×9927 若按长边 2048 缩会变成 165×2048）。几何判断，与阅读模式无关。
+        if (options.enhanced && !isTallStrip) {
+            try {
+                val scaleDown = minOf(
+                    1f,
+                    targetW / bitmap.width.toFloat(),
+                    targetH / bitmap.height.toFloat(),
+                )
+                if (scaleDown < 1f) {
+                    val scaledWidth = max(1, (bitmap.width * scaleDown).roundToInt())
+                    val scaledHeight = max(1, (bitmap.height * scaleDown).roundToInt())
+                    val scaled = Bitmap.createScaledBitmap(bitmap, scaledWidth, scaledHeight, true)
+                    if (scaled !== bitmap) {
+                        bitmap.recycle()
+                        bitmap = scaled
+                    }
+                }
+            } catch (e: Throwable) {
+                // 缩不下来就按原尺寸继续（只是慢一些），不影响正确性。
+            }
+        }
 
         // MihonSY: run Lanczos3 enhancement synchronously on the decoded bitmap. The
         // decoder is called on Coil's background thread, so this never blocks the UI.

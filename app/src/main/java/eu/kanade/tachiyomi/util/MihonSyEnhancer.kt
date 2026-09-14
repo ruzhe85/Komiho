@@ -11,6 +11,7 @@ import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 
 /**
  * Image enhancement for Komiho.
@@ -28,6 +29,12 @@ object MihonSyEnhancer {
 
     // MihonSY: Anime4K disabled.
     // private const val ANIME4K_ASSET_DIR = "anime4k"
+
+    /**
+     * 增强结果任一边的上限；超出即等比缩小。推导见 [capOutputSize]。
+     * 取 16384 = 现代移动 GPU 的常见 GL 最大纹理边长。
+     */
+    private const val MAX_ENHANCE_OUTPUT_SIDE = 16384
 
     init {
         System.loadLibrary("mihonsy-enhance")
@@ -233,8 +240,45 @@ object MihonSyEnhancer {
 
             else -> null
         }
-        onComplete?.invoke(result != null && result !== input, SystemClock.uptimeMillis() - start)
-        return result
+        // 只在结果确实是新对象时才缩（避免误 recycle 调用方仍在用的 input）。
+        val capped = if (result != null && result !== input) capOutputSize(result) else result
+        onComplete?.invoke(capped != null && capped !== input, SystemClock.uptimeMillis() - start)
+        return capped
+    }
+
+    /**
+     * Komiho: 增强结果的尺寸上限（对标上游的 textureLimit 保护）。
+     *
+     * 输出 = 输入 × 倍率，长条页会被放大到很夸张的尺寸：
+     *  - 普通页：输入受 MAX_ENHANCE_SOURCE_DIMENSION(2048) 约束 → 2x 输出 ≤4096，**永不触发**；
+     *  - 长条页：输入保留全高 → 实测 800×9927 经 2x 得 1600×19854 ≈ **127MB**，高度已超常见
+     *    的 GPU 纹理/画布上限 16384；
+     *  - CPU 倍率档在长条上更极端：Lanczos3 3x 会得到 2400×29781 ≈ **286MB**，基本必 OOM。
+     *
+     * [MAX_ENHANCE_OUTPUT_SIDE] 取 16384：现代 Adreno/Mali 的 GL 最大纹理普遍就是 16384，
+     * 取它当上限既保证结果落在纹理可绘制范围内，又把长条内存从 127MB 压到约 86MB
+     * （宽 1320，仍接近 1440 的显示宽，肉眼无感）。普通页与 ≤2x 的倍率都不会触发。
+     */
+    private fun capOutputSize(bitmap: Bitmap?): Bitmap? {
+        if (bitmap == null || bitmap.isRecycled) return bitmap
+        val maxSide = maxOf(bitmap.width, bitmap.height)
+        if (maxSide <= MAX_ENHANCE_OUTPUT_SIDE) return bitmap
+        val factor = MAX_ENHANCE_OUTPUT_SIDE.toFloat() / maxSide
+        val width = maxOf(1, (bitmap.width * factor).roundToInt())
+        val height = maxOf(1, (bitmap.height * factor).roundToInt())
+        return try {
+            val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
+            if (scaled !== bitmap) {
+                bitmap.recycle()
+                scaled
+            } else {
+                bitmap
+            }
+        } catch (e: Throwable) {
+            // 缩不下来就用原尺寸（宁可大也不要丢结果）。
+            logcat(LogPriority.WARN, e) { "Enhancement output cap failed; keeping full size" }
+            bitmap
+        }
     }
 
     /**
