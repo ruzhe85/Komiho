@@ -40,6 +40,7 @@ import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
+import eu.kanade.tachiyomi.data.coil.pageIndex
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
@@ -90,6 +91,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
      * For automatic background. Will be set as background color when [onImageLoaded] is called.
      */
     var pageBackground: Drawable? = null
+
+    /**
+     * Komiho 诊断：当前页序号（-1 = 未知），由 holder 在 setImage 前写入。
+     * 只用于增强日志区分请求来源（`prewarm#N` / `holder#N`），不参与任何渲染逻辑。
+     */
+    var pageIndex: Int = -1
 
     @CallSuper
     open fun onImageLoaded() {
@@ -400,6 +407,8 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .diskCachePolicy(CachePolicy.DISABLED)
                     .enhanced(true)
                     .customDecoder(true)
+                    // Komiho 诊断：带上页号（prewarm 保持默认 false → 日志里显示 holder#N）。
+                    .pageIndex(this@ReaderPageImageView.pageIndex)
                     .target(
                         onSuccess = { result ->
                             val image = result as BitmapImage

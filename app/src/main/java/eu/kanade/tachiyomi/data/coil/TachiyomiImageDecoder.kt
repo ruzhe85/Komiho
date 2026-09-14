@@ -151,7 +151,12 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             try {
                 val preferences = Injekt.get<ReaderPreferences>()
                 if (preferences.enhancementMode.get() != 0) {
-                    val enhanced = MihonSyEnhancer.enhance(bitmap, preferences)
+                    // Komiho 诊断：来源标识 = 谁发起的 + 第几页。
+                    // 用来判断并发增强请求是「同一页被算了两遍」还是「相邻两页各一次」——
+                    // 同包内取 top-level 扩展，无需 import。
+                    val sourceTag = (if (options.prewarm) "prewarm" else "holder") +
+                        "#${options.pageIndex}"
+                    val enhanced = MihonSyEnhancer.enhance(bitmap, preferences, sourceTag = sourceTag)
                     if (enhanced != null && enhanced !== bitmap && !enhanced.isRecycled) {
                         bitmap.recycle()
                         bitmap = enhanced

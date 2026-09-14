@@ -177,8 +177,11 @@ class PagerPageHolder(
         // 3) C 方案：副作用分支（双页分割 onPageSplit / 合并 splitDoublePages）不再整体放弃——
         //    纯管线缓存「通用预处理」（流物化+嗅探，layoutApplied=false），此处补跑布局；
         // 4) 补跑失败才回退完整旧管线 prepareLegacy（从流重新读取）。
+        // Komiho 诊断：把页号写到 view 上（供增强日志区分为第几页），并记下是否命中预载结果。
+        pageIndex = page.index
         val key = viewer.preparedCache.key(page, extraPage)
         var prepared = viewer.preparedCache.get(key)
+        val prewarmHit = prepared != null
         if (prepared == null) {
             prepared = PagerPagePreparer.preparePure(
                 viewer = viewer,
@@ -206,6 +209,13 @@ class PagerPageHolder(
 
         withUIContext {
             val bitmap = result.decodedBitmap
+            // Komiho 诊断：预载到底有没有省下等待。
+            // usedPreDecoded=true 表示直接命中预解码位图（零等待）；false 表示要走现场解码+增强。
+            android.util.Log.d(
+                "Waifu2xPrefetch",
+                "page=${page.index} prewarmHit=$prewarmHit usedPreDecoded=${bitmap != null} " +
+                    "enhanceMs=${result.enhanceElapsedMillis}",
+            )
             if (bitmap != null && !bitmap.isRecycled) {
                 // 增强预解码已完成：直接走 bitmap 路径（与旧增强成功路径等价）
                 setImage(
