@@ -349,6 +349,7 @@
     <string name="enhancement_off">关闭</string>
     <string name="enhancement_anime4k">Anime4K</string>
     <string name="enhancement_lanczos3">Lanczos3</string>
+    <string name="enhancement_ai_upscale">AI 超分</string>
     <string name="enhancement_catmull_rom">Catmull-Rom</string>
     <string name="enhancement_spline36">Spline36</string>
     <string name="pref_anime4k">Anime4K（GPU）</string>

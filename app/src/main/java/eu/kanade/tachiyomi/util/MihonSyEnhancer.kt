@@ -1,11 +1,11 @@
 package eu.kanade.tachiyomi.util
 
-// MihonSY: Anime4K disabled — Application/Context only used by the commented-out A4K code.
-// import android.app.Application
-// import android.content.Context
+// Komiho: Application is used by the GPU AI upscaler (model asset extraction).
+import android.app.Application
 import android.graphics.Bitmap
 import android.os.SystemClock
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
@@ -13,16 +13,16 @@ import uy.kohesive.injekt.api.get
 import java.util.concurrent.Executors
 
 /**
- * Lightweight image enhancement for MihonSY.
+ * Image enhancement for Komiho.
  *
- * CPU resampling algorithms are bundled, all cheap enough for mobile:
- *  - Lanczos3 / Catmull-Rom: classic CPU resampling, memory-friendly and
- *    fully deterministic.
+ * Two families, selected by [ReaderPreferences.enhancementMode]:
+ *  - Lanczos3 / Catmull-Rom (CPU): classic resampling, cheap and fully deterministic.
+ *  - AI upscale (GPU): ncnn + Vulkan 2x super-resolution ported from
+ *    HaoweiLi97/mihon_img_upscale. Falls back to the original image when this ABI has no
+ *    Vulkan build or when inference fails.
  *
- * No heavyweight CNN models (waifu2x / Real-CUGAN / Real-ESRGAN) are included.
- *
- * MihonSY: Anime4K (GPU shaders) was disabled — its native sources are no longer
- * compiled into the build, so the Kotlin bindings below are commented out.
+ * MihonSY: Anime4K (GPU shaders) remains disabled — its native sources are not compiled
+ * into the build, so the Kotlin bindings below stay commented out.
  */
 object MihonSyEnhancer {
 
@@ -228,10 +228,35 @@ object MihonSyEnhancer {
                 }
             }
 
+            // Komiho: GPU AI upscale (ncnn + Vulkan). Scale is fixed by the model (2x).
+            5 -> enhanceWithGpu(input, preferences)
+
             else -> null
         }
         onComplete?.invoke(result != null && result !== input, SystemClock.uptimeMillis() - start)
         return result
+    }
+
+    /**
+     * Komiho: GPU AI upscale branch — used when [ReaderPreferences.enhancementMode] is 5.
+     *
+     * The bundled ncnn model is a fixed 2x network, so [ReaderPreferences.lanczosScale] does
+     * not choose the AI output size. When this ABI has no Vulkan build (or inference fails)
+     * we fall back to the CPU Lanczos3 resampler at the configured scale, so the page is
+     * still enlarged instead of silently staying at its original size.
+     */
+    private fun enhanceWithGpu(input: Bitmap, preferences: ReaderPreferences): Bitmap? {
+        if (Waifu2x.isSupported) {
+            Waifu2x.process(Injekt.get<Application>(), input)?.let { return it }
+            logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
+        } else {
+            logcat(LogPriority.WARN) { "AI upscale unavailable for this ABI; falling back to Lanczos3" }
+        }
+
+        val scale = preferences.lanczosScale.get() / 100f
+        if (scale <= 1f) return null
+        val argb = ensureArgb(input) ?: return null
+        return nativeLanczosProcess(argb, scale).takeUnless { it === argb }
     }
 
     /** Returns [input] if it is already a mutable ARGB_8888 bitmap, otherwise a copy. */
