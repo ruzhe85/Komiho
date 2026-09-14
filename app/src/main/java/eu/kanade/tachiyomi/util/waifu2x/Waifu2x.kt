@@ -32,7 +32,14 @@ object Waifu2x {
     /** ncnn precision mode: 0 = fp32 (the most portable across GPUs). */
     private const val PRECISION = 0
 
-    private const val FP16_ARITHMETIC = false
+    /**
+     * fp16 arithmetic (accumulators in fp16, on top of fp16 storage).
+     *
+     * `waifu2x.cpp` gates this on `vkdev->info.support_fp16_arithmetic()`, so devices that do
+     * not support it silently keep fp32 arithmetic — safe to request unconditionally.
+     * Verified supported on the Adreno 750 (log: `FP16 arithmetic ... supported=1`).
+     */
+    private const val FP16_ARITHMETIC = true
 
     /** Bump when the bundled model assets change so existing installs re-extract. */
     private const val MODEL_CACHE_VERSION = "1"
