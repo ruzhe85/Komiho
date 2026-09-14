@@ -83,8 +83,28 @@ object Waifu2x {
         } ?: return null
 
         return try {
+            // Komiho 临时诊断（量完可删）：把「排队等待」与「纯推理」拆开。
+            // nativeClearAbortProcessing() 内部要拿 g_lock（waifu2x_jni.cpp:357-362），
+            // 所以它的耗时 ≈ 等上一个推理（可能 1–3 秒）释放锁的时间 = 排队等待。
+            // 判据：wait 常年 ≈0 → 解码线程没被占住，方案 A 不必做；wait 经常上千毫秒
+            // → 线程饥饿真实存在，再考虑把增强搬出解码器。
+            // 用 android.util.Log 而非项目 logcat()：release 构建下 XLog 级别是 WARN
+            // （App.kt 的 setupExhLogging），logcat() 的 DEBUG/INFO 会被整条吞掉。
+            val waitStart = android.os.SystemClock.uptimeMillis()
             nativeClearAbortProcessing()
-            nativeProcess(argb, id)?.takeUnless { it === argb }
+            val waitMs = android.os.SystemClock.uptimeMillis() - waitStart
+
+            val procStart = android.os.SystemClock.uptimeMillis()
+            val out = nativeProcess(argb, id)
+            val procMs = android.os.SystemClock.uptimeMillis() - procStart
+
+            android.util.Log.d(
+                "Waifu2xTiming",
+                "wait=${waitMs}ms inference=${procMs}ms total=${waitMs + procMs}ms " +
+                    "src=${argb.width}x${argb.height}",
+            )
+
+            out?.takeUnless { it === argb }
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "Waifu2x: processing failed" }
             null
