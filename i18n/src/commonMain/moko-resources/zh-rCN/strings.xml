@@ -367,6 +367,12 @@
     <string name="lanczos_scale_2x">2x</string>
     <string name="lanczos_scale_2_5x">2.5x</string>
     <string name="lanczos_scale_3x">3x</string>
+    <string name="pref_ai_tile_size">AI 分块大小</string>
+    <string name="pref_ai_tile_size_summary">每次推理的分块边长。块越大，分块调度次数越少、速度越快，但峰值显存占用越高。默认 128。</string>
+    <string name="ai_tile_size_96">96 · 省显存</string>
+    <string name="ai_tile_size_128">128 · 平衡（默认）</string>
+    <string name="ai_tile_size_192">192 · 较快</string>
+    <string name="ai_tile_size_256">256 · 最快</string>
     <string name="vertical_plus_viewer">条漫（页间有空隙）</string>
     <string name="action_select_inverse">反选</string>
     <string name="add_tracking">添加进度记录</string>

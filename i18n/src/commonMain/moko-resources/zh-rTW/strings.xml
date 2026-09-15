@@ -373,6 +373,12 @@
     <string name="lanczos_scale_1_5x">1.5x</string>
     <string name="lanczos_scale_2x">2x</string>
     <string name="lanczos_scale_3x">3x</string>
+    <string name="pref_ai_tile_size">AI 分塊大小</string>
+    <string name="pref_ai_tile_size_summary">每次推理的分塊邊長。塊越大，分塊調度次數越少、速度越快，但峰值記憶體佔用越高。預設 128。</string>
+    <string name="ai_tile_size_96">96 · 省記憶體</string>
+    <string name="ai_tile_size_128">128 · 平衡（預設）</string>
+    <string name="ai_tile_size_192">192 · 較快</string>
+    <string name="ai_tile_size_256">256 · 最快</string>
     <string name="add_tracking">新增閱讀歷程</string>
     <string name="channel_new_chapters">章節更新</string>
     <string name="in_library">在書櫃中</string>
