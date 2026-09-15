@@ -29,7 +29,22 @@ object Waifu2x {
     /** Receptive field of the 10-layer 3x3 stack — matches the upstream W2xEX default. */
     private const val PADDING = 10
 
-    /** ncnn precision mode: 0 = fp32 (the most portable across GPUs). */
+    /**
+     * ncnn precision mode。**0 = FP16**（见 `waifu2x.cpp:191`：`case 0` 与 `default` 同一分支，
+     * 置 fp16 packed/storage/arithmetic；`waifu2x.h:48` 亦注明 `0 = fp16`）。
+     * 1 = FP32、2 = INT8、3 = BF16 —— 与上游 `realCuganPrecision()` 的
+     * 0:FP16 / 1:FP32 / 2:INT8 / 3:BF16 编号一致。
+     *
+     * 这里固定用 0（FP16），不暴露成设置项：
+     *  - 最终输出只有 8 bit/通道，中间多几位精度肉眼看不见，FP32 反而慢约一倍、内存翻倍；
+     *  - INT8 需要自行量化模型（本项目只有原始 fp32 权重，缺 scale/zero-point，硬跑会出错值），
+     *    且超分是回归任务，量化误差会直接变成色带与噪点；
+     *  - **只有 0/1 能启用 fused 快路径**：`waifu2x.cpp:208-211` 的 `gpu_pipeline_available`
+     *    要求 `precision_mode == 1 || (precision_mode == 0 && support_fp16_storage())`，
+     *    选 INT8/BF16 会掉回慢的 Staged 路径。
+     * 日志实证（Adreno 750）：`Precision=0 FP16 arithmetic requested=1 supported=1 enabled=1`，
+     * 且 `Embedded fused pipeline create: precision=fp16`。
+     */
     private const val PRECISION = 0
 
     /**
