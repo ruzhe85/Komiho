@@ -317,19 +317,46 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             listOf(pager.currentItem + 1, pager.currentItem - 1)
         }
         for (position in positions) {
-            val pair = adapter.joinedItems.getOrNull(position) ?: continue
-            if (pair.second != null) continue // 双页合并模式：纯管线放弃，预热无收益
-            val next = pair.first as? ReaderPage ?: continue
-            if (next is InsertPage) continue // 插入页没有自己的流，预热无意义
+            val pair = adapter.joinedItems.getOrNull(position)
+            if (pair == null) {
+                prewarmLog("skip pos=$position reason=no-item")
+                continue
+            }
+            if (pair.second != null) {
+                prewarmLog("skip pos=$position reason=dual-page-pair")
+                continue // 双页合并模式：纯管线放弃，预热无收益
+            }
+            val next = pair.first as? ReaderPage
+            if (next == null) {
+                prewarmLog("skip pos=$position reason=not-ReaderPage(${pair.first?.javaClass?.simpleName})")
+                continue
+            }
+            if (next is InsertPage) {
+                prewarmLog("skip pos=$position reason=InsertPage")
+                continue // 插入页没有自己的流，预热无意义
+            }
             val key = preparedCache.key(next, pair.second as? ReaderPage)
-            if (preparedCache.get(key) != null) continue
+            if (preparedCache.get(key) != null) {
+                prewarmLog("skip pos=$position page=${next.index} reason=cache-hit")
+                continue
+            }
+            prewarmLog("launch pos=$position page=${next.index} gen=$generation")
             scope.launchIO {
                 prewarmMutex.withLock {
                     // Komiho P1：等锁期间用户可能又翻了页 —— 目标过期就放弃，否则会白跑
                     // 一次昂贵的增强（GPU 1–3 秒），把真正需要的页面继续往后推。
-                    if (generation != prewarmGeneration.get()) return@withLock
+                    if (generation != prewarmGeneration.get()) {
+                        prewarmLog(
+                            "abort page=${next.index} reason=stale-gen " +
+                                "gen=$generation now=${prewarmGeneration.get()}",
+                        )
+                        return@withLock
+                    }
                     // 拿到锁后复查：可能已被相邻预热或 holder 计算填入
-                    if (preparedCache.get(key) != null) return@withLock
+                    if (preparedCache.get(key) != null) {
+                        prewarmLog("abort page=${next.index} reason=cache-filled-while-waiting")
+                        return@withLock
+                    }
                     runningPrewarmPosition = position
                     try {
                         val prepared = PagerPagePreparer.preparePure(
@@ -337,6 +364,11 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                             page = next,
                             extraPage = pair.second as? ReaderPage,
                             viewHeight = pager.height,
+                        )
+                        prewarmLog(
+                            "done page=${next.index} ok=${prepared != null} " +
+                                "enhanceMs=${prepared?.enhanceElapsedMillis} " +
+                                "layoutApplied=${prepared?.layoutApplied}",
                         )
                         prepared?.let { preparedCache.put(key, it) }
                     } finally {
@@ -583,3 +615,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     fun getShiftedPage(): ReaderPage? = adapter.pageToShift
     // SY <--
 }
+
+/**
+ * Komiho 诊断（临时，排查完可删）：记录预载路径的每一次决策，用来回答
+ * 「为什么预载从来没有产出过增强结果」。release 下 logcat() 的 DEBUG 会被
+ * XLog 的 WARN 级别吞掉，所以这里直接用 android.util.Log。
+ */
+private fun prewarmLog(msg: String) = android.util.Log.d("Waifu2xPrewarm", msg)

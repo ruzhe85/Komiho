@@ -76,7 +76,16 @@ class PagerPageHolder(
      */
     private var extraLoadJob: Job? = null
 
+    /** Komiho 诊断：本 holder 已执行过几次 setImage（用于识别重复增强）。 */
+    private var setImageCount = 0
+
     init {
+        // Komiho 诊断：记录 holder 实例身份 —— 用于判断「同一页被增强两次」是
+        // 两个 holder 实例各算一次，还是同一个 holder 被调了两次 setImage。
+        android.util.Log.d(
+            "Waifu2xHolder",
+            "CREATE page=${page.index} extra=${extraPage?.index ?: -1} id=${System.identityHashCode(this)}",
+        )
         loadJob = scope.launch { loadPageAndProcessStatus(1) }
         extraLoadJob = scope.launch { loadPageAndProcessStatus(2) }
     }
@@ -87,6 +96,11 @@ class PagerPageHolder(
     @SuppressLint("ClickableViewAccessibility")
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        // Komiho 诊断：holder 何时被回收（与 CREATE 配对即可看出是否同页多实例并存）。
+        android.util.Log.d(
+            "Waifu2xHolder",
+            "DETACH page=${page.index} id=${System.identityHashCode(this)}",
+        )
         loadJob?.cancel()
         loadJob = null
         extraLoadJob?.cancel()
@@ -211,10 +225,13 @@ class PagerPageHolder(
             val bitmap = result.decodedBitmap
             // Komiho 诊断：预载到底有没有省下等待。
             // usedPreDecoded=true 表示直接命中预解码位图（零等待）；false 表示要走现场解码+增强。
+            // id/count 用于定位重复增强：同一 id 且 count>1 = 同一 holder 被调两次；
+            // 同一 page 出现两个不同 id = 两个 holder 实例并存。
             android.util.Log.d(
                 "Waifu2xPrefetch",
                 "page=${page.index} prewarmHit=$prewarmHit usedPreDecoded=${bitmap != null} " +
-                    "enhanceMs=${result.enhanceElapsedMillis}",
+                    "enhanceMs=${result.enhanceElapsedMillis} " +
+                    "id=${System.identityHashCode(this)} count=${++setImageCount}",
             )
             if (bitmap != null && !bitmap.isRecycled) {
                 // 增强预解码已完成：直接走 bitmap 路径（与旧增强成功路径等价）
