@@ -525,6 +525,12 @@
     <string name="lanczos_scale_2x">2x</string>
     <string name="lanczos_scale_2_5x">2.5x</string>
     <string name="lanczos_scale_3x">3x</string>
+    <string name="pref_ai_tile_size">AI tile size</string>
+    <string name="pref_ai_tile_size_summary">Tile edge used per inference pass. Larger tiles mean fewer dispatch round-trips (faster) but higher peak GPU memory. 128 is the engine default.</string>
+    <string name="ai_tile_size_96">96 · Low memory</string>
+    <string name="ai_tile_size_128">128 · Balanced (default)</string>
+    <string name="ai_tile_size_192">192 · Faster</string>
+    <string name="ai_tile_size_256">256 · Fastest</string>
     <string name="pref_hide_threshold">Sensitivity for hiding menu on scroll</string>
     <string name="pref_highest">Highest</string>
     <string name="pref_high">High</string>

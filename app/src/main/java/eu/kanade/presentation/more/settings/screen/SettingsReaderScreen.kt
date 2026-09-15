@@ -333,6 +333,15 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_lanczos_scale),
                     enabled = enhancementMode in 2..4,
                 ),
+                // Komiho: tile geometry for the AI upscaler (mode 5 only).
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.aiTileSize,
+                    entries = ReaderPreferences.AiTileSizeOptions
+                        .associate { it.first to stringResource(it.second) },
+                    title = stringResource(MR.strings.pref_ai_tile_size),
+                    subtitle = stringResource(MR.strings.pref_ai_tile_size_summary),
+                    enabled = enhancementMode == 5,
+                ),
                 // MihonSY: independent toggle for the enhancement status overlay.
                 // Enhancing does NOT auto-show it; the user must enable this.
                 Preference.PreferenceItem.SwitchPreference(

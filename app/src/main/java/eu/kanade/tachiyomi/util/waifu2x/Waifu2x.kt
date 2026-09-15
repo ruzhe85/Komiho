@@ -59,11 +59,40 @@ object Waifu2x {
     /** Bump when the bundled model assets change so existing installs re-extract. */
     private const val MODEL_CACHE_VERSION = "1"
 
+    /**
+     * Komiho: AI tile edge (px) — the native default is 128 (`waifu2x.cpp:150`).
+     * Each tile allocates `(tilesize + 2*prepadding)` input and `tilesize * scale` output,
+     * so the GPU working set grows with the square of this value.
+     */
+    private const val DEFAULT_TILE_SIZE = 128
+
+    /**
+     * 256 is the ceiling the bundled `prepadding = 18` is documented safe for
+     * (`waifu2x.cpp:151`); below 64 the per-tile overhead starts to dominate.
+     */
+    private const val MIN_TILE_SIZE = 64
+    private const val MAX_TILE_SIZE = 256
+
+    /**
+     * `tile_sleep_ms` — inter-tile sleep for thermal throttling, 0 = full speed.
+     * Kept at the engine default (`waifu2x.h:44`); forwarded only because
+     * `nativeUpdatePerformanceConfig` sets both fields in one call.
+     */
+    private const val TILE_SLEEP_MS = 0
+
     @Volatile
     private var libraryLoaded = false
 
     @Volatile
     private var isInitialized = false
+
+    /** Tile size the caller asked for; applied on the next [process] call. */
+    @Volatile
+    private var requestedTileSize = DEFAULT_TILE_SIZE
+
+    /** Tile size currently pushed to the native engine; -1 = not yet applied. */
+    @Volatile
+    private var appliedTileSize = -1
 
     init {
         libraryLoaded = try {
@@ -80,6 +109,18 @@ object Waifu2x {
     val isSupported: Boolean get() = libraryLoaded
 
     /**
+     * Komiho: sets the AI tile edge (px) for subsequent inferences, clamped to 64..256.
+     *
+     * The value is applied lazily on the next [process] call rather than here — the native
+     * engine only exists after [init], so pushing it eagerly would be a no-op on a cold
+     * start. Forwarding is guarded by a change check because the native side takes the
+     * engine lock.
+     */
+    fun setTileSize(size: Int) {
+        requestedTileSize = size.coerceIn(MIN_TILE_SIZE, MAX_TILE_SIZE)
+    }
+
+    /**
      * Runs AI upscaling on [input]. **Blocking** — call it from a background thread.
      * Returns the upscaled bitmap, or null when unavailable / failed (caller keeps the original).
      *
@@ -88,6 +129,7 @@ object Waifu2x {
     fun process(context: Context, input: Bitmap, id: Int = -1, tag: String = ""): Bitmap? {
         if (!libraryLoaded || input.isRecycled) return null
         if (!isInitialized && !init(context)) return null
+        applyTileSizeIfNeeded()
 
         val argb = if (input.config != Bitmap.Config.ARGB_8888) {
             try {
@@ -139,6 +181,7 @@ object Waifu2x {
             logcat(LogPriority.WARN, e) { "Waifu2x: destroy failed" }
         } finally {
             isInitialized = false
+            appliedTileSize = -1
         }
     }
 
@@ -161,6 +204,24 @@ object Waifu2x {
 
     // Internals -----------------------------------------------------------------------
 
+    /**
+     * Forwards [requestedTileSize] to the native engine, skipping the call when unchanged.
+     * Must run after [init] — `nativeUpdatePerformanceConfig` is a no-op while no engine exists.
+     */
+    private fun applyTileSizeIfNeeded() {
+        val size = requestedTileSize
+        if (size == appliedTileSize) return
+        try {
+            nativeUpdatePerformanceConfig(TILE_SLEEP_MS, size)
+            appliedTileSize = size
+        } catch (e: Throwable) {
+            // Symbol missing in an older .so — keep the engine default rather than failing
+            // the pass. Caught as Throwable because JNI resolution failures surface as
+            // UnsatisfiedLinkError (an Error, not an Exception).
+            logcat(LogPriority.WARN, e) { "Waifu2x: failed to apply tile size $size" }
+        }
+    }
+
     private fun init(context: Context): Boolean = synchronized(this) {
         if (isInitialized) return true
         val dir = prepareModel(context)
@@ -176,6 +237,9 @@ object Waifu2x {
         }
         if (!isInitialized) {
             logcat(LogPriority.WARN) { "Waifu2x: native init failed (Vulkan device missing?)" }
+        } else {
+            // 新引擎回到原生默认 tilesize(128)，旧值随上一个引擎一起释放 —— 标记为待重新下发。
+            appliedTileSize = -1
         }
         isInitialized
     }
@@ -221,6 +285,13 @@ object Waifu2x {
     ): Boolean
 
     private external fun nativeProcess(bitmap: Bitmap, id: Int): Bitmap?
+
+    /**
+     * Komiho: forwards tile geometry to the running engine (`waifu2x_jni.cpp:606`).
+     * Takes the engine lock, so call it only when the value actually changes.
+     * `tileSleepMs` is the inter-tile cooling sleep; 0 = full speed.
+     */
+    private external fun nativeUpdatePerformanceConfig(tileSleepMs: Int, tileSize: Int)
 
     private external fun nativeDestroy()
 

@@ -305,6 +305,9 @@ object MihonSyEnhancer {
         sourceTag: String = "",
     ): Bitmap? {
         if (Waifu2x.isSupported) {
+            // Komiho: tile geometry is a user preference; pushed before the pass (applied
+            // lazily and only when it changed, since the native side takes the engine lock).
+            Waifu2x.setTileSize(preferences.aiTileSize.get())
             Waifu2x.process(Injekt.get<Application>(), input, tag = sourceTag)?.let { return it }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
         } else {

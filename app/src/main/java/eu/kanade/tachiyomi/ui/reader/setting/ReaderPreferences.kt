@@ -225,6 +225,18 @@ class ReaderPreferences(
 
     val lanczosScale: Preference<Int> = preferenceStore.getInt("pref_lanczos_scale", 200) // 150/200/300 = 1.5x/2x/3x
 
+    /**
+     * Komiho: tile edge (px) for the AI upscaler — forwarded to the native `tilesize`
+     * (`waifu2x.cpp:150`, default 128) via `nativeUpdatePerformanceConfig`.
+     *
+     * Only affects AI upscale (mode 5). Larger tiles cut the number of tile
+     * dispatches (and the per-tile fixed overhead) at the cost of a higher peak
+     * GPU working set — each tile allocates `(tilesize + 2*prepadding)` input and
+     * `tilesize * scale` output, so the working set scales with the square of this value.
+     * The engine ships with `prepadding = 18`, annotated as safe up to tile size 256.
+     */
+    val aiTileSize: Preference<Int> = preferenceStore.getInt("pref_ai_tile_size", 128)
+
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
     // MihonSY image enhancement <--
@@ -357,6 +369,17 @@ class ReaderPreferences(
             200 to MR.strings.lanczos_scale_2x,
             250 to MR.strings.lanczos_scale_2_5x,
             300 to MR.strings.lanczos_scale_3x,
+        )
+
+        /**
+         * Komiho: AI tile edge options. 128 is the native default (`waifu2x.cpp:150`);
+         * 256 is the largest value the bundled `prepadding = 18` is documented safe for.
+         */
+        val AiTileSizeOptions = listOf(
+            96 to MR.strings.ai_tile_size_96,
+            128 to MR.strings.ai_tile_size_128,
+            192 to MR.strings.ai_tile_size_192,
+            256 to MR.strings.ai_tile_size_256,
         )
         // MihonSY image enhancement <--
         // MihonSY <--
