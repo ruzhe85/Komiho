@@ -80,30 +80,9 @@ enum class AiUpscaleModel(
         labelRes = MR.strings.ai_model_omni_turbo,
     ),
 
-    /**
-     * Photo-Small W2xEX — photo-oriented 2x network: 40 layers, 18 convolutions, channel width 64.
-     *
-     * Specs parsed from its own `.param` (deliberately **not** copied from the siblings):
-     * 18 stacked 3x3 convolutions, stride 1, no pooling, `PixelShuffle(0=2)` plus a bilinear
-     * `Interp` bypass. The receptive-field halo is therefore 18 — i.e. [padding] = 18, where the
-     * AnimeVideo/Omni family uses 10. Reusing 10 here would leave visible tile seams.
-     *
-     * ⚠️ Much heavier than the rest of the catalogue: **598,464 weight elements = 13.4x** the
-     * compute of [AnimeVideoMiniV18]. With the measured 0.99 s per 2.97 MP page baseline that is
-     * roughly **13 s per page**, and ~35 s on a 7.5 MP webtoon strip. Added on request — treat it
-     * as a quality-over-speed option, not a daily driver.
-     *
-     * Note it is tuned for *photos*; line art / screentones may not gain as much as with the
-     * anime-tuned entries above.
-     */
-    PhotoSmallW2xEX(
-        id = "photo-small-w2xex",
-        assetDir = "w2xex-esrgan/Photo-Small-W2xEX",
-        stem = "Photo-Small-W2xEX",
-        scale = 2,
-        padding = 18,
-        labelRes = MR.strings.ai_model_photo_small,
-    ),
+    // Photo-Small W2xEX 曾在此处（40 层 / 18 卷积 / 598,464 权重元素 = 13.4x 算力 / padding 18），
+    // 2026-09-16 按用户反馈「效果很差」移除。若要恢复：把 assets/w2xex-esrgan/Photo-Small-W2xEX/
+    // 放回去 + 三语补 ai_model_photo_small，并注意它的 padding 是 18（不是同族的 10）。
     ;
 
     companion object {
