@@ -529,6 +529,7 @@
     <string name="enhancement_group_gpu">GPU</string>
     <string name="enhancement_scale">Scale</string>
     <string name="ai_model_anime_video">AnimeVideo</string>
+    <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="pref_ai_tile_size">Tile size</string>
     <string name="pref_ai_tile_size_summary">Tile edge used per inference pass. Larger tiles mean fewer dispatch round-trips (faster) but higher peak GPU memory. 128 is the engine default.</string>
     <string name="ai_tile_size_96">96 · Low memory</string>

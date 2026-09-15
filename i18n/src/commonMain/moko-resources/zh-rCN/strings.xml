@@ -371,6 +371,7 @@
     <string name="enhancement_group_gpu">GPU</string>
     <string name="enhancement_scale">倍率</string>
     <string name="ai_model_anime_video">AnimeVideo</string>
+    <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="pref_ai_tile_size">分块大小</string>
     <string name="pref_ai_tile_size_summary">每次推理的分块边长。块越大，分块调度次数越少、速度越快，但峰值显存占用越高。默认 128。</string>
     <string name="ai_tile_size_96">96 · 省显存</string>
