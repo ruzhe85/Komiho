@@ -58,6 +58,12 @@ import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.download.DownloadUiState
 import app.mihonsy.komga.data.download.KomgaDownloadEvent
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -174,6 +180,11 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
     // 已读过任意一本 → FAB 文案为「继续阅读」，否则「开始阅读」。
     val isReading = books.any { it.readProgress != null }
 
+    // issue #1：书籍列表进入多选时隐藏 FAB —— 底部选择栏最右侧是「下载所选」，用
+    // SpaceEvenly 分布后正好落在右下角，与 FAB 完全重叠（用户反馈「下载键被遮挡」）。
+    // 由 BookShelf 通过 onSelectionModeChange 上报。
+    var shelfInSelection by remember { mutableStateOf(false) }
+
     fun openBook(bookId: String) {
         loadScope.launch {
             runCatching { KomgaReaderLauncher.open(context, client, bookId) }
@@ -206,20 +217,30 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
         // SY: MihonSY 口径的「继续阅读」浮动按钮——原先是 header 里的整宽 OutlinedButton，
         // 在手机端与简介区叠在一起（还抢走了「收回」的点击）。改成右下角 FAB 后两者都消失。
         floatingActionButton = {
-            SmallExtendedFloatingActionButton(
-                text = {
-                    Text(
-                        text = if (isReading) "继续阅读" else "开始阅读",
-                    )
-                },
-                icon = { Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null) },
-                onClick = { nextBook?.let { openBook(it.id) } },
-                expanded = true,
-                modifier = Modifier.animateFloatingActionButton(
-                    visible = nextBook != null,
-                    alignment = Alignment.BottomEnd,
-                ),
-            )
+            // issue #1（下载键被遮挡）：多选时让 FAB 整体退出组合 —— AnimatedVisibility 在退出
+            // 动画结束后会移除内容，既不遮挡底部选择栏的「下载所选」，也不会拦截它的点击。
+            // 注意：只把 animateFloatingActionButton 的 visible 置 false 不够，缩放为 0 的
+            // FAB 仍然参与命中测试，点击仍会落在它身上。
+            AnimatedVisibility(
+                visible = !shelfInSelection,
+                enter = scaleIn(transformOrigin = TransformOrigin(1f, 1f)) + fadeIn(),
+                exit = scaleOut(transformOrigin = TransformOrigin(1f, 1f)) + fadeOut(),
+            ) {
+                SmallExtendedFloatingActionButton(
+                    text = {
+                        Text(
+                            text = if (isReading) "继续阅读" else "开始阅读",
+                        )
+                    },
+                    icon = { Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null) },
+                    onClick = { nextBook?.let { openBook(it.id) } },
+                    expanded = true,
+                    modifier = Modifier.animateFloatingActionButton(
+                        visible = nextBook != null,
+                        alignment = Alignment.BottomEnd,
+                    ),
+                )
+            }
         },
     ) { padding ->
         when {
@@ -321,6 +342,8 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                         ?: if (downloadStore.isDownloaded(bookId)) DownloadUiState.DOWNLOADED else DownloadUiState.NONE
                                 },
                                 onDownloadClick = { startDownload(it) },
+                                // issue #1：多选时通知宿主隐藏右下角 FAB，避免它压住「下载所选」
+                                onSelectionModeChange = { shelfInSelection = it },
                             )
                         }
                     }
@@ -354,6 +377,8 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                     ?: if (downloadStore.isDownloaded(bookId)) DownloadUiState.DOWNLOADED else DownloadUiState.NONE
                             },
                             onDownloadClick = { startDownload(it) },
+                            // issue #1：多选时通知宿主隐藏右下角 FAB，避免它压住「下载所选」
+                            onSelectionModeChange = { shelfInSelection = it },
                         )
                     }
                 }
