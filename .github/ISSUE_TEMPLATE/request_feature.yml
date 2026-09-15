@@ -1,13 +1,13 @@
 name: ⭐ Feature request
-description: Suggest a feature to improve TachiyomiSY
-labels: [Feature request]
+description: Suggest a feature to improve Komiho
+labels: [enhancement]
 body:
 
   - type: textarea
     id: feature-description
     attributes:
       label: Describe your suggested feature
-      description: How can TachiyomiSY be improved?
+      description: How can Komiho be improved?
       placeholder: |
         Example:
           "It should work like this..."
@@ -31,7 +31,7 @@ body:
           required: true
         - label: I have written a short but informative title.
           required: true
-        - label: I have updated the app to version **[1.13.2](https://github.com/jobobby04/tachiyomisy/releases/latest)**.
+        - label: I have updated the app to the [latest release](https://github.com/ruzhe85/Komiho/releases/latest).
           required: true
         - label: I will fill out all of the requested information in this form.
           required: true

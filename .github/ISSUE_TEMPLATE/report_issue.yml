@@ -1,6 +1,6 @@
-name: 🐞 Issue report
-description: Report an issue in TachiyomiSY
-labels: [Bug]
+name: 🐞 Bug report
+description: Report a bug in Komiho
+labels: [bug]
 body:
 
   - type: textarea
@@ -43,17 +43,18 @@ body:
     attributes:
       label: Crash logs
       description: |
-        If you're experiencing crashes, if possible, go to the app's **More → Settings → Advanced** page, press **Dump crash logs** and share the crash logs here.
+        If the app crashes it opens a crash screen — tap **Share crash logs** (中文界面：**导出崩溃日志**) there and attach the exported file here.
+        You can also paste the relevant log lines as plain text.
       placeholder: |
-        You can upload the crash log file as an attachment, or paste the crash logs in plain text if needed.
+        Attach the exported crash log file, or paste the log text here.
 
   - type: input
-    id: tachiyomisy-version
+    id: komiho-version
     attributes:
-      label: TachiyomiSY version
-      description: You can find your TachiyomiSY version in **More → About**.
+      label: Komiho version
+      description: You can find your Komiho version in **Settings → About**, shown as `Version x.y.z (build)`.
       placeholder: |
-        Example: "1.13.2"
+        Example: "1.1.0 (8)"
     validations:
       required: true
 
@@ -94,11 +95,9 @@ body:
           required: true
         - label: I have written a short but informative title.
           required: true
-        - label: I have gone through the [FAQ](https://mihon.app/docs/faq/general) and [troubleshooting guide](https://mihon.app/docs/guides/troubleshooting/).
+        - label: I have updated the app to the [latest release](https://github.com/ruzhe85/Komiho/releases/latest).
           required: true
-        - label: I have updated the app to version **[1.13.2](https://github.com/jobobby04/tachiyomisy/releases/latest)**.
+        - label: I understand that **Komiho ships no content of its own** — it is a reader for Komga, local files, WebDAV and SMB, so I **will not receive help** with the Komga server, the network share, or anything about where the files come from.
           required: true
         - label: I have filled out all of the requested information in this form, including specific version numbers.
-          required: true
-        - label: I understand that **TachiyomiSY does not have or fix any extensions**, and I **will not receive help** for any issues related to sources or extensions.
           required: true

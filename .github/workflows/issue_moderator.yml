@@ -14,38 +14,10 @@ jobs:
         uses: tachiyomiorg/issue-moderator-action@v2.6.1
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          duplicate-label: Duplicate
-
-          auto-close-rules: |
-            [
-              {
-                "type": "body",
-                "regex": ".*DELETE THIS SECTION IF YOU HAVE READ AND ACKNOWLEDGED IT.*",
-                "message": "The acknowledgment section was not removed."
-              },
-              {
-                "type": "body",
-                "regex": ".*\\* (Tachiyomi version|Android version|Device): \\?.*",
-                "message": "Requested information in the template was not filled out."
-              },
-              {
-                "type": "both",
-                "regex": "^(?!.*myanimelist.*).*(aniyomi|anime).*$",
-                "ignoreCase": true,
-                "message": "TachiyomiSY does not support anime, and has no plans to support anime. In addition Tachiyomi is not affiliated with Aniyomi https://github.com/jmir1/aniyomi"
-              },
-              {
-                "type": "both",
-                "regex": ".*(?:fail(?:ed|ure|s)?|can\\s*(?:no|')?t|(?:not|un).*able|(?<!n[o']?t )blocked by|error) (?:to )?(?:get past|by ?pass|penetrate)?.*cloud ?fl?are.*",
-                "ignoreCase": true,
-                "labels": ["Cloudflare protected"],
-                "message": "Refer to the **Solving Cloudflare issues** section at https://mihon.app/docs/guides/troubleshooting/#cloudflare. If it doesn't work, migrate to other sources or wait until they lower their protection."
-              },
-              {
-                "type": "both",
-                "regex": "^.*(myanimelist|mal).*$",
-                "ignoreCase": true,
-                "message": "For issues with linking MyAnimeList, please follow these steps:\n1. Update TachiyomiSY to version 0.10.5 or newer\n2. Change your default User-Agent (`More → Settings → Advanced → Default user agent string`)\n3. Close and restart TachiyomiSY\n4. Attempt to link MyAnimeList again\n\nIf you had MyAnimeList linked before, try to unlink it first before trying these steps."
-              }
-            ]
-          auto-close-ignore-label: do-not-autoclose
+          # Komiho: duplicate detection only — the label below already exists in the repo.
+          # The upstream fork's auto-close rules were dropped (2026-09-16) because they describe a
+          # different app: one of them auto-closed any issue that merely mentioned anime, two
+          # others pointed at features Komiho does not have (online sources, Cloudflare-protected
+          # sites, MyAnimeList), and the last two matched a plain-text bug template that no longer
+          # exists — these issue forms are YAML and GitHub already enforces their required fields.
+          duplicate-label: duplicate
