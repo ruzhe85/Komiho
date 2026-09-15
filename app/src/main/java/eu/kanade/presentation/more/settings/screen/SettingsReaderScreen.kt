@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalView
 import eu.kanade.presentation.more.settings.Preference
+import eu.kanade.presentation.reader.settings.ImageEnhancementSection
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderBottomButton
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
@@ -302,52 +303,19 @@ object SettingsReaderScreen : SearchableSettings {
     }
 
     // MihonSY -->
+    /**
+     * Komiho: the grouped picker, rendered through [Preference.PreferenceItem.CustomPreference]
+     * so this page and the in-reader sheet share one implementation
+     * ([ImageEnhancementSection]) instead of two layouts that drift apart.
+     */
     @Composable
     private fun getEnhancementGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
-        val enhancementMode by readerPreferences.enhancementMode.collectAsState()
-
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_image_enhancement_group),
             preferenceItems = listOf(
-                Preference.PreferenceItem.ListPreference(
-                    preference = readerPreferences.enhancementMode,
-                    entries = ReaderPreferences.EnhancementModes
-                        .mapIndexed { index, it -> index to stringResource(it) }
-                        .toMap(),
-                    title = stringResource(MR.strings.pref_enhancement_mode),
-                    subtitle = stringResource(MR.strings.pref_enhancement_mode_summary),
-                ),
-                // MihonSY: Anime4K disabled — quality selector removed from settings.
-                // Preference.PreferenceItem.ListPreference(
-                //     preference = readerPreferences.anime4kMode,
-                //     entries = ReaderPreferences.Anime4kModes
-                //         .mapIndexed { index, it -> index to stringResource(it) }
-                //         .toMap(),
-                //     title = stringResource(MR.strings.pref_anime4k_mode),
-                //     enabled = enhancementMode == 1,
-                // ),
-                Preference.PreferenceItem.ListPreference(
-                    preference = readerPreferences.lanczosScale,
-                    entries = ReaderPreferences.LanczosScaleOptions
-                        .associate { it.first to stringResource(it.second) },
-                    title = stringResource(MR.strings.pref_lanczos_scale),
-                    enabled = enhancementMode in 2..4,
-                ),
-                // Komiho: tile geometry for the AI upscaler (mode 5 only).
-                Preference.PreferenceItem.ListPreference(
-                    preference = readerPreferences.aiTileSize,
-                    entries = ReaderPreferences.AiTileSizeOptions
-                        .associate { it.first to stringResource(it.second) },
-                    title = stringResource(MR.strings.pref_ai_tile_size),
-                    subtitle = stringResource(MR.strings.pref_ai_tile_size_summary),
-                    enabled = enhancementMode == 5,
-                ),
-                // MihonSY: independent toggle for the enhancement status overlay.
-                // Enhancing does NOT auto-show it; the user must enable this.
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = readerPreferences.showEnhancementStatus,
-                    title = stringResource(MR.strings.pref_show_enhancement_status),
-                    subtitle = stringResource(MR.strings.pref_show_enhancement_status_summary),
+                Preference.PreferenceItem.CustomPreference(
+                    title = stringResource(MR.strings.pref_image_enhancement_group),
+                    content = { ImageEnhancementSection(preferences = readerPreferences) },
                 ),
             ),
         )

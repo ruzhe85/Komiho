@@ -5,6 +5,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.os.SystemClock
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -305,8 +306,10 @@ object MihonSyEnhancer {
         sourceTag: String = "",
     ): Bitmap? {
         if (Waifu2x.isSupported) {
-            // Komiho: tile geometry is a user preference; pushed before the pass (applied
-            // lazily and only when it changed, since the native side takes the engine lock).
+            // Komiho: model and tile geometry are user preferences. Both are pushed before
+            // the pass and applied lazily — only a real change reaches the native side
+            // (the model rebuilds the engine, the tile size takes the engine lock).
+            Waifu2x.setModel(AiUpscaleModel.fromId(preferences.aiModelId.get()))
             Waifu2x.setTileSize(preferences.aiTileSize.get())
             Waifu2x.process(Injekt.get<Application>(), input, tag = sourceTag)?.let { return it }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
