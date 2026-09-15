@@ -44,14 +44,32 @@ enum class AiUpscaleModel(
     ),
 
     /**
+     * Omni-Mini V2 — verified **layer-for-layer identical** to [AnimeVideoMiniV18]: same 24
+     * layers, same 10 convolutions, same channel ladder (24 … 24 → 12), same 44,712 weight
+     * elements. Only the training run differs, so running it costs exactly the same.
+     *
+     * Its `.bin` is larger (176 KB vs 89 KB) purely because the weights are stored **fp32**
+     * instead of fp16 — that must not be read as more compute.
+     */
+    OmniMiniV2(
+        id = "omni-mini-v2-w2xex",
+        assetDir = "w2xex-esrgan/Omni-MiniV2-W2xEX",
+        stem = "Omni-MiniV2-W2xEX",
+        scale = 2,
+        padding = 10,
+        labelRes = MR.strings.ai_model_omni_mini,
+    ),
+
+    /**
      * Omni-Turbo V1.5 — same author's retrained sibling of [AnimeVideoMiniV18].
      *
      * Verified by parsing both `.param` files: identical topology (24 layers, 10 convolutions,
      * PReLU x9, `PixelShuffle(0=2)`, bilinear `Interp` bypass), so [scale] and [padding] carry
      * over unchanged — tile seams behave exactly like the existing model.
      *
-     * Only the weights differ, and they are heavier: 598 KB vs 89 KB. Expect somewhat more
-     * compute per tile in exchange for the retrained quality.
+     * Weights are heavier though: channels are 64 wide instead of 24, i.e. **303,552 weight
+     * elements = 6.79x** the compute of [AnimeVideoMiniV18] (measured 0.99 s per 2.97 MP page
+     * for the latter, so expect roughly 6 s here). Use it when quality matters more than speed.
      */
     OmniTurboV15(
         id = "omni-turbo-v15-w2xex",
