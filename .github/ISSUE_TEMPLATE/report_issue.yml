@@ -1,92 +1,108 @@
-name: 🐞 Bug report
-description: Report a bug in Komiho
+name: 🐞 Bug report · 问题反馈
+description: Report a bug in Komiho · 反馈 Komiho 的问题
 labels: [bug]
 body:
 
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve Komiho. **Only the three fields marked *required* need filling in** — the rest are optional, but the more you can tell us the faster this gets fixed.
+        **Only the three fields marked *required* need filling in — the rest are optional.**
+        **只有三项必填，其余都可以留空。**
+
         Please check that you are on the [latest release](https://github.com/ruzhe85/Komiho/releases/latest) before reporting.
-        Note that Komiho ships no content of its own — it is a reader for Komga, local files, WebDAV and SMB, so problems with the Komga server, the network share, or where the files come from cannot be handled here.
+        提交前请先确认你用的是[最新版本](https://github.com/ruzhe85/Komiho/releases/latest)。
+
+        Komiho ships no content of its own — it is a reader for Komga, local files, WebDAV and SMB, so problems with the Komga server, the network share, or where the files come from cannot be handled here.
+        Komiho 本身不提供任何内容 —— 它是 Komga / 本地文件 / WebDAV / SMB 的阅读器，所以 Komga 服务端、网络共享、文件来源相关的问题不在此受理。
 
   - type: textarea
     id: reproduce-steps
     attributes:
-      label: Steps to reproduce
-      description: Provide an example of the issue.
+      label: Steps to reproduce · 复现步骤
+      description: |
+        How can we reproduce the issue?
+        请说明如何复现该问题。
       placeholder: |
-        Example:
-          1. First step
-          2. Second step
-          3. Issue here
+        Example / 示例:
+          1. Open a book / 打开一本书
+          2. Turn to page 5 / 翻到第 5 页
+          3. Issue appears here / 问题在这里出现
     validations:
       required: true
 
   - type: input
     id: komiho-version
     attributes:
-      label: Komiho version
-      description: You can find your Komiho version in **Settings → About**, shown as `Version x.y.z (build)`.
+      label: Komiho version · Komiho 版本
+      description: |
+        **Settings → About** shows it as `Version x.y.z (build)`.
+        在**设置 → 关于**里能看到，格式为 `版本 x.y.z (build)`。
       placeholder: |
-        Example: "1.1.0 (8)"
+        Example / 示例: 1.1.0 (8)
     validations:
       required: true
 
   - type: checkboxes
     id: acknowledgements
     attributes:
-      label: Acknowledgements
+      label: Acknowledgements · 确认事项
       options:
-        - label: I have searched the existing issues and this is a new ticket, **NOT** a duplicate or related to another open or closed issue.
+        - label: I have searched the existing issues and this is a new ticket, **NOT** a duplicate. · 我已搜索过现有 issue，确认这不是重复问题。
           required: true
 
   - type: textarea
     id: actual-behavior
     attributes:
-      label: Actual behavior
-      description: Explain what actually happens. A screenshot or short recording helps a lot.
+      label: Actual behavior · 实际表现
+      description: |
+        What actually happens? A screenshot or short recording helps a lot.
+        实际发生了什么？附截图或短录屏会很有帮助。
       placeholder: |
-        Example:
-          "This happened instead..."
+        Example / 示例: "This happened instead..." / "实际是这样……"
 
   - type: textarea
     id: expected-behavior
     attributes:
-      label: Expected behavior
-      description: Explain what you expected to happen.
+      label: Expected behavior · 预期表现
+      description: |
+        What did you expect to happen?
+        你期望发生什么？
       placeholder: |
-        Example:
-          "This should happen..."
+        Example / 示例: "This should happen..." / "本应如此……"
 
   - type: textarea
     id: crash-logs
     attributes:
-      label: Crash logs
+      label: Crash logs · 崩溃日志
       description: |
-        If the app crashes it opens a crash screen — tap **Share crash logs** (中文界面：**导出崩溃日志**) there and attach the exported file here.
+        If the app crashes it opens a crash screen — tap **Share crash logs** / **导出崩溃日志** there and attach the exported file here.
+        如果应用崩溃会自动打开崩溃页 —— 点其中的 **导出崩溃日志**（Share crash logs），把导出的文件附在这里。
         You can also paste the relevant log lines as plain text.
+        也可以直接粘贴相关日志文本。
       placeholder: |
         Attach the exported crash log file, or paste the log text here.
+        附上导出的日志文件，或在此粘贴日志文本。
 
   - type: input
     id: android-version
     attributes:
-      label: Android version
+      label: Android version · Android 版本
       placeholder: |
-        Example: "Android 14"
+        Example / 示例: Android 14
 
   - type: input
     id: device
     attributes:
-      label: Device
-      description: Phone / tablet model, or the TV box type if relevant.
+      label: Device · 设备
+      description: |
+        Phone / tablet model, or the TV box model if relevant.
+        手机 / 平板型号；电视盒子也请写明型号。
       placeholder: |
-        Example: "OnePlus 12"
+        Example / 示例: OnePlus 12
 
   - type: textarea
     id: other-details
     attributes:
-      label: Other details
+      label: Other details · 其他说明
       placeholder: |
-        Additional details and attachments.
+        Additional details and attachments. / 补充说明与附件。

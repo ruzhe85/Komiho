@@ -2,10 +2,10 @@ blank_issues_enabled: false
 contact_links:
   - name: 📖 README · 使用说明
     url: https://github.com/ruzhe85/Komiho/blob/main/README.md
-    about: What Komiho is, which sources it supports (Komga / local files / WebDAV / SMB), and how to add them
-  - name: ⬇️ 最新版本 · Latest release
+    about: What Komiho is, which sources it supports (Komga / local files / WebDAV / SMB) and how to add them · Komiho 是什么、支持哪些来源、怎么添加
+  - name: ⬇️ Latest release · 最新版本
     url: https://github.com/ruzhe85/Komiho/releases/latest
-    about: Please reproduce the problem on the newest build before opening an issue
-  - name: 🧩 Komga 服务端问题
+    about: Please reproduce the problem on the newest build before opening an issue · 提 issue 前请先在新版本上复现
+  - name: 🧩 Komga server issues · Komga 服务端问题
     url: https://github.com/gotson/komga/issues
-    about: Problems with the Komga server itself (library scanning, metadata, API) belong in the Komga repository
+    about: Problems with the Komga server itself (library scanning, metadata, API) belong in the Komga repository · 服务端本身的问题（扫描、元数据、API）请提到 Komga 仓库
