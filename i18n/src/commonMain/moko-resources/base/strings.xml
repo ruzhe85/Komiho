@@ -532,11 +532,10 @@
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <string name="pref_ai_tile_size">Tile size</string>
-    <string name="pref_ai_tile_size_summary">Tile edge used per inference pass. Larger tiles mean fewer dispatch round-trips (faster) but higher peak GPU memory. 128 is the engine default.</string>
-    <string name="ai_tile_size_96">96 · Low memory</string>
-    <string name="ai_tile_size_128">128 · Balanced (default)</string>
-    <string name="ai_tile_size_192">192 · Faster</string>
-    <string name="ai_tile_size_256">256 · Fastest</string>
+    <string name="ai_tile_size_96">96</string>
+    <string name="ai_tile_size_128">128</string>
+    <string name="ai_tile_size_192">192</string>
+    <string name="ai_tile_size_256">256</string>
     <string name="pref_hide_threshold">Sensitivity for hiding menu on scroll</string>
     <string name="pref_highest">Highest</string>
     <string name="pref_high">High</string>
