@@ -117,6 +117,20 @@ private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScre
                 )
             }
         }
+    } else if (enhancementMode == 5) {
+        // Komiho: AI upscale (ncnn + Vulkan) — tile edge. Larger tiles mean fewer tile
+        // dispatches (faster) at the cost of a higher peak GPU working set. Same chip-row
+        // pattern as the Lanczos scale picker above; applied on the next inference.
+        val aiTileSize by screenModel.preferences.aiTileSize.collectAsState()
+        SettingsChipRow {
+            ReaderPreferences.AiTileSizeOptions.forEach { (value, label) ->
+                FilterChip(
+                    selected = aiTileSize == value,
+                    onClick = { screenModel.preferences.aiTileSize.set(value) },
+                    label = { Text(stringResource(label)) },
+                )
+            }
+        }
     }
 
     // MihonSY: enhancement status overlay toggle, available right here in the
