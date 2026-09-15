@@ -1,7 +1,6 @@
 package eu.kanade.presentation.reader.settings
 
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -9,8 +8,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import eu.kanade.domain.manga.model.readerOrientation
 import eu.kanade.domain.manga.model.readingMode
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
@@ -74,71 +71,15 @@ internal fun ColumnScope.ReadingModePage(screenModel: ReaderSettingsScreenModel)
 /**
  * In-reader image enhancement settings. Placed at the top level of the reading-mode page
  * (outside the webtoon/pager sections) on purpose: enhancement is global and applies to
- * every reading mode. A single selector (Off / Anime4K / Lanczos3) avoids the ambiguity of
- * two toggles where one silently overrides the other.
+ * every reading mode.
+ *
+ * The grouped layout (Off / CPU / GPU, each with its own parameter row) lives in
+ * [ImageEnhancementSection] so this sheet and Settings → Reader stay structurally identical.
  */
 @Composable
 private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScreenModel) {
     HeadingItem(MR.strings.pref_image_enhancement_group)
-    Text(
-        text = stringResource(MR.strings.pref_enhancement_mode_summary),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp),
-    )
-
-    val enhancementMode by screenModel.preferences.enhancementMode.collectAsState()
-    // MihonSY: no label — the "图像增强" heading + explanation Text above already
-    // serve as the section title; the chip row sits directly below.
-    SettingsChipRow {
-        // MihonSY: Anime4K (index 1) and Spline36 (index 4) are disabled — hidden
-        // in the UI but kept in the index map for backward-compatible stored values.
-        ReaderPreferences.EnhancementModes.forEachIndexed { index, label ->
-            if (index == 1 || index == 4) return@forEachIndexed
-            FilterChip(
-                selected = enhancementMode == index,
-                onClick = { screenModel.preferences.enhancementMode.set(index) },
-                label = { Text(stringResource(label)) },
-            )
-        }
-    }
-
-    if (enhancementMode == 1 || enhancementMode == 4) {
-        // Anime4K / Spline36 hidden — an old stored value shows no extra chip.
-    } else if (enhancementMode in 2..3) {
-        // Lanczos3 / Catmull-Rom — scale selection applies to both.
-        val lanczosScale by screenModel.preferences.lanczosScale.collectAsState()
-        SettingsChipRow {
-            ReaderPreferences.LanczosScaleOptions.forEach { (value, label) ->
-                FilterChip(
-                    selected = lanczosScale == value,
-                    onClick = { screenModel.preferences.lanczosScale.set(value) },
-                    label = { Text(stringResource(label)) },
-                )
-            }
-        }
-    } else if (enhancementMode == 5) {
-        // Komiho: AI upscale (ncnn + Vulkan) — tile edge. Larger tiles mean fewer tile
-        // dispatches (faster) at the cost of a higher peak GPU working set. Same chip-row
-        // pattern as the Lanczos scale picker above; applied on the next inference.
-        val aiTileSize by screenModel.preferences.aiTileSize.collectAsState()
-        SettingsChipRow {
-            ReaderPreferences.AiTileSizeOptions.forEach { (value, label) ->
-                FilterChip(
-                    selected = aiTileSize == value,
-                    onClick = { screenModel.preferences.aiTileSize.set(value) },
-                    label = { Text(stringResource(label)) },
-                )
-            }
-        }
-    }
-
-    // MihonSY: enhancement status overlay toggle, available right here in the
-    // reader settings so the user does not have to dig into the app settings.
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_show_enhancement_status),
-        pref = screenModel.preferences.showEnhancementStatus,
-    )
+    ImageEnhancementSection(preferences = screenModel.preferences)
 }
 // MihonSY <--
 

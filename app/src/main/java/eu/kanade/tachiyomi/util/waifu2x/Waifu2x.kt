@@ -14,20 +14,12 @@ import tachiyomi.core.common.util.system.logcat
  * `libwaifu2x-jni.so` (`app/src/main/cpp/waifu2x{,_jni}.cpp`) and is only built for
  * ABIs whose ncnn SDK is present under `third_party/`.
  *
- * The bundled model is a 2x residual ncnn network, so the output scale is fixed —
- * unlike the CPU resamplers there is no user-selectable scale factor.
+ * Models come from [AiUpscaleModel]: scale and tile padding are per-model properties, and
+ * the native engine is rebuilt whenever the selected model differs from the running one.
+ * Unlike the CPU resamplers there is still no free-form scale factor — the scale is baked
+ * into the network itself.
  */
 object Waifu2x {
-
-    /** Asset folder + file stem of the bundled model. */
-    private const val MODEL_ASSET_DIR = "w2xex-esrgan/AnimeVideo-MiniV1.8-W2xEX"
-    private const val MODEL_STEM = "AnimeVideo-MiniV1.8-W2xEX"
-
-    /** Fixed 2x: the network ends in a PixelShuffle(2) plus a 2x residual branch. */
-    const val SCALE = 2
-
-    /** Receptive field of the 10-layer 3x3 stack — matches the upstream W2xEX default. */
-    private const val PADDING = 10
 
     /**
      * ncnn precision mode。**0 = FP16**（见 `waifu2x.cpp:191`：`case 0` 与 `default` 同一分支，
@@ -94,6 +86,14 @@ object Waifu2x {
     @Volatile
     private var appliedTileSize = -1
 
+    /** Model the caller asked for; the engine is (re)built for it on the next [process]. */
+    @Volatile
+    private var requestedModel: AiUpscaleModel = AiUpscaleModel.Default
+
+    /** Model the running native engine was built for; null = no engine yet. */
+    @Volatile
+    private var activeModel: AiUpscaleModel? = null
+
     init {
         libraryLoaded = try {
             System.loadLibrary("waifu2x-jni")
@@ -121,6 +121,18 @@ object Waifu2x {
     }
 
     /**
+     * Komiho: selects the GPU model ([AiUpscaleModel]) for subsequent inferences.
+     *
+     * Applied lazily on the next [process] call. Switching models is expensive — the native
+     * engine is torn down and re-initialised (model load + Vulkan pipeline creation) — so
+     * this only records the intent; [ensureEngine] compares it against the running model and
+     * short-circuits when they match, keeping the hot path free of extra work.
+     */
+    fun setModel(model: AiUpscaleModel) {
+        requestedModel = model
+    }
+
+    /**
      * Runs AI upscaling on [input]. **Blocking** — call it from a background thread.
      * Returns the upscaled bitmap, or null when unavailable / failed (caller keeps the original).
      *
@@ -128,7 +140,7 @@ object Waifu2x {
      */
     fun process(context: Context, input: Bitmap, id: Int = -1, tag: String = ""): Bitmap? {
         if (!libraryLoaded || input.isRecycled) return null
-        if (!isInitialized && !init(context)) return null
+        if (!ensureEngine(context)) return null
         applyTileSizeIfNeeded()
 
         val argb = if (input.config != Bitmap.Config.ARGB_8888) {
@@ -181,6 +193,7 @@ object Waifu2x {
             logcat(LogPriority.WARN, e) { "Waifu2x: destroy failed" }
         } finally {
             isInitialized = false
+            activeModel = null
             appliedTileSize = -1
         }
     }
@@ -222,35 +235,53 @@ object Waifu2x {
         }
     }
 
-    private fun init(context: Context): Boolean = synchronized(this) {
-        if (isInitialized) return true
-        val dir = prepareModel(context)
+    /**
+     * Makes sure a native engine is running for [requestedModel], building it if needed.
+     *
+     * Also covers model switches: a different entry means a different network (weights,
+     * scale, tile padding), and the native side cannot swap that in place —
+     * `nativeInitW2xEx` deletes the previous instance and constructs a new one, waiting for
+     * any in-flight inference to release the engine lock first.
+     */
+    private fun ensureEngine(context: Context): Boolean = synchronized(this) {
+        val model = requestedModel
+        if (isInitialized && activeModel == model) return true
+
+        val dir = prepareModel(context, model)
         if (dir == null) {
-            logcat(LogPriority.WARN) { "Waifu2x: bundled model not found in assets" }
+            logcat(LogPriority.WARN) { "Waifu2x: model assets missing for ${model.id}" }
             return false
         }
-        isInitialized = try {
-            nativeInitW2xEx(dir, MODEL_STEM, SCALE, PRECISION, FP16_ARITHMETIC, PADDING)
+
+        val ok = try {
+            nativeInitW2xEx(dir, model.stem, model.scale, PRECISION, FP16_ARITHMETIC, model.padding)
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "Waifu2x: native init threw" }
             false
         }
-        if (!isInitialized) {
-            logcat(LogPriority.WARN) { "Waifu2x: native init failed (Vulkan device missing?)" }
-        } else {
+        isInitialized = ok
+        activeModel = if (ok) model else null
+        if (ok) {
             // 新引擎回到原生默认 tilesize(128)，旧值随上一个引擎一起释放 —— 标记为待重新下发。
             appliedTileSize = -1
+        } else {
+            logcat(LogPriority.WARN) { "Waifu2x: native init failed (Vulkan device missing?)" }
         }
-        isInitialized
+        ok
     }
 
-    /** Extracts the bundled model into the cache dir and returns its absolute path. */
-    private fun prepareModel(context: Context): String? = try {
-        val dir = File(context.cacheDir, "waifu2x-models/$MODEL_STEM")
+    /**
+     * Extracts the given model's assets into the cache dir and returns its absolute path.
+     *
+     * Each model gets its own directory keyed by [AiUpscaleModel.id] so switching models
+     * never mixes files; [MODEL_CACHE_VERSION] invalidates previously extracted copies.
+     */
+    private fun prepareModel(context: Context, model: AiUpscaleModel): String? = try {
+        val dir = File(context.cacheDir, "waifu2x-models/${model.id}")
         if (!dir.isDirectory && !dir.mkdirs() && !dir.isDirectory) {
             null
         } else {
-            val files = context.assets.list(MODEL_ASSET_DIR).orEmpty()
+            val files = context.assets.list(model.assetDir).orEmpty()
             if (files.isEmpty()) {
                 null
             } else {
@@ -259,7 +290,7 @@ object Waifu2x {
                 for (name in files) {
                     val out = File(dir, name)
                     if (refresh || !out.exists() || out.length() == 0L) {
-                        context.assets.open("$MODEL_ASSET_DIR/$name").use { input ->
+                        context.assets.open("${model.assetDir}/$name").use { input ->
                             out.outputStream().use(input::copyTo)
                         }
                     }

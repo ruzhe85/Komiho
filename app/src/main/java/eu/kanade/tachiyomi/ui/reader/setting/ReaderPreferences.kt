@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.ui.graphics.BlendMode
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
+import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.getEnum
@@ -237,6 +238,18 @@ class ReaderPreferences(
      */
     val aiTileSize: Preference<Int> = preferenceStore.getInt("pref_ai_tile_size", 128)
 
+    /**
+     * Komiho: which GPU model the AI upscaler runs ([AiUpscaleModel]).
+     *
+     * Stored as the model's stable string id, not an index — adding or reordering catalogue
+     * entries must never remap an existing install's choice. Unknown ids (dropped model)
+     * fall back to [AiUpscaleModel.Default].
+     */
+    val aiModelId: Preference<String> = preferenceStore.getString(
+        "pref_ai_model_id",
+        AiUpscaleModel.Default.id,
+    )
+
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
     // MihonSY image enhancement <--
@@ -380,6 +393,16 @@ class ReaderPreferences(
             128 to MR.strings.ai_tile_size_128,
             192 to MR.strings.ai_tile_size_192,
             256 to MR.strings.ai_tile_size_256,
+        )
+
+        /**
+         * Komiho: CPU-side modes as an explicit (flag → label) table for the grouped picker.
+         * Flags match the values stored in [enhancementMode]; [EnhancementModes] stays as the
+         * full index map so old stored values keep resolving.
+         */
+        val CpuEnhancementModes = listOf(
+            2 to MR.strings.enhancement_lanczos3,
+            3 to MR.strings.enhancement_catmull_rom,
         )
         // MihonSY image enhancement <--
         // MihonSY <--
