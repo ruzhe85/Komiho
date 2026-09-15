@@ -1,35 +1,37 @@
-name: ⭐ Feature request
-description: Suggest a feature to improve Komiho
+name: ⭐ Feature request · 功能建议
+description: Suggest a feature to improve Komiho · 给 Komiho 提一个功能建议
 labels: [enhancement]
 body:
 
   - type: markdown
     attributes:
       value: |
-        Thanks for the suggestion. **Only the two fields marked *required* need filling in** — the rest are optional.
+        **Only the two fields marked *required* need filling in — the rest are optional.**
+        **只有两项必填，其余都可以留空。**
 
   - type: textarea
     id: feature-description
     attributes:
-      label: Describe your suggested feature
-      description: How can Komiho be improved? A concrete use case helps a lot.
+      label: Describe your suggested feature · 功能描述
+      description: |
+        How can Komiho be improved? A concrete use case helps a lot.
+        希望 Komiho 怎么改进？说清使用场景会很有帮助。
       placeholder: |
-        Example:
-          "It should work like this..."
+        Example / 示例: "It should work like this..." / "希望可以这样……"
     validations:
       required: true
 
   - type: checkboxes
     id: acknowledgements
     attributes:
-      label: Acknowledgements
+      label: Acknowledgements · 确认事项
       options:
-        - label: I have searched the existing issues and this is a new ticket, **NOT** a duplicate or related to another open or closed issue.
+        - label: I have searched the existing issues and this is a new ticket, **NOT** a duplicate. · 我已搜索过现有 issue，确认这不是重复问题。
           required: true
 
   - type: textarea
     id: other-details
     attributes:
-      label: Other details
+      label: Other details · 其他说明
       placeholder: |
-        Additional details, screenshots or mockups.
+        Additional details, screenshots or mockups. / 补充说明、截图或草图。
