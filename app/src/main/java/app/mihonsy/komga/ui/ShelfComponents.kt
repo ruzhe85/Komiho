@@ -345,6 +345,9 @@ fun BookShelf(
     onDownloadClick: (String) -> Unit = {},
     // 可选头部（如系列详情的简介区）：手机端作为列表首个 item 随书籍一起滚动。
     header: @Composable (() -> Unit)? = null,
+    // 选择模式变化上报宿主：宿主据此隐藏右下角 FAB。否则 FAB 会压住底部选择栏
+    // 最右侧的「下载所选」（issue #1：「下载按键会被继续阅读按键遮挡」）。
+    onSelectionModeChange: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -367,6 +370,9 @@ fun BookShelf(
 
     // 选择状态下拦截系统返回手势：退出选择而不是退出程序
     BackHandler(inSelection) { exitSelection() }
+
+    // 上报选择模式给宿主（issue #1：宿主需据此隐藏右下角 FAB，它会遮住底部选择栏的「下载所选」）
+    LaunchedEffect(inSelection) { onSelectionModeChange(inSelection) }
 
     fun performBatchUpdate(completed: Boolean) {
         val snapshot = selectedBooks
