@@ -42,6 +42,25 @@ enum class AiUpscaleModel(
         padding = 10,
         labelRes = MR.strings.ai_model_anime_video,
     ),
+
+    /**
+     * Omni-Turbo V1.5 — same author's retrained sibling of [AnimeVideoMiniV18].
+     *
+     * Verified by parsing both `.param` files: identical topology (24 layers, 10 convolutions,
+     * PReLU x9, `PixelShuffle(0=2)`, bilinear `Interp` bypass), so [scale] and [padding] carry
+     * over unchanged — tile seams behave exactly like the existing model.
+     *
+     * Only the weights differ, and they are heavier: 598 KB vs 89 KB. Expect somewhat more
+     * compute per tile in exchange for the retrained quality.
+     */
+    OmniTurboV15(
+        id = "omni-turbo-v15-w2xex",
+        assetDir = "w2xex-esrgan/Omni-TurboV1.5-W2xEX",
+        stem = "Omni-TurboV1.5-W2xEX",
+        scale = 2,
+        padding = 10,
+        labelRes = MR.strings.ai_model_omni_turbo,
+    ),
     ;
 
     companion object {
