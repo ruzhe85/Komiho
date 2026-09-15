@@ -531,6 +531,7 @@
     <string name="ai_model_anime_video">AnimeVideo</string>
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
+    <string name="ai_model_photo_small">Photo-Small</string>
     <string name="pref_ai_tile_size">Tile size</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>
