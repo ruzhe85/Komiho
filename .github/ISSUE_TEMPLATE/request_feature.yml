@@ -3,35 +3,33 @@ description: Suggest a feature to improve Komiho
 labels: [enhancement]
 body:
 
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. **Only the two fields marked *required* need filling in** — the rest are optional.
+
   - type: textarea
     id: feature-description
     attributes:
       label: Describe your suggested feature
-      description: How can Komiho be improved?
+      description: How can Komiho be improved? A concrete use case helps a lot.
       placeholder: |
         Example:
           "It should work like this..."
     validations:
       required: true
 
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I have searched the existing issues and this is a new ticket, **NOT** a duplicate or related to another open or closed issue.
+          required: true
+
   - type: textarea
     id: other-details
     attributes:
       label: Other details
       placeholder: |
-        Additional details and attachments.
-
-  - type: checkboxes
-    id: acknowledgements
-    attributes:
-      label: Acknowledgements
-      description: Read this carefully, we will close and ignore your issue if you skimmed through this.
-      options:
-        - label: I have searched the existing issues and this is a new ticket, **NOT** a duplicate or related to another open or closed issue.
-          required: true
-        - label: I have written a short but informative title.
-          required: true
-        - label: I have updated the app to the [latest release](https://github.com/ruzhe85/Komiho/releases/latest).
-          required: true
-        - label: I will fill out all of the requested information in this form.
-          required: true
+        Additional details, screenshots or mockups.

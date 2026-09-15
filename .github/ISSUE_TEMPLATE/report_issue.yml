@@ -3,6 +3,13 @@ description: Report a bug in Komiho
 labels: [bug]
 body:
 
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Komiho. **Only the three fields marked *required* need filling in** — the rest are optional, but the more you can tell us the faster this gets fixed.
+        Please check that you are on the [latest release](https://github.com/ruzhe85/Komiho/releases/latest) before reporting.
+        Note that Komiho ships no content of its own — it is a reader for Komga, local files, WebDAV and SMB, so problems with the Komga server, the network share, or where the files come from cannot be handled here.
+
   - type: textarea
     id: reproduce-steps
     attributes:
@@ -16,27 +23,41 @@ body:
     validations:
       required: true
 
-  - type: textarea
-    id: expected-behavior
+  - type: input
+    id: komiho-version
     attributes:
-      label: Expected behavior
-      description: Explain what you should expect to happen.
+      label: Komiho version
+      description: You can find your Komiho version in **Settings → About**, shown as `Version x.y.z (build)`.
       placeholder: |
-        Example:
-          "This should happen..."
+        Example: "1.1.0 (8)"
     validations:
       required: true
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I have searched the existing issues and this is a new ticket, **NOT** a duplicate or related to another open or closed issue.
+          required: true
 
   - type: textarea
     id: actual-behavior
     attributes:
       label: Actual behavior
-      description: Explain what actually happens.
+      description: Explain what actually happens. A screenshot or short recording helps a lot.
       placeholder: |
         Example:
           "This happened instead..."
-    validations:
-      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: Explain what you expected to happen.
+      placeholder: |
+        Example:
+          "This should happen..."
 
   - type: textarea
     id: crash-logs
@@ -49,34 +70,19 @@ body:
         Attach the exported crash log file, or paste the log text here.
 
   - type: input
-    id: komiho-version
-    attributes:
-      label: Komiho version
-      description: You can find your Komiho version in **Settings → About**, shown as `Version x.y.z (build)`.
-      placeholder: |
-        Example: "1.1.0 (8)"
-    validations:
-      required: true
-
-  - type: input
     id: android-version
     attributes:
       label: Android version
-      description: You can find this somewhere in your Android settings.
       placeholder: |
         Example: "Android 14"
-    validations:
-      required: true
 
   - type: input
     id: device
     attributes:
       label: Device
-      description: List your device and model.
+      description: Phone / tablet model, or the TV box type if relevant.
       placeholder: |
-        Example: "Google Pixel 8"
-    validations:
-      required: true
+        Example: "OnePlus 12"
 
   - type: textarea
     id: other-details
@@ -84,20 +90,3 @@ body:
       label: Other details
       placeholder: |
         Additional details and attachments.
-
-  - type: checkboxes
-    id: acknowledgements
-    attributes:
-      label: Acknowledgements
-      description: Read this carefully, we will close and ignore your issue if you skimmed through this.
-      options:
-        - label: I have searched the existing issues and this is a new ticket, **NOT** a duplicate or related to another open or closed issue.
-          required: true
-        - label: I have written a short but informative title.
-          required: true
-        - label: I have updated the app to the [latest release](https://github.com/ruzhe85/Komiho/releases/latest).
-          required: true
-        - label: I understand that **Komiho ships no content of its own** — it is a reader for Komga, local files, WebDAV and SMB, so I **will not receive help** with the Komga server, the network share, or anything about where the files come from.
-          required: true
-        - label: I have filled out all of the requested information in this form, including specific version numbers.
-          required: true
