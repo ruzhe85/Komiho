@@ -40,8 +40,15 @@ jobs:
           restore-keys: |
             gradle-
 
+      # Komiho: setup-android@v4 has a default `packages: 'tools platform-tools'`, but Google
+      # has retired the legacy "tools" package from the SDK repository — `sdkmanager tools`
+      # now prints "Failed to find package 'tools'" and exits 1, which fails this action
+      # (run 34983288701 died here in 50s, before any compilation). Override the default so
+      # only platform-tools is pulled; everything else we need is installed explicitly below.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       - name: Install SDK components (platform 36 + build-tools + NDK + CMake)
         run: |
