@@ -521,7 +521,7 @@ private fun TypeSelectContent(
             }
         }
         // Komiho: 冷启动落点 —— 三个行为互斥单选（语义与取值见 StartupPreferences）。
-        // 只看标题不够自明（尤其「继续阅读」），所以每项带一行副标题说明。
+        // 按用户要求只显示标题（最近 / 最后来源 / 继续阅读），不带副标题说明。
         item(key = "startup") {
             HorizontalDivider(Modifier.padding(top = 14.dp, bottom = 12.dp))
             Text(
@@ -537,11 +537,6 @@ private fun TypeSelectContent(
                     StartupPreferences.Behavior.LAST_SOURCE -> R.string.startup_last_source
                     StartupPreferences.Behavior.CONTINUE_READING -> R.string.startup_continue
                 }
-                val summaryRes = when (behavior) {
-                    StartupPreferences.Behavior.RECENT -> R.string.startup_recent_summary
-                    StartupPreferences.Behavior.LAST_SOURCE -> R.string.startup_last_source_summary
-                    StartupPreferences.Behavior.CONTINUE_READING -> R.string.startup_continue_summary
-                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -549,13 +544,12 @@ private fun TypeSelectContent(
                             StartupPreferences.setBehavior(behavior)
                             startupBehavior = behavior
                         }
-                        .padding(vertical = 9.dp),
-                    verticalAlignment = Alignment.Top,
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // 自绘单选圈（外圈 + 选中内点）：复用现有组件，不为一个控件引入新依赖。
                     Box(
                         modifier = Modifier
-                            .padding(top = 2.dp)
                             .size(18.dp)
                             .clip(CircleShape)
                             .border(
@@ -579,18 +573,12 @@ private fun TypeSelectContent(
                         }
                     }
                     Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = composeStringResource(titleRes),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            text = composeStringResource(summaryRes),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        text = composeStringResource(titleRes),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
             Text(
