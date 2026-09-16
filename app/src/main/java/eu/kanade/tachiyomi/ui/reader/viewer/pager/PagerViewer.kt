@@ -133,7 +133,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         // 并发打满 CPU/GC 导致掉帧。降回 1 恢复最早顺滑感；独立的 ByteArray 内存流已
         // 根治大跳页「解码失败」错误与活 archive 流崩溃，不会随 offscreen 变化复发。
         // 代价：极快连翻可能偶现黑屏（同最早，但无 Mutex 拖慢会比最早轻）。条页模式不变。
-        pager.offscreenPageLimit = 1
+        // Komiho：现在这个值由「阅读设置 → 预载页数」控制（1/2/3，默认 1），见 PagerConfig；
+        // 抬高仍是上面那笔账：每档多 2 页已解码的增强位图 + 每页一次推测性 GPU 推理。
+        pager.offscreenPageLimit = config.offscreenPageLimit
         pager.id = R.id.reader_pager
         pager.adapter = adapter
         pager.addOnPageChangeListener(pagerListener)

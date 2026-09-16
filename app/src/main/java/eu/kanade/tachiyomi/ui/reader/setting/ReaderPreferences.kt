@@ -295,6 +295,16 @@ class ReaderPreferences(
 
     val pageLayout: Preference<Int> = preferenceStore.getInt("page_layout", PagerConfig.PageLayout.AUTOMATIC)
 
+    /**
+     * Komiho：分页阅读的「预载页数」= ViewPager 离屏缓冲（当前页**前后各保留几页**）。
+     *
+     * 默认 [PagerConfig.OffscreenPages.DEFAULT]（1，保守、最省内存）。调大能让连翻 / 跳页更"即出"，
+     * 代价是每档约多 2 页**已解码的增强位图**（双页一跨页增强后 4016×2880 ≈ 46MB），以及每页
+     * 一次**推测性**的 GPU 推理（引擎只有一个、串行）。稳态阅读（每页停留 > 渲染耗时）看不出差别。
+     */
+    val pagerOffscreenLimit: Preference<Int> =
+        preferenceStore.getInt("pref_pager_offscreen_limit", PagerConfig.OffscreenPages.DEFAULT)
+
     val invertDoublePages: Preference<Boolean> = preferenceStore.getBoolean("invert_double_pages", false)
 
     val centerMarginType: Preference<Int> = preferenceStore.getInt("center_margin_type", PagerConfig.CenterMarginType.NONE)

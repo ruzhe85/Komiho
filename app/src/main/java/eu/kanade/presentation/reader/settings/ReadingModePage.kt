@@ -14,6 +14,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
+import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
@@ -126,6 +127,18 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
                 selected = pageLayout == index,
                 onClick = { screenModel.preferences.pageLayout.set(index) },
                 label = { Text(stringResource(it)) },
+            )
+        }
+    }
+
+    // Komiho：预载页数（前后各几页）。档位只写值，含义由行标题承担。
+    val offscreenLimit by screenModel.preferences.pagerOffscreenLimit.collectAsState()
+    SettingsChipRow(MR.strings.pref_pager_offscreen_limit) {
+        (PagerConfig.OffscreenPages.MIN..PagerConfig.OffscreenPages.MAX).forEach { pages ->
+            FilterChip(
+                selected = offscreenLimit == pages,
+                onClick = { screenModel.preferences.pagerOffscreenLimit.set(pages) },
+                label = { Text(pages.toString()) },
             )
         }
     }
