@@ -284,7 +284,6 @@ import tachiyomi.domain.chapter.repository.BookmarkRepository
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.history.model.LocalHistoryItem
 import tachiyomi.domain.history.repository.HistoryRepository
-import tachiyomi.domain.manga.interactor.GetManga
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import androidx.compose.material.icons.filled.Description
 import uy.kohesive.injekt.Injekt
@@ -6970,8 +6969,9 @@ private data class MergedBook(
 // 旧版的「读过 X 本」已移除——它数的是历史章节数，口径既不是本也不是章，误导。
 //
 // 数据来源：本地/WebDAV/SMB 取本地历史库（按 chapterUrl 去重，取最近一次）；
-// Komga 优先取服务器「进行中」书籍（readProgress.readDate 倒序，与 Web 面板同口径），
-// 不足 N 条再用本地历史补齐。断网/无连接时自然只剩本地记录。
+// Komga 只取服务器「继续阅读」口径（read_status=IN_PROGRESS，readProgress.readDate 倒序，
+// 与 Web 面板 / Home 的「继续阅读」一致），**不再用本地历史补齐** —— 本地历史含已读完的书，
+// 补齐会让它变成「最近阅读」语义。断网 / 未连接时该卡为空。
 /**
  * 解析 Komga 的 readDate（形如 2026-09-08T15:44:41.123456789Z）为毫秒时间戳，失败返回 0。
  * 只取到秒（尾部小数/时区忽略），不用 java.time 以避免 desugaring 风险。
@@ -7046,18 +7046,12 @@ private fun SourceDashboardPane(
                         .take(limit)
             }
             val local = Agg()
-            // SY: Komga 同样是「每连接一条来源」，但本地历史统一挂在 KomgaSource.ID 下、
-            // url 不带 connId，无法反查是哪条连接读的——故历史先全部归入这个回落池，
-            // 只有「激活连接」的卡片会拿它补齐（见下方 komgaCards 的构建）。
-            val komgaLocal = Agg()
             val komgaConns = KomgaPreferences(context.applicationContext).connections()
             val webdav = mutableMapOf<String, Agg>()
             // SY --> Komiho Phase7: SMB 摘要分桶（smb://<connId>/<relPath> → smb:<connId>）。
             val smb = mutableMapOf<String, Agg>()
             // SY <--
             val repo = Injekt.get<HistoryRepository>()
-            val getManga = Injekt.get<GetManga>()
-            val mangaRepo = Injekt.get<MangaRepository>()
             val conns = WebDavConnectionStore.all()
             // 本地/WebDAV：同一来源 ID，按 chapterUrl 前缀归类。
             runCatching { repo.getHistoryBySourceDetailed(LocalSource.ID).first() }.getOrDefault(emptyList()).forEach { item ->
@@ -7077,8 +7071,6 @@ private fun SourceDashboardPane(
                     else -> local.add(item)
                 }
             }
-            // Komga：历史统一挂在 KomgaSource.ID 下（无记录时卡片回落引导语）。
-            runCatching { repo.getHistoryBySourceDetailed(KomgaSource.ID).first() }.getOrDefault(emptyList()).forEach { komgaLocal.add(it) }
             // SY: 封面回退链与历史/书签行同口径（本地文件 → WebDAV 缓存 → SMB 缓存）。
             // 注意：Komga 封面不走 coverOf（需挂起解析 Manga + 鉴权 fetcher），单独在下方 suspend 块处理。
             val coverOf: (LocalHistoryItem?) -> Any? = { item ->
@@ -7093,30 +7085,6 @@ private fun SourceDashboardPane(
                         ?: item.thumbnailUrl?.takeIf { it.isNotBlank() }
                         ?: WebDavCoverCache.existingCoverFile(context, url)
                         ?: SmbCoverCache.existingCoverFile(context, url)
-                }
-            }
-            // SY: Komga 封面必须走 MangaCoverFetcher（按 source 解析 KomgaSource 带上鉴权头）。
-            // 直接传裸 URL 会用默认 network fetcher（无鉴权 → 401 无封面），所以这里解析出 Manga
-            // 对象交回渲染层触发该 fetcher，并依赖 ensureManga 写入的 ogThumbnailUrl。
-            // 补偿：升级前插入的旧记录 ogThumbnailUrl=null，按连接 baseUrl 即时补全并落库，
-            // 这样无需重新打开书，聚合页 Komga 卡片也能立刻出封面。
-            var komgaCover: Any? = null
-            val komgaLast = komgaLocal.last
-            if (komgaLast != null) {
-                var manga = runCatching { getManga.await(komgaLast.mangaId) }.getOrNull()
-                if (manga != null) {
-                    if (manga.thumbnailUrl.isNullOrBlank()) {
-                        val seriesId = manga.url.removePrefix(KomgaSource.SERIES_URL_PREFIX)
-                        val base = runCatching { KomgaPreferences(context.applicationContext).connection().baseUrl }
-                            .getOrNull()?.trimEnd('/')
-                        if (!seriesId.isBlank() && !base.isNullOrBlank()) {
-                            runCatching {
-                                mangaRepo.update(MangaUpdate(id = manga.id, thumbnailUrl = "$base/api/v1/series/$seriesId/thumbnail"))
-                            }
-                            manga = getManga.await(komgaLast.mangaId) ?: manga
-                        }
-                    }
-                    komgaCover = manga.takeIf { !it.thumbnailUrl.isNullOrBlank() }
                 }
             }
             // SY: 历史记录 → 卡片条目。总页数取阅读器回填的内存备忘（未读过则 0，只显示页码）。
@@ -7146,28 +7114,17 @@ private fun SourceDashboardPane(
             val build: (Agg, Int) -> SourceCardSummary = { agg, limit ->
                 SourceCardSummary(toRecents(agg.recents(limit)))
             }
-            // Komiho: Komga 卡优先取「服务器最后一次阅读」——readProgress.readDate 最新的
-            // 进行中书籍（与 Home 的「继续阅读」同口径）；没有进行中的书 / 断网 / 未连接
-            // 时回落到本地历史（与改动前完全一致）。
-            // Komga 本地历史行的封面走 coverOf 会拿到 null（Komga url 不进本地封面回退链），
-            // 首条补上按 series 解析出的 Komga 封面，与改动前的卡片封面一致。
-            // 本地历史回落只给「激活连接」那张卡（本地历史无法区分是哪个连接读的，
-            // 若每张卡都塞同一份，两张卡内容会完全一样）。
-            val activeKomgaConnId = runCatching {
-                KomgaPreferences(context.applicationContext).activeConnectionId
-            }.getOrNull().orEmpty()
-            val activeKomgaLimit = DashboardPreferences.limitFor(
-                SOURCE_ID_KOMGA_PREFIX + activeKomgaConnId,
-            ).coerceAtLeast(1)
-            val komgaLocalRecents = toRecents(komgaLocal.recents(activeKomgaLimit * 2)).mapIndexed { i, r ->
-                if (i == 0 && r.coverModel == null) r.copy(coverModel = komgaCover) else r
-            }
-            // 每条 Komga 连接一张卡：主体按**该连接**拉服务器「进行中」记录。
+            // Komiho: Komga 卡【只取 Komga API 的「继续阅读」口径】—— readProgress.readDate
+            // 最新的「进行中」（read_status=IN_PROGRESS）书籍，与 Home 的「继续阅读」及 Komga
+            // Web 面板完全一致。
+            // ⚠️ 刻意不再用本地历史补齐条数（2026-09-16 按用户反馈改）：本地历史里含**已读完**的
+            // 书，补齐会把「最近阅读」语义混进「继续阅读」口径里。所以服务器没有进行中的书 / 断网 /
+            // 未连接时，卡片就保持为空，由空态提示引导进入来源。
+            // 每条 Komga 连接一张卡：按**该连接**拉服务器「进行中」记录。
             val komgaCards = komgaConns.associate { conn ->
                 val key = SOURCE_ID_KOMGA_PREFIX + conn.id.ifBlank { conn.baseUrl }
-                val fallback = if (conn.id == activeKomgaConnId) komgaLocalRecents else emptyList()
                 val n = DashboardPreferences.limitFor(key).coerceAtLeast(1)
-                var card = SourceCardSummary(fallback.take(n))
+                var card = SourceCardSummary(emptyList())
                 runCatching {
                     val client = KomgaApiClient(conn)
                     val books = client.getBooks(
@@ -7204,14 +7161,8 @@ private fun SourceDashboardPane(
                         )
                     }
                     if (serverRecents.isNotEmpty()) {
-                        // 服务器「进行中」不足 N 条时用本地历史补齐（同一本按 chapterId 去重），
-                        // 仍按最后阅读时间倒序，保证卡片列表时间单调。
-                        val serverIds = serverRecents.map { it.chapterId }.toHashSet()
-                        card = SourceCardSummary(
-                            (serverRecents + fallback.filter { it.chapterId !in serverIds })
-                                .sortedByDescending { it.readAt }
-                                .take(n),
-                        )
+                        // 只给「进行中」的结果，不掺本地历史（见上方口径说明）。
+                        card = SourceCardSummary(serverRecents.sortedByDescending { it.readAt }.take(n))
                     }
                 }
                 key to card
