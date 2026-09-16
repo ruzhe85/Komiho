@@ -214,6 +214,37 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             .firstOrNull { it.item.first == page || it.item.second == page }
 
     /**
+     * [item] 是否为当前显示项（Komiho P3 判「可见页」用；双页时 item = page to extraPage）。
+     */
+    fun isCurrentItem(item: Any): Boolean = adapter.joinedItems.getOrNull(pager.currentItem) == item
+
+    /**
+     * Komiho P3：可见页优先。
+     *
+     * 记下「最近一份开始跑的重活是第几页」，并在**可见页**开始跑时，若上一份是别的页，
+     * 调 [Waifu2x.abortProcessing] 把它打断 —— 原生在 tile 边界返回（几十 ms），把 GPU 让给当前页。
+     *
+     * 为什么需要：GPU 只有一个引擎，且原生 `g_lock` 覆盖**整次推理**（双页一次 ≈2.5s）。
+     * GPU 上没有优先级，谁先进 `nativeProcess` 谁先跑 ⇒ 快速连翻或单↔双页切换时，
+     * 新可见页会被上一页/邻居的推理拖着排队（实测 5 次推理 wait 累积到 9.7s、total 12.1s，
+     * 可见页排在第 3）。
+     *
+     * 安全性：[Waifu2x.process] 每次进入都会先 `nativeClearAbortProcessing()`，所以「打断」
+     * 只对**当前正在跑的那一次**推理生效；对排队中的、以及后续任务都是空操作。
+     */
+    fun onPrepareStart(pageIndex: Int, visible: Boolean) {
+        val previous = lastPreparePage
+        lastPreparePage = pageIndex
+        if (!visible || previous < 0 || previous == pageIndex) return
+        prewarmLog("preempt page=$previous by-page=$pageIndex")
+        Waifu2x.abortProcessing()
+    }
+
+    /** 最近一份开始跑的重活是第几页（-1 = 还没跑过）。见 [onPrepareStart]。 */
+    @Volatile
+    private var lastPreparePage = -1
+
+    /**
      * Called when a new page (either a [ReaderPage] or [ChapterTransition]) is marked as active
      */
     fun onPageChange(position: Int) {
@@ -358,6 +389,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                         return@withLock
                     }
                     runningPrewarmPosition = position
+                    // Komiho P3：把预热也登记进「谁在跑」，这样可见页 holder 开始跑时能把它打断
+                    // （否则新可见页会排在一条已无人要的预热推理后面，实测可拖到 +2.5s）。
+                    onPrepareStart(pageIndex = next.index, visible = false)
                     try {
                         val prepared = PagerPagePreparer.preparePure(
                             viewer = this@PagerViewer,
