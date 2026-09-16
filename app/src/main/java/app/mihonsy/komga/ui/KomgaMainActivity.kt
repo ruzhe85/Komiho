@@ -5279,7 +5279,8 @@ private fun LocalFileBrowser(
     }
     // SY <--
 
-    // 统一点击行为：目录→下钻；归档/epub→直接读该文件；图片→读所在目录（reader 自动载入同目录全部图片）。
+    // 统一点击行为：目录→下钻；归档/epub→直接读该文件；图片→读所在目录
+    //（目录 = 一卷，reader 自动载入同目录全部图片），并从**点开的那张图**开始。
     val onItemOpen: (LocalEntry) -> Unit = { entry ->
         when {
             entry.isDirectory -> navigateTo(stack + entry.name)
@@ -5287,7 +5288,7 @@ private fun LocalFileBrowser(
                 openLocalFile(context, entry.uni, (stack + entry.name).joinToString("/"))
             }
             entry.isImage -> scope.launch {
-                openLocalFile(context, current, stack.joinToString("/"))
+                openLocalFile(context, current, stack.joinToString("/"), entry.name)
             }
         }
     }
@@ -5751,25 +5752,55 @@ private fun LocalBrowseOptionsMenu(
  * 书签/历史即可互认。再启动现有 [ReaderActivity]，reader 本地管线按 chapter.url 定位文件并解码，
  * Lanczos 等增强随 reader 自带。失败时在 UI 提示原因。
  */
-private suspend fun openLocalFile(context: android.content.Context, file: UniFile, relPath: String) {
+private suspend fun openLocalFile(
+    context: android.content.Context,
+    file: UniFile,
+    relPath: String,
+    // Komiho: 散图目录里被点开的那张图片名。有值时阅读器直接定位到该图，
+    // 不再从目录第 1 页开始（用户反馈：点 79 却从 01 开始读）。
+    startImageName: String? = null,
+) {
     try {
-        val (mangaId, chapterId) = withContext(Dispatchers.IO) {
+        val (mangaId, chapterId, initialPage) = withContext(Dispatchers.IO) {
             val fs = Injekt.get<LocalSourceFileSystem>()
             // 真实绝对路径（canonical）：同一物理文件在 SAF 与全权限（MANAGE）两种模式下路径一致，
             // 作为 manga.url / chapter.url 即可让书签/历史跨模式互认。
             val canonicalFile = fs.realPathOf(file)
                 ?: throw Exception(context.getString(R.string.file_not_found, relPath))
             val isArchive = file.isLocalArchive() || file.extension.equals("epub", true)
-            // 书籍（系列）目录：归档/epub 取父目录，目录/散图取自身。
-            val bookDir = if (isArchive) canonicalFile.substringBeforeLast('/') else canonicalFile
+            // 系列目录口径统一为「条目所在的那一级容器」：归档/epub 取该文件的父目录；
+            // 散图目录取**自身的父目录** —— 当前目录即一卷，父目录下的兄弟目录是其它卷，
+            // 这样读完当前卷才能自动续到下一卷（issue #2：「阅读文件夹中的图片时也能跳转到下一文件夹」）。
+            // 父目录解析不到（例如散图就在浏览根）时退回自身，保持原行为。
+            val seriesDir = if (isArchive) {
+                canonicalFile.substringBeforeLast('/')
+            } else {
+                canonicalFile.substringBeforeLast('/', "")
+                    .takeIf { it.isNotBlank() && fs.resolveUnderBase(it) != null }
+                    ?: canonicalFile
+            }
             // manga.url = 系列目录的真实绝对路径（全局唯一，且跨模式稳定）。
-            val mangaUrl = bookDir
-            val seriesTitle = bookDir.substringAfterLast('/').ifEmpty { file.name.orEmpty() }
+            val mangaUrl = seriesDir
+            val seriesTitle = seriesDir.substringAfterLast('/').ifEmpty { file.name.orEmpty() }
             // 标题取「系列（父目录）名」而非具体卷名：同系列复用同一 manga 时，阅读器左上角稳定显示系列名。
             val title = seriesTitle
             // 当前系列目录的 UniFile（扫描兄弟章节用）；解析失败即文件不在当前根下。
-            val bookDirUni = fs.resolveUnderBase(bookDir)
-                ?: throw Exception(context.getString(R.string.series_dir_not_found, bookDir))
+            val bookDirUni = fs.resolveUnderBase(seriesDir)
+                ?: throw Exception(context.getString(R.string.series_dir_not_found, seriesDir))
+            // 散图：被点开那张图在「目录内自然序图片列表」中的下标 → 阅读器初始页。
+            // 判据与排序必须和 DirectoryPageLoader 完全一致（isImage + 自然序），否则会错页。
+            val startPage = if (!isArchive && startImageName != null) {
+                fs.resolveUnderBase(canonicalFile)
+                    ?.listFiles()
+                    ?.filter { !it.isDirectory && ImageUtil.isImage(it.name) { it.openInputStream() } }
+                    ?.sortedWith { a, b ->
+                        a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
+                    }
+                    ?.indexOfFirst { it.name == startImageName }
+                    ?.takeIf { it >= 0 }
+            } else {
+                null
+            }
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
             val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
@@ -5798,7 +5829,7 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                         a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
                     }
                     .forEach { sib ->
-                        val url = fs.realPathOf(sib) ?: "$bookDir/${sib.name}"
+                        val url = fs.realPathOf(sib) ?: "$seriesDir/${sib.name}"
                         if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
                             chapterRepo.addAll(
                                 listOf(
@@ -5817,15 +5848,16 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                 chapterRepo.getChapterByUrlAndMangaId(canonicalFile, manga.id!!)
                     ?: error(context.getString(R.string.chapter_not_written, canonicalFile))
             } else {
-                // 目录/散图：把系列目录下所有子目录（卷/话）都建成章节，使翻完当前卷自动续到下一卷；
-                // 章节 url 用真实绝对路径。当前打开的目录是其中一章。
+                // 散图目录：把系列目录（= 当前目录的父目录）下所有子目录（卷）都建成章节，
+                // 使翻完当前卷自动续到下一卷（issue #2）；章节 url 用真实绝对路径。
+                // 当前打开的目录本身就是其中一章，正常无需保底。
                 bookDirUni.listFiles().orEmpty().toList()
                     .filter { it.isDirectory }
                     .sortedWith { a, b ->
                         a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
                     }
                     .forEach { sib ->
-                        val url = fs.realPathOf(sib) ?: "$bookDir/${sib.name}"
+                        val url = fs.realPathOf(sib) ?: "$seriesDir/${sib.name}"
                         if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
                             chapterRepo.addAll(
                                 listOf(
@@ -5855,9 +5887,9 @@ private suspend fun openLocalFile(context: android.content.Context, file: UniFil
                         ),
                     ).first()
             }
-            manga.id!! to chapter.id!!.toLong()
+            Triple(manga.id!!, chapter.id!!.toLong(), startPage)
         }
-        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
+        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, initialPage))
     } catch (e: Throwable) {
         android.widget.Toast.makeText(
             context,
@@ -6180,8 +6212,13 @@ private suspend fun openWebDavTestFile(
         val isImageFile = fileName.substringAfterLast('.', "").lowercase() in WEBDAV_IMAGE_EXTS
         val dirUrl = httpUrl.substringBeforeLast('/') + "/"
         // SY <--
-        // manga.url = 远程目录（同一远程目录的多个归档同属一个系列）
-        val mangaUrl = httpUrl.substringBeforeLast('/')
+        // manga.url = 系列目录（同一目录下的多个归档 / 多个卷目录同属一个系列）
+        val dirBase = dirUrl.trimEnd('/')
+        // 散图：当前目录 = 一卷，系列取**其父目录** —— 父目录下的兄弟目录是其它卷，
+        // 读完当前卷才能自动续到下一卷（issue #2）。父目录取不到（已在共享根）时退回当前目录。
+        val parentBase = dirBase.substringBeforeLast('/', "")
+            .takeIf { it.startsWith("http") && it.substringAfter("://", "").contains('/') }
+        val mangaUrl = if (isImageFile && parentBase != null) parentBase else dirBase
         val seriesTitle = runCatching {
             java.net.URLDecoder.decode(mangaUrl.substringAfterLast('/'), "UTF-8")
         }.getOrDefault(mangaUrl.substringAfterLast('/')).ifBlank { decodedName }
@@ -6190,8 +6227,23 @@ private suspend fun openWebDavTestFile(
         } else {
             WebDavConnectionStore.toChapterUrl(conn.id, httpUrl)
         }
+        // 散图：被点开那张图在「目录内自然序图片列表」中的下标 → 阅读器初始页。
+        // 判据与排序必须和 WebDavDirectoryPageLoader 一致（isImage + 自然序），否则会错页。
+        val startPage = if (isImageFile) {
+            runCatching {
+                WebDavPropfind.list(conn, dirUrl)
+                    .filter { it.isImage }
+                    .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                    .indexOfFirst { it.name == decodedName }
+                    .takeIf { it >= 0 }
+            }.onFailure {
+                logcat(LogPriority.WARN) { "[WebDav] 定位点开图片失败，改从第 1 页开始: ${it.message}" }
+            }.getOrNull()
+        } else {
+            null
+        }
         prefs.webdavTestUrl.set(httpUrl)
-        val (mangaId, chapterId) = withContext(Dispatchers.IO) {
+        val (mangaId, chapterId, initialPage) = withContext(Dispatchers.IO) {
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
             val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
@@ -6210,16 +6262,17 @@ private suspend fun openWebDavTestFile(
             if (manga.ogTitle != seriesTitle) {
                 mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
             }
-            // SY --> Komiho Phase7: 散图对齐本地模式——点图片 = 当前目录当漫画，
-            // 其下全部子目录各成一章（目录章节，URL 尾斜杠），叶子目录保底当前目录单章；
+            // SY --> Komiho: 散图 —— 系列 = 当前目录的**父目录**，其下所有子目录各成一章
+            //（当前目录也在内），读完当前卷自动续到下一个目录章（issue #2）。
             // 归档 = 同目录归档全部成章（原有）。
             if (isImageFile) {
                 val siblingDirs = runCatching {
                     WebDavPropfind.list(conn, mangaUrl).filter { it.isDir }
                 }.onFailure {
-                    logcat(LogPriority.WARN) { "[WebDav] 散图子目录扫描失败: ${it.message}" }
+                    logcat(LogPriority.WARN) { "[WebDav] 卷目录扫描失败: ${it.message}" }
                 }.getOrDefault(emptyList())
-                siblingDirs.forEach { sib ->
+                    .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                siblingDirs.forEachIndexed { idx, sib ->
                     val dirHttp = if (sib.url.endsWith('/')) sib.url else "${sib.url}/"
                     val url = WebDavConnectionStore.toChapterUrl(conn.id, dirHttp)
                     if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
@@ -6231,32 +6284,30 @@ private suspend fun openWebDavTestFile(
                                     mangaId = manga.id!!,
                                     url = url,
                                     name = sib.name,
-                                    chapterNumber = if (parsed > 0) parsed else 1.0,
+                                    // 无编号的按列表序兜底：避免全落到 1.0 把「下一卷」顺序打乱
+                                    chapterNumber = if (parsed > 0) parsed else idx + 1.0,
                                     dateUpload = sib.lastModified.takeIf { it > 0 } ?: 0L,
                                 ),
                             ),
                         )
                     }
                 }
-                // 保底：当前目录未被子目录覆盖（叶子散图目录）→ 单章。
-                // 命名 = 点开的图片文件名（去扩展名）：目录名与系列名相同会让历史显示成
-                // 「目录名/目录名」（如共享根的散图 → QNAP3/QNAP3）；旧版本建的章
-                //（name=目录名）在这里顺带迁移成文件名。
-                val fileBase = decodedName.substringBeforeLast('.').ifBlank { decodedName }
-                val existingChapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
-                if (existingChapter == null) {
+                // 保底：扫描失败 / 当前目录不在列表里（如目录就是 WebDAV 根）→ 仍建当前目录单章，
+                // 保证这次点开的图一定读得到。
+                if (chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!) == null) {
+                    val dirName = runCatching {
+                        java.net.URLDecoder.decode(dirBase.substringAfterLast('/'), "UTF-8")
+                    }.getOrDefault(dirBase.substringAfterLast('/'))
                     chapterRepo.addAll(
                         listOf(
                             Chapter.create().copy(
                                 mangaId = manga.id!!,
                                 url = chapterUrl,
-                                name = fileBase,
+                                name = dirName.ifBlank { seriesTitle },
                                 chapterNumber = 1.0,
                             ),
                         ),
                     )
-                } else if (existingChapter.name == seriesTitle && seriesTitle != fileBase) {
-                    chapterRepo.update(ChapterUpdate(id = existingChapter.id!!, name = fileBase))
                 }
                 // SY <--
                 } else {
@@ -6295,9 +6346,9 @@ private suspend fun openWebDavTestFile(
             }
             val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
                 ?: error(context.getString(R.string.webdav_chapter_write_failed))
-            manga.id!! to chapter.id!!.toLong()
+            Triple(manga.id!!, chapter.id!!.toLong(), startPage)
         }
-        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
+        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, initialPage))
     } catch (e: Throwable) {
         android.widget.Toast.makeText(
             context,
@@ -6636,19 +6687,38 @@ private suspend fun openSmbFile(
         val fileName = relPath.substringAfterLast('/')
         if (fileName.isBlank()) throw Exception(context.getString(R.string.smb_path_no_filename))
         val dirRel = relPath.substringBeforeLast('/', "")
-        // SY --> Komiho Phase7: 散图支持——点图片文件 = 所在目录当一章（URL 尾斜杠标识目录章节），
-        // 章节名/编号取目录名；归档仍走「同目录归档全部成章」。
+        // SY --> Komiho: 散图支持——点图片文件 = 所在目录当一章（URL 尾斜杠标识目录章节），
+        // 章节名取目录名；归档仍走「同目录归档全部成章」。
         val isImageFile = fileName.substringAfterLast('.', "").lowercase() in SMB_IMAGE_EXTS
         // SY <--
-        // manga.url = 共享内目录（同目录的多个归档同属一个系列）
-        val mangaUrl = SmbConnectionStore.toChapterUrl(conn.id, dirRel)
-        val seriesTitle = dirRel.substringAfterLast('/').ifBlank { conn.share }.ifBlank { fileName }
+        // 散图：当前目录 = 一卷，系列取**其父目录** —— 父目录下的兄弟目录是其它卷，
+        // 读完当前卷才能自动续到下一卷（issue #2）。父目录为空（已在共享根）时退回当前目录。
+        val parentRel = dirRel.substringBeforeLast('/', "")
+        val seriesRel = if (isImageFile && parentRel.isNotBlank()) parentRel else dirRel
+        // manga.url = 共享内系列目录（同目录的多个归档 / 多个卷目录同属一个系列）
+        val mangaUrl = SmbConnectionStore.toChapterUrl(conn.id, seriesRel)
+        val seriesTitle = seriesRel.substringAfterLast('/').ifBlank { conn.share }.ifBlank { fileName }
         val chapterUrl = if (isImageFile) {
             SmbConnectionStore.toChapterUrl(conn.id, dirRel) + "/"
         } else {
             SmbConnectionStore.toChapterUrl(conn.id, relPath)
         }
-        val (mangaId, chapterId) = withContext(Dispatchers.IO) {
+        // 散图：被点开那张图在「目录内自然序图片列表」中的下标 → 阅读器初始页。
+        // 判据与排序必须和 SmbDirectoryPageLoader 一致（isImage + 自然序），否则会错页。
+        val startPage = if (isImageFile) {
+            runCatching {
+                SmbBrowse.list(conn, password, dirRel)
+                    .filter { it.isImage }
+                    .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                    .indexOfFirst { it.name == fileName }
+                    .takeIf { it >= 0 }
+            }.onFailure {
+                logcat(LogPriority.WARN) { "[Smb] 定位点开图片失败，改从第 1 页开始: ${it.message}" }
+            }.getOrNull()
+        } else {
+            null
+        }
+        val (mangaId, chapterId, initialPage) = withContext(Dispatchers.IO) {
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
             val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
@@ -6666,52 +6736,49 @@ private suspend fun openSmbFile(
             if (manga.ogTitle != seriesTitle) {
                 mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
             }
-            // SY --> Komiho Phase7: 散图对齐本地模式完整做法——
-            // 点图片 = 当前目录当漫画（manga.url=当前目录），其下全部子目录各成一章
-            //（散图目录章，URL 尾斜杠），叶子目录（无子目录）保底当前目录单章；
-            // 翻完当前卷自动续到下一个子目录章。归档 = 同目录归档全部成章。
+            // SY --> Komiho: 散图 —— 系列 = 当前目录的**父目录**，其下所有子目录各成一章
+            //（当前目录也在内），读完当前卷自动续到下一个目录章（issue #2）。
+            // 归档 = 同目录归档全部成章。
             if (isImageFile) {
                 val siblingDirs = runCatching {
-                    SmbBrowse.list(conn, password, dirRel).filter { it.isDir }
+                    SmbBrowse.list(conn, password, seriesRel).filter { it.isDir }
                 }.onFailure {
-                    logcat(LogPriority.WARN) { "[Smb] 散图子目录扫描失败: ${it.message}" }
+                    logcat(LogPriority.WARN) { "[Smb] 卷目录扫描失败: ${it.message}" }
                 }.getOrDefault(emptyList())
-                siblingDirs.forEach { sib ->
+                    .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                siblingDirs.forEachIndexed { idx, sib ->
                     val url = SmbConnectionStore.toChapterUrl(conn.id, sib.path) + "/"
                     if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
-                        val parsed = ChapterRecognition.parseChapterNumber(seriesTitle, sib.name, -1.0)
+                        val parsed =
+                            ChapterRecognition.parseChapterNumber(seriesTitle, sib.name, -1.0)
                         chapterRepo.addAll(
                             listOf(
                                 Chapter.create().copy(
                                     mangaId = manga.id!!,
                                     url = url,
                                     name = sib.name,
-                                    chapterNumber = if (parsed > 0) parsed else 1.0,
+                                    // 无编号的按列表序兜底：避免全落到 1.0 把「下一卷」顺序打乱
+                                    chapterNumber = if (parsed > 0) parsed else idx + 1.0,
                                     dateUpload = sib.lastModified.takeIf { it > 0 } ?: 0L,
                                 ),
                             ),
                         )
                     }
                 }
-                // 保底：当前目录未被子目录覆盖（叶子散图目录）→ 单章。
-                // 命名 = 点开的图片文件名（去扩展名）：目录名与系列名相同会让历史显示成
-                // 「目录名/目录名」（如共享根的散图 → QNAP3/QNAP3）；旧版本建的章
-                //（name=目录名）在这里顺带迁移成文件名。
-                val fileBase = fileName.substringBeforeLast('.').ifBlank { fileName }
-                val existingChapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
-                if (existingChapter == null) {
+                // 保底：扫描失败 / 当前目录不在列表里（如目录就是共享根）→ 仍建当前目录单章，
+                // 保证这次点开的图一定读得到。
+                if (chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!) == null) {
+                    val dirName = dirRel.substringAfterLast('/').ifBlank { seriesTitle }
                     chapterRepo.addAll(
                         listOf(
                             Chapter.create().copy(
                                 mangaId = manga.id!!,
                                 url = chapterUrl,
-                                name = fileBase,
+                                name = dirName,
                                 chapterNumber = 1.0,
                             ),
                         ),
                     )
-                } else if (existingChapter.name == seriesTitle && seriesTitle != fileBase) {
-                    chapterRepo.update(ChapterUpdate(id = existingChapter.id!!, name = fileBase))
                 }
                 // SY <--
                 } else {
@@ -6745,9 +6812,9 @@ private suspend fun openSmbFile(
             }
             val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
                 ?: error(context.getString(R.string.webdav_chapter_write_failed))
-            manga.id!! to chapter.id!!.toLong()
+            Triple(manga.id!!, chapter.id!!.toLong(), startPage)
         }
-        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId))
+        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, initialPage))
     } catch (e: Throwable) {
         // SY: broken pipe 等服务器断连翻成人话，其余原样。
         val msg = if (smbIsConnectionReset(e)) context.getString(R.string.smb_conn_reset) else e.message
