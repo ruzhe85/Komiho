@@ -315,6 +315,16 @@
     <string name="addsrc_pick_folder">選擇資料夾</string>
     <string name="addsrc_local_note">本地為內建來源、始終存在；此頁僅用於管理權限與漫畫根目錄。</string>
 
+    <!-- Komiho: 冷啟動落點（來源管理頁「啟動」區） -->
+    <string name="startup_section">啟動</string>
+    <string name="startup_recent">最近頁</string>
+    <string name="startup_recent_summary">開啟後停在「最近」頁</string>
+    <string name="startup_last_source">上次來源</string>
+    <string name="startup_last_source_summary">檔案來源回到上次目錄，Komga 回到首頁</string>
+    <string name="startup_continue">繼續閱讀</string>
+    <string name="startup_continue_summary">直接開啟上次在讀的那本書</string>
+    <string name="startup_hint">僅在冷啟動時生效；橫豎屏切換、從背景返回不會跳頁。</string>
+
     <!-- SY: Komiho 主介面來源切換 / 本地瀏覽 / 儲存 / 下載 -->
     <string name="source_local">本地</string>
     <string name="source_add">來源管理</string>

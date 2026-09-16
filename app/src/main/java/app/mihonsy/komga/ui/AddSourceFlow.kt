@@ -98,6 +98,7 @@ import app.mihonsy.komga.data.DashboardPreferences
 import kotlin.math.roundToInt
 import androidx.compose.runtime.mutableFloatStateOf
 import app.mihonsy.komga.data.SourceVisibilityStore
+import app.mihonsy.komga.data.StartupPreferences
 // SY --> Komiho Phase7: SMB 表单接入。
 import app.mihonsy.komga.data.smb.SmbBrowse
 import app.mihonsy.komga.data.smb.SmbConnection
@@ -407,6 +408,9 @@ private fun TypeSelectContent(
         mutableStateListOf<SourceEntry>().apply { addAll(buildSourceEntries(komgaConns, localName)) }
     }
 
+    // Komiho: 冷启动落点（写入 StartupPreferences；本页只负责呈现与改写）。
+    var startupBehavior by remember { mutableStateOf(StartupPreferences.behavior()) }
+
     val lazyListState = rememberLazyListState()
     // SY: onMove 采用库官方写法 `add(to.index, removeAt(from.index))`，**不要**再做
     // 「toIndex > fromIndex 则 -1」的修正：那样拖拽项永远插在目标项之前、无法越过它，
@@ -515,6 +519,86 @@ private fun TypeSelectContent(
                     },
                 )
             }
+        }
+        // Komiho: 冷启动落点 —— 三个行为互斥单选（语义与取值见 StartupPreferences）。
+        // 只看标题不够自明（尤其「继续阅读」），所以每项带一行副标题说明。
+        item(key = "startup") {
+            HorizontalDivider(Modifier.padding(top = 14.dp, bottom = 12.dp))
+            Text(
+                composeStringResource(R.string.startup_section),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            StartupPreferences.Behavior.entries.forEach { behavior ->
+                val selected = behavior == startupBehavior
+                val titleRes = when (behavior) {
+                    StartupPreferences.Behavior.RECENT -> R.string.startup_recent
+                    StartupPreferences.Behavior.LAST_SOURCE -> R.string.startup_last_source
+                    StartupPreferences.Behavior.CONTINUE_READING -> R.string.startup_continue
+                }
+                val summaryRes = when (behavior) {
+                    StartupPreferences.Behavior.RECENT -> R.string.startup_recent_summary
+                    StartupPreferences.Behavior.LAST_SOURCE -> R.string.startup_last_source_summary
+                    StartupPreferences.Behavior.CONTINUE_READING -> R.string.startup_continue_summary
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            StartupPreferences.setBehavior(behavior)
+                            startupBehavior = behavior
+                        }
+                        .padding(vertical = 9.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    // 自绘单选圈（外圈 + 选中内点）：复用现有组件，不为一个控件引入新依赖。
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .border(
+                                width = 1.5.dp,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outline
+                                },
+                                shape = CircleShape,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (selected) {
+                            Box(
+                                modifier = Modifier
+                                    .size(9.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = composeStringResource(titleRes),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = composeStringResource(summaryRes),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            Text(
+                text = composeStringResource(R.string.startup_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(top = 6.dp),
+            )
         }
     }
 }

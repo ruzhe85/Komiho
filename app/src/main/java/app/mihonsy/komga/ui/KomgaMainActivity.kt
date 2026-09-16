@@ -195,6 +195,7 @@ import androidx.compose.ui.layout.ContentScale
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import app.mihonsy.komga.data.DashboardPreferences
+import app.mihonsy.komga.data.StartupPreferences
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaDbBridge
 import app.mihonsy.komga.data.KomgaConnection
@@ -670,6 +671,27 @@ private fun KomgaMainScreen(
     val visibleTabs = remember(currentIsFileSource) {
         MainTab.entries.filter { it.visibleFor(currentIsFileSource) }
     }
+    // Komiho: 冷启动落点（设置入口：来源管理 → 启动）。
+    // startupApplied 用 rememberSaveable：只有**真正冷启动**（savedInstanceState 为空）才会是 false；
+    // 配置变更（横竖屏/主题）与从最近任务返回都会带着它回来，从而不会重新应用设置。
+    var startupApplied by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(visibleTabs, sourceEntries) {
+        if (startupApplied || visibleTabs.isEmpty()) return@LaunchedEffect
+        startupApplied = true
+        when (StartupPreferences.behavior()) {
+            // 最近页
+            StartupPreferences.Behavior.RECENT ->
+                currentTab = MainTab.Sources.ordinal
+            // 上次来源：跳过「最近」，落到该来源的内容首页（Komga = 主页 / 文件源 = 目录）。
+            // 目录路径由 Browse 页自身从 localBrowseLastPath / webdavBrowseLastPaths 恢复。
+            StartupPreferences.Behavior.LAST_SOURCE ->
+                currentTab = visibleTabs.firstOrNull { it != MainTab.Sources }?.ordinal
+                    ?: MainTab.Sources.ordinal
+            // 继续阅读：先落「最近」作为安全落点，随后由下方 LaunchedEffect 打开阅读器。
+            StartupPreferences.Behavior.CONTINUE_READING ->
+                currentTab = MainTab.Sources.ordinal
+        }
+    }
     // 恢复/切换后兜底：当前 tab 若不在可见集合内（如来源切换/连接被删），回落到第一个可见 tab。
     LaunchedEffect(visibleTabs) {
         if (visibleTabs.none { it.ordinal == currentTab }) {
@@ -729,6 +751,58 @@ private fun KomgaMainScreen(
         currentTab = MainTab.entries.first { it != MainTab.Sources && it.visibleFor(entry.kind.isFileSource) }.ordinal
     }
     // SY <--
+
+    /**
+     * Komiho: 由章节 url 反推所属来源 id（「继续阅读」启动模式用）。
+     * 用 chapterUrl 前缀判断、而非 manga.source —— 本地 / WebDAV / SMB 三者共用 LocalSource.ID，
+     * 只有 url 前缀能区分（与聚合页的分桶逻辑同口径）。
+     */
+    fun sourceIdForChapterUrl(url: String): String? = when {
+        url.startsWith(KomgaSource.BOOK_URL_PREFIX) ||
+            url.startsWith(KomgaSource.SERIES_URL_PREFIX) -> {
+            // Komga 历史不带 connId：沿用上次来源（它也是 Komga 时），否则用当前激活连接。
+            val stored = storagePreferences.browseSourceId.get()
+            if (stored.startsWith(SOURCE_ID_KOMGA_PREFIX)) {
+                stored
+            } else {
+                SOURCE_ID_KOMGA_PREFIX + prefs.connection().id
+            }
+        }
+        url.startsWith("smb://") ->
+            SOURCE_ID_SMB_PREFIX + url.removePrefix("smb://").substringBefore('/')
+        url.startsWith("webdav://") ->
+            SOURCE_ID_WEBDAV_PREFIX + url.removePrefix("webdav://").substringBefore('/')
+        // 旧格式 webdav:<URL>（Phase3 遗留）：无法从 url 反查连接，放弃（回落到「最近」页）。
+        url.startsWith("webdav:") -> null
+        else -> SOURCE_ID_LOCAL
+    }
+
+    // Komiho: 「继续阅读」启动模式 —— 冷启动直接打开上次在读的那本书（带上次页码）。
+    // startupResumeDone 同样用 rememberSaveable，保证横竖屏 / 从后台返回时不会又跳一次阅读器。
+    // 任何一步取不到（无历史 / 来源已删 / 书已被移除）都安静停在「最近」页，不阻断启动。
+    var startupResumeDone by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(startupApplied) {
+        if (!startupApplied || startupResumeDone) return@LaunchedEffect
+        if (StartupPreferences.behavior() != StartupPreferences.Behavior.CONTINUE_READING) {
+            return@LaunchedEffect
+        }
+        startupResumeDone = true
+        val repo = Injekt.get<HistoryRepository>()
+        val items = runCatching {
+            withContext(Dispatchers.IO) {
+                repo.getHistoryBySourceDetailed(KomgaSource.ID).first() +
+                    repo.getHistoryBySourceDetailed(LocalSource.ID).first()
+            }
+        }.getOrNull().orEmpty()
+        val last = items.maxByOrNull { it.readAt?.time ?: 0L } ?: return@LaunchedEffect
+        val entry = sourceIdForChapterUrl(last.chapterUrl)
+            ?.let { id -> sourceEntries.firstOrNull { it.id == id } }
+            ?: return@LaunchedEffect
+        openSourceFromDashboard(entry)
+        context.startActivity(
+            ReaderActivity.newIntent(context, last.mangaId, last.chapterId, last.lastPageRead.toInt()),
+        )
+    }
 
     // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转（按条目所属来源路由）：
     // 本地条目 → 切到本地来源 + 浏览 tab 定位所在目录；
