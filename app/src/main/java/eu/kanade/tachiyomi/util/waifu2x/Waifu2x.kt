@@ -22,6 +22,20 @@ import tachiyomi.core.common.util.system.logcat
 object Waifu2x {
 
     /**
+     * Komiho: 单次推理的耗时拆分，用调用方传入的持有对象回传（不用共享字段，避免并发串号）。
+     *
+     * - [waitMs]：等原生引擎锁（`g_lock`，即等**别人**的推理跑完）的排队时间 —— **不属于计算**；
+     * - [procMs]：纯推理耗时。
+     *
+     * 「显示增强状态」角标要的是「从 0 开始解码 + 增强的实际消耗」，所以必须把 [waitMs] 剔除，
+     * 否则一页在有并发时会被显示成 4–9 秒（实测 `wait` 可到 4.4s / 9.7s）。
+     */
+    class Timing {
+        @Volatile var waitMs = -1L
+        @Volatile var procMs = -1L
+    }
+
+    /**
      * ncnn precision mode。**0 = FP16**（见 `waifu2x.cpp:191`：`case 0` 与 `default` 同一分支，
      * 置 fp16 packed/storage/arithmetic；`waifu2x.h:48` 亦注明 `0 = fp16`）。
      * 1 = FP32、2 = INT8、3 = BF16 —— 与上游 `realCuganPrecision()` 的
@@ -137,8 +151,15 @@ object Waifu2x {
      * Returns the upscaled bitmap, or null when unavailable / failed (caller keeps the original).
      *
      * @param tag Komiho 诊断：请求来源标识（如 `prewarm#12` / `holder#12`），只写进日志。
+     * @param timing Komiho：非空时回传本次的等锁/纯推理耗时拆分（角标要用「剔除等锁」的口径）。
      */
-    fun process(context: Context, input: Bitmap, id: Int = -1, tag: String = ""): Bitmap? {
+    fun process(
+        context: Context,
+        input: Bitmap,
+        id: Int = -1,
+        tag: String = "",
+        timing: Timing? = null,
+    ): Bitmap? {
         if (!libraryLoaded || input.isRecycled) return null
         if (!ensureEngine(context)) return null
         applyTileSizeIfNeeded()
@@ -168,6 +189,9 @@ object Waifu2x {
             val procStart = android.os.SystemClock.uptimeMillis()
             val out = nativeProcess(argb, id)
             val procMs = android.os.SystemClock.uptimeMillis() - procStart
+
+            timing?.waitMs = waitMs
+            timing?.procMs = procMs
 
             android.util.Log.d(
                 "Waifu2xTiming",

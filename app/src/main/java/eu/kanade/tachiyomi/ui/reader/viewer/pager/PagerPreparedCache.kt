@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.data.coil.prewarm
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.isStandardImageStream
+import eu.kanade.tachiyomi.util.EnhanceTimings
 import logcat.LogPriority
 import okio.Buffer
 import okio.BufferedSource
@@ -188,6 +189,10 @@ object PagerPagePreparer {
             config.imageCropBorders,
             pageIndex,
         )
+        // Komiho: 角标口径 —— 优先用解码器登记的「解码 + 增强实际计算耗时」（已剔除等锁与
+        // 线程排队，见 EnhanceTimings）；取不到才回退旧口径（Coil 外层墙钟，含排队会虚高，
+        // 实测同一页可被显示成 6.9s / 12.1s，而实际只花 2.7s）。
+        val pureEnhanceMs = EnhanceTimings.take(pageIndex)
         return PagerPreparedPage(
             source = itemSource,
             source2 = null,
@@ -196,7 +201,11 @@ object PagerPagePreparer {
             decodedBitmap = bitmap,
             enhancementMode = enhancementMode,
             cropBorders = config.imageCropBorders,
-            enhanceElapsedMillis = if (bitmap != null) android.os.SystemClock.uptimeMillis() - decodeStart else -1L,
+            enhanceElapsedMillis = if (bitmap != null) {
+                pureEnhanceMs ?: (android.os.SystemClock.uptimeMillis() - decodeStart)
+            } else {
+                -1L
+            },
             layoutApplied = true,
         )
     }
