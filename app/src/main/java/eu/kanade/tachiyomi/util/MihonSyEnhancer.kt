@@ -169,8 +169,9 @@ object MihonSyEnhancer {
      * @param input must be an ARGB_8888 bitmap.
      * @param onComplete optional callback invoked with (enhanced != null, elapsedMillis, gpuWaitMillis)
      *   so callers can show a meaningful status (time taken / success).
-     *   Komiho：`gpuWaitMillis` = 本次推理**等原生引擎锁**的时间（等别人的推理跑完），
-     *   不属于计算耗时；角标显示「实际计算消耗」时要把它减掉。
+     *   Komiho：`gpuWaitMillis` = 本次**等原生引擎锁的总时长**（两段之和：`clearAbort` 拿到的那次
+     *   + `nativeProcess` 内部再拿一次那次的排队），不属于计算耗时；角标显示「实际计算消耗」时
+     *   要把它减掉。见 [Waifu2x.Timing.totalWaitMs]。
      * @param sourceTag Komiho 诊断：请求来源标识（`prewarm#12` / `holder#12`），仅用于日志。
      */
     fun enhance(
@@ -254,7 +255,10 @@ object MihonSyEnhancer {
         onComplete?.invoke(
             capped != null && capped !== input,
             SystemClock.uptimeMillis() - start,
-            gpuTiming?.waitMs?.coerceAtLeast(0L) ?: 0L,
+            // Komiho: 传「等锁总时长」而不是单纯的 waitMs —— process() 里其实是两次拿 g_lock，
+            // nativeProcess 内部那次排队会被算进 procMs（实测某页 wait=2413 却 proc=4913，
+            // 原生自报只跑了 2449）。角标要剔除的是两段之和，见 Waifu2x.Timing.totalWaitMs()。
+            gpuTiming?.totalWaitMs() ?: 0L,
         )
         return capped
     }

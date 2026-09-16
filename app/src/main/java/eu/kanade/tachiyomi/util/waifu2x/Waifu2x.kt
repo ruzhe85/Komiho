@@ -24,15 +24,34 @@ object Waifu2x {
     /**
      * Komiho: 单次推理的耗时拆分，用调用方传入的持有对象回传（不用共享字段，避免并发串号）。
      *
-     * - [waitMs]：等原生引擎锁（`g_lock`，即等**别人**的推理跑完）的排队时间 —— **不属于计算**；
-     * - [procMs]：纯推理耗时。
+     * `process()` 里其实是**两次**拿 `g_lock`：
+     * - [waitMs]：第一次（`nativeClearAbortProcessing()` 要拿锁）—— 等**别人**推理跑完的排队时间；
+     * - `nativeProcess` 内部**再拿一次**，那段排队被并进了 [procMs]。
      *
-     * 「显示增强状态」角标要的是「从 0 开始解码 + 增强的实际消耗」，所以必须把 [waitMs] 剔除，
-     * 否则一页在有并发时会被显示成 4–9 秒（实测 `wait` 可到 4.4s / 9.7s）。
+     * ⇒ 单看 [waitMs] **不足以**剔除排队：实测某页 `wait=2413ms`、`procMs=4913ms`，而原生自报
+     * 本次只跑了 2449ms —— 多出来的 2464ms 就是第二次排队。所以引入 [nativeInferenceMs]
+     * （原生在每次运行结束时登记），由 [totalWaitMs] 把两段等锁一起算出来。
+     *
+     * 「显示增强状态」角标要的是「从 0 开始解码 + 增强的实际消耗」，必须把**两段**等锁都剔除，
+     * 否则并发时一页会被显示成 4–9 秒（实测 `wait` 可到 4.4s / 9.7s）。
      */
     class Timing {
         @Volatile var waitMs = -1L
         @Volatile var procMs = -1L
+
+        /** 原生自报的**纯推理**耗时；-1 = 未知（失败 / 被抢占 / 没拿到）。 */
+        @Volatile var nativeInferenceMs = -1L
+
+        /** 需要从「总流程」里剔除的等锁总时长（两段之和）；拿不到拆分的部分按 0 计。 */
+        fun totalWaitMs(): Long {
+            if (waitMs < 0) return 0L
+            val secondWait = if (nativeInferenceMs > 0 && procMs > nativeInferenceMs) {
+                procMs - nativeInferenceMs
+            } else {
+                0L
+            }
+            return waitMs + secondWait
+        }
     }
 
     /**
@@ -178,6 +197,8 @@ object Waifu2x {
             // Komiho 临时诊断（量完可删）：把「排队等待」与「纯推理」拆开。
             // nativeClearAbortProcessing() 内部要拿 g_lock（waifu2x_jni.cpp:357-362），
             // 所以它的耗时 ≈ 等上一个推理（可能 1–3 秒）释放锁的时间 = 排队等待。
+            // ⚠️ 这**只是第一段**排队：nativeProcess 内部还会再拿一次同样的锁，
+            // 那段被计入下面的 `inference`（用 pure= 才能摘出来，见 [Timing] 的说明）。
             // 判据：wait 常年 ≈0 → 解码线程没被占住，方案 A 不必做；wait 经常上千毫秒
             // → 线程饥饿真实存在，再考虑把增强搬出解码器。
             // 用 android.util.Log 而非项目 logcat()：release 构建下 XLog 级别是 WARN
@@ -190,13 +211,25 @@ object Waifu2x {
             val out = nativeProcess(argb, id)
             val procMs = android.os.SystemClock.uptimeMillis() - procStart
 
+            // Komiho：原生自报的纯推理耗时（已剔除 nativeProcess 内部那次 g_lock 排队）。
+            // 读不到就保持 -1，角标退回「只剔第一段等锁」的旧口径（fail-open，不会算错方向）。
+            val pureMs = try {
+                nativeGetLastInferenceMs()
+            } catch (e: Throwable) {
+                -1L
+            }
+
             timing?.waitMs = waitMs
             timing?.procMs = procMs
+            timing?.nativeInferenceMs = pureMs
 
+            // Komiho 诊断：把「排队等待」与「纯推理」拆开。
+            // ⚠️ 老脚本按 `total=…ms src=… from=…` 解析，所以新字段一律追加在 `from=` **之后**。
             android.util.Log.d(
                 "Waifu2xTiming",
                 "wait=${waitMs}ms inference=${procMs}ms total=${waitMs + procMs}ms " +
-                    "src=${argb.width}x${argb.height} from=${tag.ifEmpty { "?" }}",
+                    "src=${argb.width}x${argb.height} from=${tag.ifEmpty { "?" }} " +
+                    "pure=${pureMs}ms queue2=${if (pureMs > 0) procMs - pureMs else -1}ms",
             )
 
             out?.takeUnless { it === argb }
@@ -340,6 +373,15 @@ object Waifu2x {
     ): Boolean
 
     private external fun nativeProcess(bitmap: Bitmap, id: Int): Bitmap?
+
+    /**
+     * Komiho: 原生登记的「最近一次推理纯耗时」（ms，不含等锁）；-1 = 未知。
+     *
+     * 须**紧跟 [nativeProcess] 之后**读：原生在每次运行结束时写值，而下一个任务的写入要等它
+     * 自己跑完（≥1 秒）才会发生，所以这里不会串到别人的数字。用途见 [Timing.totalWaitMs]。
+     * 若 .so 里没有这个符号（例如本地 ABI 没更新）会抛 UnsatisfiedLinkError —— 调用处已兜住。
+     */
+    private external fun nativeGetLastInferenceMs(): Long
 
     /**
      * Komiho: forwards tile geometry to the running engine (`waifu2x_jni.cpp:606`).
