@@ -167,6 +167,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
@@ -399,6 +400,13 @@ internal const val SOURCE_ID_WEBDAV_PREFIX = SourceVisibilityStore.ID_WEBDAV_PRE
 // `smb:<connId>`——单冒号，避免与章节 url 的 scheme 混淆）。
 internal const val SOURCE_ID_SMB_PREFIX = SourceVisibilityStore.ID_SMB_PREFIX
 // SY <--
+
+/**
+ * Komiho: 冷启动落点（「开始」区设置）诊断 TAG。
+ * 用 android.util.Log 而非 logcat()：release 包里 logcat() 的 DEBUG/INFO 会被 XLog 掐掉
+ * （App.kt#setupExhLogging 非 DEBUG 时把级别设为 WARN），排查这种「静默不生效」只能靠它。
+ */
+private const val KOMGA_STARTUP_TAG = "KomgaStartup"
 
 /**
  * Komga `/api/v1/series` 的单页条数。库网格、检索等「要取全量」的地方按此逐页拉取——
@@ -678,7 +686,13 @@ private fun KomgaMainScreen(
     LaunchedEffect(visibleTabs, sourceEntries) {
         if (startupApplied || visibleTabs.isEmpty()) return@LaunchedEffect
         startupApplied = true
-        when (StartupPreferences.behavior()) {
+        val startupBehavior = StartupPreferences.behavior()
+        android.util.Log.i(
+            KOMGA_STARTUP_TAG,
+            "cold start: behavior=$startupBehavior fileSource=$currentIsFileSource " +
+                "tabs=${visibleTabs.map { it.name }} src=${currentSourceId}",
+        )
+        when (startupBehavior) {
             // 最近页
             StartupPreferences.Behavior.RECENT ->
                 currentTab = MainTab.Sources.ordinal
@@ -687,7 +701,8 @@ private fun KomgaMainScreen(
             StartupPreferences.Behavior.LAST_SOURCE ->
                 currentTab = visibleTabs.firstOrNull { it != MainTab.Sources }?.ordinal
                     ?: MainTab.Sources.ordinal
-            // 继续阅读：先落「最近」作为安全落点，随后由下方 LaunchedEffect 打开阅读器。
+            // 继续阅读：先落「最近」作为安全落点，随后由下方续读 effect（key=Unit + snapshotFlow
+            // 等本状态置位）打开阅读器。
             StartupPreferences.Behavior.CONTINUE_READING ->
                 currentTab = MainTab.Sources.ordinal
         }
@@ -781,23 +796,65 @@ private fun KomgaMainScreen(
     // startupResumeDone 同样用 rememberSaveable，保证横竖屏 / 从后台返回时不会又跳一次阅读器。
     // 任何一步取不到（无历史 / 来源已删 / 书已被移除）都安静停在「最近」页，不阻断启动。
     var startupResumeDone by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(startupApplied) {
-        if (!startupApplied || startupResumeDone) return@LaunchedEffect
-        if (StartupPreferences.behavior() != StartupPreferences.Behavior.CONTINUE_READING) {
+    // ⚠️ 这里**不能**写成 `LaunchedEffect(startupApplied)`：那是个确定性竞态 ——
+    // 上方 effect 把 startupApplied 置 true 时，本协程（第一个实例）已经把 startupResumeDone
+    // 置为 true、正挂起在 DB 查询上，于是被「key 变化 → 重启」取消，续读永远做不完；
+    // 重启后的新实例又看到 done=true 直接 return ⇒ 每次冷启动都静默回落到「最近」页。
+    // 改成 key=Unit（不重启）+ snapshotFlow 等状态置位，语义等价且无竞态。
+    LaunchedEffect(Unit) {
+        snapshotFlow { startupApplied }.first { it }
+        if (startupResumeDone) {
+            android.util.Log.i(KOMGA_STARTUP_TAG, "resume skip: done=true")
+            return@LaunchedEffect
+        }
+        val resumeBehavior = StartupPreferences.behavior()
+        if (resumeBehavior != StartupPreferences.Behavior.CONTINUE_READING) {
+            android.util.Log.i(KOMGA_STARTUP_TAG, "resume skip: behavior=$resumeBehavior")
             return@LaunchedEffect
         }
         startupResumeDone = true
         val repo = Injekt.get<HistoryRepository>()
-        val items = runCatching {
-            withContext(Dispatchers.IO) {
-                repo.getHistoryBySourceDetailed(KomgaSource.ID).first() +
-                    repo.getHistoryBySourceDetailed(LocalSource.ID).first()
-            }
-        }.getOrNull().orEmpty()
-        val last = items.maxByOrNull { it.readAt?.time ?: 0L } ?: return@LaunchedEffect
-        val entry = sourceIdForChapterUrl(last.chapterUrl)
-            ?.let { id -> sourceEntries.firstOrNull { it.id == id } }
-            ?: return@LaunchedEffect
+        // 两个来源分开 runCatching：一个查询失败不会把另一条历史一起废掉（原来合在一个块里）。
+        val komgaHistory = runCatching {
+            withContext(Dispatchers.IO) { repo.getHistoryBySourceDetailed(KomgaSource.ID).first() }
+        }.onFailure {
+            android.util.Log.w(KOMGA_STARTUP_TAG, "history(komga) failed: $it")
+        }.getOrDefault(emptyList())
+        val localHistory = runCatching {
+            withContext(Dispatchers.IO) { repo.getHistoryBySourceDetailed(LocalSource.ID).first() }
+        }.onFailure {
+            android.util.Log.w(KOMGA_STARTUP_TAG, "history(local) failed: $it")
+        }.getOrDefault(emptyList())
+        val items = komgaHistory + localHistory
+        android.util.Log.i(
+            KOMGA_STARTUP_TAG,
+            "history komga=${komgaHistory.size} local=${localHistory.size}",
+        )
+        val last = items.maxByOrNull { it.readAt?.time ?: 0L }
+        if (last == null) {
+            android.util.Log.i(KOMGA_STARTUP_TAG, "bail: 没有任何历史记录")
+            return@LaunchedEffect
+        }
+        android.util.Log.i(
+            KOMGA_STARTUP_TAG,
+            "last: title='${last.mangaTitle}' chapter='${last.chapterName}' " +
+                "url='${last.chapterUrl}' page=${last.lastPageRead} readAt=${last.readAt}",
+        )
+        val derivedSourceId = sourceIdForChapterUrl(last.chapterUrl)
+        val entry = derivedSourceId?.let { id -> sourceEntries.firstOrNull { it.id == id } }
+        if (entry == null) {
+            android.util.Log.i(
+                KOMGA_STARTUP_TAG,
+                "bail: 反查不到来源 derived=$derivedSourceId " +
+                    "available=${sourceEntries.map { it.id }}",
+            )
+            return@LaunchedEffect
+        }
+        android.util.Log.i(
+            KOMGA_STARTUP_TAG,
+            "opening source=${entry.id} manga=${last.mangaId} chapter=${last.chapterId} " +
+                "page=${last.lastPageRead}",
+        )
         openSourceFromDashboard(entry)
         context.startActivity(
             ReaderActivity.newIntent(context, last.mangaId, last.chapterId, last.lastPageRead.toInt()),
