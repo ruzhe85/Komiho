@@ -167,32 +167,36 @@ object MihonSyEnhancer {
      * Returns the enhanced bitmap, or null when no enhancement applies / fails.
      *
      * @param input must be an ARGB_8888 bitmap.
-     * @param onComplete optional callback invoked with (enhanced != null, elapsedMillis)
+     * @param onComplete optional callback invoked with (enhanced != null, elapsedMillis, gpuWaitMillis)
      *   so callers can show a meaningful status (time taken / success).
+     *   Komiho：`gpuWaitMillis` = 本次推理**等原生引擎锁**的时间（等别人的推理跑完），
+     *   不属于计算耗时；角标显示「实际计算消耗」时要把它减掉。
      * @param sourceTag Komiho 诊断：请求来源标识（`prewarm#12` / `holder#12`），仅用于日志。
      */
     fun enhance(
         input: Bitmap,
         preferences: ReaderPreferences = Injekt.get(),
-        onComplete: ((enhanced: Boolean, elapsedMillis: Long) -> Unit)? = null,
+        onComplete: ((enhanced: Boolean, elapsedMillis: Long, gpuWaitMillis: Long) -> Unit)? = null,
         sourceTag: String = "",
     ): Bitmap? {
         val start = SystemClock.uptimeMillis()
         if (input.isRecycled) {
-            onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
+            onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
             return null
         }
         // MihonSY: never enhance hardware bitmaps — reading their pixels is unreliable
         // (can produce all-black frames on some devices). Decode-time enhancement runs
         // on software bitmaps, so a HARDWARE input simply skips enhancement.
         if (input.config == Bitmap.Config.HARDWARE) {
-            onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
+            onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
             return null
         }
 
         // Single selector: 0 = Off, 2 = Lanczos3, 3 = Catmull-Rom.
         // (MihonSY: Anime4K (1) and Spline36 (4) are disabled and excluded from the build.)
         val mode = preferences.enhancementMode.get()
+        // Komiho: GPU 档单独收集耗时拆分 —— 角标要显示「剔除等锁」的实际计算消耗。
+        val gpuTiming = if (mode == 5) Waifu2x.Timing() else null
         val result = when (mode) {
             // MihonSY: Anime4K branch disabled — native side no longer compiled.
             // 1 -> {
@@ -225,7 +229,7 @@ object MihonSyEnhancer {
             in 2..3 -> {
                 val scale = preferences.lanczosScale.get() / 100f
                 val argb = ensureArgb(input) ?: run {
-                    onComplete?.invoke(false, SystemClock.uptimeMillis() - start)
+                    onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
                     return null
                 }
                 if (scale > 1f) {
@@ -241,13 +245,17 @@ object MihonSyEnhancer {
             }
 
             // Komiho: GPU AI upscale (ncnn + Vulkan). Scale is fixed by the model (2x).
-            5 -> enhanceWithGpu(input, preferences, sourceTag)
+            5 -> enhanceWithGpu(input, preferences, sourceTag, gpuTiming)
 
             else -> null
         }
         // 只在结果确实是新对象时才缩（避免误 recycle 调用方仍在用的 input）。
         val capped = if (result != null && result !== input) capOutputSize(result) else result
-        onComplete?.invoke(capped != null && capped !== input, SystemClock.uptimeMillis() - start)
+        onComplete?.invoke(
+            capped != null && capped !== input,
+            SystemClock.uptimeMillis() - start,
+            gpuTiming?.waitMs?.coerceAtLeast(0L) ?: 0L,
+        )
         return capped
     }
 
@@ -304,6 +312,7 @@ object MihonSyEnhancer {
         input: Bitmap,
         preferences: ReaderPreferences,
         sourceTag: String = "",
+        timing: Waifu2x.Timing? = null,
     ): Bitmap? {
         if (Waifu2x.isSupported) {
             // Komiho: model and tile geometry are user preferences. Both are pushed before
@@ -311,7 +320,8 @@ object MihonSyEnhancer {
             // (the model rebuilds the engine, the tile size takes the engine lock).
             Waifu2x.setModel(AiUpscaleModel.fromId(preferences.aiModelId.get()))
             Waifu2x.setTileSize(preferences.aiTileSize.get())
-            Waifu2x.process(Injekt.get<Application>(), input, tag = sourceTag)?.let { return it }
+            Waifu2x.process(Injekt.get<Application>(), input, tag = sourceTag, timing = timing)
+                ?.let { return it }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
         } else {
             logcat(LogPriority.WARN) { "AI upscale unavailable for this ABI; falling back to Lanczos3" }

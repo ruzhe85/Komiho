@@ -43,6 +43,7 @@ import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.data.coil.pageIndex
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.EnhanceTimings
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
 import okio.BufferedSource
@@ -416,7 +417,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
                             isVisible = true
                             showEnhancementOutcome(
                                 success = true,
-                                elapsedMillis = android.os.SystemClock.uptimeMillis() - startTime,
+                                // Komiho: 优先用解码器登记的实际计算耗时（解码 + 增强，已剔除等锁）；
+                                // 取不到才回退 Coil 外层墙钟（含排队会虚高）。
+                                elapsedMillis = EnhanceTimings.take(pageIndex)
+                                    ?: (android.os.SystemClock.uptimeMillis() - startTime),
                             )
                         },
                     )
