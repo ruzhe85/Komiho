@@ -38,7 +38,7 @@ Format support differs slightly by source:
 
 ### 📖 Full reading experience
 
-Built on the MihonSY reader, and continuously optimized for real reading:
+Based on the MihonSY reader, and continuously optimized for real reading:
 
 * Horizontal paging / vertical paging / webtoon
 * LTR / RTL
