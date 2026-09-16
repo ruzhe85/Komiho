@@ -6227,21 +6227,6 @@ private suspend fun openWebDavTestFile(
         } else {
             WebDavConnectionStore.toChapterUrl(conn.id, httpUrl)
         }
-        // 散图：被点开那张图在「目录内自然序图片列表」中的下标 → 阅读器初始页。
-        // 判据与排序必须和 WebDavDirectoryPageLoader 一致（isImage + 自然序），否则会错页。
-        val startPage = if (isImageFile) {
-            runCatching {
-                WebDavPropfind.list(conn, dirUrl)
-                    .filter { it.isImage }
-                    .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
-                    .indexOfFirst { it.name == decodedName }
-                    .takeIf { it >= 0 }
-            }.onFailure {
-                logcat(LogPriority.WARN) { "[WebDav] 定位点开图片失败，改从第 1 页开始: ${it.message}" }
-            }.getOrNull()
-        } else {
-            null
-        }
         prefs.webdavTestUrl.set(httpUrl)
         val (mangaId, chapterId, initialPage) = withContext(Dispatchers.IO) {
             val mangaRepo = Injekt.get<MangaRepository>()
@@ -6261,6 +6246,25 @@ private suspend fun openWebDavTestFile(
             // 标题始终显示系列（目录）名：早期版本把归档名写进了标题，这里直接修正
             if (manga.ogTitle != seriesTitle) {
                 mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
+            }
+            // 散图：被点开那张图在「目录内自然序图片列表」中的下标 → 阅读器初始页。
+            // 判据与排序必须和 WebDavDirectoryPageLoader 一致（isImage + 自然序），否则会错页。
+            // 注意：logcat 是 Any 的扩展函数，只在有隐式接收者的作用域（如本 withContext）里可解析，
+            // 不能提到函数体顶层，否则 CI 报 Unresolved reference 'logcat'。
+            val startPage = if (isImageFile) {
+                runCatching {
+                    WebDavPropfind.list(conn, dirUrl)
+                        .filter { it.isImage }
+                        .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                        .indexOfFirst { it.name == decodedName }
+                        .takeIf { it >= 0 }
+                }.onFailure {
+                    logcat(LogPriority.WARN) {
+                        "[WebDav] 定位点开图片失败，改从第 1 页开始: ${it.message}"
+                    }
+                }.getOrNull()
+            } else {
+                null
             }
             // SY --> Komiho: 散图 —— 系列 = 当前目录的**父目录**，其下所有子目录各成一章
             //（当前目录也在内），读完当前卷自动续到下一个目录章（issue #2）。
@@ -6703,21 +6707,6 @@ private suspend fun openSmbFile(
         } else {
             SmbConnectionStore.toChapterUrl(conn.id, relPath)
         }
-        // 散图：被点开那张图在「目录内自然序图片列表」中的下标 → 阅读器初始页。
-        // 判据与排序必须和 SmbDirectoryPageLoader 一致（isImage + 自然序），否则会错页。
-        val startPage = if (isImageFile) {
-            runCatching {
-                SmbBrowse.list(conn, password, dirRel)
-                    .filter { it.isImage }
-                    .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
-                    .indexOfFirst { it.name == fileName }
-                    .takeIf { it >= 0 }
-            }.onFailure {
-                logcat(LogPriority.WARN) { "[Smb] 定位点开图片失败，改从第 1 页开始: ${it.message}" }
-            }.getOrNull()
-        } else {
-            null
-        }
         val (mangaId, chapterId, initialPage) = withContext(Dispatchers.IO) {
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
@@ -6735,6 +6724,24 @@ private suspend fun openSmbFile(
                 ).first()
             if (manga.ogTitle != seriesTitle) {
                 mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
+            }
+            // 散图：被点开那张图在「目录内自然序图片列表」中的下标 → 阅读器初始页。
+            // 判据与排序必须和 SmbDirectoryPageLoader 一致（isImage + 自然序），否则会错页。
+            // 注意：logcat 是 Any 的扩展函数，只能在有隐式接收者的作用域里用（见本 withContext）。
+            val startPage = if (isImageFile) {
+                runCatching {
+                    SmbBrowse.list(conn, password, dirRel)
+                        .filter { it.isImage }
+                        .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                        .indexOfFirst { it.name == fileName }
+                        .takeIf { it >= 0 }
+                }.onFailure {
+                    logcat(LogPriority.WARN) {
+                        "[Smb] 定位点开图片失败，改从第 1 页开始: ${it.message}"
+                    }
+                }.getOrNull()
+            } else {
+                null
             }
             // SY --> Komiho: 散图 —— 系列 = 当前目录的**父目录**，其下所有子目录各成一章
             //（当前目录也在内），读完当前卷自动续到下一个目录章（issue #2）。
