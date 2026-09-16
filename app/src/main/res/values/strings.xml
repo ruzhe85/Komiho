@@ -330,12 +330,9 @@
 
     <!-- Komiho: 冷启动落点（来源管理页「启动」区） -->
     <string name="startup_section">启动</string>
-    <string name="startup_recent">最近页</string>
-    <string name="startup_recent_summary">打开后停在「最近」页</string>
-    <string name="startup_last_source">上次来源</string>
-    <string name="startup_last_source_summary">文件源回到上次目录，Komga 回到主页</string>
+    <string name="startup_recent">最近</string>
+    <string name="startup_last_source">最后来源</string>
     <string name="startup_continue">继续阅读</string>
-    <string name="startup_continue_summary">直接打开上次在读的那本书</string>
     <string name="startup_hint">只在冷启动时生效；横竖屏切换、从后台返回不会跳页。</string>
 
     <!-- SY: Komiho 主界面来源切换 / 本地浏览 / 存储 / 下载 -->
