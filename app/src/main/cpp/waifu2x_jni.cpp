@@ -20,6 +20,12 @@ static std::atomic<int> g_progress{0};
 static std::atomic<int> g_current_id{-1};
 static std::atomic<int> g_ui_busy{0};
 static std::atomic<bool> g_abort_processing{false};
+// Komiho: 最近一次推理的**纯耗时**（ms，不含任何等锁；-1 = 未知/失败/被抢占）。
+// 为什么要它：Kotlin 侧只能量到 `nativeProcess` 的整体耗时，而 `nativeProcess` 内部**自己
+// 还要再拿一次 g_lock**（真正的推理排队发生在这里）—— 那段排队会被当成"推理耗时"。
+// 实测某页 Kotlin 报 4913ms，而原生三趟都是 ~2450ms ⇒ 角标因此虚高 2.4s。
+// 这里把纯耗时单独曝给 Kotlin，让它能把两段等锁都剔除。
+static std::atomic<long long> g_last_inference_ms{-1};
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInit(JNIEnv *env,
@@ -144,6 +150,8 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
 
     // Update ID only after acquiring lock (now we are truly the active process)
     g_current_id.store(id);
+    // Komiho: 本次跑完前先清掉，避免并发下把上一次的纯耗时当成这次的（拿不到就保持 -1）
+    g_last_inference_ms.store(-1);
 
     if (!g_waifu2x)
       return bitmap;
@@ -227,6 +235,8 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
             const auto fused_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                       std::chrono::steady_clock::now() - fused_start)
                                       .count();
+            // Komiho: 成功才登记纯耗时（失败/被抢占保持 -1，Kotlin 侧退回旧口径）
+            g_last_inference_ms.store(ret == 0 ? (long long)fused_ms : -1);
             LOGD("Fused Vulkan processing %s in %lld ms",
                  ret == 0 ? "completed" : "failed",
                  static_cast<long long>(fused_ms));
@@ -243,6 +253,8 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
             const auto staged_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                        std::chrono::steady_clock::now() - staged_start)
                                        .count();
+            // Komiho: 同上，登记这条回退路径的纯耗时
+            g_last_inference_ms.store(ret == 0 ? (long long)staged_ms : -1);
             LOGD("Staged processing %s in %lld ms",
                  ret == 0 ? "completed" : "failed",
                  static_cast<long long>(staged_ms));
@@ -595,6 +607,15 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeGetProgress(JNIEnv *env,
   jlong id = (jlong)g_current_id.load();
   jlong progress = (jlong)g_progress.load();
   return (id << 32) | (progress & 0xFFFFFFFF);
+}
+
+// Komiho: 最近一次推理的纯耗时（ms，不含等锁）；-1 = 未知（失败 / 被 abort / 还没跑过）。
+// 调用时机须紧跟 nativeProcess 之后：写值发生在每次运行**结束时**，而下次运行的写入要等
+// 至少一次推理（1–3 秒）之后，所以这里的读取不会串到别人的值。
+extern "C" JNIEXPORT jlong JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeGetLastInferenceMs(
+    JNIEnv *env, jobject thiz) {
+  return (jlong)g_last_inference_ms.load();
 }
 extern "C" JNIEXPORT void JNICALL
 Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeSetUiBusy(JNIEnv *env,

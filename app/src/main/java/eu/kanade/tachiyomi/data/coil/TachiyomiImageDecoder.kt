@@ -161,6 +161,8 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                     val sourceTag = (if (options.prewarm) "prewarm" else "holder") +
                         "#${options.pageIndex}"
                     // Komiho: 角标口径 = 「解码 + 增强」的**实际计算**耗时（剔除等锁）。
+                    // `gpuWaitMs` 是**两段**等锁之和（MihonSyEnhancer 给的 totalWaitMs）——
+                    // 只剔第一段不够：nativeProcess 内部还有一次 g_lock 排队。
                     // 在同线程用局部变量收集回调值，避免并发页互相串号。
                     var enhanceOk = false
                     var gpuWaitMs = 0L
