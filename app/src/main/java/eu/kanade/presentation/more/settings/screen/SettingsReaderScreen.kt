@@ -298,6 +298,13 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_page_rotate_invert),
                     enabled = rotateToFit,
                 ),
+                // Komiho：预载页数（前后各几页）。档位只写值。
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.pagerOffscreenLimit,
+                    entries = (PagerConfig.OffscreenPages.MIN..PagerConfig.OffscreenPages.MAX)
+                        .associateWith { it.toString() },
+                    title = stringResource(MR.strings.pref_pager_offscreen_limit),
+                ),
             ),
         )
     }
