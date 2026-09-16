@@ -320,6 +320,16 @@
     <string name="addsrc_pick_folder">Choose folder</string>
     <string name="addsrc_local_note">Local storage is built in and always available; this page manages permissions and the manga root only.</string>
 
+    <!-- Komiho: cold-start destination (Manage sources → Startup) -->
+    <string name="startup_section">Startup</string>
+    <string name="startup_recent">Recent page</string>
+    <string name="startup_recent_summary">Stops on the Recent page</string>
+    <string name="startup_last_source">Last source</string>
+    <string name="startup_last_source_summary">Files: last folder; Komga: home</string>
+    <string name="startup_continue">Continue reading</string>
+    <string name="startup_continue_summary">Opens the book you were reading</string>
+    <string name="startup_hint">Cold start only; rotating the screen or returning from the background will not jump pages.</string>
+
     <!-- SY: Komiho source switcher / local browse / storage / downloads -->
     <string name="source_local">Local storage</string>
     <string name="source_add">Manage sources</string>
