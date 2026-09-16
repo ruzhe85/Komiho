@@ -4694,7 +4694,9 @@ private fun KomgaAbout(modifier: Modifier, context: android.content.Context) {
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+            // Komiho: 左右各缩进两格（16→32dp）——原先 16dp 时列表行与分割线两端顶死，
+            // 与上方居中的品牌区不成比例（用户反馈「左右顶格」）。
+            .padding(horizontal = 32.dp, vertical = 16.dp),
     ) {
         // ── 品牌区：应用图标 + 名称 + 版本 + 一句描述（居中）──
         Column(
@@ -4729,11 +4731,11 @@ private fun KomgaAbout(modifier: Modifier, context: android.content.Context) {
         Spacer(Modifier.height(20.dp))
 
         // ── 操作项：与设置页其它条目同构的列表行（不再是整宽按钮）──
+        // Komiho: 去掉条目间的分割线——只有三项，且线会横贯内容两端显得顶格（用户要求）。
         AboutActionRow(
             title = composeStringResource(R.string.about_changelog),
             onClick = { showChangelog = true },
         )
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         AboutActionRow(
             title = composeStringResource(R.string.about_check_update),
             enabled = !checking,
@@ -4747,7 +4749,6 @@ private fun KomgaAbout(modifier: Modifier, context: android.content.Context) {
                 }
             },
         )
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         AboutActionRow(
             title = composeStringResource(R.string.about_source_code),
             onClick = { context.openInBrowser("https://github.com/ruzhe85/Komiho") },
