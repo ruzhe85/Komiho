@@ -146,12 +146,29 @@ android {
             isEnable = true
             isUniversalApk = true
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            // Komiho (2026-09-18): x86/x86_64 dropped. They only ever served emulators,
+            // and no Android device we ship to runs them — meanwhile the QNN libraries
+            // (6 .so, ~43 MB) live under jniLibs/arm64-v8a only, so the x86 splits were
+            // carrying none of the AI backend anyway. Keeping the split list to the two
+            // real phone ABIs halves the artifacts to build and upload.
+            include("armeabi-v7a", "arm64-v8a")
         }
     }
 
     packaging {
         jniLibs {
+            // Komiho (2026-09-18): the Qualcomm DSP loads `libQnnHtpV<arch>Skel.so`
+            // itself, by *path*, through ADSP_LIBRARY_PATH — it cannot dlopen a library
+            // mapped straight out of the APK. AGP's default `extractNativeLibs=false`
+            // leaves `nativeLibraryDir` (…/lib/arm64) completely empty, so the DSP never
+            // found the Skel and every QNN init died with:
+            //     Failed to load skel, error: 4000
+            //     Transport layer setup failed: 14001
+            // (the later `contextCreateFromBinary failed: 14001` was a knock-on failure).
+            // Forcing legacy packaging writes the real .so files to disk so the DSP can
+            // read them. Cost: ~43 MB of extra on-device storage for the QNN libraries;
+            // the APK download size is unchanged.
+            useLegacyPackaging = true
             keepDebugSymbols += listOf(
                 "libandroidx.graphics.path",
                 "libarchive-jni",

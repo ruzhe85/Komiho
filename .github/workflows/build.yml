@@ -93,6 +93,14 @@ jobs:
       # same release (single CI channel, no per-build tag sprawl). The git tag "CI"
       # is reused — if a release already exists we just re-upload (clobber) the APKs
       # and keep the title fixed. Pre-release (yellow), never the green "Latest".
+      #
+      # Komiho (2026-09-18): only the per-ABI APKs are uploaded here. The universal
+      # APK (all ABIs merged) is ~190 MB once the QNN contexts and both HTP Skel/stub
+      # pairs are bundled, and `gh release upload` gave up on it after 18 minutes with
+      # `HTTP 400: 400 Bad Request` — the per-ABI APKs had already landed by then, so
+      # the build "failed" purely on the biggest asset. Dropping it keeps this channel
+      # fast and green; the universal package is produced by `ci-npu.yml` on demand.
+      # ABI list is arm64-v8a + armeabi-v7a only (see app/build.gradle.kts splits).
       - name: "Rename APKs to komiho-ci-*"
         run: |
           cd app/build/outputs/apk/release
@@ -102,6 +110,8 @@ jobs:
             [ "$abi" = "$apk" ] && abi=universal
             mv "$apk" "komiho-ci-${abi}.apk"
           done
+          # Keep the universal one out of this channel (see note above).
+          rm -f komiho-ci-universal.apk
           ls -la
 
       - name: "Upload APK to CI Release (tag: CI, title: Komiho-CI)"
@@ -113,18 +123,23 @@ jobs:
           RUN_NO="${{ github.run_number }}"
           BUILD_DATE=$(date -u +%Y%m%d)
           NOTES="Auto build #${RUN_NO} · ${{ github.sha }} · ${BUILD_DATE}T$(date -u +%H:%M:%SZ)"
+          # Upload smallest-first so the APKs people actually flash land before any
+          # long transfer can time out.
+          cd app/build/outputs/apk/release
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             # Release exists: overwrite APKs in place, keep fixed title.
-            gh release upload "$TAG" app/build/outputs/apk/release/komiho-ci-*.apk \
-              --repo "${{ github.repository }}" \
-              --clobber
+            for apk in $(ls -S -r komiho-ci-*.apk); do
+              gh release upload "$TAG" "$apk" \
+                --repo "${{ github.repository }}" \
+                --clobber
+            done
             gh release edit "$TAG" \
               --repo "${{ github.repository }}" \
               --title "$TITLE" \
               --notes "$NOTES"
           else
             # First time: create the fixed CI release.
-            gh release create "$TAG" app/build/outputs/apk/release/komiho-ci-*.apk \
+            gh release create "$TAG" $(ls -S -r komiho-ci-*.apk) \
               --repo "${{ github.repository }}" \
               --title "$TITLE" \
               --notes "$NOTES" \
