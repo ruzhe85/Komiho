@@ -46,6 +46,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.EnhanceTimings
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.ImageUtil
 import uy.kohesive.injekt.Injekt
@@ -240,22 +241,47 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private fun dpToPx(dp: Float): Int = (dp * resources.displayMetrics.density).toInt()
 
     /**
-     * MihonSY: shows the enhancement outcome badge. Success shows the real elapsed
-     * time; failure/skip shows 跳过. No-op unless enhancement is on AND the status
-     * toggle is on. Enhancement itself runs synchronously inside the Coil decoder,
-     * so this is only called from the Coil success/error listeners — plus
+     * MihonSY: shows the enhancement outcome badge. Success shows which engine actually ran
+     * plus the real elapsed time; failure/skip shows 跳过. No-op unless enhancement is on
+     * AND the status toggle is on. Enhancement itself runs synchronously inside the Coil
+     * decoder, so this is only called from the Coil success/error listeners — plus
      * PagerPageHolder for the pre-decoded bitmap path (SY: Page 优化，耗时来自预处理阶段).
+     *
+     * Komiho (2026-09-17): the success label reports the **engine that really produced the
+     * image** — `NPU OK` / `GPU OK` / `CPU OK` — read from [Waifu2x.lastEngine] rather than
+     * from the selected model. A silent NPU→Vulkan fallback used to render identically to a
+     * genuine NPU run, which made the cross-HTP experiment unreadable from the screen.
      */
     internal fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0 || !preferences.showEnhancementStatus.get()) return
         val tv = ensureEnhanceStatusView()
         tv.text = if (success) {
-            String.format(java.util.Locale.US, "OK %.1fs", elapsedMillis / 1000f)
+            String.format(
+                java.util.Locale.US,
+                "%s %.1fs",
+                engineLabel(),
+                elapsedMillis / 1000f,
+            )
         } else {
             "跳过"
         }
         tv.visibility = View.VISIBLE
+    }
+
+    /**
+     * Komiho: engine tag for the badge. CPU 档（Lanczos3 / Catmull-Rom）本身就是 CPU，直接标
+     * `CPU OK`；AI 档要看原生侧真正跑的是哪台引擎 —— 见 [Waifu2x.lastEngine]。
+     */
+    private fun engineLabel(): String = when (Injekt.get<ReaderPreferences>().enhancementMode.get()) {
+        // CPU resampler modes (2 = Lanczos3, 3 = Catmull-Rom) never touch the native engines.
+        2, 3 -> "CPU OK"
+        else -> when (Waifu2x.lastEngine) {
+            Waifu2x.EngineKind.QNN_HTP -> "NPU OK"
+            Waifu2x.EngineKind.NCNN_VULKAN -> "GPU OK"
+            // NONE = 引擎没出结果，本页由 CPU 重采样兜底（或首个引擎结果尚未登记）。
+            Waifu2x.EngineKind.NONE -> "CPU OK"
+        }
     }
     // MihonSY <--
 

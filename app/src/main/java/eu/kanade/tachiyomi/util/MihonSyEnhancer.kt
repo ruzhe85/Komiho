@@ -326,6 +326,7 @@ object MihonSyEnhancer {
             // Komiho（跨 HTP 试验期）：不接 onQnnFallback —— 回写偏好会把用户选的 NPU
             // 条目改成 Default，导致「换台机器重试同一个模型」这件事做不了。失败只留日志
             // （Waifu2x 的 `NPU UNAVAILABLE` WARN 带 on-chip arch），当页仍回落 Vulkan 出图。
+            // 回落现在是**可见**的：角标读 Waifu2x.lastEngine，QNN 没跑成就会显示 GPU OK。
             Waifu2x.setTileSize(preferences.aiTileSize.get())
             Waifu2x.process(Injekt.get<Application>(), input, tag = sourceTag, timing = timing)
                 ?.let { return it }
@@ -334,6 +335,10 @@ object MihonSyEnhancer {
             logcat(LogPriority.WARN) { "AI upscale unavailable for this ABI; falling back to Lanczos3" }
         }
 
+        // Komiho: 落到这里 = GPU/NPU 引擎都没出结果，本页由 CPU 重采样完成。
+        // 角标据此显示 CPU OK（引擎选择失败时 lastEngine 保持上一次的值，所以必须在
+        // 真正走 CPU 路径时清掉，否则会把上一页的 GPU/NPU 结果错误地沿用过来）。
+        Waifu2x.markCpuFallback()
         val scale = preferences.lanczosScale.get() / 100f
         if (scale <= 1f) return null
         val argb = ensureArgb(input) ?: return null
