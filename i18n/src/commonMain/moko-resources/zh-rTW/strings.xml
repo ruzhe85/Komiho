@@ -380,6 +380,11 @@
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <string name="ai_model_qnn_realcugan_pro">Real-CUGAN (NPU)</string>
+    <string name="ai_model_qnn_realcugan_pro_int8">Real-CUGAN int8 (NPU)</string>
+    <string name="ai_model_qnn_w2xex_photo">W2xEX Photo (NPU)</string>
+    <string name="ai_model_qnn_w2xex_photo_int8">W2xEX Photo int8 (NPU)</string>
+    <string name="ai_model_qnn_animevideo_v3">AnimeVideo v3 (NPU)</string>
+    <string name="ai_model_qnn_animevideo_v3_int8">AnimeVideo v3 int8 (NPU)</string>
     <string name="pref_ai_tile_size">分塊大小</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>
