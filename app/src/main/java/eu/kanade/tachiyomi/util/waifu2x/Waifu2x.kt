@@ -320,11 +320,21 @@ object Waifu2x {
                 return true
             }
             logcat(LogPriority.WARN) { "Waifu2x: QNN init failed for ${model.id}; falling back to Vulkan Default" }
+            // Komiho: 回落必须**写回偏好**，否则 UI 高亮着一个跑不起来的 NPU 条目、
+            // 实际引擎是 Vulkan，两者永远不一致；而且每次重建引擎都要再失败一次。
+            // 门控（isModelSupported）本应拦住这条路，这里是「探测通过但实际仍跑不通」的兜底。
             requestedModel = AiUpscaleModel.Default
+            onQnnFallback?.invoke(model)
             return ensureEngineLocked(context, AiUpscaleModel.Default)
         }
         return ensureEngineLocked(context, model)
     }
+
+    /**
+     * Invoked when a QNN model had to fall back to Vulkan at init time. The UI layer uses it
+     * to persist the correction so the setting stops lying about the active engine.
+     */
+    var onQnnFallback: ((AiUpscaleModel) -> Unit)? = null
 
     /** Vulkan/ncnn branch of [ensureEngine] (kept out of the dispatcher for clarity). */
     private fun ensureEngineLocked(context: Context, model: AiUpscaleModel): Boolean {
@@ -398,16 +408,28 @@ object Waifu2x {
     @Volatile
     private var qnnRuntimeAvailable: Boolean? = null
 
+    /** Cached result of [nativeGetQnnArchitecture]; -1 = not probed yet. */
+    @Volatile
+    private var qnnArchitecture: Int = -1
+
     /**
-     * Whether an NPU model entry should be offered on this device. Probed once and cached —
-     * the probe dlopens `libQnnHtp.so`, which must not happen per frame.
+     * Whether an NPU model entry should be offered on this device.
+     *
+     * Komiho (2026-09-17): the original probe only dlopen'd `libQnnHtp.so`, but those
+     * libraries ship inside our own APK, so the call succeeds on **every** device —
+     * including non-Qualcomm ones, where it used to leak the whole NPU group into the
+     * model list and then silently fall back to Vulkan at inference time.
+     *
+     * The real discriminator is the on-chip HTP: a non-Qualcomm device gets no
+     * `ON_CHIP` hardware device from `deviceGetPlatformInfo`, so [nativeGetQnnArchitecture]
+     * reports 0. NPU entries are then hidden and stored ids normalise to [AiUpscaleModel.Default].
      */
     val isQnnRuntimeAvailable: Boolean
         get() {
             if (!libraryLoaded) return false
             return qnnRuntimeAvailable ?: run {
                 val available = try {
-                    nativeIsQnnRuntimeAvailable()
+                    nativeIsQnnRuntimeAvailable() && detectedQnnArchitecture > 0
                 } catch (e: Throwable) {
                     logcat(LogPriority.WARN, e) { "Waifu2x: QNN probe failed" }
                     false
@@ -418,11 +440,36 @@ object Waifu2x {
         }
 
     /**
-     * UI filter: QNN entries are only offered where the runtime loads. Vulkan entries are
-     * always shown (their failure path is the CPU resampler fallback).
+     * Detected on-chip HTP architecture (75 / 79 / 81 …), or 0 when this device has no
+     * usable HTP. Probed once and cached — it dlopens the QNN runtime.
      */
-    fun isModelSupported(model: AiUpscaleModel): Boolean =
-        model.backend != AiUpscaleModel.Backend.QNN_HTP || isQnnRuntimeAvailable
+    val detectedQnnArchitecture: Int
+        get() {
+            if (!libraryLoaded) return 0
+            if (qnnArchitecture >= 0) return qnnArchitecture
+            val arch = try {
+                nativeGetQnnArchitecture()
+            } catch (e: Throwable) {
+                logcat(LogPriority.WARN, e) { "Waifu2x: QNN architecture probe failed" }
+                0
+            }
+            logcat(LogPriority.WARN) { "Waifu2x: detected HTP architecture v$arch" }
+            qnnArchitecture = arch
+            return arch
+        }
+
+    /**
+     * UI filter: a QNN entry is offered only where the matching HTP generation exists on
+     * chip. The shipped contexts target a specific architecture ([QNN_TARGET_ARCH]), so a
+     * device whose HTP differs can never run them — hiding is the honest answer, and the
+     * same check keeps non-Qualcomm hardware from seeing NPU at all.
+     *
+     * Vulkan entries are always shown (their failure path is the CPU resampler fallback).
+     */
+    fun isModelSupported(model: AiUpscaleModel): Boolean = when (model.backend) {
+        AiUpscaleModel.Backend.NCNN_VULKAN -> true
+        AiUpscaleModel.Backend.QNN_HTP -> detectedQnnArchitecture == QNN_TARGET_ARCH
+    }
 
     /**
      * Extracts the given model's assets into the cache dir and returns its absolute path.
@@ -501,8 +548,27 @@ object Waifu2x {
     private external fun nativeIsQnnRuntimeAvailable(): Boolean
 
     /**
+     * On-chip HTP architecture (75 / 79 / 81 …) read from the QNN platform info, or 0 when
+     * this device has no usable HTP. This — not [nativeIsQnnRuntimeAvailable] — is what
+     * separates a real Qualcomm NPU from "our own .so happened to load".
+     */
+    private external fun nativeGetQnnArchitecture(): Int
+
+    /**
      * Loads a prebuilt context binary into the HTP engine.
      * Takes the engine lock; also exports `ADSP_LIBRARY_PATH` for the DSP-side Skel lookup.
      */
     private external fun nativeInitQnn(contextPath: String, nativeLibraryDir: String, padding: Int): Boolean
+
+    companion object {
+        /**
+         * Komiho: the HTP generation the bundled QNN contexts were compiled for.
+         *
+         * The contexts under `assets/qnn-contexts/` are **per-architecture** builds (they are
+         * not Flexible Context Binaries), so this must match the device's on-chip HTP
+         * exactly. Keep it in sync with the `.v<NN>.bin` suffix of every shipped context.
+         * Configured from `build.gradle.kts` via `QNN_TARGET_ARCH` for easy A/B on device.
+         */
+        const val QNN_TARGET_ARCH: Int = 81
+    }
 }
