@@ -2,8 +2,8 @@ name: CI-NPU (full package)
 
 # Komiho (2026-09-18): on-demand build for the *complete* artifact set, including the
 # universal APK. Only run this when you actually need it — it is roughly 20 minutes of
-# upload time because the universal package is ~270 MB once the twelve QNN contexts,
-# the two HTP Skel/stub pairs and the 79 MB libQnnHtpPrepare.so are merged into one file.
+# upload time because the universal package is ~290 MB once the twelve QNN contexts,
+# the five HTP Skel/stub pairs and the 79 MB libQnnHtpPrepare.so are merged into one file.
 #
 # Why this exists as a separate workflow rather than a second step in build.yml:
 #   * build.yml (every push to main) stays fast and green — it publishes the per-ABI
@@ -101,7 +101,7 @@ jobs:
           for apk in app-*-release.apk; do
             echo "--- $apk"
             unzip -l "$apk" | grep -E 'libQnn|qnn-contexts' | head -30
-            # Two libraries here are dlopen()ed by NAME at runtime and are therefore
+            # Every library here is dlopen()ed by NAME at runtime and is therefore
             # invisible to a DT_NEEDED scan of any of our .so files:
             #
             #   * libQnnModelDlc.so — dlopen()ed from qnn_backend.cpp (DLC container
@@ -109,23 +109,32 @@ jobs:
             #   * libQnnHtpPrepare.so — dlopen()ed from INSIDE libQnnHtp.so by its own
             #     PrepareLibLoader (string `libQnnHtpPrepare`, assembled with a platform
             #     suffix). It is not in libQnnHtp.so's DT_NEEDED list either.
+            #   * libQnnHtpV{69,73,75,79,81}Skel.so — the DSP-side HTP kernels. The
+            #     HTP backend picks one at runtime through ADSP_LIBRARY_PATH; we do not
+            #     choose the arch from Kotlin, so *every* arch must be present. This is
+            #     the full set the reference build (app.mihon 1.3.9) ships, and after
+            #     aligning to it, the only remaining difference on the V75 path is gone.
+            #   * libQnnHtpV{69,73,75,79,81}Stub.so — the matching host-side stubs.
             #
-            # The second one is the actual cause of `loadRemoteSymbols failed with err
-            # 4000` on device. The QnnDsp log strings sit back to back in libQnnHtp.so:
+            # History, because this comment has been wrong twice (2026-09-18):
+            # both ModelDlc and libQnnHtpPrepare.so were added one at a time as "the fix"
+            # for the on-device `loadRemoteSymbols failed with err 4000` /
+            # `Failed to load skel, error: 4000` chain, and both times the error chain
+            # came back byte-for-byte identical. The failure is in the DSP transport /
+            # skel-load stage; 4000 is QNN_MIN_ERROR_BACKEND (QnnCommon.h:77) and 14001
+            # is QNN_DEVICE_ERROR_INVALID_CONFIG (QnnMinimum.Device + 1), i.e. backend /
+            # device level, not "file not found".
             #
-            #   "Attempting to open dynamically linked so: %s using base filename"
-            #   "Failed to resolve symbol 'getBuildIdFunc': %s"
-            #   "loadRemoteSymbols failed with err %lu"
-            #
-            # i.e. PrepareLibLoader opens libQnnHtpPrepare.so purely to resolve
-            # getBuildIdFunc for the host/skel build-id handshake. When the file is
-            # absent the dlsym fails, the transport never comes up (14001), and
-            # contextCreateFromBinary fails with 0x36b1 — we silently fall back to Vulkan.
-            #
-            # Do NOT "optimise" this list by deleting the Prepare entry: its absence is
-            # silent, costs nothing at build time, and only shows up as a missing NPU on
-            # a real phone. It is 79 MB, which is exactly why it looks droppable.
-            for need in libQnnHtp.so libQnnHtpV75Skel.so libQnnHtpV79Skel.so libQnnSystem.so libQnnModelDlc.so libQnnHtpPrepare.so; do
+            # Do NOT "optimise" this list by dropping entries: their absence is silent,
+            # costs nothing at build time, and only shows up as a missing NPU on a real
+            # phone. The Prepare library alone is 79 MB — which is exactly why it looks
+            # droppable.
+            for need in libQnnHtp.so libQnnHtpPrepare.so libQnnModelDlc.so libQnnSystem.so \
+                        libQnnHtpV69Skel.so libQnnHtpV69Stub.so \
+                        libQnnHtpV73Skel.so libQnnHtpV73Stub.so \
+                        libQnnHtpV75Skel.so libQnnHtpV75Stub.so \
+                        libQnnHtpV79Skel.so libQnnHtpV79Stub.so \
+                        libQnnHtpV81Skel.so libQnnHtpV81Stub.so; do
               if ! unzip -l "$apk" | grep -q "$need"; then
                 echo "::error::$apk is missing $need"
                 exit 1

@@ -147,7 +147,7 @@ android {
             reset()
             // Komiho (2026-09-18): x86/x86_64 dropped. They only ever served emulators,
             // and no Android device we ship to runs them — meanwhile the QNN libraries
-            // (7 .so, ~122 MB) live under jniLibs/arm64-v8a only, so the x86 splits were
+            // (14 .so, ~170 MB) live under jniLibs/arm64-v8a only, so the x86 splits were
             // carrying none of the AI backend anyway. Keeping the split list to the two
             // real phone ABIs halves the artifacts to build and upload.
             //
@@ -183,15 +183,19 @@ android {
             // Komiho (2026-09-18): the Qualcomm DSP loads `libQnnHtpV<arch>Skel.so`
             // itself, by *path*, through ADSP_LIBRARY_PATH — it cannot dlopen a library
             // mapped straight out of the APK. AGP's default `extractNativeLibs=false`
-            // leaves `nativeLibraryDir` (…/lib/arm64) completely empty, so the DSP never
-            // found the Skel and every QNN init died with:
+            // leaves `nativeLibraryDir` (…/lib/arm64) completely empty, and the root
+            // cause of the original failure looked like exactly that:
             //     Failed to load skel, error: 4000
             //     Transport layer setup failed: 14001
-            // (the later `contextCreateFromBinary failed: 14001` was a knock-on failure).
-            // Forcing legacy packaging writes the real .so files to disk so the DSP can
-            // read them. Cost: ~120 MB of extra on-device storage for the QNN libraries
-            // (the Skel/stub pairs plus the 79 MB libQnnHtpPrepare.so); the APK download
-            // size is unchanged.
+            // ⚠️ Correction (same day): turning this on did NOT fix the 4000 chain by
+            // itself — the on-device error log is byte-for-byte identical with the real
+            // .so files sitting on disk. It is kept because the known-good reference
+            // build (app.mihon 1.3.9, `dumpsys package` → extractNativeLibs=true) ships
+            // the same layout, so at least the two are equivalent on this axis.
+            // Cost: ~205 MB of extra on-device storage for the QNN libraries
+            // (libQnnHtp + libQnnSystem + libQnnModelDlc + the 79 MB Prepare library
+            // + five Skel/stub pairs); the APK download size is barely affected because
+            // these .so files compress well.
             useLegacyPackaging = true
             keepDebugSymbols += listOf(
                 "libandroidx.graphics.path",
