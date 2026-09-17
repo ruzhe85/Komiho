@@ -33,12 +33,23 @@ static std::atomic<long long> g_last_inference_ms{-1};
 // nativeInitW2xEx）；nativeProcess 只看 is_initialized() 自动路由，QNN 失败/未
 // 初始化时自然落进下方 fused/staged(ncnn) 路径 ⇒ 回退链在原生层天然成立。
 // ADSP_LIBRARY_PATH 必须在首次 dlopen 前指向本 App 的 nativeLibraryDir ——
-// HTP Skel（libQnnHtpV75Skel.so）由 DSP 加载器按它查找。
+// HTP Skel（libQnnHtpV<arch>Skel.so）由 DSP 加载器按它查找 —— arch 必须与打包的
+// Skel/Stub 以及 assets/qnn-contexts 里的 context 编译目标一致（见 Waifu2x.QNN_TARGET_ARCH）。
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeIsQnnRuntimeAvailable(
     JNIEnv *, jobject) {
   return qnn_backend::is_runtime_loadable() ? JNI_TRUE : JNI_FALSE;
+}
+
+// Komiho: 本机 HTP 架构号（75/79/81…），0 = 非高通 / 无可用 HTP。
+// 与 is_runtime_loadable 的区别很关键：dlopen("libQnnHtp.so") 因为 .so 就在我们自己的
+// APK 里，在**任何**设备上都会成功 ⇒ 它只能证明"库能加载"，不能证明"这台机器有 HTP"。
+// 真正能区分高通与非高通的判据是 deviceGetPlatformInfo 能否返回 ON_CHIP 设备及其 arch。
+extern "C" JNIEXPORT jint JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeGetQnnArchitecture(
+    JNIEnv *, jobject) {
+  return static_cast<jint>(qnn_backend::architecture());
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

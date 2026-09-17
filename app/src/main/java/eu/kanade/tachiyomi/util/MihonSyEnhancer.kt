@@ -323,6 +323,10 @@ object MihonSyEnhancer {
             // the pass and applied lazily — only a real change reaches the native side
             // (the model rebuilds the engine, the tile size takes the engine lock).
             Waifu2x.setModel(AiUpscaleModel.fromId(preferences.aiModelId.get()))
+            // Komiho: a QNN model that passes the on-chip gate can still fail to load the
+            // context (mismatched build, OOM on the DSP). Persist the correction so the
+            // chip stops claiming an engine that is not running.
+            Waifu2x.onQnnFallback = { preferences.aiModelId.set(AiUpscaleModel.Default.id) }
             Waifu2x.setTileSize(preferences.aiTileSize.get())
             Waifu2x.process(Injekt.get<Application>(), input, tag = sourceTag, timing = timing)
                 ?.let { return it }

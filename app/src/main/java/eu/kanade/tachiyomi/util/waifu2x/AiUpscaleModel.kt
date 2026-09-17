@@ -25,7 +25,7 @@ import tachiyomi.i18n.MR
  * @property labelRes display name shown in the GPU group; model names are not translated.
  * @property backend which native engine runs this model.
  * @property assetFile exact asset file name — only used by QNN models whose file name
- *   embeds the HTP architecture (`<stem>.v75.bin`); Vulkan models ignore it.
+ *   embeds the HTP architecture (`<stem>.v81.bin`); Vulkan models ignore it.
  */
 enum class AiUpscaleModel(
     val id: String,
@@ -90,9 +90,10 @@ enum class AiUpscaleModel(
     /**
      * Komiho: Qualcomm NPU (QNN/HTP) context — Real-CUGAN Pro x2 conservative, fp16.
      *
-     * Context binary ported from the upstream release APK (`assets/qnn-contexts/`, compiled
-     * for HTP v75 = Snapdragon 8 Gen 3). Entry is only shown when [Waifu2x.isQnnModelSupported]
-     * passes; any init/execute failure falls back to the Vulkan engine transparently.
+     * Context binary ported from the upstream release APK (`assets/qnn-contexts/`), compiled
+     * for a specific HTP generation (see [Waifu2x.QNN_TARGET_ARCH]). Entry is only shown when
+     * [Waifu2x.isModelSupported] reports the device's on-chip HTP matches that build; any
+     * init/execute failure falls back to the Vulkan engine transparently.
      *
      * padding = 18: the SE-module layout defeats the closed-form derivation, but the
      * convolution trunk is 15x k3 + 3x k2 stride-1 convs → input halo = 15*1 + 3*0.5 = 16.5,
@@ -106,7 +107,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_realcugan_pro,
         backend = Backend.QNN_HTP,
-        assetFile = "realcugan-pro-x2-conservative.v75.bin",
+        assetFile = "realcugan-pro-x2-conservative.v81.bin",
     ),
 
     /**
@@ -122,7 +123,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_realcugan_pro_int8,
         backend = Backend.QNN_HTP,
-        assetFile = "realcugan-pro-x2-conservative-int8.v75.bin",
+        assetFile = "realcugan-pro-x2-conservative-int8.v81.bin",
     ),
 
     /**
@@ -142,7 +143,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_w2xex_photo,
         backend = Backend.QNN_HTP,
-        assetFile = "w2xex-photo-small-x2.v75.bin",
+        assetFile = "w2xex-photo-small-x2.v81.bin",
     ),
 
     /** Komiho: int8 sibling of [QnnW2xexPhotoSmallX2] — same topology, same halo. */
@@ -154,7 +155,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_w2xex_photo_int8,
         backend = Backend.QNN_HTP,
-        assetFile = "w2xex-photo-small-x2-int8.v75.bin",
+        assetFile = "w2xex-photo-small-x2-int8.v81.bin",
     ),
 
     /**
@@ -173,7 +174,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_animevideo_v3,
         backend = Backend.QNN_HTP,
-        assetFile = "realesrgan-animevideov3-x2.v75.bin",
+        assetFile = "realesrgan-animevideov3-x2.v81.bin",
     ),
 
     /** Komiho: int8 sibling of [QnnRealesrganAnimevideov3X2] — same topology, same halo. */
@@ -185,7 +186,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_animevideo_v3_int8,
         backend = Backend.QNN_HTP,
-        assetFile = "realesrgan-animevideov3-x2-int8.v75.bin",
+        assetFile = "realesrgan-animevideov3-x2-int8.v81.bin",
     ),
 
     // Photo-Small W2xEX 曾在此处（40 层 / 18 卷积 / 598,464 权重元素 = 13.4x 算力 / padding 18），
