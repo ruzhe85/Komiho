@@ -2,8 +2,8 @@ name: CI-NPU (full package)
 
 # Komiho (2026-09-18): on-demand build for the *complete* artifact set, including the
 # universal APK. Only run this when you actually need it — it is roughly 20 minutes of
-# upload time because the universal package is ~190 MB once the twelve QNN contexts and
-# the two HTP Skel/stub pairs are merged into one file.
+# upload time because the universal package is ~270 MB once the twelve QNN contexts,
+# the two HTP Skel/stub pairs and the 79 MB libQnnHtpPrepare.so are merged into one file.
 #
 # Why this exists as a separate workflow rather than a second step in build.yml:
 #   * build.yml (every push to main) stays fast and green — it publishes the per-ABI
@@ -101,10 +101,31 @@ jobs:
           for apk in app-*-release.apk; do
             echo "--- $apk"
             unzip -l "$apk" | grep -E 'libQnn|qnn-contexts' | head -30
-            # libQnnModelDlc.so is dlopen()ed by name from qnn_backend.cpp (it is not
-            # in libQnnHtp.so's DT_NEEDED, so a plain dependency scan would miss it).
-            # Without it QNN init dies with `loadRemoteSymbols failed ... 4000`.
-            for need in libQnnHtp.so libQnnHtpV75Skel.so libQnnHtpV79Skel.so libQnnSystem.so libQnnModelDlc.so; do
+            # Two libraries here are dlopen()ed by NAME at runtime and are therefore
+            # invisible to a DT_NEEDED scan of any of our .so files:
+            #
+            #   * libQnnModelDlc.so — dlopen()ed from qnn_backend.cpp (DLC container
+            #     reader + QnnModel_composeGraphs entry points).
+            #   * libQnnHtpPrepare.so — dlopen()ed from INSIDE libQnnHtp.so by its own
+            #     PrepareLibLoader (string `libQnnHtpPrepare`, assembled with a platform
+            #     suffix). It is not in libQnnHtp.so's DT_NEEDED list either.
+            #
+            # The second one is the actual cause of `loadRemoteSymbols failed with err
+            # 4000` on device. The QnnDsp log strings sit back to back in libQnnHtp.so:
+            #
+            #   "Attempting to open dynamically linked so: %s using base filename"
+            #   "Failed to resolve symbol 'getBuildIdFunc': %s"
+            #   "loadRemoteSymbols failed with err %lu"
+            #
+            # i.e. PrepareLibLoader opens libQnnHtpPrepare.so purely to resolve
+            # getBuildIdFunc for the host/skel build-id handshake. When the file is
+            # absent the dlsym fails, the transport never comes up (14001), and
+            # contextCreateFromBinary fails with 0x36b1 — we silently fall back to Vulkan.
+            #
+            # Do NOT "optimise" this list by deleting the Prepare entry: its absence is
+            # silent, costs nothing at build time, and only shows up as a missing NPU on
+            # a real phone. It is 79 MB, which is exactly why it looks droppable.
+            for need in libQnnHtp.so libQnnHtpV75Skel.so libQnnHtpV79Skel.so libQnnSystem.so libQnnModelDlc.so libQnnHtpPrepare.so; do
               if ! unzip -l "$apk" | grep -q "$need"; then
                 echo "::error::$apk is missing $need"
                 exit 1

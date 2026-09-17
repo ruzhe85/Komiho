@@ -100,8 +100,9 @@ jobs:
       # and keep the title fixed. Pre-release (yellow), never the green "Latest".
       #
       # Komiho (2026-09-18): only the per-ABI APKs are uploaded here. The universal
-      # APK (all ABIs merged) is ~190 MB once the QNN contexts and both HTP Skel/stub
-      # pairs are bundled, and `gh release upload` gave up on it after 18 minutes with
+      # APK (all ABIs merged) is ~270 MB once the QNN contexts, both HTP Skel/stub
+      # pairs and the 79 MB libQnnHtpPrepare.so are bundled, and `gh release upload`
+      # gave up on it after 18 minutes with
       # `HTTP 400: 400 Bad Request` — the per-ABI APKs had already landed by then, so
       # the build "failed" purely on the biggest asset. Dropping it keeps this channel
       # fast and green; the universal package is produced by `ci-npu.yml` on demand.
