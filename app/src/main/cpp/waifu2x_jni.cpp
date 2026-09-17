@@ -32,9 +32,19 @@ static std::atomic<long long> g_last_inference_ms{-1};
 // 引擎选择发生在 Kotlin 侧（ensureEngine 按模型 backend 调 nativeInitQnn 或
 // nativeInitW2xEx）；nativeProcess 只看 is_initialized() 自动路由，QNN 失败/未
 // 初始化时自然落进下方 fused/staged(ncnn) 路径 ⇒ 回退链在原生层天然成立。
-// ADSP_LIBRARY_PATH 必须在首次 dlopen 前指向本 App 的 nativeLibraryDir ——
-// HTP Skel（libQnnHtpV<arch>Skel.so）由 DSP 加载器按它查找 —— arch 必须与打包的
-// Skel/Stub 以及 assets/qnn-contexts 里的 context 编译目标一致（见 AiUpscaleModel.packedQnnArches）。
+//
+// ★★ ADSP_LIBRARY_PATH 必须在**首次 dlopen("libQnnHtp.so") 之前**指向本 App 的
+// nativeLibraryDir —— HTP Skel（libQnnHtpV<arch>Skel.so）由 DSP 侧加载器按它查找。
+// 这个 setenv 以前放在 nativeInitQnn 里，但 Kotlin 会**先**调
+// nativeIsQnnRuntimeAvailable / nativeGetQnnArchitecture（两者都会 dlopen
+// libQnnHtp.so 并建立 FastRPC/DSP 会话），那时代码还没设 env ⇒ DSP 侧此后就再也
+// 装不上 Skel（err 4000，且每次重试都失败）。
+// 现在改到 JNI_OnLoad（System.loadLibrary 那一刻）设置，且用 dladdr 自定位目录，
+// 不再依赖 Kotlin 的调用顺序。详见 qnn_backend.cpp 里 ensure_dsp_path 的注释。
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *) {
+  qnn_backend::ensure_dsp_path(nullptr);
+  return JNI_VERSION_1_6;
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeIsQnnRuntimeAvailable(
@@ -60,11 +70,9 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInitQnn(
   const char *context_path_chars = env->GetStringUTFChars(context_path, nullptr);
   const char *library_dir_chars =
       env->GetStringUTFChars(native_library_dir, nullptr);
-  const std::string dsp_paths =
-      std::string(library_dir_chars) +
-      ";/vendor/dsp/cdsp;/vendor/lib/rfsa/cdsp;/system/vendor/lib/rfsa/cdsp";
-  setenv("ADSP_LIBRARY_PATH", dsp_paths.c_str(), 1);
-  LOGD("QNN ADSP_LIBRARY_PATH=%s", dsp_paths.c_str());
+  // Komiho (2026-09-18): env 早在 JNI_OnLoad 就设好了；这里用 Kotlin 传来的
+  // nativeLibraryDir 再确认一次（幂等，并打印 before/after 便于对日志）。
+  qnn_backend::ensure_dsp_path(library_dir_chars);
   const bool initialized =
       qnn_backend::initialize(context_path_chars, static_cast<int>(padding));
   env->ReleaseStringUTFChars(native_library_dir, library_dir_chars);

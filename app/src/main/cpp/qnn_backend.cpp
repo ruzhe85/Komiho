@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fstream>
@@ -26,6 +27,60 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace qnn_backend {
+
+// ── Komiho (2026-09-18): ADSP_LIBRARY_PATH 必须在「首次 dlopen libQnnHtp.so」之前就位 ──
+//
+// 为什么值得为它单独写一节：真机日志（run 35263307970 的装机版）的时间顺序是
+//     43.157  QnnBackend: Detected HTP architecture v75 from QNN platform info
+//                                                            ← architecture() 已经 dlopen 过
+//     43.163  Waifu2xJNI: QNN ADSP_LIBRARY_PATH=...           ← 我们到这一刻才 setenv
+//     43.171  QnnDsp <I> QnnLog_create started.               ← 才真正 initialize
+// 也就是说 libQnnHtp.so 的**第一次映射**（以及它内部 FastRPC router、DSP 会话的建立）
+// 发生在一个「ADSP_LIBRARY_PATH 还没设」的进程环境里。此后 DSP 侧就再也装不上 Skel：
+//     loadRemoteSymbols failed with err 4000 → Failed to create transport
+//     → Failed to load skel, error: 4000 → Transport layer setup failed: 14001
+// 而且**之后每一次重试都失败**（进程级的 FastRPC/DSP 状态一旦建错就不会自愈）。
+//
+// 更要命的是：waifu2x_jni.cpp 顶部的注释本来就写着「ADSP_LIBRARY_PATH 必须在首次
+// dlopen 前指向本 App 的 nativeLibraryDir」—— 注释与实现自相矛盾，这里把它改成事实：
+//   * 调用点：JNI_OnLoad（= Kotlin System.loadLibrary("waifu2x-jni") 那一刻），
+//     以及每个 QNN 入口函数的最前面（幂等，兜底）。
+//   * 路径不再依赖 Kotlin 传参：优先用调用方给的 nativeLibraryDir，没有就用 dladdr
+//     自定位本 .so 所在目录（即 …/lib/arm64）。
+//
+// 为什么路径是这几段：HTP Skel 由 DSP 侧的加载器按 ADSP_LIBRARY_PATH 逐段查找，
+// 第一段必须放我们自己的 lib 目录（Skel/Stub 就在那儿），后面三段是参照实现同款的
+// vendor 兜底目录（字面量与上游 libwaifu2x-jni.so 内完全一致）。
+namespace {
+std::string own_library_dir() {
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void *>(&own_library_dir), &info) != 0 &&
+      info.dli_fname) {
+    const std::string full(info.dli_fname);
+    const size_t slash = full.find_last_of('/');
+    if (slash != std::string::npos) {
+      return full.substr(0, slash);
+    }
+  }
+  return {};
+}
+} // namespace
+
+void ensure_dsp_path(const char *preferred_dir) {
+  const std::string dir = (preferred_dir && *preferred_dir)
+                              ? std::string(preferred_dir)
+                              : own_library_dir();
+  if (dir.empty()) {
+    LOGW("Unable to locate the native library dir; ADSP_LIBRARY_PATH untouched");
+    return;
+  }
+  const std::string paths =
+      dir + ";/vendor/dsp/cdsp;/vendor/lib/rfsa/cdsp;/system/vendor/lib/rfsa/cdsp";
+  const char *before = getenv("ADSP_LIBRARY_PATH");
+  LOGD("DSP path: before=\"%s\"", before ? before : "(unset)");
+  setenv("ADSP_LIBRARY_PATH", paths.c_str(), 1);
+  LOGD("QNN ADSP_LIBRARY_PATH=%s", paths.c_str());
+}
 
 #if MIHON_ENABLE_QNN
 namespace {
@@ -202,6 +257,7 @@ public:
   ~Runtime() { reset(); }
 
   bool probe() {
+    ensure_dsp_path(nullptr); // 必须在 dlopen 之前
     void *handle = dlopen("libQnnHtp.so", RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
       LOGE("Unable to load libQnnHtp.so: %s", dlerror());
@@ -213,6 +269,7 @@ public:
   }
 
   int architecture() {
+    ensure_dsp_path(nullptr); // 必须在 dlopen 之前（首次调用尤其关键）
     void *handle = dlopen("libQnnHtp.so", RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
       LOGE("Unable to load libQnnHtp.so while detecting architecture: %s",
@@ -516,6 +573,7 @@ private:
     if (backend_ && provider_ && system_provider_) {
       return true;
     }
+    ensure_dsp_path(nullptr); // 兜底：任何时候走到这里都保证 env 已就位
     reset();
     // Load order matters: libQnnModelDlc.so first, so that when libQnnHtp.so is
     // mapped it can already resolve the DLC entry points it dlopen()s by name.
