@@ -101,7 +101,10 @@ jobs:
           for apk in app-*-release.apk; do
             echo "--- $apk"
             unzip -l "$apk" | grep -E 'libQnn|qnn-contexts' | head -30
-            for need in libQnnHtp.so libQnnHtpV75Skel.so libQnnHtpV79Skel.so libQnnSystem.so; do
+            # libQnnModelDlc.so is dlopen()ed by name from qnn_backend.cpp (it is not
+            # in libQnnHtp.so's DT_NEEDED, so a plain dependency scan would miss it).
+            # Without it QNN init dies with `loadRemoteSymbols failed ... 4000`.
+            for need in libQnnHtp.so libQnnHtpV75Skel.so libQnnHtpV79Skel.so libQnnSystem.so libQnnModelDlc.so; do
               if ! unzip -l "$apk" | grep -q "$need"; then
                 echo "::error::$apk is missing $need"
                 exit 1

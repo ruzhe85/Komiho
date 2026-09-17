@@ -21,6 +21,7 @@
 
 #define TAG "QnnBackend"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace qnn_backend {
@@ -453,6 +454,13 @@ public:
       dlclose(system_library_);
       system_library_ = nullptr;
     }
+    // ModelDlc is loaded BEFORE libQnnHtp.so, so it must be released AFTER it
+    // (reverse order) — unloading a library whose dependents are still mapped
+    // would leave the HTP backend with dangling entry points.
+    if (model_dlc_library_) {
+      dlclose(model_dlc_library_);
+      model_dlc_library_ = nullptr;
+    }
     if (backend_library_) {
       dlclose(backend_library_);
       backend_library_ = nullptr;
@@ -465,8 +473,25 @@ private:
       return true;
     }
     reset();
+    // Load order matters: libQnnModelDlc.so first, so that when libQnnHtp.so is
+    // mapped it can already resolve the DLC entry points it dlopen()s by name.
+    // release order in reset() is the exact reverse.
+    model_dlc_library_ = dlopen("libQnnModelDlc.so", RTLD_NOW | RTLD_LOCAL);
+    if (!model_dlc_library_) {
+      // Non-fatal on purpose: some QNN runtime builds fold these entry points
+      // into libQnnHtp.so itself, so a missing ModelDlc must not abort init
+      // here — the DLC call reports its own error if it really is needed.
+      LOGW("libQnnModelDlc.so not available: %s", dlerror());
+    }
     backend_library_ = dlopen("libQnnHtp.so", RTLD_NOW | RTLD_LOCAL);
     system_library_ = dlopen("libQnnSystem.so", RTLD_NOW | RTLD_LOCAL);
+    // Why ModelDlc is loaded at all: it carries the DLC container reader and the
+    // QnnModel_composeGraphs / composeGraphsFromDlc entry points. It is NOT in
+    // the DT_NEEDED list of libQnnHtp.so and there is no public header to link
+    // against; the reference implementation (Mihon's mihon_img_upscale,
+    // package app.mihon) dlopen()s it by name exactly like this. Its absence is
+    // what made QNN fail on-device with `loadRemoteSymbols failed ... 4000`
+    // while every other .so was byte-identical to the working build.
     if (!backend_library_ || !system_library_) {
       LOGE("Unable to load QNN libraries: %s", dlerror());
       reset();
@@ -774,6 +799,9 @@ private:
 
   void *backend_library_ = nullptr;
   void *system_library_ = nullptr;
+  // Held only to keep the DLC entry points resolvable for libQnnHtp.so; we
+  // never call into it directly (there is no public header for it).
+  void *model_dlc_library_ = nullptr;
   const QnnInterface_t *provider_ = nullptr;
   const QnnSystemInterface_t *system_provider_ = nullptr;
   Qnn_BackendHandle_t backend_ = nullptr;
