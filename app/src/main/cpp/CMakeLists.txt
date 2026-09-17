@@ -85,6 +85,7 @@ if(KOMIHO_NCNN_FOUND)
     add_library(waifu2x-jni SHARED
         waifu2x.cpp
         waifu2x_jni.cpp
+        qnn_backend.cpp
     )
     add_dependencies(waifu2x-jni mihonsy-fused-shaders)
 
@@ -92,6 +93,17 @@ if(KOMIHO_NCNN_FOUND)
         ${CMAKE_SOURCE_DIR}
         ${GENERATED_SHADER_DIR}
     )
+
+    # Komiho: QNN/HTP (Qualcomm NPU) backend — headers are vendored under
+    # include/QNN/ (extracted from the official QAIRT SDK zip, MIT-licensed API
+    # headers). Runtime .so files are dlopen'ed at run time (never linked), and
+    # only on arm64-v8a: other ABIs compile the stub path (probe fails).
+    if(ANDROID_ABI STREQUAL "arm64-v8a" AND EXISTS "${CMAKE_SOURCE_DIR}/include/QNN/QnnInterface.h")
+        target_compile_definitions(waifu2x-jni PRIVATE MIHON_ENABLE_QNN=1)
+        target_include_directories(waifu2x-jni PRIVATE "${CMAKE_SOURCE_DIR}/include/QNN")
+    else()
+        target_compile_definitions(waifu2x-jni PRIVATE MIHON_ENABLE_QNN=0)
+    endif()
 
     find_package(Threads REQUIRED)
 
