@@ -85,6 +85,25 @@ object Waifu2x {
     private const val MODEL_CACHE_VERSION = "1"
 
     /**
+     * Komiho: the HTP generation the bundled QNN contexts were compiled for.
+     *
+     * The contexts under `assets/qnn-contexts/` are **per-architecture** builds (they are
+     * *not* Flexible Context Binaries — byte-level comparison of the v69/v73/v75/v79/v81
+     * builds of one model shows 85–94% differing bytes and different file lengths), so a
+     * context only loads on the HTP generation it was compiled for.
+     *
+     * Keep this in sync with the `.v<NN>.bin` suffix of every shipped context, and with the
+     * `libQnnHtpV<NN>{Skel,Stub}.so` pair under `jniLibs/arm64-v8a/`. Changing the target
+     * arch therefore means touching three places: the asset suffixes, the jniLibs pair, and
+     * this constant.
+     *
+     * NOTE: this is deliberately **not** used to gate model visibility — see
+     * [isQnnRuntimeAvailable]. The cross-HTP experiment tests whether a v81 context still
+     * loads on older hardware, so choosing such a model on an older HTP must stay possible.
+     */
+    const val QNN_TARGET_ARCH: Int = 81
+
+    /**
      * Komiho: AI tile edge (px) — the native default is 128 (`waifu2x.cpp:150`).
      * Each tile allocates `(tilesize + 2*prepadding)` input and `tilesize * scale` output,
      * so the GPU working set grows with the square of this value.
@@ -587,15 +606,8 @@ object Waifu2x {
      */
     private external fun nativeInitQnn(contextPath: String, nativeLibraryDir: String, padding: Int): Boolean
 
-    companion object {
-        /**
-         * Komiho: the HTP generation the bundled QNN contexts were compiled for.
-         *
-         * The contexts under `assets/qnn-contexts/` are **per-architecture** builds (they are
-         * not Flexible Context Binaries), so this must match the device's on-chip HTP
-         * exactly. Keep it in sync with the `.v<NN>.bin` suffix of every shipped context.
-         * Configured from `build.gradle.kts` via `QNN_TARGET_ARCH` for easy A/B on device.
-         */
-        const val QNN_TARGET_ARCH: Int = 81
-    }
+    // NOTE: [QNN_TARGET_ARCH] is declared as a top-level member of this `object` (see the
+    // constants block near the top of the file). Do NOT add a `companion object` here —
+    // `Waifu2x` is already a standalone `object`, so a second one is a compile error:
+    // "Modifier 'companion' is not applicable inside 'standalone object'".
 }
