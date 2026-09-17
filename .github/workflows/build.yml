@@ -138,25 +138,60 @@ jobs:
           RUN_NO="${{ github.run_number }}"
           BUILD_DATE=$(date -u +%Y%m%d)
           NOTES="Auto build #${RUN_NO} · ${{ github.sha }} · ${BUILD_DATE}T$(date -u +%H:%M:%SZ)"
+          cd app/build/outputs/apk/release
+
+          # Komiho (2026-09-18): retry the asset upload. Bundling libQnnHtpPrepare.so
+          # pushed the arm64 APK from ~80 MB to ~110 MB, and the release-asset upload
+          # endpoint is single-connection with no resumable chunks — at that size it
+          # started returning a bare
+          #
+          #     HTTP 500: Error saving asset (.../komiho-ci-arm64-v8a.apk)
+          #
+          # after ~5.5 minutes of transfer (run 35256372680). The build itself was
+          # green: the APK existed at 115784119 bytes and the QNN asset check passed.
+          # 500 from uploads.github.com is transient far more often than not, so retry
+          # with a growing backoff before declaring the job failed. Do NOT drop this
+          # in favour of "upload faster" — without it a single backend hiccup turns a
+          # perfectly good build red, which is exactly what happened.
+          upload_with_retry() {
+            local file="$1" attempt delay
+            for attempt in 1 2 3 4 5; do
+              if gh release upload "$TAG" "$file" \
+                   --repo "${{ github.repository }}" \
+                   --clobber; then
+                echo "uploaded $file (attempt $attempt)"
+                return 0
+              fi
+              delay=$((attempt * 20))
+              echo "::warning::upload of $file failed (attempt $attempt/5), retrying in ${delay}s"
+              sleep "$delay"
+            done
+            echo "::error::upload of $file failed after 5 attempts"
+            return 1
+          }
+
           # Upload smallest-first so the APKs people actually flash land before any
           # long transfer can time out.
-          cd app/build/outputs/apk/release
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             # Release exists: overwrite APKs in place, keep fixed title.
             for apk in $(ls -S -r komiho-ci-*.apk); do
-              gh release upload "$TAG" "$apk" \
-                --repo "${{ github.repository }}" \
-                --clobber
+              upload_with_retry "$apk"
             done
             gh release edit "$TAG" \
               --repo "${{ github.repository }}" \
               --title "$TITLE" \
               --notes "$NOTES"
           else
-            # First time: create the fixed CI release.
-            gh release create "$TAG" $(ls -S -r komiho-ci-*.apk) \
+            # First time: create the release with no assets, then push each one
+            # through the retrying helper. Passing the files straight to
+            # `gh release create` would give us exactly one shot per asset, which is
+            # the path that failed on run 35256372680.
+            gh release create "$TAG" \
               --repo "${{ github.repository }}" \
               --title "$TITLE" \
               --notes "$NOTES" \
               --prerelease
+            for apk in $(ls -S -r komiho-ci-*.apk); do
+              upload_with_retry "$apk"
+            done
           fi
