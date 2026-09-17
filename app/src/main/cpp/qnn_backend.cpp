@@ -7,6 +7,7 @@
 #include <android/log.h>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
 #include <cstring>
 #include <dlfcn.h>
 #include <fstream>
@@ -32,6 +33,44 @@ namespace {
 using GetProvidersFn = Qnn_ErrorHandle_t (*)(const QnnInterface_t ***, uint32_t *);
 using GetSystemProvidersFn =
     Qnn_ErrorHandle_t (*)(const QnnSystemInterface_t ***, uint32_t *);
+
+// Komiho (2026-09-18, diagnostic — safe to delete once NPU is confirmed).
+//
+// Why this exists: passing `nullptr` as the logger to QnnBackend_create() makes QNN
+// use its own default logger, which only emits ERROR and above. That hides the one
+// line that names the HTP skel the backend is trying to load:
+//   QnnDsp <V> Attempting to open dynamically linked so: <name> using base filename
+// Without it we cannot tell *which* arch it asks for, and we have been reduced to
+// guessing why `Failed to load skel, error: 4000` happens even though a byte-identical
+// libQnnHtpV75Skel.so sits in the app's lib/arm64 directory.
+// We therefore install our own logger at DEBUG level (the most verbose level the
+// header exposes) for the init path only, then drop it back to ERROR so the
+// inference loop stays quiet.
+void qnn_log_callback(const char *fmt, QnnLog_Level_t level,
+                      uint64_t /*timestamp*/, va_list args) {
+  int priority;
+  switch (level) {
+    case QNN_LOG_LEVEL_ERROR:
+      priority = ANDROID_LOG_ERROR;
+      break;
+    case QNN_LOG_LEVEL_WARN:
+      priority = ANDROID_LOG_WARN;
+      break;
+    case QNN_LOG_LEVEL_INFO:
+      priority = ANDROID_LOG_INFO;
+      break;
+    case QNN_LOG_LEVEL_VERBOSE:
+      priority = ANDROID_LOG_VERBOSE;
+      break;
+    case QNN_LOG_LEVEL_DEBUG:
+      priority = ANDROID_LOG_DEBUG;
+      break;
+    default:
+      priority = ANDROID_LOG_DEFAULT;
+      break;
+  }
+  __android_log_vprint(priority, "QnnHost", fmt, args);
+}
 
 struct GraphMetadata {
   const char *name = nullptr;
@@ -445,7 +484,12 @@ public:
       if (backend_ && qnn.backendFree) {
         qnn.backendFree(backend_);
       }
+      // The logger must outlive the backend that holds it.
+      if (log_ && qnn.logFree) {
+        qnn.logFree(log_);
+      }
     }
+    log_ = nullptr;
     device_ = nullptr;
     backend_ = nullptr;
     provider_ = nullptr;
@@ -491,13 +535,18 @@ private:
     // against; the reference implementation (Mihon's mihon_img_upscale,
     // package app.mihon) dlopen()s it by name exactly like this.
     //
-    // NOTE (2026-09-18): this is NOT the fix for `loadRemoteSymbols failed ...
-    // 4000`. That error is raised inside libQnnHtp.so's own PrepareLibLoader,
-    // which resolves getBuildIdFunc out of libQnnHtpPrepare.so — a file that has
-    // to be packaged under jniLibs (see that entry in ci-npu.yml). Adding
-    // ModelDlc alone left the device error chain byte-for-byte unchanged.
+    // NOTE (2026-09-18, corrected twice — do not trust the earlier versions of
+    // this comment): neither ModelDlc nor libQnnHtpPrepare.so is the cause of
+    // `loadRemoteSymbols failed ... 4000` / `Failed to load skel, error: 4000`.
+    // Both were added to jniLibs and both left the on-device error chain
+    // byte-for-byte unchanged (verified with logcat diff before/after).
+    // The failure is in the DSP transport / skel-load stage, and the only
+    // remaining difference against the known-good reference build (app.mihon
+    // 1.3.9, same device, all V75 files byte-identical) is that the reference
+    // ships libQnnHtpV{69,73,81}Skel/Stub.so as well. Those are now packaged
+    // too — see the asset list in ci-npu.yml.
     // ModelDlc is kept because the DLC graph path needs it, not because it was
-    // the 4000 culprit.
+    // ever the culprit.
     if (!backend_library_ || !system_library_) {
       LOGE("Unable to load QNN libraries: %s", dlerror());
       reset();
@@ -518,7 +567,16 @@ private:
       reset();
       return false;
     }
-    Qnn_ErrorHandle_t status = qnn.backendCreate(nullptr, nullptr, &backend_);
+    // Komiho (2026-09-18): see qnn_log_callback above — verbose logging for the
+    // init path only, so the next device log names the skel that fails to load.
+    // Best effort: on any failure we simply fall back to QNN's default logger.
+    if (qnn.logCreate && !log_) {
+      if (qnn.logCreate(&qnn_log_callback, QNN_LOG_LEVEL_DEBUG, &log_) !=
+          QNN_SUCCESS) {
+        log_ = nullptr;
+      }
+    }
+    Qnn_ErrorHandle_t status = qnn.backendCreate(log_, nullptr, &backend_);
     if (status != QNN_SUCCESS) {
       LOGE("QNN backendCreate failed: %u", static_cast<unsigned>(status));
       reset();
@@ -536,6 +594,10 @@ private:
         reset();
         return false;
       }
+    }
+    // Back to quiet for the inference path (verbose logging costs time).
+    if (log_ && qnn.logSetLogLevel) {
+      qnn.logSetLogLevel(log_, QNN_LOG_LEVEL_ERROR);
     }
     return true;
   }
@@ -810,6 +872,8 @@ private:
   void *model_dlc_library_ = nullptr;
   const QnnInterface_t *provider_ = nullptr;
   const QnnSystemInterface_t *system_provider_ = nullptr;
+  // Komiho (2026-09-18): verbose logger for the init path only (see qnn_log_callback).
+  Qnn_LogHandle_t log_ = nullptr;
   Qnn_BackendHandle_t backend_ = nullptr;
   Qnn_DeviceHandle_t device_ = nullptr;
   Qnn_ContextHandle_t context_ = nullptr;
