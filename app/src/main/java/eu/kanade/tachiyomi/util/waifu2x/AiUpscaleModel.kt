@@ -4,6 +4,22 @@ import dev.icerock.moko.resources.StringResource
 import tachiyomi.i18n.MR
 
 /**
+ * Komiho: HTP generations every NPU entry ships a context for — v75 (SM8650 / 8 Gen 3)
+ * and v79 (SM8750 / 8 Elite), so one APK covers both test devices.
+ *
+ * ⚠️ Must stay in sync with the `<stem>.v<arch>.bin` files under `assets/qnn-contexts/`
+ * and the `libQnnHtpV<arch>{Skel,Stub}.so` pair under `jniLibs/arm64-v8a/`. The DSP looks
+ * the Skel up by its own on-chip arch **before** any context is read, so a missing Skel
+ * fails the whole init (`loadRemoteSymbols failed with err 4000`) even when the context
+ * itself would have loaded.
+ *
+ * Declared here — at file scope, *not* in the companion object — because enum entries are
+ * initialised before the companion: `qnnArches = QNN_ARCHES` inside an entry only compiles
+ * against a top-level declaration. See the class KDoc for the full explanation.
+ */
+private val QNN_ARCHES: List<Int> = listOf(75, 79)
+
+/**
  * Komiho: the model catalogue for the AI upscaler.
  *
  * The engine rebuilds itself whenever the selected entry differs from the running one.
@@ -29,6 +45,13 @@ import tachiyomi.i18n.MR
  *   (`<stem>.<arch>.bin`) is picked at init time from the device's on-chip HTP arch, see
  *   [Waifu2x.contextAssetFor]. QNN context binaries are **not** Flexible Context Binaries,
  *   so each generation needs its own file.
+ *
+ * ⚠️ Kotlin initialisation order: an enum entry's arguments are evaluated **before** the
+ * enum's `companion object` is initialised, so an entry can never reference a companion
+ * member — `qnnArches = QNN_ARCHES` fails to compile with *"Companion object of enum class
+ * 'AiUpscaleModel' is uninitialized here"*. The arch list therefore lives as a file-level
+ * private constant ([QNN_ARCHES]) that the entries can see, and is re-exposed to callers
+ * as [companion object.packedQnnArches].
  */
 enum class AiUpscaleModel(
     val id: String,
@@ -207,19 +230,12 @@ enum class AiUpscaleModel(
         val Default: AiUpscaleModel = AnimeVideoMiniV18
 
         /**
-         * Komiho: HTP generations every NPU entry ships a context for.
+         * The packed HTP generations — see the file-level [QNN_ARCHES] declaration.
          *
-         * Since 2026-09-17 the app carries **two** generations at once so one build covers
-         * both test devices: v75 (SM8650 / 8 Gen 3) and v79 (SM8750 / 8 Elite). The matching
-         * `libQnnHtpV<arch>Skel.so` must be bundled for each entry in this list too —
-         * the DSP looks the Skel up by its own on-chip arch *before* any context is read,
-         * so a missing Skel fails the whole init (`loadRemoteSymbols failed with err 4000`)
-         * regardless of whether the context itself would have loaded.
-         *
-         * Keep in sync with: the `<stem>.v<arch>.bin` files under `assets/qnn-contexts/`
-         * and the `libQnnHtpV<arch>{Skel,Stub}.so` pair under `jniLibs/arm64-v8a/`.
+         * Re-exposed here for callers that want to report which generations an APK carries
+         * (e.g. the arch-mismatch warning in [Waifu2x]).
          */
-        val QNN_ARCHES: List<Int> = listOf(75, 79)
+        val packedQnnArches: List<Int> get() = QNN_ARCHES
 
         /**
          * Resolves a persisted id, falling back to [Default].

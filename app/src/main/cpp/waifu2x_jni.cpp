@@ -34,7 +34,7 @@ static std::atomic<long long> g_last_inference_ms{-1};
 // 初始化时自然落进下方 fused/staged(ncnn) 路径 ⇒ 回退链在原生层天然成立。
 // ADSP_LIBRARY_PATH 必须在首次 dlopen 前指向本 App 的 nativeLibraryDir ——
 // HTP Skel（libQnnHtpV<arch>Skel.so）由 DSP 加载器按它查找 —— arch 必须与打包的
-// Skel/Stub 以及 assets/qnn-contexts 里的 context 编译目标一致（见 AiUpscaleModel.QNN_ARCHES）。
+// Skel/Stub 以及 assets/qnn-contexts 里的 context 编译目标一致（见 AiUpscaleModel.packedQnnArches）。
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeIsQnnRuntimeAvailable(

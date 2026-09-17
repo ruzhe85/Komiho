@@ -414,7 +414,8 @@ object Waifu2x {
             logcat(LogPriority.WARN) {
                 "Waifu2x: NPU UNAVAILABLE — QNN init failed for ${model.id} " +
                     "(on-chip HTP v$detectedQnnArchitecture vs packed arches " +
-                    "${model.qnnArches.joinToString { it.toString() }}); falling back to Vulkan Default"
+                    "${AiUpscaleModel.packedQnnArches.joinToString { it.toString() }}); " +
+                    "falling back to Vulkan Default"
             }
             requestedModel = AiUpscaleModel.Default
             onQnnFallback?.invoke(model)
@@ -472,7 +473,7 @@ object Waifu2x {
         if (asset == null) {
             logcat(LogPriority.WARN) {
                 "Waifu2x: no QNN context for ${model.id} on HTP v$arch " +
-                    "(packed arches: ${model.qnnArches.joinToString { it.toString() }})"
+                    "(packed arches: ${AiUpscaleModel.packedQnnArches.joinToString { it.toString() }})"
             }
             return false
         }
@@ -568,10 +569,10 @@ object Waifu2x {
      * UI filter: an NPU entry is offered on any device with a real Qualcomm HTP, regardless
      * of generation.
      *
-     * Komiho (2026-09-17): the gate deliberately does **not** compare against
-     * [AiUpscaleModel.qnnArches]. We ship contexts for v75 and v79, but a newer HTP runs
-     * older contexts (downward compatible), so restricting by architecture would hide
-     * entries on devices that can actually run them. An unmatched arch reports an init
+     * Komiho (2026-09-17): the gate deliberately does **not** compare against the packed
+     * arch set ([AiUpscaleModel.qnnArches]). We ship contexts for v75 and v79, but a newer
+     * HTP runs older contexts (downward compatible), so restricting by architecture would
+     * hide entries on devices that can actually run them. An unmatched arch reports an init
      * failure and the page falls back to Vulkan — the badge then shows what really ran,
      * which is the whole point of observing the actual execution path.
      *
@@ -672,9 +673,10 @@ object Waifu2x {
      */
     private external fun nativeInitQnn(contextPath: String, nativeLibraryDir: String, padding: Int): Boolean
 
-    // NOTE: the QNN arch set is declared on [AiUpscaleModel.QNN_ARCHES] (the catalogue owns
-    // which generations ship), and the per-device file is resolved by [contextAssetFor].
-    // Do NOT add a `companion object` here — `Waifu2x` is already a standalone `object`, so
-    // a second one is a compile error: "Modifier 'companion' is not applicable inside
-    // 'standalone object'".
+    // NOTE: the QNN arch set is declared at file scope in `AiUpscaleModel.kt` (the catalogue
+    // owns which generations ship; it is re-exposed as
+    // `AiUpscaleModel.packedQnnArches` for reporting), and the per-device file is resolved by
+    // [contextAssetFor]. Do NOT add a `companion object` here — `Waifu2x` is already a
+    // standalone `object`, so a second one is a compile error: "Modifier 'companion' is not
+    // applicable inside 'standalone object'".
 }
