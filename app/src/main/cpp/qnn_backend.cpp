@@ -489,9 +489,15 @@ private:
     // QnnModel_composeGraphs / composeGraphsFromDlc entry points. It is NOT in
     // the DT_NEEDED list of libQnnHtp.so and there is no public header to link
     // against; the reference implementation (Mihon's mihon_img_upscale,
-    // package app.mihon) dlopen()s it by name exactly like this. Its absence is
-    // what made QNN fail on-device with `loadRemoteSymbols failed ... 4000`
-    // while every other .so was byte-identical to the working build.
+    // package app.mihon) dlopen()s it by name exactly like this.
+    //
+    // NOTE (2026-09-18): this is NOT the fix for `loadRemoteSymbols failed ...
+    // 4000`. That error is raised inside libQnnHtp.so's own PrepareLibLoader,
+    // which resolves getBuildIdFunc out of libQnnHtpPrepare.so — a file that has
+    // to be packaged under jniLibs (see that entry in ci-npu.yml). Adding
+    // ModelDlc alone left the device error chain byte-for-byte unchanged.
+    // ModelDlc is kept because the DLC graph path needs it, not because it was
+    // the 4000 culprit.
     if (!backend_library_ || !system_library_) {
       LOGE("Unable to load QNN libraries: %s", dlerror());
       reset();
