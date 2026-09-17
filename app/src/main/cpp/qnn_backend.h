@@ -21,6 +21,11 @@ int process_rgba(const uint8_t *input, int width, int height, int input_stride,
                  const std::atomic<bool> *should_abort);
 void shutdown();
 
+// Komiho (2026-09-18): 把 ADSP_LIBRARY_PATH 指向 nativeLibraryDir。
+// **必须在任何一次 dlopen("libQnnHtp.so") 之前调用**（见 qnn_backend.cpp 里的长注释）。
+// preferred_dir 为 null/空时用 dladdr 自定位本 .so 所在目录。
+void ensure_dsp_path(const char *preferred_dir);
+
 } // namespace qnn_backend
 
 #endif // MIHON_QNN_BACKEND_H
