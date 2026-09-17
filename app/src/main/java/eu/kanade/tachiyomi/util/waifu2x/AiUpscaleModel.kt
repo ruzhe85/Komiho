@@ -24,8 +24,11 @@ import tachiyomi.i18n.MR
  * @property padding receptive-field halo required per tile; must match the network depth.
  * @property labelRes display name shown in the GPU group; model names are not translated.
  * @property backend which native engine runs this model.
- * @property assetFile exact asset file name — only used by QNN models whose file name
- *   embeds the HTP architecture (`<stem>.v81.bin`); Vulkan models ignore it.
+ * @property qnnArches HTP architectures this entry ships a context for. Empty for Vulkan
+ *   models. One entry can cover several generations at once — the matching file
+ *   (`<stem>.<arch>.bin`) is picked at init time from the device's on-chip HTP arch, see
+ *   [Waifu2x.contextAssetFor]. QNN context binaries are **not** Flexible Context Binaries,
+ *   so each generation needs its own file.
  */
 enum class AiUpscaleModel(
     val id: String,
@@ -35,7 +38,7 @@ enum class AiUpscaleModel(
     val padding: Int,
     val labelRes: StringResource,
     val backend: Backend = Backend.NCNN_VULKAN,
-    val assetFile: String = "",
+    val qnnArches: List<Int> = emptyList(),
 ) {
     /**
      * 2x residual ESRGAN-style network, 10 conv layers, ~89 KB of weights.
@@ -90,10 +93,11 @@ enum class AiUpscaleModel(
     /**
      * Komiho: Qualcomm NPU (QNN/HTP) context — Real-CUGAN Pro x2 conservative, fp16.
      *
-     * Context binary ported from the upstream release APK (`assets/qnn-contexts/`), compiled
-     * for a specific HTP generation (see [Waifu2x.QNN_TARGET_ARCH]). Entry is only shown when
-     * [Waifu2x.isModelSupported] reports the device's on-chip HTP matches that build; any
-     * init/execute failure falls back to the Vulkan engine transparently.
+     * Context binaries ported from the upstream release APK (`assets/qnn-contexts/`),
+     * compiled per HTP generation ([qnnArches]). Entry is shown whenever
+     * [Waifu2x.isQnnRuntimeAvailable] reports a Qualcomm NPU — deliberately **not**
+     * restricted to the architectures we ship, so a newer HTP can still be tried and the
+     * badge reports what actually ran; any init failure falls back to Vulkan transparently.
      *
      * padding = 18: the SE-module layout defeats the closed-form derivation, but the
      * convolution trunk is 15x k3 + 3x k2 stride-1 convs → input halo = 15*1 + 3*0.5 = 16.5,
@@ -107,7 +111,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_realcugan_pro,
         backend = Backend.QNN_HTP,
-        assetFile = "realcugan-pro-x2-conservative.v81.bin",
+        qnnArches = QNN_ARCHES,
     ),
 
     /**
@@ -123,7 +127,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_realcugan_pro_int8,
         backend = Backend.QNN_HTP,
-        assetFile = "realcugan-pro-x2-conservative-int8.v81.bin",
+        qnnArches = QNN_ARCHES,
     ),
 
     /**
@@ -143,7 +147,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_w2xex_photo,
         backend = Backend.QNN_HTP,
-        assetFile = "w2xex-photo-small-x2.v81.bin",
+        qnnArches = QNN_ARCHES,
     ),
 
     /** Komiho: int8 sibling of [QnnW2xexPhotoSmallX2] — same topology, same halo. */
@@ -155,7 +159,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_w2xex_photo_int8,
         backend = Backend.QNN_HTP,
-        assetFile = "w2xex-photo-small-x2-int8.v81.bin",
+        qnnArches = QNN_ARCHES,
     ),
 
     /**
@@ -174,7 +178,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_animevideo_v3,
         backend = Backend.QNN_HTP,
-        assetFile = "realesrgan-animevideov3-x2.v81.bin",
+        qnnArches = QNN_ARCHES,
     ),
 
     /** Komiho: int8 sibling of [QnnRealesrganAnimevideov3X2] — same topology, same halo. */
@@ -186,7 +190,7 @@ enum class AiUpscaleModel(
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_animevideo_v3_int8,
         backend = Backend.QNN_HTP,
-        assetFile = "realesrgan-animevideov3-x2-int8.v81.bin",
+        qnnArches = QNN_ARCHES,
     ),
 
     // Photo-Small W2xEX 曾在此处（40 层 / 18 卷积 / 598,464 权重元素 = 13.4x 算力 / padding 18），
@@ -201,6 +205,21 @@ enum class AiUpscaleModel(
     companion object {
         /** Model used on a fresh install and whenever a stored id is unknown. */
         val Default: AiUpscaleModel = AnimeVideoMiniV18
+
+        /**
+         * Komiho: HTP generations every NPU entry ships a context for.
+         *
+         * Since 2026-09-17 the app carries **two** generations at once so one build covers
+         * both test devices: v75 (SM8650 / 8 Gen 3) and v79 (SM8750 / 8 Elite). The matching
+         * `libQnnHtpV<arch>Skel.so` must be bundled for each entry in this list too —
+         * the DSP looks the Skel up by its own on-chip arch *before* any context is read,
+         * so a missing Skel fails the whole init (`loadRemoteSymbols failed with err 4000`)
+         * regardless of whether the context itself would have loaded.
+         *
+         * Keep in sync with: the `<stem>.v<arch>.bin` files under `assets/qnn-contexts/`
+         * and the `libQnnHtpV<arch>{Skel,Stub}.so` pair under `jniLibs/arm64-v8a/`.
+         */
+        val QNN_ARCHES: List<Int> = listOf(75, 79)
 
         /**
          * Resolves a persisted id, falling back to [Default].

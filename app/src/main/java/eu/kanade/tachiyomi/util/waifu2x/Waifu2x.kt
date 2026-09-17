@@ -81,27 +81,33 @@ object Waifu2x {
      */
     private const val FP16_ARITHMETIC = true
 
-    /** Bump when the bundled model assets change so existing installs re-extract. */
-    private const val MODEL_CACHE_VERSION = "1"
+    /**
+     * Bump when the bundled model assets change so existing installs re-extract.
+     *
+     * 2026-09-17 v2: QNN contexts moved from a single v81 target to a per-arch set
+     * (v75 + v79), and the cached file name changed with them. Without a bump, an install
+     * that had already extracted `*.v81.bin` would keep that stale file and the new finger
+     * print would never be honoured.
+     */
+    private const val MODEL_CACHE_VERSION = "2"
 
     /**
-     * Komiho: the HTP generation the bundled QNN contexts were compiled for.
+     * Komiho: picks the context asset for [model] on a device whose on-chip HTP is [arch].
      *
-     * The contexts under `assets/qnn-contexts/` are **per-architecture** builds (they are
-     * *not* Flexible Context Binaries — byte-level comparison of the v69/v73/v75/v79/v81
-     * builds of one model shows 85–94% differing bytes and different file lengths), so a
-     * context only loads on the HTP generation it was compiled for.
+     * Each NPU entry ships one context per generation ([AiUpscaleModel.qnnArches]) because
+     * QNN context binaries are **not** Flexible Context Binaries — byte-level comparison of
+     * the v75/v79/v81 builds of one model shows 85–94% differing bytes and different file
+     * lengths, so a context only loads on the generation it was compiled for.
      *
-     * Keep this in sync with the `.v<NN>.bin` suffix of every shipped context, and with the
-     * `libQnnHtpV<NN>{Skel,Stub}.so` pair under `jniLibs/arm64-v8a/`. Changing the target
-     * arch therefore means touching three places: the asset suffixes, the jniLibs pair, and
-     * this constant.
-     *
-     * NOTE: this is deliberately **not** used to gate model visibility — see
-     * [isQnnRuntimeAvailable]. The cross-HTP experiment tests whether a v81 context still
-     * loads on older hardware, so choosing such a model on an older HTP must stay possible.
+     * A device whose arch we do not ship returns null; [ensureEngine] then logs the
+     * mismatch and falls back to Vulkan rather than handing the engine a file that cannot
+     * load. This is intentionally a *runtime* lookup: the same APK serves v75 and v79
+     * devices, and the choice is made from the probed hardware, not a build-time constant.
      */
-    const val QNN_TARGET_ARCH: Int = 81
+    fun contextAssetFor(model: AiUpscaleModel, arch: Int): String? {
+        if (arch <= 0) return null
+        return model.stem + ".v" + arch + ".bin"
+    }
 
     /**
      * Komiho: AI tile edge (px) — the native default is 128 (`waifu2x.cpp:150`).
@@ -198,6 +204,40 @@ object Waifu2x {
         private set
 
     /**
+     * The engine that actually produced the most recent successful inference.
+     *
+     * Komiho (2026-09-17): the reader badge used to report success/failure only, so a
+     * **silent fallback** looked identical to a real NPU run — the v81-on-v75 experiment was
+     * misread as "NPU works" for exactly that reason. The badge now reports the engine that
+     * genuinely ran, which is derived here from the live engine state rather than from what
+     * the user selected.
+     *
+     * [EngineKind.QNN_HTP] is reported only when the QNN engine is the one currently loaded
+     * ([activeModel] has the QNN backend); if init failed, [ensureEngine] has already swapped
+     * [requestedModel] to [AiUpscaleModel.Default], so the next successful run reports
+     * [EngineKind.NCNN_VULKAN] instead.
+     */
+    enum class EngineKind { NONE, NCNN_VULKAN, QNN_HTP }
+
+    /** Engine that ran the last successful [process] call; [EngineKind.NONE] if none yet. */
+    @Volatile
+    var lastEngine: EngineKind = EngineKind.NONE
+        private set
+
+    /**
+     * Komiho: records that the caller completed this page on the **CPU** resampler because
+     * neither the NPU nor the Vulkan engine produced a result.
+     *
+     * Called by [MihonSY]'s enhancer on the CPU fallback path. Without it the badge would
+     * keep showing the previous page's engine — the state is sticky by design (a page that
+     * never reaches [process] must not clear an earlier result), so the transition to CPU
+     * has to be reported explicitly.
+     */
+    fun markCpuFallback() {
+        lastEngine = EngineKind.NONE
+    }
+
+    /**
      * Runs AI upscaling on [input]. **Blocking** — call it from a background thread.
      * Returns the upscaled bitmap, or null when unavailable / failed (caller keeps the original).
      *
@@ -242,6 +282,18 @@ object Waifu2x {
             val procStart = android.os.SystemClock.uptimeMillis()
             val out = nativeProcess(argb, id)
             val procMs = android.os.SystemClock.uptimeMillis() - procStart
+
+            // Komiho：记录**真正跑完的那台引擎**，供阅读器角标显示 CPU/GPU/NPU OK。
+            // 必须在推理成功之后才登记：只有 nativeProcess 返回了结果，才能说这条路径成立。
+            // activeModel 是引擎侧的事实（QNN 加载失败时 ensureEngine 已把它换成 Default），
+            // 所以这里读它而不是读 requestedModel —— 否则又会把「回落 Vulkan」报成 NPU。
+            if (out != null && out !== argb) {
+                lastEngine = when (activeModel?.backend) {
+                    AiUpscaleModel.Backend.QNN_HTP -> EngineKind.QNN_HTP
+                    AiUpscaleModel.Backend.NCNN_VULKAN -> EngineKind.NCNN_VULKAN
+                    null -> lastEngine
+                }
+            }
 
             // Komiho：原生自报的纯推理耗时（已剔除 nativeProcess 内部那次 g_lock 排队）。
             // 读不到就保持 -1，角标退回「只剔第一段等锁」的旧口径（fail-open，不会算错方向）。
@@ -361,7 +413,8 @@ object Waifu2x {
             lastFailedQnnModel = model
             logcat(LogPriority.WARN) {
                 "Waifu2x: NPU UNAVAILABLE — QNN init failed for ${model.id} " +
-                    "(on-chip HTP v$detectedQnnArchitecture vs packed contexts); falling back to Vulkan Default"
+                    "(on-chip HTP v$detectedQnnArchitecture vs packed arches " +
+                    "${model.qnnArches.joinToString { it.toString() }}); falling back to Vulkan Default"
             }
             requestedModel = AiUpscaleModel.Default
             onQnnFallback?.invoke(model)
@@ -408,9 +461,22 @@ object Waifu2x {
      * ncnn models), then handed to [nativeInitQnn] together with the app's
      * `nativeLibraryDir` — the HTP Skel library is loaded by the DSP runtime, which resolves
      * `ADSP_LIBRARY_PATH` against that directory. The padding travels with the model entry.
+     *
+     * The file is chosen from the **probed** on-chip arch ([contextAssetFor]), so one entry
+     * covers both generations we ship. An arch we have no context for fails here — before
+     * the DSP is asked to do anything — and the caller falls back to Vulkan.
      */
     private fun initQnnEngine(context: Context, model: AiUpscaleModel): Boolean {
-        val contextPath = prepareQnnContext(context, model) ?: return false
+        val arch = detectedQnnArchitecture
+        val asset = contextAssetFor(model, arch)
+        if (asset == null) {
+            logcat(LogPriority.WARN) {
+                "Waifu2x: no QNN context for ${model.id} on HTP v$arch " +
+                    "(packed arches: ${model.qnnArches.joinToString { it.toString() }})"
+            }
+            return false
+        }
+        val contextPath = prepareQnnContext(context, model, asset) ?: return false
         val libraryDir = context.applicationInfo.nativeLibraryDir
         return try {
             nativeInitQnn(contextPath, libraryDir, model.padding)
@@ -421,16 +487,16 @@ object Waifu2x {
     }
 
     /** Extracts a QNN context from assets; returns its absolute path, or null. */
-    private fun prepareQnnContext(context: Context, model: AiUpscaleModel): String? = try {
+    private fun prepareQnnContext(context: Context, model: AiUpscaleModel, asset: String): String? = try {
         val dir = File(context.cacheDir, "qnn-contexts")
         if (!dir.isDirectory && !dir.mkdirs() && !dir.isDirectory) {
             null
         } else {
-            val out = File(dir, model.assetFile)
+            val out = File(dir, asset)
             val versionFile = File(dir, ".model-version")
             val refresh = versionFile.takeIf { it.exists() }?.readText() != MODEL_CACHE_VERSION
             if (refresh || !out.exists() || out.length() == 0L) {
-                context.assets.open("${model.assetDir}/${model.assetFile}").use { input ->
+                context.assets.open("${model.assetDir}/$asset").use { input ->
                     out.outputStream().use(input::copyTo)
                 }
             }
@@ -503,11 +569,11 @@ object Waifu2x {
      * of generation.
      *
      * Komiho (2026-09-17): the gate deliberately does **not** compare against
-     * [QNN_TARGET_ARCH]. The shipped contexts target one HTP generation, but newer HTPs run
-     * older contexts (downward compatible), and an unmatched context reports an init failure
-     * that [onQnnFallback] handles. Restricting by architecture would hide the entries on
-     * devices that can actually run them, and we want to observe exactly which Qualcomm
-     * machines work — that is the point of the experiment.
+     * [AiUpscaleModel.qnnArches]. We ship contexts for v75 and v79, but a newer HTP runs
+     * older contexts (downward compatible), so restricting by architecture would hide
+     * entries on devices that can actually run them. An unmatched arch reports an init
+     * failure and the page falls back to Vulkan — the badge then shows what really ran,
+     * which is the whole point of observing the actual execution path.
      *
      * Non-Qualcomm hardware reports architecture 0 (no `ON_CHIP` HTP device) and stays hidden.
      * Vulkan entries are always shown (their failure path is the CPU resampler fallback).
@@ -606,8 +672,9 @@ object Waifu2x {
      */
     private external fun nativeInitQnn(contextPath: String, nativeLibraryDir: String, padding: Int): Boolean
 
-    // NOTE: [QNN_TARGET_ARCH] is declared as a top-level member of this `object` (see the
-    // constants block near the top of the file). Do NOT add a `companion object` here —
-    // `Waifu2x` is already a standalone `object`, so a second one is a compile error:
-    // "Modifier 'companion' is not applicable inside 'standalone object'".
+    // NOTE: the QNN arch set is declared on [AiUpscaleModel.QNN_ARCHES] (the catalogue owns
+    // which generations ship), and the per-device file is resolved by [contextAssetFor].
+    // Do NOT add a `companion object` here — `Waifu2x` is already a standalone `object`, so
+    // a second one is a compile error: "Modifier 'companion' is not applicable inside
+    // 'standalone object'".
 }
