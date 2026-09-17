@@ -84,10 +84,15 @@ jobs:
       # which made Lanczos3 ~30-40x slower than MihonSY's Release APK on the same
       # device. Signed with the independent release keystore so it installs alongside
       # MihonSY without needing to uninstall it.
+      #
+      # `-PkomihoAbi=arm64-v8a` narrows the ABI splits to this single ABI (see
+      # app/build.gradle.kts): the daily channel only ever needs the arm64 phone APK,
+      # and it also disables the merged universal APK, which is the single slowest
+      # asset to upload. `ci-npu.yml` builds every ABI for real releases.
       - name: Build release APK
         env:
           KOMIHO_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KOMIHO_RELEASE_KEYSTORE_PASSWORD }}
-        run: ./gradlew assembleRelease -Pdisable-code-shrink --no-daemon --stacktrace
+        run: ./gradlew assembleRelease -Pdisable-code-shrink -PkomihoAbi=arm64-v8a --no-daemon --stacktrace
 
       # Fixed CI Release: tag "CI", title "Komiho-CI". Every build overwrites the
       # same release (single CI channel, no per-build tag sprawl). The git tag "CI"
@@ -101,6 +106,14 @@ jobs:
       # the build "failed" purely on the biggest asset. Dropping it keeps this channel
       # fast and green; the universal package is produced by `ci-npu.yml` on demand.
       # ABI list is arm64-v8a + armeabi-v7a only (see app/build.gradle.kts splits).
+      #
+      # Komiho (2026-09-18, later): arm64-v8a ONLY for the daily channel.
+      # Measured on run 35248730805 — of 23m40s total, "Build release APK" was only
+      # 5m26s while "Upload APK" burned 16m51s (71%). The release upload API is
+      # single-connection and large assets dominate everything else. Uploading just
+      # one ABI ~halves that. armeabi-v7a is still built by `ci-npu.yml` when needed;
+      # the daily channel is a smoke/perf channel and the test device is arm64. Restore
+      # the v7a upload here if the daily v7a package is ever wanted again.
       - name: "Rename APKs to komiho-ci-*"
         run: |
           cd app/build/outputs/apk/release
@@ -110,8 +123,9 @@ jobs:
             [ "$abi" = "$apk" ] && abi=universal
             mv "$apk" "komiho-ci-${abi}.apk"
           done
-          # Keep the universal one out of this channel (see note above).
-          rm -f komiho-ci-universal.apk
+          # Only arm64-v8a is built (-PkomihoAbi) so neither of these should exist;
+          # the rm's are belt-and-braces in case the ABI flag ever regresses.
+          rm -f komiho-ci-universal.apk komiho-ci-armeabi-v7a.apk
           ls -la
 
       - name: "Upload APK to CI Release (tag: CI, title: Komiho-CI)"

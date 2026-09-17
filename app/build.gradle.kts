@@ -144,14 +144,37 @@ android {
     splits {
         abi {
             isEnable = true
-            isUniversalApk = true
             reset()
             // Komiho (2026-09-18): x86/x86_64 dropped. They only ever served emulators,
             // and no Android device we ship to runs them — meanwhile the QNN libraries
             // (6 .so, ~43 MB) live under jniLibs/arm64-v8a only, so the x86 splits were
             // carrying none of the AI backend anyway. Keeping the split list to the two
             // real phone ABIs halves the artifacts to build and upload.
-            include("armeabi-v7a", "arm64-v8a")
+            //
+            // Komiho (2026-09-18, later): `-PkomihoAbi=arm64-v8a` narrows the splits to a
+            // single ABI. The daily CI channel uses it because the build server spent
+            // 5m26s compiling but 16m51s *uploading* (run 35248730805) — halving what is
+            // produced cuts both halves. Default stays both ABIs so a plain
+            // `assembleRelease` (and ci-npu.yml) keeps producing every artifact.
+            //
+            // NOTE: everything below runs after `reset()`, so it is the single source of
+            // truth for both `include` and `isUniversalApk` — don't hoist an
+            // `isUniversalApk = true` above the reset, it would be cleared.
+            val requestedAbis = (project.findProperty("komihoAbi") as String?)
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+            if (requestedAbis.isNullOrEmpty()) {
+                include("armeabi-v7a", "arm64-v8a")
+                isUniversalApk = true
+            } else {
+                include(*requestedAbis.toTypedArray())
+                // A single-ABI request is a "just give me a phone APK" request — the
+                // merged universal APK would be that same ABI, and it is the biggest,
+                // slowest asset in the release.
+                isUniversalApk = requestedAbis.size > 1
+            }
         }
     }
 
