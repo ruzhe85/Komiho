@@ -160,10 +160,23 @@ object Waifu2x {
      * engine is torn down and re-initialised (model load + Vulkan pipeline creation) — so
      * this only records the intent; [ensureEngine] compares it against the running model and
      * short-circuits when they match, keeping the hot path free of extra work.
+     *
+     * Note for the cross-HTP experiment: a QNN model is **never blacklisted** on failure, so
+     * every attempt still probes the real device. [lastFailedQnnModel] exists only for
+     * observability, letting the diagnostics distinguish "NPU actually ran" from
+     * "NPU was selected but the context did not load".
      */
     fun setModel(model: AiUpscaleModel) {
         requestedModel = model
     }
+
+    /**
+     * Last QNN model whose context failed to initialise on this device, or null if the most
+     * recent attempt succeeded. Diagnostic only — nothing consults it to change behaviour.
+     */
+    @Volatile
+    var lastFailedQnnModel: AiUpscaleModel? = null
+        private set
 
     /**
      * Runs AI upscaling on [input]. **Blocking** — call it from a background thread.
@@ -314,15 +327,23 @@ object Waifu2x {
             if (ok) {
                 isInitialized = true
                 activeModel = model
+                lastFailedQnnModel = null
+                logcat(LogPriority.WARN) { "Waifu2x: NPU ACTIVE — ${model.id} running on HTP" }
                 // QNN 的 tile 几何来自 context（设置项对它不生效）——标记为「已应用」，
                 // 免得第一次 process 还去 nativeUpdatePerformanceConfig 白拿一次引擎锁。
                 appliedTileSize = requestedTileSize
                 return true
             }
-            logcat(LogPriority.WARN) { "Waifu2x: QNN init failed for ${model.id}; falling back to Vulkan Default" }
-            // Komiho: 回落必须**写回偏好**，否则 UI 高亮着一个跑不起来的 NPU 条目、
-            // 实际引擎是 Vulkan，两者永远不一致；而且每次重建引擎都要再失败一次。
-            // 门控（isModelSupported）本应拦住这条路，这里是「探测通过但实际仍跑不通」的兜底。
+            // Komiho（2026-09-17 跨 HTP 试验期）：**故意不回写偏好、也不拉黑**。
+            // 这次是在多台高通机上试「v81 context 到底能不能跑」，一旦失败就把设置改回
+            // Default，用户在界面上看不到自己选了什么，也无法重试 —— 测试就做不下去。
+            // 因此这里只做两件事：留痕（下面这条 WARN 带 arch，一眼可判）+ 回落到 Vulkan
+            // 保证当页仍能出图。恢复正常行为时再把 onQnnFallback 接回去即可。
+            lastFailedQnnModel = model
+            logcat(LogPriority.WARN) {
+                "Waifu2x: NPU UNAVAILABLE — QNN init failed for ${model.id} " +
+                    "(on-chip HTP v$detectedQnnArchitecture vs packed contexts); falling back to Vulkan Default"
+            }
             requestedModel = AiUpscaleModel.Default
             onQnnFallback?.invoke(model)
             return ensureEngineLocked(context, AiUpscaleModel.Default)
@@ -459,16 +480,22 @@ object Waifu2x {
         }
 
     /**
-     * UI filter: a QNN entry is offered only where the matching HTP generation exists on
-     * chip. The shipped contexts target a specific architecture ([QNN_TARGET_ARCH]), so a
-     * device whose HTP differs can never run them — hiding is the honest answer, and the
-     * same check keeps non-Qualcomm hardware from seeing NPU at all.
+     * UI filter: an NPU entry is offered on any device with a real Qualcomm HTP, regardless
+     * of generation.
      *
+     * Komiho (2026-09-17): the gate deliberately does **not** compare against
+     * [QNN_TARGET_ARCH]. The shipped contexts target one HTP generation, but newer HTPs run
+     * older contexts (downward compatible), and an unmatched context reports an init failure
+     * that [onQnnFallback] handles. Restricting by architecture would hide the entries on
+     * devices that can actually run them, and we want to observe exactly which Qualcomm
+     * machines work — that is the point of the experiment.
+     *
+     * Non-Qualcomm hardware reports architecture 0 (no `ON_CHIP` HTP device) and stays hidden.
      * Vulkan entries are always shown (their failure path is the CPU resampler fallback).
      */
     fun isModelSupported(model: AiUpscaleModel): Boolean = when (model.backend) {
         AiUpscaleModel.Backend.NCNN_VULKAN -> true
-        AiUpscaleModel.Backend.QNN_HTP -> detectedQnnArchitecture == QNN_TARGET_ARCH
+        AiUpscaleModel.Backend.QNN_HTP -> isQnnRuntimeAvailable
     }
 
     /**

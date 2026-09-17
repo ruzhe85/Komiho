@@ -323,10 +323,9 @@ object MihonSyEnhancer {
             // the pass and applied lazily — only a real change reaches the native side
             // (the model rebuilds the engine, the tile size takes the engine lock).
             Waifu2x.setModel(AiUpscaleModel.fromId(preferences.aiModelId.get()))
-            // Komiho: a QNN model that passes the on-chip gate can still fail to load the
-            // context (mismatched build, OOM on the DSP). Persist the correction so the
-            // chip stops claiming an engine that is not running.
-            Waifu2x.onQnnFallback = { preferences.aiModelId.set(AiUpscaleModel.Default.id) }
+            // Komiho（跨 HTP 试验期）：不接 onQnnFallback —— 回写偏好会把用户选的 NPU
+            // 条目改成 Default，导致「换台机器重试同一个模型」这件事做不了。失败只留日志
+            // （Waifu2x 的 `NPU UNAVAILABLE` WARN 带 on-chip arch），当页仍回落 Vulkan 出图。
             Waifu2x.setTileSize(preferences.aiTileSize.get())
             Waifu2x.process(Injekt.get<Application>(), input, tag = sourceTag, timing = timing)
                 ?.let { return it }
