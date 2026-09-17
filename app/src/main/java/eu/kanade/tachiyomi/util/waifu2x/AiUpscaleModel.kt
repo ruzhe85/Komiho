@@ -4,23 +4,28 @@ import dev.icerock.moko.resources.StringResource
 import tachiyomi.i18n.MR
 
 /**
- * Komiho: the ncnn model catalogue for the GPU (Vulkan) upscaler.
+ * Komiho: the model catalogue for the AI upscaler.
  *
- * Until now the model was a pair of compile-time constants inside [Waifu2x]
- * (`MODEL_ASSET_DIR` / `MODEL_STEM` plus a fixed `SCALE`), so "adding a model" meant
- * editing code in three places. This enum is the thin indirection layer: the UI lists
- * [entries] and persists [id], and the engine rebuilds itself when the id changes.
+ * The engine rebuilds itself whenever the selected entry differs from the running one.
+ * Since 2026-09-17 an entry also carries a [backend]: the classic ncnn+Vulkan models and
+ * the Qualcomm NPU (QNN/HTP) context binaries live side by side in this catalogue, and
+ * [Waifu2x.ensureEngine] branches on the backend when building the native engine.
  *
- * Adding a model is now: drop the `.param`/`.bin` pair under `assets/`, add one enum
- * entry with its asset path. Nothing else needs to change — [Waifu2x.ensureEngine]
- * re-initialises the native engine whenever the active entry differs from the running one.
+ * Adding a Vulkan model is: drop the `.param`/`.bin` pair under `assets/`, add one enum
+ * entry with its asset path. Adding an NPU model is: drop the `.<arch>.bin` context under
+ * `assets/qnn-contexts/` and add an entry with [Backend.QNN_HTP]. Nothing else needs to
+ * change — the reader UI lists [entries] and persists [id].
  *
  * @property id stable, persisted identifier — never rename an existing one.
  * @property assetDir folder under `assets/` holding the model files.
- * @property stem file stem: `assetDir/stem.param` + `assetDir/stem.bin`.
- * @property scale output scale baked into the network (PixelShuffle factor).
+ * @property stem Vulkan models: file stem (`assetDir/stem.param` + `assetDir/stem.bin`).
+ *   QNN models: context file stem (`assetDir/stem.v<arch>.bin`).
+ * @property scale output scale baked into the network.
  * @property padding receptive-field halo required per tile; must match the network depth.
  * @property labelRes display name shown in the GPU group; model names are not translated.
+ * @property backend which native engine runs this model.
+ * @property assetFile exact asset file name — only used by QNN models whose file name
+ *   embeds the HTP architecture (`<stem>.v75.bin`); Vulkan models ignore it.
  */
 enum class AiUpscaleModel(
     val id: String,
@@ -29,6 +34,8 @@ enum class AiUpscaleModel(
     val scale: Int,
     val padding: Int,
     val labelRes: StringResource,
+    val backend: Backend = Backend.NCNN_VULKAN,
+    val assetFile: String = "",
 ) {
     /**
      * 2x residual ESRGAN-style network, 10 conv layers, ~89 KB of weights.
@@ -80,10 +87,35 @@ enum class AiUpscaleModel(
         labelRes = MR.strings.ai_model_omni_turbo,
     ),
 
+    /**
+     * Komiho: Qualcomm NPU (QNN/HTP) context — Real-CUGAN Pro x2 conservative, fp16.
+     *
+     * Context binary ported from the upstream release APK (`assets/qnn-contexts/`, compiled
+     * for HTP v75 = Snapdragon 8 Gen 3). Entry is only shown when [Waifu2x.isQnnModelSupported]
+     * passes; any init/execute failure falls back to the Vulkan engine transparently.
+     *
+     * padding = 18: the SE-module layout defeats the closed-form derivation, but the
+     * convolution trunk is 15x k3 + 3x k2 stride-1 convs → input halo = 15*1 + 3*0.5 = 16.5,
+     * rounded up. Re-check for seams on device and bump if any show.
+     */
+    QnnRealCuganProX2(
+        id = "qnn-realcugan-pro-x2-conservative",
+        assetDir = "qnn-contexts",
+        stem = "realcugan-pro-x2-conservative",
+        scale = 2,
+        padding = 18,
+        labelRes = MR.strings.ai_model_qnn_realcugan_pro,
+        backend = Backend.QNN_HTP,
+        assetFile = "realcugan-pro-x2-conservative.v75.bin",
+    ),
+
     // Photo-Small W2xEX 曾在此处（40 层 / 18 卷积 / 598,464 权重元素 = 13.4x 算力 / padding 18），
     // 2026-09-16 按用户反馈「效果很差」移除。若要恢复：把 assets/w2xex-esrgan/Photo-Small-W2xEX/
     // 放回去 + 三语补 ai_model_photo_small，并注意它的 padding 是 18（不是同族的 10）。
     ;
+
+    /** Which native engine executes this model. */
+    enum class Backend { NCNN_VULKAN, QNN_HTP }
 
     companion object {
         /** Model used on a fresh install and whenever a stored id is unknown. */

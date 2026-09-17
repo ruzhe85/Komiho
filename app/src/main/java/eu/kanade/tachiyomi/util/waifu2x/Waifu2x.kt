@@ -299,11 +299,35 @@ object Waifu2x {
      * scale, tile padding), and the native side cannot swap that in place —
      * `nativeInitW2xEx` deletes the previous instance and constructs a new one, waiting for
      * any in-flight inference to release the engine lock first.
+     *
+     * Komiho: QNN models take the [Backend.QNN_HTP] branch — they load a prebuilt context
+     * binary instead of the ncnn engine. When that fails (unsupported HTP arch, missing
+     * runtime, corrupt context) the request silently falls back to the Vulkan engine with
+     * [AiUpscaleModel.Default], so an NPU selection can never degrade below the status quo.
      */
     private fun ensureEngine(context: Context): Boolean = synchronized(this) {
         val model = requestedModel
         if (isInitialized && activeModel == model) return true
 
+        if (model.backend == AiUpscaleModel.Backend.QNN_HTP) {
+            val ok = initQnnEngine(context, model)
+            if (ok) {
+                isInitialized = true
+                activeModel = model
+                // QNN 的 tile 几何来自 context（设置项对它不生效）——标记为「已应用」，
+                // 免得第一次 process 还去 nativeUpdatePerformanceConfig 白拿一次引擎锁。
+                appliedTileSize = requestedTileSize
+                return true
+            }
+            logcat(LogPriority.WARN) { "Waifu2x: QNN init failed for ${model.id}; falling back to Vulkan Default" }
+            requestedModel = AiUpscaleModel.Default
+            return ensureEngineLocked(context, AiUpscaleModel.Default)
+        }
+        return ensureEngineLocked(context, model)
+    }
+
+    /** Vulkan/ncnn branch of [ensureEngine] (kept out of the dispatcher for clarity). */
+    private fun ensureEngineLocked(context: Context, model: AiUpscaleModel): Boolean {
         val dir = prepareModel(context, model)
         if (dir == null) {
             logcat(LogPriority.WARN) { "Waifu2x: model assets missing for ${model.id}" }
@@ -324,8 +348,81 @@ object Waifu2x {
         } else {
             logcat(LogPriority.WARN) { "Waifu2x: native init failed (Vulkan device missing?)" }
         }
-        ok
+        return ok
     }
+
+    /**
+     * Komiho: loads a QNN context binary for [model] and initialises the HTP engine.
+     *
+     * The context is extracted from assets into `cacheDir/qnn-contexts/` (versioned like the
+     * ncnn models), then handed to [nativeInitQnn] together with the app's
+     * `nativeLibraryDir` — the HTP Skel library is loaded by the DSP runtime, which resolves
+     * `ADSP_LIBRARY_PATH` against that directory. The padding travels with the model entry.
+     */
+    private fun initQnnEngine(context: Context, model: AiUpscaleModel): Boolean {
+        val contextPath = prepareQnnContext(context, model) ?: return false
+        val libraryDir = context.applicationInfo.nativeLibraryDir
+        return try {
+            nativeInitQnn(contextPath, libraryDir, model.padding)
+        } catch (e: Throwable) {
+            logcat(LogPriority.WARN, e) { "Waifu2x: nativeInitQnn threw (missing symbol?)" }
+            false
+        }
+    }
+
+    /** Extracts a QNN context from assets; returns its absolute path, or null. */
+    private fun prepareQnnContext(context: Context, model: AiUpscaleModel): String? = try {
+        val dir = File(context.cacheDir, "qnn-contexts")
+        if (!dir.isDirectory && !dir.mkdirs() && !dir.isDirectory) {
+            null
+        } else {
+            val out = File(dir, model.assetFile)
+            val versionFile = File(dir, ".model-version")
+            val refresh = versionFile.takeIf { it.exists() }?.readText() != MODEL_CACHE_VERSION
+            if (refresh || !out.exists() || out.length() == 0L) {
+                context.assets.open("${model.assetDir}/${model.assetFile}").use { input ->
+                    out.outputStream().use(input::copyTo)
+                }
+            }
+            if (refresh) versionFile.writeText(MODEL_CACHE_VERSION)
+            out.absolutePath
+        }
+    } catch (e: Exception) {
+        logcat(LogPriority.WARN, e) { "Waifu2x: failed to prepare QNN context" }
+        null
+    }
+
+    // Komiho: NPU 门控 ————————————————————————————————————————————————————————————
+
+    /** Cached result of [nativeIsQnnRuntimeAvailable]; null = not probed yet. */
+    @Volatile
+    private var qnnRuntimeAvailable: Boolean? = null
+
+    /**
+     * Whether an NPU model entry should be offered on this device. Probed once and cached —
+     * the probe dlopens `libQnnHtp.so`, which must not happen per frame.
+     */
+    val isQnnRuntimeAvailable: Boolean
+        get() {
+            if (!libraryLoaded) return false
+            return qnnRuntimeAvailable ?: run {
+                val available = try {
+                    nativeIsQnnRuntimeAvailable()
+                } catch (e: Throwable) {
+                    logcat(LogPriority.WARN, e) { "Waifu2x: QNN probe failed" }
+                    false
+                }
+                qnnRuntimeAvailable = available
+                available
+            }
+        }
+
+    /**
+     * UI filter: QNN entries are only offered where the runtime loads. Vulkan entries are
+     * always shown (their failure path is the CPU resampler fallback).
+     */
+    fun isModelSupported(model: AiUpscaleModel): Boolean =
+        model.backend != AiUpscaleModel.Backend.QNN_HTP || isQnnRuntimeAvailable
 
     /**
      * Extracts the given model's assets into the cache dir and returns its absolute path.
@@ -397,4 +494,15 @@ object Waifu2x {
     private external fun nativeClearAbortProcessing()
 
     private external fun nativeGetProgress(): Long
+
+    // Komiho: QNN/HTP — see app/src/main/cpp/waifu2x_jni.cpp -------------------------
+
+    /** dlopens `libQnnHtp.so`; false when this device has no usable QNN runtime. */
+    private external fun nativeIsQnnRuntimeAvailable(): Boolean
+
+    /**
+     * Loads a prebuilt context binary into the HTP engine.
+     * Takes the engine lock; also exports `ADSP_LIBRARY_PATH` for the DSP-side Skel lookup.
+     */
+    private external fun nativeInitQnn(contextPath: String, nativeLibraryDir: String, padding: Int): Boolean
 }

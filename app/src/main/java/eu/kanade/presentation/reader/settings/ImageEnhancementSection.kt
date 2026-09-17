@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.SettingsChipRow
@@ -82,19 +83,23 @@ fun ImageEnhancementSection(
         EnhancementGroupLabel(MR.strings.enhancement_group_gpu)
         // fromId() normalises unknown/removed stored ids to the default, so exactly one
         // model chip stays selected no matter what the preference holds.
+        // Komiho: NPU (QNN) entries are filtered out on devices without a usable QNN
+        // runtime — same "unsupported options stay invisible" contract as elsewhere.
         val modelId by preferences.aiModelId.collectAsState()
         val activeModel = AiUpscaleModel.fromId(modelId)
         SettingsChipRow {
-            AiUpscaleModel.entries.forEach { model ->
-                FilterChip(
-                    selected = mode == 5 && activeModel == model,
-                    onClick = {
-                        preferences.aiModelId.set(model.id)
-                        preferences.enhancementMode.set(5)
-                    },
-                    label = { Text(stringResource(model.labelRes)) },
-                )
-            }
+            AiUpscaleModel.entries
+                .filter { Waifu2x.isModelSupported(it) }
+                .forEach { model ->
+                    FilterChip(
+                        selected = mode == 5 && activeModel == model,
+                        onClick = {
+                            preferences.aiModelId.set(model.id)
+                            preferences.enhancementMode.set(5)
+                        },
+                        label = { Text(stringResource(model.labelRes)) },
+                    )
+                }
         }
         if (mode == 5) {
             // Tile edge only affects the GPU path.

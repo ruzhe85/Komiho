@@ -1,4 +1,5 @@
 #include "waifu2x.h"
+#include "qnn_backend.h"
 #include <android/bitmap.h>
 #include <android/log.h>
 #include <algorithm>
@@ -27,6 +28,46 @@ static std::atomic<bool> g_abort_processing{false};
 // 这里把纯耗时单独曝给 Kotlin，让它能把两段等锁都剔除。
 static std::atomic<long long> g_last_inference_ms{-1};
 
+// ── Komiho: QNN/HTP (Qualcomm NPU) 接线 ─────────────────────────────────────
+// 引擎选择发生在 Kotlin 侧（ensureEngine 按模型 backend 调 nativeInitQnn 或
+// nativeInitW2xEx）；nativeProcess 只看 is_initialized() 自动路由，QNN 失败/未
+// 初始化时自然落进下方 fused/staged(ncnn) 路径 ⇒ 回退链在原生层天然成立。
+// ADSP_LIBRARY_PATH 必须在首次 dlopen 前指向本 App 的 nativeLibraryDir ——
+// HTP Skel（libQnnHtpV75Skel.so）由 DSP 加载器按它查找。
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeIsQnnRuntimeAvailable(
+    JNIEnv *, jobject) {
+  return qnn_backend::is_runtime_loadable() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInitQnn(
+    JNIEnv *env, jobject, jstring context_path, jstring native_library_dir,
+    jint padding) {
+  std::lock_guard<std::mutex> lock(g_lock);
+  const char *context_path_chars = env->GetStringUTFChars(context_path, nullptr);
+  const char *library_dir_chars =
+      env->GetStringUTFChars(native_library_dir, nullptr);
+  const std::string dsp_paths =
+      std::string(library_dir_chars) +
+      ";/vendor/dsp/cdsp;/vendor/lib/rfsa/cdsp;/system/vendor/lib/rfsa/cdsp";
+  setenv("ADSP_LIBRARY_PATH", dsp_paths.c_str(), 1);
+  LOGD("QNN ADSP_LIBRARY_PATH=%s", dsp_paths.c_str());
+  const bool initialized =
+      qnn_backend::initialize(context_path_chars, static_cast<int>(padding));
+  env->ReleaseStringUTFChars(native_library_dir, library_dir_chars);
+  env->ReleaseStringUTFChars(context_path, context_path_chars);
+  return initialized ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeIsQnnInitialized(
+    JNIEnv *, jobject) {
+  return qnn_backend::is_initialized() ? JNI_TRUE : JNI_FALSE;
+}
+// ── Komiho: QNN 接线结束 ────────────────────────────────────────────────────
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInit(JNIEnv *env,
                                                          jobject thiz,
@@ -38,6 +79,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInit(JNIEnv *env,
   g_abort_processing = true;
   std::lock_guard<std::mutex> lock(g_lock);
   g_abort_processing = false;
+  qnn_backend::shutdown(); // Komiho: 换 ncnn 引擎 ⇒ QNN 引擎作废
 
 
   ncnn::create_gpu_instance();
@@ -91,6 +133,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInitWaifu2xUpconv7(
   g_abort_processing = true;
   std::lock_guard<std::mutex> lock(g_lock);
   g_abort_processing = false;
+  qnn_backend::shutdown(); // Komiho: 换 ncnn 引擎 ⇒ QNN 引擎作废
 
 
   ncnn::create_gpu_instance();
@@ -153,7 +196,11 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
     // Komiho: 本次跑完前先清掉，避免并发下把上一次的纯耗时当成这次的（拿不到就保持 -1）
     g_last_inference_ms.store(-1);
 
-    if (!g_waifu2x)
+    // Komiho: QNN-only 模式下 g_waifu2x 可能尚未加载（ncnn 引擎与 QNN 引擎独立），
+    // 所以这里不再以 g_waifu2x 为准入判据 —— 只要 QNN 已初始化就继续往下走；
+    // 输出倍率由 QNN 的 context 自报（scale()），两者都没有时才失败返回。
+    const bool qnn_active = qnn_backend::is_initialized();
+    if (!g_waifu2x && !qnn_active)
       return bitmap;
 
     AndroidBitmapInfo info{};
@@ -184,9 +231,12 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
     }
     AndroidBitmap_unlockPixels(env, bitmap);
 
-    if (g_waifu2x) {
-      int out_w = w * g_waifu2x->scale;
-      int out_h = h * g_waifu2x->scale;
+    // Komiho: 输出倍率 —— QNN 引擎自报 scale；否则用 ncnn 引擎的。两者都无 → 失败。
+    int out_scale = qnn_active ? qnn_backend::scale() : 0;
+    if (out_scale <= 0 && g_waifu2x) out_scale = g_waifu2x->scale;
+    if (out_scale > 0) {
+      int out_w = w * out_scale;
+      int out_h = h * out_scale;
 
       // Create result bitmap
       jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
@@ -208,8 +258,10 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
           AndroidBitmapInfo outInfo{};
           AndroidBitmap_getInfo(env, outBitmap, &outInfo);
 
-          g_waifu2x->progress_ptr = &g_progress;
-          g_waifu2x->should_abort_ptr = &g_abort_processing;
+          if (g_waifu2x) {
+            g_waifu2x->progress_ptr = &g_progress;
+            g_waifu2x->should_abort_ptr = &g_abort_processing;
+          }
 
           bool input_has_alpha =
               (info.flags & ANDROID_BITMAP_FLAGS_ALPHA_MASK) !=
@@ -226,7 +278,26 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
             }
           }
 
-          if (ret != 0 && !g_abort_processing.load() &&
+          // Komiho: QNN/HTP 优先 —— 引擎由 Kotlin 侧按模型 backend 初始化；
+          // 这里 tile 循环在 qnn_backend 内部（自带 should_abort 协作中断）。
+          // 失败/未初始化时 ret 保持非 0，自然落进下方 ncnn 路径（原生回退链）。
+          if (qnn_backend::is_initialized()) {
+            const auto qnn_start = std::chrono::steady_clock::now();
+            ret = qnn_backend::process_rgba(
+                static_cast<const uint8_t *>(packed_input.data), w, h, w * 4,
+                static_cast<uint8_t *>(outPixels), outInfo.stride, &g_progress,
+                &g_abort_processing);
+            const auto qnn_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - qnn_start)
+                                    .count();
+            // Komiho: 成功才登记纯耗时（口径与 Vulkan 路径一致，角标据此剔除排队）
+            g_last_inference_ms.store(ret == 0 ? (long long)qnn_ms : -1);
+            LOGD("QNN HTP processing %s in %lld ms",
+                 ret == 0 ? "completed" : "failed",
+                 static_cast<long long>(qnn_ms));
+          }
+
+          if (ret != 0 && !g_abort_processing.load() && g_waifu2x &&
               g_waifu2x->has_gpu_pipeline()) {
             const auto fused_start = std::chrono::steady_clock::now();
             ret = g_waifu2x->process_gpu(packed_input, outPixels,
@@ -242,7 +313,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
                  static_cast<long long>(fused_ms));
           }
 
-          if (ret != 0 && !g_abort_processing.load()) {
+          if (ret != 0 && !g_abort_processing.load() && g_waifu2x) {
             LOGD("Fused GPU pipeline unavailable for this image; retrying staged path");
             const auto staged_start = std::chrono::steady_clock::now();
             ncnn::Mat in = ncnn::Mat::from_pixels(
@@ -260,8 +331,10 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
                  static_cast<long long>(staged_ms));
           }
 
-          g_waifu2x->progress_ptr = nullptr;
-          g_waifu2x->should_abort_ptr = nullptr;
+          if (g_waifu2x) {
+            g_waifu2x->progress_ptr = nullptr;
+            g_waifu2x->should_abort_ptr = nullptr;
+          }
 
           AndroidBitmap_unlockPixels(env, outBitmap);
         }
@@ -353,6 +426,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeDestroy(JNIEnv *env,
     delete g_waifu2x;
     g_waifu2x = nullptr;
   }
+  qnn_backend::shutdown(); // Komiho: 彻底销毁时连 QNN 引擎一起释放
   g_progress.store(0);
   g_current_id.store(-1);
   g_abort_processing.store(false);
@@ -381,6 +455,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInitRealCugan(
   g_abort_processing = true; // Signal abort to any running process
   std::lock_guard<std::mutex> lock(g_lock);
   g_abort_processing = false; // Reset
+  qnn_backend::shutdown(); // Komiho: 换 ncnn 引擎 ⇒ QNN 引擎作废
 
 
   ncnn::create_gpu_instance();
@@ -476,6 +551,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInitRealESRGAN(
   g_abort_processing = true;
   std::lock_guard<std::mutex> lock(g_lock);
   g_abort_processing = false;
+  qnn_backend::shutdown(); // Komiho: 换 ncnn 引擎 ⇒ QNN 引擎作废
 
 
   ncnn::create_gpu_instance();
@@ -524,6 +600,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInitW2xEx(
   g_abort_processing = true;
   std::lock_guard<std::mutex> lock(g_lock);
   g_abort_processing = false;
+  qnn_backend::shutdown(); // Komiho: 换 ncnn 引擎 ⇒ QNN 引擎作废
 
 
   ncnn::create_gpu_instance();
@@ -570,6 +647,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeInitNose(
   g_abort_processing = true;
   std::lock_guard<std::mutex> lock(g_lock);
   g_abort_processing = false;
+  qnn_backend::shutdown(); // Komiho: 换 ncnn 引擎 ⇒ QNN 引擎作废
 
   ncnn::create_gpu_instance();
 
