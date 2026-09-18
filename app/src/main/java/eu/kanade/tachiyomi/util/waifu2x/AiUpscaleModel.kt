@@ -160,23 +160,32 @@ enum class AiUpscaleModel(
      *
      * Compiled **locally** on 2026-09-19 with the amd64 `QnnHtp.dll` bundled in
      * `onnxruntime-qnn` — no QAIRT SDK, no Docker and no AI Hub involved. Pipeline:
-     * `Universal-FastV2-W2xEX.param/.bin` → ONNX(fp32) → ONNX(fp16) → `<stem>.v<arch>.bin`
-     * (~12 s per model per arch). The reusable script lives in the
-     * `komiho-add-upscale-model` skill (`references/qnn_pipeline/local_compile_context.py`).
+     * `Universal-FastV2-W2xEX.param/.bin` → ONNX(fp32) → **NHWC-wrapped** → ONNX(fp16) →
+     * `<stem>.v<arch>.bin` (~3 s per model per arch). The reusable scripts live in the
+     * `komiho-add-upscale-model` skill (`references/qnn_pipeline/`).
      *
-     * ⚠️ **Version coupling — this is why jniLibs moved to qnn-runtime 2.50.0.** These
-     * contexts carry QAIRT `2.49.40` (what `onnxruntime-qnn` 2.5.0 bundles; 2.6.0 emits
-     * `2.50.40`). QNN requires *runtime version >= context compile version*, so against the
-     * previous 2.49.0 runtime the loader failed with "Unable to read QNN context graph
-     * metadata" and silently fell back to Vulkan. The older int8 contexts (`2.49.0`) stay
-     * loadable because the relation is one-directional. **Whenever contexts are compiled
+     * ⚠️ **Why the ONNX is wrapped before compiling.** ORT serialises graph metadata using the
+     * *ONNX-declared* tensor layout, so a plain `(1,3,H,W)` model lands in the context as NCHW
+     * and its graph tensors as `QNN_TENSOR_VERSION_1` — whereas the upstream QAIRT-built int8
+     * contexts are NHWC `(1,H,W,3)` with version-2 tensors, which is what `qnn_backend.cpp`
+     * asserts. Shipping an unwrapped context made the device fall back to Vulkan with only
+     * "Unable to read QNN context graph metadata" to go on. Both halves are now handled:
+     * the wrap (`references/qnn_pipeline/wrap_nhwc_io.py`) fixes the layout, and
+     * `copy_tensor()` accepts version-1 tensors. **Verify a context with
+     * `references/qnn_pipeline/inspect_context.py` before shipping it** — it prints tensor
+     * version, dataType and dims on the PC.
+     *
+     * ⚠️ **Version coupling.** These contexts carry QAIRT `2.49.40` (what `onnxruntime-qnn`
+     * 2.5.0 bundles; 2.6.0 emits `2.50.40`). QNN wants *runtime >= context compile version*,
+     * which is why jniLibs moved to `qnn-runtime` 2.50.0. The older int8 contexts (`2.49.0`)
+     * stay loadable because the relation is one-directional. **Whenever contexts are compiled
      * again, read the QAIRT tag inside the produced `.bin` and keep `runtime >= that`.**
      *
      * Why fp16 instead of int8: **fp16 needs no calibration set**, which is what makes local
      * compilation practical (int8/W8A16 would need a representative image set). The cost is
-     * size — 1,714,560 B per arch, against 907,336 B for the int8 sibling with the same weight
-     * count. No native change was needed: `qnn_backend.cpp` already accepts fp16 input tensors
-     * (`is_fp16_tensor`).
+     * size — 1,726,776 B (v75) / 1,734,968 B (v79) per arch, against 907,336 B for the int8
+     * sibling with the same weight count. No native change was needed for the dtype:
+     * `qnn_backend.cpp` already accepts fp16 tensors (`is_fp16_tensor`).
      *
      * padding = 18: same 40-layer / 18-convolution topology as [QnnW2xexPhotoSmallX2Int8],
      * verified by parsing its `.param` (18 Convolution + 17 PReLU, PixelShuffle 0=2).

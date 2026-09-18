@@ -88,8 +88,14 @@ object Waifu2x {
      * (v75 + v79), and the cached file name changed with them. Without a bump, an install
      * that had already extracted `*.v81.bin` would keep that stale file and the new finger
      * print would never be honoured.
+     *
+     * 2026-09-19 v3: the [AiUpscaleModel.QnnUniversalFastV2Fp16] contexts were recompiled —
+     * same *file names*, different bytes (NHWC-wrapped so the graph I/O matches this code's
+     * contract). Note that an app **update does not clear `cacheDir`** on AOSP, so a plain
+     * reinstall would otherwise keep serving the old file: during debugging two different
+     * builds reported the exact same loader error because of this.
      */
-    private const val MODEL_CACHE_VERSION = "2"
+    private const val MODEL_CACHE_VERSION = "3"
 
     /**
      * Komiho: picks the context asset for [model] on a device whose on-chip HTP is [arch].
