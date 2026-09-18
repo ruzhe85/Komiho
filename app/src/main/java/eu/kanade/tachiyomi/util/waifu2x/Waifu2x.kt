@@ -231,16 +231,46 @@ object Waifu2x {
         private set
 
     /**
-     * Komiho: records that the caller completed this page on the **CPU** resampler because
+     * Komiho (2026-09-19): engine recorded **per page index**, because the reader badge is
+     * drawn per page while [lastEngine] is one global slot.
+     *
+     * Why the global slot alone was wrong: enhancements run concurrently for neighbouring
+     * pages (background prewarm + the page on screen), and [markCpuFallback] used to clear
+     * the global value for *any* page that produced no result — including pages whose
+     * inference the pager deliberately aborted when the user swiped. The next badge to be
+     * drawn then read `NONE` and printed `CPU OK` on a page that had in fact run on the NPU.
+     *
+     * Never evicted: the key space is the current chapter's page count, so it stays tiny and
+     * is simply overwritten when another chapter is opened.
+     */
+    private val engineByPage = java.util.concurrent.ConcurrentHashMap<Int, EngineKind>()
+
+    /**
+     * Komiho: engine that produced the image for [pageIndex].
+     *
+     * Falls back to the global [lastEngine] when this page has no record yet and for callers
+     * that have no page number (prepared-cache reuse), so the badge never goes blank.
+     */
+    fun engineFor(pageIndex: Int): EngineKind =
+        if (pageIndex >= 0) engineByPage[pageIndex] ?: lastEngine else lastEngine
+
+    /**
+     * Komiho: records that [pageIndex] had to be completed on the **CPU** resampler because
      * neither the NPU nor the Vulkan engine produced a result.
      *
      * Called by [MihonSY]'s enhancer on the CPU fallback path. Without it the badge would
      * keep showing the previous page's engine — the state is sticky by design (a page that
      * never reaches [process] must not clear an earlier result), so the transition to CPU
      * has to be reported explicitly.
+     *
+     * Scoped to [pageIndex] so one page's fallback can no longer mislabel its neighbours;
+     * `pageIndex < 0` (no page number) still clears the global slot only.
      */
-    fun markCpuFallback() {
+    fun markCpuFallback(pageIndex: Int = -1) {
         lastEngine = EngineKind.NONE
+        if (pageIndex >= 0) {
+            engineByPage[pageIndex] = EngineKind.NONE
+        }
     }
 
     /**
@@ -293,11 +323,19 @@ object Waifu2x {
             // 必须在推理成功之后才登记：只有 nativeProcess 返回了结果，才能说这条路径成立。
             // activeModel 是引擎侧的事实（QNN 加载失败时 ensureEngine 已把它换成 Default），
             // 所以这里读它而不是读 requestedModel —— 否则又会把「回落 Vulkan」报成 NPU。
+            // 2026-09-19：同时按 `id`（页号）登记 —— 角标是每页画的，而 lastEngine 是全局槽，
+            // 并发页（预取 + 当前页）会互相覆盖，见 [engineByPage] 的说明。
             if (out != null && out !== argb) {
-                lastEngine = when (activeModel?.backend) {
+                val kind = when (activeModel?.backend) {
                     AiUpscaleModel.Backend.QNN_HTP -> EngineKind.QNN_HTP
                     AiUpscaleModel.Backend.NCNN_VULKAN -> EngineKind.NCNN_VULKAN
-                    null -> lastEngine
+                    null -> null
+                }
+                if (kind != null) {
+                    lastEngine = kind
+                    if (id >= 0) {
+                        engineByPage[id] = kind
+                    }
                 }
             }
 

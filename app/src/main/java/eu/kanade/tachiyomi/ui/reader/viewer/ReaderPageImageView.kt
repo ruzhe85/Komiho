@@ -248,9 +248,13 @@ open class ReaderPageImageView @JvmOverloads constructor(
      * PagerPageHolder for the pre-decoded bitmap path (SY: Page 优化，耗时来自预处理阶段).
      *
      * Komiho (2026-09-17): the success label reports the **engine that really produced the
-     * image** — `NPU OK` / `GPU OK` / `CPU OK` — read from [Waifu2x.lastEngine] rather than
+     * image** — `NPU OK` / `GPU OK` / `CPU OK` — read from [Waifu2x.engineFor] rather than
      * from the selected model. A silent NPU→Vulkan fallback used to render identically to a
      * genuine NPU run, which made the cross-HTP experiment unreadable from the screen.
+     *
+     * Komiho (2026-09-19): it is looked up **by page index**. Reading the single global slot
+     * meant a concurrent page's fallback could mislabel this page (`CPU OK` on a page that ran
+     * on the NPU); see [Waifu2x.engineFor].
      */
     internal fun showEnhancementOutcome(success: Boolean, elapsedMillis: Long) {
         val preferences = Injekt.get<ReaderPreferences>()
@@ -260,7 +264,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             String.format(
                 java.util.Locale.US,
                 "%s %.1fs",
-                engineLabel(),
+                engineLabel(pageIndex),
                 elapsedMillis / 1000f,
             )
         } else {
@@ -271,18 +275,22 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     /**
      * Komiho: engine tag for the badge. CPU 档（Lanczos3 / Catmull-Rom）本身就是 CPU，直接标
-     * `CPU OK`；AI 档要看原生侧真正跑的是哪台引擎 —— 见 [Waifu2x.lastEngine]。
+     * `CPU OK`；AI 档要看原生侧真正跑的是哪台引擎 —— 见 [Waifu2x.engineFor]。
+     *
+     * 2026-09-19：按**页号**取引擎，而不是读全局 `lastEngine`。增强是并发跑的（预取 + 当前页），
+     * 全局槽会被别的页覆盖 —— 曾导致「明明跑的是 NPU，角标却显示 CPU OK」。
      */
-    private fun engineLabel(): String = when (Injekt.get<ReaderPreferences>().enhancementMode.get()) {
-        // CPU resampler modes (2 = Lanczos3, 3 = Catmull-Rom) never touch the native engines.
-        2, 3 -> "CPU OK"
-        else -> when (Waifu2x.lastEngine) {
-            Waifu2x.EngineKind.QNN_HTP -> "NPU OK"
-            Waifu2x.EngineKind.NCNN_VULKAN -> "GPU OK"
-            // NONE = 引擎没出结果，本页由 CPU 重采样兜底（或首个引擎结果尚未登记）。
-            Waifu2x.EngineKind.NONE -> "CPU OK"
+    private fun engineLabel(pageIndex: Int): String =
+        when (Injekt.get<ReaderPreferences>().enhancementMode.get()) {
+            // CPU resampler modes (2 = Lanczos3, 3 = Catmull-Rom) never touch the native engines.
+            2, 3 -> "CPU OK"
+            else -> when (Waifu2x.engineFor(pageIndex)) {
+                Waifu2x.EngineKind.QNN_HTP -> "NPU OK"
+                Waifu2x.EngineKind.NCNN_VULKAN -> "GPU OK"
+                // NONE = 引擎没出结果，本页由 CPU 重采样兜底（或首个引擎结果尚未登记）。
+                Waifu2x.EngineKind.NONE -> "CPU OK"
+            }
         }
-    }
     // MihonSY <--
 
     /**
