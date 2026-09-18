@@ -110,7 +110,7 @@ class WebtoonViewer(
     /**
      * Layout manager of the recycler view.
      */
-    private val layoutManager = WebtoonLayoutManager(activity, scrollDistance)
+    private val layoutManager = WebtoonLayoutManager(activity, scrollDistance * config.webtoonPrefetchDepth)
 
     /**
      * Adapter of the recycler view.
@@ -234,7 +234,12 @@ class WebtoonViewer(
         // MihonSY: keep tap-scroll distance and animation speed in sync with settings
         config.tapScrollChangedListener = {
             scrollDistance = computeTapScrollDistance()
-            layoutManager.extraLayoutSpace = scrollDistance
+            applyWebtoonPrefetch()
+        }
+
+        // Komiho: prefetch depth changed in settings -> recompute extra layout space now
+        config.prefetchChangedListener = {
+            applyWebtoonPrefetch()
         }
 
         frame.layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)
@@ -248,7 +253,7 @@ class WebtoonViewer(
             val newDistance = computeTapScrollDistance()
             if (newDistance != scrollDistance) {
                 scrollDistance = newDistance
-                layoutManager.extraLayoutSpace = newDistance
+                applyWebtoonPrefetch()
             }
         }
     }

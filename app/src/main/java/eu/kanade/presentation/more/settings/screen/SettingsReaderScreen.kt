@@ -363,6 +363,15 @@ object SettingsReaderScreen : SearchableSettings {
                         .toMap(),
                     title = stringResource(MR.strings.pref_webtoon_tap_scroll_distance),
                 ),
+                // Komiho: webtoon 预取深度（1=当前，2/3=加大预取缓解 NPU 增强黑屏）
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.webtoonPrefetchDepth,
+                    entries = ReaderPreferences.WebtoonPrefetchDepth
+                        .mapIndexed { index, it -> (index + 1) to stringResource(it) }
+                        .toMap(),
+                    title = stringResource(MR.strings.pref_webtoon_prefetch_depth),
+                    subtitle = stringResource(MR.strings.pref_webtoon_prefetch_depth_summary),
+                ),
                 // Komiho: v2 的时长按滚动距离自动算，固定时长滑条对它无效 —— 开启 v2 时隐藏
                 if (!pageTransitionsWebtoonV2) {
                     Preference.PreferenceItem.SliderPreference(

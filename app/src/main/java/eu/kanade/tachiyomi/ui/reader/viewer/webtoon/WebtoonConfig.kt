@@ -56,6 +56,16 @@ class WebtoonConfig(
 
     var tapScrollChangedListener: (() -> Unit)? = null
 
+    // Komiho: webtoon 预取深度（extra layout space 倍数）。1 = 当前行为，上限 3。
+    var webtoonPrefetchDepth: Int = readerPreferences.webtoonPrefetchDepth.get()
+        .coerceIn(
+            ReaderPreferences.WEBTOON_PREFETCH_DEPTH_MIN,
+            ReaderPreferences.WEBTOON_PREFETCH_DEPTH_MAX,
+        )
+        private set
+
+    var prefetchChangedListener: (() -> Unit)? = null
+
     var originalSize = false
         private set
     // MihonSY <--
@@ -169,6 +179,18 @@ class WebtoonConfig(
             )
         readerPreferences.webtoonOriginalSize
             .register({ originalSize = it }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho: 预取深度变化 → 通知 viewer 重算 extra layout space
+        readerPreferences.webtoonPrefetchDepth
+            .register(
+                {
+                    webtoonPrefetchDepth = it.coerceIn(
+                        ReaderPreferences.WEBTOON_PREFETCH_DEPTH_MIN,
+                        ReaderPreferences.WEBTOON_PREFETCH_DEPTH_MAX,
+                    )
+                },
+                { prefetchChangedListener?.invoke() },
+            )
         // MihonSY <--
     }
 

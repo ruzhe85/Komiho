@@ -214,6 +214,13 @@ class ReaderPreferences(
         false,
     )
 
+    // Komiho: webtoon 预取深度（extra layout space 倍数）。1 = 当前行为（约 1 屏），
+    // 2/3 = 加大预取、提前解码后续页面，缓解 NPU 增强时的黑屏间隙。默认 1（原版）。
+    val webtoonPrefetchDepth: Preference<Int> = preferenceStore.getInt(
+        "webtoon_prefetch_depth",
+        WEBTOON_PREFETCH_DEPTH_DEFAULT,
+    )
+
     // MihonSY image enhancement -->
     /** 0 = Off, 1 = Anime4K (disabled), 2 = Lanczos3, 3 = Catmull-Rom, 4 = Spline36 (disabled),
      *  5 = AI upscale (Komiho: ncnn + Vulkan, fixed 2x model).
@@ -361,6 +368,16 @@ class ReaderPreferences(
         )
 
         val WebtoonTapScrollFractions = floatArrayOf(0.5f, 0.75f, 1.0f)
+
+        // Komiho: webtoon 预取深度档位（倍数）。1 = 当前原版行为，上限 3。
+        const val WEBTOON_PREFETCH_DEPTH_MIN = 1
+        const val WEBTOON_PREFETCH_DEPTH_MAX = 3
+        const val WEBTOON_PREFETCH_DEPTH_DEFAULT = 1
+        val WebtoonPrefetchDepth = listOf(
+            MR.strings.webtoon_prefetch_1,
+            MR.strings.webtoon_prefetch_2,
+            MR.strings.webtoon_prefetch_3,
+        )
 
         // Komiho 翻页动画 v2 的速度档位：每屏基准时长（ms），越小越快。
         // 实际时长 = (|距离| / 可视高度 + 1) × 该值，因此同一档位下距离越长越慢。
