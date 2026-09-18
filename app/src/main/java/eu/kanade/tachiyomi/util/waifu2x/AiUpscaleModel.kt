@@ -155,6 +155,35 @@ enum class AiUpscaleModel(
         qnnArches = QNN_ARCHES,
     ),
 
+    /**
+     * Komiho: Qualcomm NPU (QNN/HTP) context — W2xEX Universal-Fast V2, **fp16** (2x output).
+     *
+     * Compiled **locally** on 2026-09-19 using the amd64 `QnnHtp.dll` that ships inside
+     * `onnxruntime-qnn` — no QAIRT SDK, no Docker and no AI Hub were involved. Pipeline:
+     * `Universal-FastV2-W2xEX.param/.bin` → ONNX(fp32) → ONNX(fp16) → `<stem>.v<arch>.bin`.
+     * The reusable script lives in the `komiho-add-upscale-model` skill
+     * (`references/qnn_pipeline/local_compile_context.py`).
+     *
+     * Why fp16 instead of int8: **fp16 needs no calibration set**, which is what makes local
+     * compilation practical (int8/W8A16 would require a representative image set). The cost is
+     * size — 1,714,560 B (v75) / 1,722,752 B (v79), against 907,336 B for the int8 sibling with
+     * identical weight count. [Backend.QNN_HTP] needs no change for this: `qnn_backend.cpp`
+     * already accepts fp16 input tensors (`is_fp16_tensor`).
+     *
+     * padding = 18: same 40-layer / 18-convolution topology as [QnnW2xexPhotoSmallX2Int8],
+     * verified by parsing its `.param` (18 Convolution + 17 PReLU, PixelShuffle 0=2).
+     */
+    QnnUniversalFastV2Fp16(
+        id = "qnn-universal-fast-v2-fp16",
+        assetDir = "qnn-contexts",
+        stem = "universal-fast-v2",
+        scale = 2,
+        padding = 18,
+        labelRes = MR.strings.ai_model_qnn_universal_fast,
+        backend = Backend.QNN_HTP,
+        qnnArches = QNN_ARCHES,
+    ),
+
     // Photo-Small W2xEX 曾在此处（40 层 / 18 卷积 / 598,464 权重元素 = 13.4x 算力 / padding 18），
     // 2026-09-16 按用户反馈「效果很差」移除。若要恢复：把 assets/w2xex-esrgan/Photo-Small-W2xEX/
     // 放回去 + 三语补 ai_model_photo_small，并注意它的 padding 是 18（不是同族的 10）。
