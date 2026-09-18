@@ -87,6 +87,19 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Tachiyomi">
 
+        <!-- Komiho (2026-09-18): Qualcomm cDSP fastrpc 客户端库。
+             ★ 这是 NPU（QNN/HTP）能不能起来的**唯一**关键声明 —— 排查了 6 轮 CI 才定位到：
+             libcdsprpc.so 是 vendor 公共库，Android 12+ 要求 App 在 manifest 里显式声明，
+             才会进 App 链接器命名空间的 uses_libraries。没有这一行，libQnnHtp.so 的
+             fastrpc 层初始化不出来，DSP 侧永远装不上 Skel，表现为
+                 loadRemoteSymbols failed with err 4000
+                 Transport layer setup failed: 14001
+             而库、代码、ADSP_LIBRARY_PATH 全部与上游逐字一致也无效。
+             与上游 mihon_img_upscale 的声明完全一致；required=false ⇒ 非高通机型不受影响。 -->
+        <uses-native-library
+            android:name="libcdsprpc.so"
+            android:required="false" />
+
         <!-- Komga client: connection setup (M1). Currently launched manually
              from the launcher until the main UI is replaced. -->
         <activity
