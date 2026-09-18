@@ -174,6 +174,8 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                             gpuWaitMs = wait
                         },
                         sourceTag = sourceTag,
+                        // Komiho: 页号透传给增强器 —— 角标按页登记引擎，别让并发页互相覆盖。
+                        pageIndex = options.pageIndex,
                     )
                     if (enhanceOk) {
                         EnhanceTimings.put(
