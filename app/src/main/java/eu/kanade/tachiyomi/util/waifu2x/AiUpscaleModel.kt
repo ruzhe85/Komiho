@@ -38,7 +38,7 @@ private val QNN_ARCHES: List<Int> = listOf(75, 79)
  *   QNN models: context file stem (`assetDir/stem.v<arch>.bin`).
  * @property scale output scale baked into the network.
  * @property padding receptive-field halo required per tile; must match the network depth.
- * @property labelRes display name shown in the GPU group; model names are not translated.
+ * @property labelRes display name shown under its platform group (GPU for Vulkan, NPU for QNN); model names are not translated.
  * @property backend which native engine runs this model.
  * @property qnnArches HTP architectures this entry ships a context for. Empty for Vulkan
  *   models. One entry can cover several generations at once — the matching file
@@ -114,25 +114,6 @@ enum class AiUpscaleModel(
     ),
 
     /**
-     * Komiho: Qualcomm NPU (QNN/HTP) context — Real-ESRGAN General x4v3, int8 (2x output).
-     *
-     * The x4v3 general model resized to 2x output (its graph keeps the x4 weights but
-     * runs at 2x). [padding] = 10 follows the Real-ESRGAN family convention used by the
-     * reference QNN backend (`prepadding = 10` for Real-ESRGAN in waifu2x_jni.cpp) and
-     * ncnn's standard tile overlap. int8 keeps it small and fast on the HTP MAC units.
-     */
-    QnnRealEsrganGeneralX4v3X2Int8(
-        id = "qnn-realesrgan-general-x4v3-x2-int8",
-        assetDir = "qnn-contexts",
-        stem = "realesrgan-general-x4v3-x2-int8",
-        scale = 2,
-        padding = 10,
-        labelRes = MR.strings.ai_model_qnn_realesrgan_general_x4v3_int8,
-        backend = Backend.QNN_HTP,
-        qnnArches = QNN_ARCHES,
-    ),
-
-    /**
      * Komiho: Qualcomm NPU (QNN/HTP) context — W2xEX Photo-Small x2, int8.
      *
      * One of the two NPU models kept after the 2026-09-18 retune. The fp16 sibling,
@@ -151,6 +132,25 @@ enum class AiUpscaleModel(
         scale = 2,
         padding = 18,
         labelRes = MR.strings.ai_model_qnn_w2xex_photo_int8,
+        backend = Backend.QNN_HTP,
+        qnnArches = QNN_ARCHES,
+    ),
+
+    /**
+     * Komiho: Qualcomm NPU (QNN/HTP) context — Real-ESRGAN General x4v3, int8 (2x output).
+     *
+     * The x4v3 general model resized to 2x output (its graph keeps the x4 weights but
+     * runs at 2x). [padding] = 10 follows the Real-ESRGAN family convention used by the
+     * reference QNN backend (`prepadding = 10` for Real-ESRGAN in waifu2x_jni.cpp) and
+     * ncnn's standard tile overlap. int8 keeps it small and fast on the HTP MAC units.
+     */
+    QnnRealEsrganGeneralX4v3X2Int8(
+        id = "qnn-realesrgan-general-x4v3-x2-int8",
+        assetDir = "qnn-contexts",
+        stem = "realesrgan-general-x4v3-x2-int8",
+        scale = 2,
+        padding = 10,
+        labelRes = MR.strings.ai_model_qnn_realesrgan_general_x4v3_int8,
         backend = Backend.QNN_HTP,
         qnnArches = QNN_ARCHES,
     ),
