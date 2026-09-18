@@ -114,66 +114,53 @@ enum class AiUpscaleModel(
     ),
 
     /**
-     * Komiho: Qualcomm NPU (QNN/HTP) context — Real-CUGAN Pro x2 conservative, fp16.
+     * Komiho: Qualcomm NPU (QNN/HTP) context — Real-CUGAN SE x2 conservative, int8.
      *
-     * Context binaries ported from the upstream release APK (`assets/qnn-contexts/`),
-     * compiled per HTP generation ([qnnArches]). Entry is shown whenever
-     * [Waifu2x.isQnnRuntimeAvailable] reports a Qualcomm NPU — deliberately **not**
-     * restricted to the architectures we ship, so a newer HTP can still be tried and the
-     * badge reports what actually ran; any init failure falls back to Vulkan transparently.
-     *
-     * padding = 18: the SE-module layout defeats the closed-form derivation, but the
-     * convolution trunk is 15x k3 + 3x k2 stride-1 convs → input halo = 15*1 + 3*0.5 = 16.5,
-     * rounded up. Re-check for seams on device and bump if any show.
+     * Real-CUGAN SE line: squeeze-and-excitation variant of the Real-CUGAN family,
+     * tuned for line-art / manga. [padding] = 18 follows the Real-CUGAN-x2 family
+     * convention (same as the other shipped NPU models); re-check for seams on device
+     * and bump if any show. int8 keeps it small and fast on the HTP MAC units.
      */
-    QnnRealCuganProX2(
-        id = "qnn-realcugan-pro-x2-conservative",
+    QnnRealCuganSeX2ConservativeInt8(
+        id = "qnn-realcugan-se-x2-conservative-int8",
         assetDir = "qnn-contexts",
-        stem = "realcugan-pro-x2-conservative",
+        stem = "realcugan-se-x2-conservative-int8",
         scale = 2,
         padding = 18,
-        labelRes = MR.strings.ai_model_qnn_realcugan_pro,
+        labelRes = MR.strings.ai_model_qnn_se_conservative_int8,
         backend = Backend.QNN_HTP,
         qnnArches = QNN_ARCHES,
     ),
 
     /**
-     * Komiho: int8-quantized sibling of [QnnRealCuganProX2] — same network, same halo.
-     * Quantization changes weight storage, not kernel sizes, so [padding] carries over.
-     * Roughly 1.5 MB smaller in the APK; expect near-identical tiles/seams behaviour.
+     * Komiho: Qualcomm NPU (QNN/HTP) context — Span NomosUni x2, int8.
+     *
+     * NomosUni is a Real-CUGAN-class model aimed at clean line-art / illustrations.
+     * [padding] = 18 follows the Real-CUGAN-x2 family convention. int8 keeps it small
+     * and fast on the HTP MAC units.
      */
-    QnnRealCuganProX2Int8(
-        id = "qnn-realcugan-pro-x2-conservative-int8",
+    QnnSpanNomosuniX2Int8(
+        id = "qnn-span-nomosuni-x2-int8",
         assetDir = "qnn-contexts",
-        stem = "realcugan-pro-x2-conservative-int8",
+        stem = "span-nomosuni-x2-int8",
         scale = 2,
         padding = 18,
-        labelRes = MR.strings.ai_model_qnn_realcugan_pro_int8,
+        labelRes = MR.strings.ai_model_qnn_span_nomosuni_int8,
         backend = Backend.QNN_HTP,
         qnnArches = QNN_ARCHES,
     ),
 
     /**
-     * Komiho: Qualcomm NPU (QNN/HTP) context — W2xEX Photo-Small x2, fp16.
+     * Komiho: Qualcomm NPU (QNN/HTP) context — W2xEX Photo-Small x2, int8.
      *
-     * Same network as the GPU `Photo-Small-W2xEX` entry that was removed on 2026-09-16
-     * (user feedback: quality too weak on the Vulkan path — the NPU run may still differ).
+     * The only NPU model kept from the original trio after the 2026-09-18 retune:
+     * the fp16 sibling and the Real-CUGAN-Pro / RealESRGAN-animevideov3 entries were
+     * dropped (severe colour blocking on the user's device). This int8 build is the
+     * current effective model.
      *
      * padding = 18: 40-layer net with 18 stride-1 convolutions (verified from its `.param`
      * before the GPU entry was dropped), i.e. per-side halo 18.0.
      */
-    QnnW2xexPhotoSmallX2(
-        id = "qnn-w2xex-photo-small-x2",
-        assetDir = "qnn-contexts",
-        stem = "w2xex-photo-small-x2",
-        scale = 2,
-        padding = 18,
-        labelRes = MR.strings.ai_model_qnn_w2xex_photo,
-        backend = Backend.QNN_HTP,
-        qnnArches = QNN_ARCHES,
-    ),
-
-    /** Komiho: int8 sibling of [QnnW2xexPhotoSmallX2] — same topology, same halo. */
     QnnW2xexPhotoSmallX2Int8(
         id = "qnn-w2xex-photo-small-x2-int8",
         assetDir = "qnn-contexts",
@@ -185,41 +172,10 @@ enum class AiUpscaleModel(
         qnnArches = QNN_ARCHES,
     ),
 
-    /**
-     * Komiho: Qualcomm NPU (QNN/HTP) context — RealESRGAN animevideov3 x2, fp16.
-     *
-     * The official family the GPU [AnimeVideoMiniV18] retrains shrink from: do NOT carry
-     * over its padding 10. Parsed `realesrgan-models/v3-anime/x2.param` (the exact network
-     * this context was compiled from): 18 stride-1 3x3 convolutions → halo = 18.0, so
-     * [padding] = 18 with no rounding headroom needed.
-     */
-    QnnRealesrganAnimevideov3X2(
-        id = "qnn-realesrgan-animevideov3-x2",
-        assetDir = "qnn-contexts",
-        stem = "realesrgan-animevideov3-x2",
-        scale = 2,
-        padding = 18,
-        labelRes = MR.strings.ai_model_qnn_animevideo_v3,
-        backend = Backend.QNN_HTP,
-        qnnArches = QNN_ARCHES,
-    ),
-
-    /** Komiho: int8 sibling of [QnnRealesrganAnimevideov3X2] — same topology, same halo. */
-    QnnRealesrganAnimevideov3X2Int8(
-        id = "qnn-realesrgan-animevideov3-x2-int8",
-        assetDir = "qnn-contexts",
-        stem = "realesrgan-animevideov3-x2-int8",
-        scale = 2,
-        padding = 18,
-        labelRes = MR.strings.ai_model_qnn_animevideo_v3_int8,
-        backend = Backend.QNN_HTP,
-        qnnArches = QNN_ARCHES,
-    ),
-
     // Photo-Small W2xEX 曾在此处（40 层 / 18 卷积 / 598,464 权重元素 = 13.4x 算力 / padding 18），
     // 2026-09-16 按用户反馈「效果很差」移除。若要恢复：把 assets/w2xex-esrgan/Photo-Small-W2xEX/
     // 放回去 + 三语补 ai_model_photo_small，并注意它的 padding 是 18（不是同族的 10）。
-    // 其同网络的 NPU 版已回归：见上方 [QnnW2xexPhotoSmallX2]（QNN context，非 Vulkan）。
+    // 其同网络的 NPU 版已回归：见上方 [QnnW2xexPhotoSmallX2Int8]（QNN context，非 Vulkan）。
     ;
 
     /** Which native engine executes this model. */
