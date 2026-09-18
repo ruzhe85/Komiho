@@ -114,38 +114,20 @@ enum class AiUpscaleModel(
     ),
 
     /**
-     * Komiho: Qualcomm NPU (QNN/HTP) context — Real-CUGAN SE x2 conservative, int8.
+     * Komiho: Qualcomm NPU (QNN/HTP) context — Real-ESRGAN General x4v3, int8 (2x output).
      *
-     * Real-CUGAN SE line: squeeze-and-excitation variant of the Real-CUGAN family,
-     * tuned for line-art / manga. [padding] = 18 follows the Real-CUGAN-x2 family
-     * convention (same as the other shipped NPU models); re-check for seams on device
-     * and bump if any show. int8 keeps it small and fast on the HTP MAC units.
+     * The x4v3 general model resized to 2x output (its graph keeps the x4 weights but
+     * runs at 2x). [padding] = 10 follows the Real-ESRGAN family convention used by the
+     * reference QNN backend (`prepadding = 10` for Real-ESRGAN in waifu2x_jni.cpp) and
+     * ncnn's standard tile overlap. int8 keeps it small and fast on the HTP MAC units.
      */
-    QnnRealCuganSeX2ConservativeInt8(
-        id = "qnn-realcugan-se-x2-conservative-int8",
+    QnnRealEsrganGeneralX4v3X2Int8(
+        id = "qnn-realesrgan-general-x4v3-x2-int8",
         assetDir = "qnn-contexts",
-        stem = "realcugan-se-x2-conservative-int8",
+        stem = "realesrgan-general-x4v3-x2-int8",
         scale = 2,
-        padding = 18,
-        labelRes = MR.strings.ai_model_qnn_se_conservative_int8,
-        backend = Backend.QNN_HTP,
-        qnnArches = QNN_ARCHES,
-    ),
-
-    /**
-     * Komiho: Qualcomm NPU (QNN/HTP) context — Span NomosUni x2, int8.
-     *
-     * NomosUni is a Real-CUGAN-class model aimed at clean line-art / illustrations.
-     * [padding] = 18 follows the Real-CUGAN-x2 family convention. int8 keeps it small
-     * and fast on the HTP MAC units.
-     */
-    QnnSpanNomosuniX2Int8(
-        id = "qnn-span-nomosuni-x2-int8",
-        assetDir = "qnn-contexts",
-        stem = "span-nomosuni-x2-int8",
-        scale = 2,
-        padding = 18,
-        labelRes = MR.strings.ai_model_qnn_span_nomosuni_int8,
+        padding = 10,
+        labelRes = MR.strings.ai_model_qnn_realesrgan_general_x4v3_int8,
         backend = Backend.QNN_HTP,
         qnnArches = QNN_ARCHES,
     ),
@@ -153,10 +135,11 @@ enum class AiUpscaleModel(
     /**
      * Komiho: Qualcomm NPU (QNN/HTP) context — W2xEX Photo-Small x2, int8.
      *
-     * The only NPU model kept from the original trio after the 2026-09-18 retune:
-     * the fp16 sibling and the Real-CUGAN-Pro / RealESRGAN-animevideov3 entries were
-     * dropped (severe colour blocking on the user's device). This int8 build is the
-     * current effective model.
+     * One of the two NPU models kept after the 2026-09-18 retune. The fp16 sibling,
+     * Real-CUGAN-Pro, RealESRGAN-animevideov3, Real-CUGAN-SE-conservative and
+     * Span-NomosUni entries were all dropped (severe colour blocking / user preference).
+     * This int8 build is the photo-quality specialist; the other survivor is
+     * [QnnRealEsrganGeneralX4v3X2Int8] (general-purpose, [padding] = 10).
      *
      * padding = 18: 40-layer net with 18 stride-1 convolutions (verified from its `.param`
      * before the GPU entry was dropped), i.e. per-side halo 18.0.
