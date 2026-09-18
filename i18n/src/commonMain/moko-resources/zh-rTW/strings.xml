@@ -352,6 +352,11 @@
     <string name="webtoon_tap_scroll_half">半個螢幕</string>
     <string name="webtoon_tap_scroll_three_quarter">3/4 螢幕</string>
     <string name="webtoon_tap_scroll_full">一個螢幕</string>
+    <string name="pref_webtoon_prefetch_depth">預取深度</string>
+    <string name="pref_webtoon_prefetch_depth_summary">加大預取會提前解碼更多後續頁面，減少 NPU 增強時的黑屏間隙（記憶體佔用略增）。</string>
+    <string name="webtoon_prefetch_1">1 螢幕</string>
+    <string name="webtoon_prefetch_2">2 螢幕</string>
+    <string name="webtoon_prefetch_3">3 螢幕</string>
     <string name="pref_webtoon_tap_scroll_duration">滾動動畫速度</string>
     <string name="pref_webtoon_original_resolution">原始解析度</string>
     <string name="pref_image_enhancement_group">影像增強</string>

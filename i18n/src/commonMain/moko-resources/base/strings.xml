@@ -500,6 +500,11 @@
     <string name="webtoon_tap_scroll_half">Half screen</string>
     <string name="webtoon_tap_scroll_three_quarter">3/4 screen</string>
     <string name="webtoon_tap_scroll_full">Full screen</string>
+    <string name="pref_webtoon_prefetch_depth">Prefetch depth</string>
+    <string name="pref_webtoon_prefetch_depth_summary">Larger prefetch pre-decodes more pages ahead, reducing black gaps during NPU upscaling (uses more memory).</string>
+    <string name="webtoon_prefetch_1">1 screen</string>
+    <string name="webtoon_prefetch_2">2 screens</string>
+    <string name="webtoon_prefetch_3">3 screens</string>
     <string name="pref_webtoon_tap_scroll_duration">Scroll animation speed</string>
     <string name="pref_webtoon_original_resolution">Original resolution</string>
     <string name="pref_image_enhancement_group">Image enhancement</string>

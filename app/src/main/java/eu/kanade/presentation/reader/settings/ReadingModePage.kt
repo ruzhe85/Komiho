@@ -217,6 +217,18 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
         }
     }
 
+    // Komiho: webtoon 预取深度（1=当前行为，2/3=加大预取提前解码，缓解 NPU 增强黑屏）
+    val webtoonPrefetchDepth by screenModel.preferences.webtoonPrefetchDepth.collectAsState()
+    SettingsChipRow(MR.strings.pref_webtoon_prefetch_depth) {
+        ReaderPreferences.WebtoonPrefetchDepth.mapIndexed { index, it ->
+            FilterChip(
+                selected = webtoonPrefetchDepth == index + 1,
+                onClick = { screenModel.preferences.webtoonPrefetchDepth.set(index + 1) },
+                label = { Text(stringResource(it)) },
+            )
+        }
+    }
+
     // Komiho: 两代翻页动画互斥，先取状态，供时长滑条显隐与两个开关互关使用。
     val pageTransitionsWebtoon by screenModel.preferences.pageTransitionsWebtoon.collectAsState()
     val pageTransitionsWebtoonV2 by screenModel.preferences.pageTransitionsWebtoonV2.collectAsState()
