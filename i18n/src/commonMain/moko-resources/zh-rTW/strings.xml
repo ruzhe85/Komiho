@@ -380,8 +380,7 @@
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <string name="ai_model_qnn_w2xex_photo_int8">W2xEX Photo int8 (NPU)</string>
-    <string name="ai_model_qnn_se_conservative_int8">Real-CUGAN SE int8 (NPU)</string>
-    <string name="ai_model_qnn_span_nomosuni_int8">Span NomosUni int8 (NPU)</string>
+    <string name="ai_model_qnn_realesrgan_general_x4v3_int8">Real-ESRGAN General x4v3 int8 (NPU)</string>
     <string name="pref_ai_tile_size">分塊大小</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>

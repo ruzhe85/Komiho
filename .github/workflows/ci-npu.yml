@@ -2,7 +2,7 @@ name: CI-NPU (full package)
 
 # Komiho (2026-09-18): on-demand build for the *complete* artifact set, including the
 # universal APK. Only run this when you actually need it — it is roughly 20 minutes of
-# upload time because the universal package is ~210 MB once the six QNN contexts
+# upload time because the universal package is ~207 MB once the four QNN contexts
 # and the five HTP Skel/stub pairs are merged into one file.
 #
 # Why this exists as a separate workflow rather than a second step in build.yml:
@@ -104,8 +104,10 @@ jobs:
             # Every library here is dlopen()ed by NAME at runtime and is therefore
             # invisible to a DT_NEEDED scan of any of our .so files:
             #
-            #   * libQnnModelDlc.so — dlopen()ed from qnn_backend.cpp (DLC container
-            #     reader + QnnModel_composeGraphs entry points).
+            #   * (libQnnModelDlc.so — DROPPED 2026-09-18: DLC container reader /
+            #     QnnModel_composeGraphs entry point; qnn_backend.cpp treats its
+            #     absence as non-fatal LOGW, and contextCreateFromBinary never reaches DLC.
+            #     Saved ~3.3 MB. Re-add if a device fails NPU init on it.)
             #   * libQnnHtpV{69,73,75,79,81}Skel.so — the DSP-side HTP kernels. The
             #     HTP backend picks one at runtime through ADSP_LIBRARY_PATH; we do not
             #     choose the arch from Kotlin, so *every* arch must be present. This is
@@ -127,7 +129,7 @@ jobs:
             # loaded via libQnnHtp.so's internal PrepareLibLoader, which our
             # contextCreateFromBinary path never reaches; dropping it saved ~79 MB with no
             # change to the NPU success path.)
-            for need in libQnnHtp.so libQnnModelDlc.so libQnnSystem.so \
+            for need in libQnnHtp.so libQnnSystem.so \
                         libQnnHtpV69Skel.so libQnnHtpV69Stub.so \
                         libQnnHtpV73Skel.so libQnnHtpV73Stub.so \
                         libQnnHtpV75Skel.so libQnnHtpV75Stub.so \
@@ -138,8 +140,8 @@ jobs:
                 exit 1
               fi
             done
-            if [ "$(unzip -l "$apk" | grep -c 'qnn-contexts/.*\.bin')" -ne 6 ]; then
-              echo "::error::$apk does not carry the 6 QNN contexts"
+            if [ "$(unzip -l "$apk" | grep -c 'qnn-contexts/.*\.bin')" -ne 4 ]; then
+              echo "::error::$apk does not carry the 4 QNN contexts"
               exit 1
             fi
           done
