@@ -7323,10 +7323,10 @@ private fun SourceDashboardPane(
             if (komgaLast != null) {
                 var manga = runCatching { getManga.await(komgaLast.mangaId) }.getOrNull()
                 if (manga != null) {
+                    val base = runCatching { KomgaPreferences(context.applicationContext).connection().baseUrl }
+                        .getOrNull()?.trimEnd('/')
                     if (manga.thumbnailUrl.isNullOrBlank()) {
                         val seriesId = manga.url.removePrefix(KomgaSource.SERIES_URL_PREFIX)
-                        val base = runCatching { KomgaPreferences(context.applicationContext).connection().baseUrl }
-                            .getOrNull()?.trimEnd('/')
                         if (!seriesId.isBlank() && !base.isNullOrBlank()) {
                             runCatching {
                                 mangaRepo.update(MangaUpdate(id = manga.id, thumbnailUrl = "$base/api/v1/series/$seriesId/thumbnail"))
@@ -7334,7 +7334,19 @@ private fun SourceDashboardPane(
                             manga = getManga.await(komgaLast.mangaId) ?: manga
                         }
                     }
-                    komgaCover = manga.takeIf { !it.thumbnailUrl.isNullOrBlank() }
+                    // Komiho: 离线回落也用「书的封面」而非系列封面。book.id 取自本地历史的
+                    // chapterUrl（BOOK_URL_PREFIX + bookId）；base 取不到时回落旧系列封面行为。
+                    val bookId = if (komgaLast.chapterUrl.startsWith(KomgaSource.BOOK_URL_PREFIX)) {
+                        komgaLast.chapterUrl.removePrefix(KomgaSource.BOOK_URL_PREFIX)
+                    } else {
+                        ""
+                    }
+                    komgaCover = if (bookId.isNotBlank() && !base.isNullOrBlank()) {
+                        manga.takeIf { !it.thumbnailUrl.isNullOrBlank() }
+                            ?.copy(ogThumbnailUrl = "$base/api/v1/books/$bookId/thumbnail")
+                    } else {
+                        manga.takeIf { !it.thumbnailUrl.isNullOrBlank() }
+                    }
                 }
             }
             // SY: 历史记录 → 卡片条目。总页数取阅读器回填的内存备忘（未读过则 0，只显示页码）。
@@ -7453,7 +7465,12 @@ private fun SourceDashboardPane(
                             page = ((book.readProgress?.page ?: 1) - 1).coerceAtLeast(0),
                             totalPages = book.media.pagesCount,
                             readAt = parseKomgaReadDate(book.readProgress?.readDate),
-                            coverModel = manga.takeIf { !it.thumbnailUrl.isNullOrBlank() },
+                            // Komiho: 最近阅读封面用「书的封面」而非「系列的封面」。
+                            // 每本 Komga book 各自有封面，而 manga 存的是 series 缩略图；
+                            // 这里只覆盖 ogThumbnailUrl 成该书(book)缩略图，source 仍指向 KomgaSource，
+                            // MangaCoverFetcher 便会带鉴权拉该书封面（裸 URL 会 401 无图）。
+                            coverModel = manga.takeIf { !it.thumbnailUrl.isNullOrBlank() }
+                                ?.copy(ogThumbnailUrl = client.bookThumbnailUrl(book.id)),
                         )
                     }
                     dashLog(
