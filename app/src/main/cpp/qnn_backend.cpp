@@ -600,9 +600,16 @@ private:
     // byte-for-byte unchanged (verified with logcat diff before/after).
     // The failure is in the DSP transport / skel-load stage, and the only
     // remaining difference against the known-good reference build (app.mihon
-    // 1.3.9, same device, all V75 files byte-identical) is that the reference
-    // ships libQnnHtpV{69,73,81}Skel/Stub.so as well. Those are now packaged
-    // too — see the asset list in ci-npu.yml.
+    // 1.3.9, same device, all V75 files byte-identical) was that the reference
+    // ships libQnnHtpV{69,73,81}Skel/Stub.so as well — those are packaged now.
+    // (2026-09-19: the QNN runtime was subsequently upgraded from 2.49.0 to
+    // qnn-runtime 2.50.0, because the fp16 contexts compiled locally by
+    // onnxruntime-qnn carry QAIRT 2.49.40 and QNN requires
+    // "runtime version >= context compile version"; with the old 2.49.0 runtime
+    // those contexts failed at QnnSystemContext_getBinaryInfo with
+    // "Unable to read QNN context graph metadata" and the reader silently fell
+    // back to Vulkan. These .so files are therefore no longer byte-identical to
+    // the reference build's, by design.)
     // ModelDlc is kept because the DLC graph path needs it, not because it was
     // ever the culprit.
     if (!backend_library_ || !system_library_) {

@@ -158,17 +158,25 @@ enum class AiUpscaleModel(
     /**
      * Komiho: Qualcomm NPU (QNN/HTP) context — W2xEX Universal-Fast V2, **fp16** (2x output).
      *
-     * Compiled **locally** on 2026-09-19 using the amd64 `QnnHtp.dll` that ships inside
-     * `onnxruntime-qnn` — no QAIRT SDK, no Docker and no AI Hub were involved. Pipeline:
-     * `Universal-FastV2-W2xEX.param/.bin` → ONNX(fp32) → ONNX(fp16) → `<stem>.v<arch>.bin`.
-     * The reusable script lives in the `komiho-add-upscale-model` skill
-     * (`references/qnn_pipeline/local_compile_context.py`).
+     * Compiled **locally** on 2026-09-19 with the amd64 `QnnHtp.dll` bundled in
+     * `onnxruntime-qnn` — no QAIRT SDK, no Docker and no AI Hub involved. Pipeline:
+     * `Universal-FastV2-W2xEX.param/.bin` → ONNX(fp32) → ONNX(fp16) → `<stem>.v<arch>.bin`
+     * (~12 s per model per arch). The reusable script lives in the
+     * `komiho-add-upscale-model` skill (`references/qnn_pipeline/local_compile_context.py`).
+     *
+     * ⚠️ **Version coupling — this is why jniLibs moved to qnn-runtime 2.50.0.** These
+     * contexts carry QAIRT `2.49.40` (what `onnxruntime-qnn` 2.5.0 bundles; 2.6.0 emits
+     * `2.50.40`). QNN requires *runtime version >= context compile version*, so against the
+     * previous 2.49.0 runtime the loader failed with "Unable to read QNN context graph
+     * metadata" and silently fell back to Vulkan. The older int8 contexts (`2.49.0`) stay
+     * loadable because the relation is one-directional. **Whenever contexts are compiled
+     * again, read the QAIRT tag inside the produced `.bin` and keep `runtime >= that`.**
      *
      * Why fp16 instead of int8: **fp16 needs no calibration set**, which is what makes local
-     * compilation practical (int8/W8A16 would require a representative image set). The cost is
-     * size — 1,714,560 B (v75) / 1,722,752 B (v79), against 907,336 B for the int8 sibling with
-     * identical weight count. [Backend.QNN_HTP] needs no change for this: `qnn_backend.cpp`
-     * already accepts fp16 input tensors (`is_fp16_tensor`).
+     * compilation practical (int8/W8A16 would need a representative image set). The cost is
+     * size — 1,714,560 B per arch, against 907,336 B for the int8 sibling with the same weight
+     * count. No native change was needed: `qnn_backend.cpp` already accepts fp16 input tensors
+     * (`is_fp16_tensor`).
      *
      * padding = 18: same 40-layer / 18-convolution topology as [QnnW2xexPhotoSmallX2Int8],
      * verified by parsing its `.param` (18 Convolution + 17 PReLU, PixelShuffle 0=2).
