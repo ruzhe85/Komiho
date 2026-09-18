@@ -157,6 +157,10 @@ bool get_graph_metadata(const QnnSystemContext_BinaryInfo_t *binary_info,
     graph_count = binary_info->contextBinaryInfoV3.numGraphs;
     break;
   default:
+    // Komiho: say *why* instead of failing silently — a newer BinaryInfo layout would
+    // otherwise surface as a bare "graph metadata unusable".
+    LOGE("Unsupported BinaryInfo version: %u",
+         static_cast<unsigned>(binary_info->version));
     return false;
   }
   if (!graphs || graph_count != 1) {
@@ -185,6 +189,7 @@ bool get_graph_metadata(const QnnSystemContext_BinaryInfo_t *binary_info,
                 graph.graphInfoV3.numGraphOutputs};
     break;
   default:
+    LOGE("Unsupported GraphInfo version: %u", static_cast<unsigned>(graph.version));
     return false;
   }
   return metadata.name && metadata.inputs && metadata.outputs &&
@@ -343,16 +348,52 @@ public:
     QnnSystemContext_Handle_t system_context = nullptr;
     const QnnSystemContext_BinaryInfo_t *binary_info = nullptr;
     Qnn_ContextBinarySize_t binary_info_size = 0;
-    if (!system.systemContextCreate || !system.systemContextGetBinaryInfo ||
-        !system.systemContextFree ||
-        system.systemContextCreate(&system_context) != QNN_SUCCESS ||
-        system.systemContextGetBinaryInfo(system_context, binary_.data(),
-                                          binary_.size(), &binary_info,
-                                          &binary_info_size) != QNN_SUCCESS ||
-        !get_graph_metadata(binary_info, metadata) ||
-        !copy_tensor(metadata.inputs[0], input_, input_name_, input_dimensions_) ||
+
+    // Komiho (2026-09-19): each step is checked and logged separately. These used to share a
+    // single `if (...) { LOGE("Unable to read QNN context graph metadata"); }`, so a
+    // device-side failure printed that one line and nothing else — no way to tell whether
+    // getBinaryInfo, the graph metadata or a tensor was at fault. That ambiguity cost a full
+    // debugging round (the real cause was a version-1 tensor); see SKILL.md.
+    bool metadata_ok = system.systemContextCreate != nullptr &&
+                       system.systemContextGetBinaryInfo != nullptr &&
+                       system.systemContextFree != nullptr;
+    if (!metadata_ok) {
+      LOGE("QNN system context API incomplete (create=%d getBinaryInfo=%d free=%d)",
+           system.systemContextCreate != nullptr,
+           system.systemContextGetBinaryInfo != nullptr,
+           system.systemContextFree != nullptr);
+    } else if (system.systemContextCreate(&system_context) != QNN_SUCCESS) {
+      LOGE("QnnSystemContext_create failed");
+      metadata_ok = false;
+    }
+
+    if (metadata_ok) {
+      const Qnn_ErrorHandle_t status = system.systemContextGetBinaryInfo(
+          system_context, binary_.data(), binary_.size(), &binary_info,
+          &binary_info_size);
+      if (status != QNN_SUCCESS) {
+        LOGE("QnnSystemContext_getBinaryInfo failed: %u",
+             static_cast<unsigned>(status));
+        metadata_ok = false;
+      }
+    }
+    if (metadata_ok && !get_graph_metadata(binary_info, metadata)) {
+      LOGE("QNN context graph metadata unusable (see preceding reason)");
+      metadata_ok = false;
+    }
+    if (metadata_ok &&
+        !copy_tensor(metadata.inputs[0], input_, input_name_, input_dimensions_)) {
+      LOGE("QNN context input tensor unusable (version %u)",
+           static_cast<unsigned>(metadata.inputs[0].version));
+      metadata_ok = false;
+    }
+    if (metadata_ok &&
         !copy_tensor(metadata.outputs[0], output_, output_name_, output_dimensions_)) {
-      LOGE("Unable to read QNN context graph metadata");
+      LOGE("QNN context output tensor unusable (version %u)",
+           static_cast<unsigned>(metadata.outputs[0].version));
+      metadata_ok = false;
+    }
+    if (!metadata_ok) {
       if (system_context && system.systemContextFree) {
         system.systemContextFree(system_context);
       }
@@ -602,14 +643,14 @@ private:
     // remaining difference against the known-good reference build (app.mihon
     // 1.3.9, same device, all V75 files byte-identical) was that the reference
     // ships libQnnHtpV{69,73,81}Skel/Stub.so as well — those are packaged now.
-    // (2026-09-19: the QNN runtime was subsequently upgraded from 2.49.0 to
-    // qnn-runtime 2.50.0, because the fp16 contexts compiled locally by
-    // onnxruntime-qnn carry QAIRT 2.49.40 and QNN requires
-    // "runtime version >= context compile version"; with the old 2.49.0 runtime
-    // those contexts failed at QnnSystemContext_getBinaryInfo with
-    // "Unable to read QNN context graph metadata" and the reader silently fell
-    // back to Vulkan. These .so files are therefore no longer byte-identical to
-    // the reference build's, by design.)
+    // (2026-09-19: the QNN runtime was upgraded from 2.49.0 to qnn-runtime 2.50.0 so
+    // that "runtime version >= context compile version" holds for the fp16 contexts
+    // compiled locally by onnxruntime-qnn (they carry QAIRT 2.49.40). NOTE: the
+    // upgrade was originally believed to *fix* those contexts — it did not. Their real
+    // problem was a version-1 graph tensor plus an NCHW I/O layout; see copy_tensor()
+    // below and the metadata block in load(). The upgrade is kept because the version
+    // relation is worth having, not because it was the cure. These .so files are
+    // therefore no longer byte-identical to the reference build's, by design.)
     // ModelDlc is kept because the DLC graph path needs it, not because it was
     // ever the culprit.
     if (!backend_library_ || !system_library_) {
@@ -802,17 +843,67 @@ private:
     return nullptr;
   }
 
+  // Komiho (2026-09-19): accept BOTH tensor versions, and always emit a version-2 tensor.
+  //
+  // Contexts produced by `onnxruntime-qnn` (our local compile path) serialise their graph
+  // tensors as **QNN_TENSOR_VERSION_1**, whereas the QAIRT `qnn-context-binary-generator`
+  // output upstream ships is version 2. Rejecting v1 made every locally compiled model fall
+  // back to Vulkan on device — and because this function sits in the same condition as
+  // `systemContextGetBinaryInfo` and `get_graph_metadata`, the only symptom was the generic
+  // "Unable to read QNN context graph metadata" line (see SKILL.md for that round).
+  //
+  // Qnn_TensorV1_t and Qnn_TensorV2_t share the layout of every field we consume
+  // (id / name / type / dataFormat / dataType / quantizeParams / rank / dimensions); V2 only
+  // appends isDynamicDimensions / sparseParams / isProduced. So read through the matching
+  // member and write a freshly zeroed V2 — which is what graphExecute and validate_tensor()
+  // below expect.
   static bool copy_tensor(const Qnn_Tensor_t &source, Qnn_Tensor_t &destination,
                           std::string &name, std::vector<uint32_t> &dimensions) {
-    if (source.version != QNN_TENSOR_VERSION_2 || !source.v2.name ||
-        !source.v2.dimensions || source.v2.rank == 0) {
+    const char *source_name = nullptr;
+    const uint32_t *source_dimensions = nullptr;
+    uint32_t source_rank = 0;
+    switch (source.version) {
+    case QNN_TENSOR_VERSION_2:
+      source_name = source.v2.name;
+      source_dimensions = source.v2.dimensions;
+      source_rank = source.v2.rank;
+      break;
+    case QNN_TENSOR_VERSION_1:
+      source_name = source.v1.name;
+      source_dimensions = source.v1.dimensions;
+      source_rank = source.v1.rank;
+      break;
+    default:
       return false;
     }
-    destination = source;
-    name = source.v2.name;
-    dimensions.assign(source.v2.dimensions,
-                      source.v2.dimensions + source.v2.rank);
+    if (!source_name || !source_dimensions || source_rank == 0) {
+      return false;
+    }
+    name = source_name;
+    dimensions.assign(source_dimensions, source_dimensions + source_rank);
+
+    std::memset(&destination, 0, sizeof(destination));
+    destination.version = QNN_TENSOR_VERSION_2;
+    if (source.version == QNN_TENSOR_VERSION_2) {
+      destination.v2.id = source.v2.id;
+      destination.v2.type = source.v2.type;
+      destination.v2.dataFormat = source.v2.dataFormat;
+      destination.v2.dataType = source.v2.dataType;
+      destination.v2.quantizeParams = source.v2.quantizeParams;
+      destination.v2.sparseParams = source.v2.sparseParams;
+    } else {
+      destination.v2.id = source.v1.id;
+      destination.v2.type = source.v1.type;
+      destination.v2.dataFormat = source.v1.dataFormat;
+      destination.v2.dataType = source.v1.dataType;
+      destination.v2.quantizeParams = source.v1.quantizeParams;
+      // V1 has no sparseParams field, and a plain memset would leave type == 0, which is
+      // QNN_SPARSE_LAYOUT_HYBRID_COO — i.e. "this tensor is sparse". These graphs are dense,
+      // so say so explicitly.
+      destination.v2.sparseParams.type = QNN_SPARSE_LAYOUT_UNDEFINED;
+    }
     destination.v2.name = name.c_str();
+    destination.v2.rank = source_rank;
     destination.v2.dimensions = dimensions.data();
     destination.v2.memType = QNN_TENSORMEMTYPE_RAW;
     destination.v2.isDynamicDimensions = nullptr;
