@@ -110,9 +110,12 @@ jobs:
             #     Saved ~3.3 MB. Re-add if a device fails NPU init on it.)
             #   * libQnnHtpV{69,73,75,79,81}Skel.so — the DSP-side HTP kernels. The
             #     HTP backend picks one at runtime through ADSP_LIBRARY_PATH; we do not
-            #     choose the arch from Kotlin, so *every* arch must be present. This is
-            #     the full set the reference build (app.mihon 1.3.9) ships, and after
-            #     aligning to it, the only remaining difference on the V75 path is gone.
+            #     choose the arch from Kotlin, so *every* arch must be present.
+            #     2026-09-19: these now come from qnn-runtime **2.50.0** (upgraded from
+            #     2.49.0) so that the locally-compiled fp16 context — which carries QAIRT
+            #     2.49.40 — satisfies QNN's "runtime >= context compile version" rule.
+            #     The earlier "match the reference build (app.mihon 1.3.9)" baseline no
+            #     longer applies; sizes differ from the upstream APK by design.
             #   * libQnnHtpV{69,73,75,79,81}Stub.so — the matching host-side stubs.
             #
             # History, because this comment has been wrong twice (2026-09-18):

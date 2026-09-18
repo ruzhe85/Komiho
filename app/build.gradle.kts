@@ -192,9 +192,11 @@ android {
             // .so files sitting on disk. It is kept because the known-good reference
             // build (app.mihon 1.3.9, `dumpsys package` → extractNativeLibs=true) ships
             // the same layout, so at least the two are equivalent on this axis.
-            // Cost: ~205 MB of extra on-device storage for the QNN libraries
-            // (libQnnHtp + libQnnSystem + libQnnModelDlc + the 79 MB Prepare library
-            // + five Skel/stub pairs); the APK download size is barely affected because
+            // Cost: on-device storage for the QNN libraries. Trims since 2026-09-18/19:
+            // libQnnModelDlc.so and the 79 MB libQnnHtpPrepare.so were both dropped
+            // (neither is reached on the contextCreateFromBinary path), leaving
+            // libQnnHtp + libQnnSystem + five Skel/stub pairs, now taken from
+            // qnn-runtime 2.50.0. The APK download size is barely affected because
             // these .so files compress well.
             useLegacyPackaging = true
             keepDebugSymbols += listOf(
