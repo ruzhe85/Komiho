@@ -441,6 +441,21 @@ open class ReaderPageImageView @JvmOverloads constructor(
                             val image = result as BitmapImage
                             setImage(ImageSource.bitmap(image.bitmap))
                             isVisible = true
+                            // Komiho: webtoon 条目是 WRAP_CONTENT，NPU 增强是同步解码，
+                            // 常在 holder 还离屏（高度已量到 0）时就跑完。若此刻不把视图高度
+                            // 定下来，增强图会落进 0 高度 SSIV，要等下次 RV 布局（滚进可视区）
+                            // 才撑开 —— 表现就是「滚到才显示」。这里按 bitmap 宽高比预置真实
+                            // 高度并立即 requestLayout，让增强图一算完就显示。
+                            if (this@ReaderPageImageView.isWebtoon) {
+                                val bmp = image.bitmap
+                                if (bmp.width > 0) {
+                                    val viewWidth = this@ReaderPageImageView.width.takeIf { it > 0 }
+                                        ?: this@ReaderPageImageView.context.resources.displayMetrics.widthPixels
+                                    val computedHeight = (bmp.height * viewWidth / bmp.width.toFloat()).toInt()
+                                    this@ReaderPageImageView.layoutParams?.height = computedHeight
+                                    this@ReaderPageImageView.requestLayout()
+                                }
+                            }
                             showEnhancementOutcome(
                                 success = true,
                                 // Komiho: 优先用解码器登记的实际计算耗时（解码 + 增强，已剔除等锁）；
