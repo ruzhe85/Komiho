@@ -1,6 +1,7 @@
 package eu.kanade.presentation.reader.settings
 
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.runtime.Composable
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
