@@ -53,10 +53,6 @@ internal fun ColumnScope.ReadingModePage(screenModel: ReaderSettingsScreenModel)
         }
     }
 
-    // MihonSY: image enhancement applies to EVERY reading mode, so it sits at the top level
-    // of the in-reader settings (not inside the webtoon/pager sections).
-    ImageEnhancementSettings(screenModel)
-
     val viewer by screenModel.viewerFlow.collectAsState()
     if (viewer is WebtoonViewer) {
         WebtoonViewerSettings(screenModel)
@@ -68,21 +64,6 @@ internal fun ColumnScope.ReadingModePage(screenModel: ReaderSettingsScreenModel)
     }
 }
 
-// MihonSY -->
-/**
- * In-reader image enhancement settings. Placed at the top level of the reading-mode page
- * (outside the webtoon/pager sections) on purpose: enhancement is global and applies to
- * every reading mode.
- *
- * The grouped layout (Off / CPU / GPU, each with its own parameter row) lives in
- * [ImageEnhancementSection] so this sheet and Settings → Reader stay structurally identical.
- */
-@Composable
-private fun ColumnScope.ImageEnhancementSettings(screenModel: ReaderSettingsScreenModel) {
-    HeadingItem(MR.strings.pref_image_enhancement_group)
-    ImageEnhancementSection(preferences = screenModel.preferences)
-}
-// MihonSY <--
 
 @Composable
 private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenModel) {
