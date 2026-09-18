@@ -105,6 +105,15 @@ class PagerPageHolder(
     /** 渲染 [renderedKey] 时的增强档位 —— 档位变了要允许重跑（否则改设置后这一页不刷新）。 */
     private var renderedEnhancementMode = -1
 
+    /**
+     * Komiho (2026-09-19): 渲染 [renderedKey] 时的「影响像素的设置」指纹
+     * （[ReaderPreferences.enhancementCacheKey]）。空串 = 还没渲染过。
+     *
+     * 只比档位不够：换 AI 模型时档位仍是 5，同一对页会被判成「已渲染」直接跳过 ——
+     * 表现就是改完设置要退出重进或一直划动才生效。
+     */
+    private var renderedEnhancementKey = ""
+
     init {
         // Komiho 诊断：记录 holder 实例身份 —— 用于判断「同一页被增强两次」是
         // 两个 holder 实例各算一次，还是同一个 holder 被调了两次 setImage。
@@ -214,8 +223,14 @@ class PagerPageHolder(
     private suspend fun setImage() {
         renderMutex.withLock {
             val key = viewer.preparedCache.key(page, extraPage)
-            val enhancementMode = Injekt.get<ReaderPreferences>().enhancementMode.get()
-            if (renderedKey == key && renderedEnhancementMode == enhancementMode) {
+            val preferences = Injekt.get<ReaderPreferences>()
+            val enhancementMode = preferences.enhancementMode.get()
+            // Komiho: 档位之外还要比「影响像素的设置」指纹，否则换模型 / 换倍率 / 改裁边都
+            // 会被判成「这一对页已渲染」而跳过（见 renderedEnhancementKey 的说明）。
+            val enhancementKey = preferences.enhancementCacheKey()
+            if (renderedKey == key && renderedEnhancementMode == enhancementMode &&
+                renderedEnhancementKey == enhancementKey
+            ) {
                 // 同一对页已经渲染过（另一条 load 任务或状态重发）→ 直接退出，不再烧一次 GPU。
                 // 放在最前面：省掉下面的等待与整条流水线。
                 android.util.Log.d(
@@ -310,6 +325,7 @@ class PagerPageHolder(
             // 不会走到这里 ⇒ 失败后仍可重来。
             renderedKey = key
             renderedEnhancementMode = enhancementMode
+            renderedEnhancementKey = enhancementKey
         }
     }
 
