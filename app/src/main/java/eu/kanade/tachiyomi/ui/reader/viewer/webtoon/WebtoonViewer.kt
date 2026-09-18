@@ -94,6 +94,17 @@ class WebtoonViewer(
     }
 
     /**
+     * Komiho: apply the webtoon prefetch depth to the layout manager's extra
+     * layout space. extraLayoutSpace = one tap-scroll distance multiplied by the
+     * user's prefetch depth (1 = original ~1-screen behaviour, up to 3 screens).
+     * Larger depth pre-binds more pages so NPU enhancement finishes before they
+     * scroll into view, eliminating the black flash on arrival.
+     */
+    private fun applyWebtoonPrefetch() {
+        layoutManager.extraLayoutSpace = scrollDistance * config.webtoonPrefetchDepth
+    }
+
+    /**
      * MihonSY: animator driving the tap-scroll. A ValueAnimator that steps the
      * recycler by a fixed per-frame delta gives a perfectly constant-speed scroll
      * (like ComicScreen) and avoids the janky ViewFlinger/OverScroller path of
