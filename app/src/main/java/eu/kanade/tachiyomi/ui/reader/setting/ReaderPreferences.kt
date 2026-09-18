@@ -259,6 +259,28 @@ class ReaderPreferences(
 
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
+
+    /**
+     * Komiho (2026-09-19): fingerprint of every preference that changes the **rendered result**
+     * of enhancement.
+     *
+     * Cached artefacts — the pager's prepared pages and its "this pair is already rendered"
+     * guard — used to be validated against [enhancementMode] alone. So switching the AI model,
+     * the resampler scale, the AI tile size or border cropping kept the old bitmap on screen
+     * until the LRU evicted it (users had to leave the chapter or keep scrolling to see the new
+     * setting). Comparing this key instead makes a change take effect on the next page render.
+     *
+     * Only settings that change the **pixels** belong here: [showEnhancementStatus] and the
+     * prefetch-depth knobs must NOT be added, otherwise toggling them would throw away work.
+     */
+    fun enhancementCacheKey(): String = buildString {
+        append(enhancementMode.get())
+        append('|').append(lanczosScale.get())
+        append('|').append(aiModelId.get())
+        append('|').append(aiTileSize.get())
+        append('|').append(cropBorders.get())
+        append('|').append(cropBordersWebtoon.get())
+    }
     // MihonSY image enhancement <--
     // MihonSY <--
 

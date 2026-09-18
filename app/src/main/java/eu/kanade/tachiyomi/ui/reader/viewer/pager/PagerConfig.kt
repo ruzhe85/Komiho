@@ -104,6 +104,19 @@ class PagerConfig(
         readerPreferences.cropBorders
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })
 
+        // Komiho (2026-09-19): 增强设置同样属于「图像配置」，变更必须立刻重渲染 —— 否则
+        // preparedCache 与 holder 的「同一对页已渲染」守卫都还认旧设置，用户得退出重进或
+        // 一直划动才看到效果。这几个偏好没有对应的 config 属性，写回 lambda 是空操作，
+        // 只为触发 refreshAdapter()。
+        readerPreferences.enhancementMode
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.lanczosScale
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiModelId
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiTileSize
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+
         readerPreferences.navigateToPan
             .register({ navigateToPan = it })
 

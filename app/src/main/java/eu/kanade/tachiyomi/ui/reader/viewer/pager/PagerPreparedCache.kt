@@ -39,6 +39,7 @@ import uy.kohesive.injekt.api.get
  *   非空时 holder 直接走 bitmap 路径，不再二次解码
  *
  * [enhancementMode] / [cropBorders] 记录生成时的设置，读取时校验，设置变更即失效。
+ * 2026-09-19 起改用 [enhancementKey]（覆盖所有影响像素的设置）—— 见 get()。
  */
 class PagerPreparedPage(
     val source: BufferedSource,
@@ -49,6 +50,15 @@ class PagerPreparedPage(
     val decodedBitmap: Bitmap?,
     val enhancementMode: Int,
     val cropBorders: Boolean,
+    /**
+     * Komiho (2026-09-19): 「会影响像素的设置」指纹，取自 [ReaderPreferences.enhancementCacheKey]。
+     * 读取时与当前设置比对，不一致即作废。
+     *
+     * 以前只比 [enhancementMode]，所以换 AI 模型 / 换倍率 / 改裁边之后，这一页仍会用旧设置的
+     * 结果，要等 LRU 淘汰、退出重进或一直划动才更新。默认值在**构造时**求值 ⇒ 所有构造点自动
+     * 写入当时的设置，不必逐个传参。
+     */
+    val enhancementKey: String = Injekt.get<ReaderPreferences>().enhancementCacheKey(),
     /** 增强预解码耗时（毫秒）；-1 = 未走预解码（关闭/动图/失败/布局未应用）。 */
     val enhanceElapsedMillis: Long,
     /** false = 仅完成通用预处理（流物化+嗅探），布局处理（分割/合并）留待 holder 补跑。 */
@@ -69,7 +79,12 @@ class PagerPreparedCache(private val maxSize: Int = 3) {
 
     fun get(key: Pair<ReaderPage, ReaderPage?>): PagerPreparedPage? = synchronized(lock) {
         val value = map[key] ?: return null
-        if (value.enhancementMode != Injekt.get<ReaderPreferences>().enhancementMode.get()) {
+        val preferences = Injekt.get<ReaderPreferences>()
+        // 档位先比（便宜、失败时日志友好），再比设置指纹（覆盖 AI 模型 / 倍率 / tile / 裁边）。
+        // 只比档位是不够的：换模型时 enhancementMode 都是 5，缓存会一直命中 → 设置不生效。
+        if (value.enhancementMode != preferences.enhancementMode.get() ||
+            value.enhancementKey != preferences.enhancementCacheKey()
+        ) {
             map.remove(key)
             return null
         }

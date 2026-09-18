@@ -91,6 +91,18 @@ class WebtoonConfig(
         readerPreferences.cropBordersWebtoon
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })
 
+        // Komiho (2026-09-19): 增强设置同样属于「图像配置」，变更必须立刻重渲染 —— 否则
+        // 已绑定的 holder 仍显示旧设置的位图，用户得退出重进或一直划动才看到效果。
+        // 这几个偏好没有对应的 config 属性，写回 lambda 是空操作，只为触发 refreshAdapter()。
+        readerPreferences.enhancementMode
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.lanczosScale
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiModelId
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiTileSize
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+
         readerPreferences.webtoonSidePadding
             .register({ sidePadding = it }, { imagePropertyChangedListener?.invoke() })
 
