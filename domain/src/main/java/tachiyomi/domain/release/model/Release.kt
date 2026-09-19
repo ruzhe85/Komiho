@@ -25,9 +25,11 @@ data class Release(
             else -> ""
         }
 
-        // SY -->
-        return assets.find { it.contains("TachiyomiSY$apkVariant-") } ?: assets[0]
-        // SY <--
+        // Komiho (2026-09-19): this used to match "TachiyomiSY$apkVariant-", which
+        // never matched our `komiho-<version>-<abi>.apk` assets, so every device
+        // silently fell back to assets[0] (right APK only by luck of ordering).
+        return assets.find { it.contains("$apkVariant-") }
+            ?: assets.firstOrNull().orEmpty()
     }
 
     /**
