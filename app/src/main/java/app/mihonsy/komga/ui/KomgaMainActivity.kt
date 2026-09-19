@@ -1505,6 +1505,8 @@ private fun KomgaMainScreen(
                         useNavRail = useNavRail,
                         navBarPosition = navBarPosition,
                         onNavTabClick = { onNavTabClick(it) },
+                        // Komiho: 关于页的检查更新结果回调到本屏统一弹窗。
+                        onUpdateAvailable = ::showUpdate,
                     )
                 }
                 // SY --> Komiho Phase4: 「来源管理」全屏流程（类型选择 / 表单 / 删除确认全在内）。
@@ -3858,6 +3860,8 @@ private fun SettingsTab(
     useNavRail: Boolean,
     navBarPosition: String,
     onNavTabClick: (MainTab) -> Unit,
+    // Komiho: 关于页「检查更新」发现新版本时回调，弹窗由上层统一呈现。
+    onUpdateAvailable: (Release) -> Unit,
 ) {
     val prefs = remember { KomgaPreferences(context.applicationContext) }
     var showAppearance by remember { mutableStateOf(false) }
@@ -3996,7 +4000,7 @@ private fun SettingsTab(
             railOnRight = railOnRight,
             onDismiss = { showAbout = false },
             title = composeStringResource(R.string.about),
-        ) { padding -> KomgaAbout(Modifier.padding(padding), context, ::showUpdate) }
+        ) { padding -> KomgaAbout(Modifier.padding(padding), context, onUpdateAvailable) }
     }
     if (showLocalStorage) {
         SettingsCategoryDialog(
