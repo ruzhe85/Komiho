@@ -67,5 +67,5 @@ object UpscaleModelRegistry {
     // ⚠️ Kept as a plain const inside this standalone object — a `companion object` here
     // would not compile ("Modifier 'companion' is not applicable inside 'standalone
     // object'", the same trap Waifu2x hit).
-    const val MODEL_PACKAGE_RELEASE_URL = "https://github.com/ruzhe85/Komiho/releases/tag/CI"
+    const val MODEL_PACKAGE_RELEASE_URL = "https://github.com/ruzhe85/Komiho/releases/tag/qnn-model"
 }
