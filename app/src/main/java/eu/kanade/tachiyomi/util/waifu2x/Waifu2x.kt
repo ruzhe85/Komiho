@@ -108,8 +108,8 @@ object Waifu2x {
      * one-time cleanup for installs that already hold a corrupted file.
      *
      * 2026-09-19 v5: NPU contexts moved out of the host APK into plugin model packages
-     * (see [NpuModelPluginScanner]). Bumping flushes the stale host-extracted
-     * `cacheDir/qnn-contexts/*` copies on upgrade; plugin models re-extract from their
+     * (see [NpuModelPluginScanner]). Bumping flushes the stale host-extracted context files
+     * under `cacheDir/qnn-contexts/` on upgrade; plugin models re-extract from their
      * owning APK on first use. (GPU model assets are unchanged, so this only costs one
      * harmless re-extraction pass.)
      */

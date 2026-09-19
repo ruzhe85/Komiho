@@ -70,7 +70,7 @@ interface UpscaleModelSpec {
  *
  * Instances are produced by [NpuModelPluginScanner] from the plugin's `models.json`; the
  * values are therefore **data, not code** — the plugin APK contains no executable classes,
- * only `assets/<assetDir>/*.v<arch>.bin` files and the manifest.
+ * only the context files `assets/<assetDir>/<stem>.v<arch>.bin` and the manifest.
  */
 data class PluginUpscaleModel(
     override val id: String,
