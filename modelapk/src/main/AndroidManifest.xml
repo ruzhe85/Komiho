@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Komiho model-package APK: asset-only. No code, no components — the host resolves the
+     package by applicationId prefix, verifies the signature, and reads assets directly. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:hasCode="false"
+        android:allowBackup="false"
+        android:label="${modelLabel}" />
+
+</manifest>

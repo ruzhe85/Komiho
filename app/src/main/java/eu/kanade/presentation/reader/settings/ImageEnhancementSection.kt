@@ -1,17 +1,31 @@
 package eu.kanade.presentation.reader.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
+import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelRegistry
+import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelSpec
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.CheckboxItem
@@ -29,13 +43,21 @@ import tachiyomi.presentation.core.util.collectAsState
  * Layout, top to bottom:
  *  - Off, on its own row;
  *  - **CPU** group — Lanczos3 / Catmull-Rom, plus the scale row while a CPU mode is active;
- *  - **GPU** group — one chip per Vulkan [AiUpscaleModel], plus the tile-size row while a GPU mode
- *    is active;
- *  - **NPU** group — one chip per Qualcomm QNN/HTP [AiUpscaleModel], shown only on devices with a
- *    usable NPU runtime;
+ *  - **GPU** group — one chip per built-in Vulkan model, plus the tile-size row while a GPU
+ *    mode is active;
+ *  - **NPU** group — models delivered by installed plugin APKs, shown only on devices with
+ *    a usable NPU runtime. 2026-09-19 模型插件化: the host APK ships **no** NPU contexts
+ *    anymore, so this group has three states:
+ *      1. no QNN runtime (non-Qualcomm) — the whole group is not rendered;
+ *      2. runtime present, no compatible plugin installed — a non-selectable hint that
+ *         links to the model-package release on GitHub (installing a package and returning
+ *         to this screen refreshes the list immediately);
+ *      3. plugin installed — one chip per model whose generation set covers this device's
+ *         on-chip HTP (a family that skips this generation stays invisible instead of
+ *         offering a chip that could only ever fall back);
  *  - the enhancement-status overlay toggle.
  *
- * The two groups are **purely visual**: the underlying state is still the single
+ * The groups are **purely visual**: the underlying state is still the single
  * [ReaderPreferences.enhancementMode] flag, so exactly one chip is selected at any time
  * (picking a model also sets mode 5). Callers draw the section heading themselves — this
  * composable renders contents only.
@@ -82,16 +104,17 @@ fun ImageEnhancementSection(
             }
         }
 
-        // fromId() normalises unknown/removed stored ids to the default, so exactly one
-        // model chip stays selected no matter what the preference holds.
+        // findById() normalises unknown/removed stored ids (dropped model, uninstalled
+        // plugin) to the default, so exactly one model chip stays selected no matter what
+        // the preference holds.
         val modelId by preferences.aiModelId.collectAsState()
-        val activeModel = AiUpscaleModel.fromId(modelId)
+        val activeModel = UpscaleModelRegistry.findById(modelId)
 
-        // GPU group — Vulkan models only. NPU entries are pulled out into their own group below.
+        // GPU group — built-in Vulkan models only. NPU models live in their own group below.
         EnhancementGroupLabel(MR.strings.enhancement_group_gpu)
         SettingsChipRow {
             AiUpscaleModel.entries
-                .filter { it.backend == AiUpscaleModel.Backend.NCNN_VULKAN && Waifu2x.isModelSupported(it) }
+                .filter { Waifu2x.isModelSupported(it) }
                 .forEach { model ->
                     FilterChip(
                         selected = mode == 5 && activeModel == model,
@@ -99,11 +122,11 @@ fun ImageEnhancementSection(
                             preferences.aiModelId.set(model.id)
                             preferences.enhancementMode.set(5)
                         },
-                        label = { Text(stringResource(model.labelRes)) },
+                        label = { Text(model.displayLabel()) },
                     )
                 }
         }
-        if (mode == 5 && activeModel.backend == AiUpscaleModel.Backend.NCNN_VULKAN) {
+        if (mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.NCNN_VULKAN) {
             // Tile edge only affects the GPU path (NPU uses the fixed QNN context).
             val tileSize by preferences.aiTileSize.collectAsState()
             EnhancementParamLabel(MR.strings.pref_ai_tile_size)
@@ -118,23 +141,62 @@ fun ImageEnhancementSection(
             }
         }
 
-        // NPU group — Qualcomm QNN/HTP context models, shown only where an NPU runtime exists.
-        // Komiho: entries are filtered out on devices without a usable QNN runtime — same
-        // "unsupported options stay invisible" contract as elsewhere.
-        val npuModels = AiUpscaleModel.entries
-            .filter { it.backend == AiUpscaleModel.Backend.QNN_HTP && Waifu2x.isModelSupported(it) }
-        if (npuModels.isNotEmpty()) {
+        // NPU group — models from installed plugin APKs, only where an NPU runtime exists.
+        if (Waifu2x.isQnnRuntimeAvailable) {
             EnhancementGroupLabel(MR.strings.enhancement_group_npu)
-            SettingsChipRow {
-                npuModels.forEach { model ->
-                    FilterChip(
-                        selected = mode == 5 && activeModel == model,
-                        onClick = {
-                            preferences.aiModelId.set(model.id)
-                            preferences.enhancementMode.set(5)
-                        },
-                        label = { Text(stringResource(model.labelRes)) },
-                    )
+
+            val context = LocalContext.current
+            var npuModels by remember { mutableStateOf(UpscaleModelRegistry.npuModels()) }
+
+            // Refresh on first composition AND every time the screen comes back to the
+            // foreground, so installing (or uninstalling) a model package and returning to
+            // this screen updates the list immediately — no app restart, no preference
+            // churn. The scan is a handful of PackageManager queries + one small JSON.
+            val lifecycleOwner = LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) {
+                        npuModels = UpscaleModelRegistry.refresh(context)
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            }
+            LaunchedEffect(Unit) {
+                npuModels = UpscaleModelRegistry.refresh(context)
+            }
+
+            val compatible = npuModels.filter { Waifu2x.detectedQnnArchitecture in it.qnnArches }
+            if (compatible.isEmpty()) {
+                // No plugin installed (or none covering this generation): a non-selectable
+                // hint instead of an empty chip row.
+                val hint = stringResource(MR.strings.ai_model_plugin_hint)
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier
+                        .clickable { context.openInBrowser(UpscaleModelRegistry.MODEL_PACKAGE_RELEASE_URL) }
+                        .padding(
+                            start = SettingsItemsPaddings.Horizontal,
+                            end = SettingsItemsPaddings.Horizontal,
+                            top = 4.dp,
+                            bottom = 4.dp,
+                        ),
+                )
+            } else {
+                SettingsChipRow {
+                    compatible.forEach { model ->
+                        FilterChip(
+                            selected = mode == 5 && activeModel == model,
+                            onClick = {
+                                preferences.aiModelId.set(model.id)
+                                preferences.enhancementMode.set(5)
+                            },
+                            label = { Text(model.displayLabel()) },
+                        )
+                    }
                 }
             }
         }
@@ -146,7 +208,12 @@ fun ImageEnhancementSection(
     }
 }
 
-/** Muted heading for a platform group (CPU / GPU). */
+/** Label text for either kind of model: moko resource for built-ins, JSON text for plugins. */
+@Composable
+private fun UpscaleModelSpec.displayLabel(): String =
+    labelRes?.let { stringResource(it) } ?: labelText.orEmpty()
+
+/** Muted heading for a platform group (CPU / GPU / NPU). */
 @Composable
 private fun EnhancementGroupLabel(labelRes: StringResource) {
     Text(

@@ -7,6 +7,13 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- Komiho (2026-09-19 模型插件化): NPU models ship as separate asset-only plugin APKs
+         (applicationId prefix cn.ruzhe.komiho.model.*). Discovering them needs package
+         visibility; <queries> cannot express a package-name prefix and a no-code APK has no
+         component to host an intent-filter, so we declare QUERY_ALL_PACKAGES and filter +
+         signature-verify candidates in NpuModelPluginScanner. Sideload-only distribution. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <!-- Foreground-service permissions kept because WorkManager's
          SystemForegroundService (dataSync type) is merged into the manifest
          and requires them on Android 14+. -->

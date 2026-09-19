@@ -33,6 +33,9 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 rootProject.name = "MihonSY"
 include(":app")
+// Komiho 模型插件化 -->
+include(":modelapk")
+// Komiho 模型插件化 <--
 include(":baseline-profile")
 include(":core-metadata")
 include(":core:common")

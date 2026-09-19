@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.BlendMode
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
 import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
+import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelRegistry
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.getEnum
@@ -246,11 +247,12 @@ class ReaderPreferences(
     val aiTileSize: Preference<Int> = preferenceStore.getInt("pref_ai_tile_size", 128)
 
     /**
-     * Komiho: which GPU model the AI upscaler runs ([AiUpscaleModel]).
+     * Komiho: which AI model the upscaler runs (a built-in [AiUpscaleModel] or a model
+     * delivered by an installed plugin APK, see [UpscaleModelRegistry]).
      *
      * Stored as the model's stable string id, not an index — adding or reordering catalogue
-     * entries must never remap an existing install's choice. Unknown ids (dropped model)
-     * fall back to [AiUpscaleModel.Default].
+     * entries must never remap an existing install's choice. Unknown ids (dropped model,
+     * uninstalled plugin) fall back to [AiUpscaleModel.Default].
      */
     val aiModelId: Preference<String> = preferenceStore.getString(
         "pref_ai_model_id",

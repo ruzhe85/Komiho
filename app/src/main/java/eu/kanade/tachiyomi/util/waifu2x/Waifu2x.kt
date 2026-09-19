@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.util.waifu2x
 
 import android.content.Context
+import android.content.res.AssetManager
 import android.graphics.Bitmap
 import java.io.File
 import logcat.LogPriority
@@ -14,7 +15,7 @@ import tachiyomi.core.common.util.system.logcat
  * `libwaifu2x-jni.so` (`app/src/main/cpp/waifu2x{,_jni}.cpp`) and is only built for
  * ABIs whose ncnn SDK is present under `third_party/`.
  *
- * Models come from [AiUpscaleModel]: scale and tile padding are per-model properties, and
+ * Models come from [UpscaleModelSpec]: scale and tile padding are per-model properties, and
  * the native engine is rebuilt whenever the selected model differs from the running one.
  * Unlike the CPU resamplers there is still no free-form scale factor — the scale is baked
  * into the network itself.
@@ -89,7 +90,7 @@ object Waifu2x {
      * that had already extracted `*.v81.bin` would keep that stale file and the new finger
      * print would never be honoured.
      *
-     * 2026-09-19 v3: the [AiUpscaleModel.QnnUniversalFastV2Fp16] contexts were recompiled —
+     * 2026-09-19 v3: the (then-bundled) Universal-Fast V2 contexts were recompiled —
      * same *file names*, different bytes (NHWC-wrapped so the graph I/O matches this code's
      * contract). Note that an app **update does not clear `cacheDir`** on AOSP, so a plain
      * reinstall would otherwise keep serving the old file: during debugging two different
@@ -105,24 +106,29 @@ object Waifu2x {
      * same model report `NPU OK`**, which is what pinned it on the cached copy rather than on
      * the context itself. Extraction is now atomic (see [extractAsset]), so this bump is the
      * one-time cleanup for installs that already hold a corrupted file.
+     *
+     * 2026-09-19 v5: NPU contexts moved out of the host APK into plugin model packages
+     * (see [NpuModelPluginScanner]). Bumping flushes the stale host-extracted
+     * `cacheDir/qnn-contexts/*` copies on upgrade; plugin models re-extract from their
+     * owning APK on first use. (GPU model assets are unchanged, so this only costs one
+     * harmless re-extraction pass.)
      */
-    private const val MODEL_CACHE_VERSION = "4"
+    private const val MODEL_CACHE_VERSION = "5"
 
     /**
      * Komiho: picks the context asset for [model] on a device whose on-chip HTP is [arch].
      *
-     * Each NPU entry ships one context per generation ([AiUpscaleModel.qnnArches]) because
+     * Each plugin model ships one context per generation ([UpscaleModelSpec.qnnArches]) because
      * QNN context binaries are **not** Flexible Context Binaries — byte-level comparison of
      * the v75/v79/v81 builds of one model shows 85–94% differing bytes and different file
      * lengths, so a context only loads on the generation it was compiled for.
      *
-     * A device whose arch we do not ship returns null; [ensureEngine] then logs the
+     * A device whose arch a family does not cover returns null; [ensureEngine] then logs the
      * mismatch and falls back to Vulkan rather than handing the engine a file that cannot
-     * load. This is intentionally a *runtime* lookup: one APK serves every generation we
-     * ship (currently v69/v73/v75/v79/v81), and the choice is made from the probed
+     * load. This is intentionally a *runtime* lookup: the choice is made from the probed
      * hardware, not a build-time constant.
      */
-    fun contextAssetFor(model: AiUpscaleModel, arch: Int): String? {
+    fun contextAssetFor(model: UpscaleModelSpec, arch: Int): String? {
         if (arch <= 0) return null
         if (arch !in model.qnnArches) return null
         return model.stem + ".v" + arch + ".bin"
@@ -165,11 +171,11 @@ object Waifu2x {
 
     /** Model the caller asked for; the engine is (re)built for it on the next [process]. */
     @Volatile
-    private var requestedModel: AiUpscaleModel = AiUpscaleModel.Default
+    private var requestedModel: UpscaleModelSpec = AiUpscaleModel.Default
 
     /** Model the running native engine was built for; null = no engine yet. */
     @Volatile
-    private var activeModel: AiUpscaleModel? = null
+    private var activeModel: UpscaleModelSpec? = null
 
     init {
         libraryLoaded = try {
@@ -198,7 +204,7 @@ object Waifu2x {
     }
 
     /**
-     * Komiho: selects the GPU model ([AiUpscaleModel]) for subsequent inferences.
+     * Komiho: selects the AI model ([UpscaleModelSpec]) for subsequent inferences.
      *
      * Applied lazily on the next [process] call. Switching models is expensive — the native
      * engine is torn down and re-initialised (model load + Vulkan pipeline creation) — so
@@ -210,7 +216,7 @@ object Waifu2x {
      * observability, letting the diagnostics distinguish "NPU actually ran" from
      * "NPU was selected but the context did not load".
      */
-    fun setModel(model: AiUpscaleModel) {
+    fun setModel(model: UpscaleModelSpec) {
         requestedModel = model
     }
 
@@ -219,7 +225,7 @@ object Waifu2x {
      * recent attempt succeeded. Diagnostic only — nothing consults it to change behaviour.
      */
     @Volatile
-    var lastFailedQnnModel: AiUpscaleModel? = null
+    var lastFailedQnnModel: UpscaleModelSpec? = null
         private set
 
     /**
@@ -340,8 +346,8 @@ object Waifu2x {
             // 并发页（预取 + 当前页）会互相覆盖，见 [engineByPage] 的说明。
             if (out != null && out !== argb) {
                 val kind = when (activeModel?.backend) {
-                    AiUpscaleModel.Backend.QNN_HTP -> EngineKind.QNN_HTP
-                    AiUpscaleModel.Backend.NCNN_VULKAN -> EngineKind.NCNN_VULKAN
+                    UpscaleModelSpec.Backend.QNN_HTP -> EngineKind.QNN_HTP
+                    UpscaleModelSpec.Backend.NCNN_VULKAN -> EngineKind.NCNN_VULKAN
                     null -> null
                 }
                 if (kind != null) {
@@ -441,16 +447,17 @@ object Waifu2x {
      * `nativeInitW2xEx` deletes the previous instance and constructs a new one, waiting for
      * any in-flight inference to release the engine lock first.
      *
-     * Komiho: QNN models take the [Backend.QNN_HTP] branch — they load a prebuilt context
-     * binary instead of the ncnn engine. When that fails (unsupported HTP arch, missing
-     * runtime, corrupt context) the request silently falls back to the Vulkan engine with
-     * [AiUpscaleModel.Default], so an NPU selection can never degrade below the status quo.
+     * Komiho: QNN models take the [UpscaleModelSpec.Backend.QNN_HTP] branch — they load a
+     * prebuilt context binary instead of the ncnn engine. When that fails (unsupported HTP
+     * arch, missing runtime, corrupt context) the request silently falls back to the Vulkan
+     * engine with [AiUpscaleModel.Default], so an NPU selection can never degrade below the
+     * status quo.
      */
     private fun ensureEngine(context: Context): Boolean = synchronized(this) {
         val model = requestedModel
         if (isInitialized && activeModel == model) return true
 
-        if (model.backend == AiUpscaleModel.Backend.QNN_HTP) {
+        if (model.backend == UpscaleModelSpec.Backend.QNN_HTP) {
             val ok = initQnnEngine(context, model)
             if (ok) {
                 isInitialized = true
@@ -471,7 +478,7 @@ object Waifu2x {
             logcat(LogPriority.WARN) {
                 "Waifu2x: NPU UNAVAILABLE — QNN init failed for ${model.id} " +
                     "(on-chip HTP v$detectedQnnArchitecture vs packed arches " +
-                    "${AiUpscaleModel.packedQnnArches.joinToString { it.toString() }}); " +
+                    "${model.qnnArches.joinToString { it.toString() }}); " +
                     "falling back to Vulkan Default"
             }
             requestedModel = AiUpscaleModel.Default
@@ -485,10 +492,10 @@ object Waifu2x {
      * Invoked when a QNN model had to fall back to Vulkan at init time. The UI layer uses it
      * to persist the correction so the setting stops lying about the active engine.
      */
-    var onQnnFallback: ((AiUpscaleModel) -> Unit)? = null
+    var onQnnFallback: ((UpscaleModelSpec) -> Unit)? = null
 
     /** Vulkan/ncnn branch of [ensureEngine] (kept out of the dispatcher for clarity). */
-    private fun ensureEngineLocked(context: Context, model: AiUpscaleModel): Boolean {
+    private fun ensureEngineLocked(context: Context, model: UpscaleModelSpec): Boolean {
         val dir = prepareModel(context, model)
         if (dir == null) {
             logcat(LogPriority.WARN) { "Waifu2x: model assets missing for ${model.id}" }
@@ -515,22 +522,24 @@ object Waifu2x {
     /**
      * Komiho: loads a QNN context binary for [model] and initialises the HTP engine.
      *
-     * The context is extracted from assets into `cacheDir/qnn-contexts/` (versioned like the
-     * ncnn models), then handed to [nativeInitQnn] together with the app's
-     * `nativeLibraryDir` — the HTP Skel library is loaded by the DSP runtime, which resolves
-     * `ADSP_LIBRARY_PATH` against that directory. The padding travels with the model entry.
+     * The context is extracted from its owning APK (host assets for built-ins, the plugin
+     * APK's assets for [PluginUpscaleModel]s — see [assetsFor]) into `cacheDir/qnn-contexts/`
+     * (versioned like the ncnn models), then handed to [nativeInitQnn] together with the
+     * app's `nativeLibraryDir` — the HTP Skel library is loaded by the DSP runtime, which
+     * resolves `ADSP_LIBRARY_PATH` against that directory. The padding travels with the
+     * model entry.
      *
-     * The file is chosen from the **probed** on-chip arch ([contextAssetFor]), so one entry
-     * covers both generations we ship. An arch we have no context for fails here — before
-     * the DSP is asked to do anything — and the caller falls back to Vulkan.
+     * The file is chosen from the **probed** on-chip arch ([contextAssetFor]). An arch the
+     * family does not cover fails here — before the DSP is asked to do anything — and the
+     * caller falls back to Vulkan.
      */
-    private fun initQnnEngine(context: Context, model: AiUpscaleModel): Boolean {
+    private fun initQnnEngine(context: Context, model: UpscaleModelSpec): Boolean {
         val arch = detectedQnnArchitecture
         val asset = contextAssetFor(model, arch)
         if (asset == null) {
             logcat(LogPriority.WARN) {
                 "Waifu2x: no QNN context for ${model.id} on HTP v$arch " +
-                    "(packed arches: ${AiUpscaleModel.packedQnnArches.joinToString { it.toString() }})"
+                    "(packed arches: ${model.qnnArches.joinToString { it.toString() }})"
             }
             return false
         }
@@ -544,7 +553,6 @@ object Waifu2x {
         }
     }
 
-    /** Extracts a QNN context from assets; returns its absolute path, or null. */
     /**
      * Komiho: copies one asset into [target] **atomically**.
      *
@@ -560,16 +568,16 @@ object Waifu2x {
      * then treated it as valid and kept serving it, so the model failed permanently until the
      * app cache was cleared (see [MODEL_CACHE_VERSION] v4).
      */
-    private fun extractAsset(context: Context, assetPath: String, target: File) {
+    private fun extractAsset(assets: AssetManager, assetPath: String, target: File) {
         val temp = File(target.parentFile, target.name + ".tmp")
         try {
-            context.assets.open(assetPath).use { input ->
+            assets.open(assetPath).use { input ->
                 temp.outputStream().use(input::copyTo)
             }
             if (!temp.renameTo(target)) {
                 // A refused rename must not leave the model unusable: fall back to the old
                 // in-place copy, which is still better than returning no path at all.
-                context.assets.open(assetPath).use { input ->
+                assets.open(assetPath).use { input ->
                     target.outputStream().use(input::copyTo)
                 }
             }
@@ -578,7 +586,18 @@ object Waifu2x {
         }
     }
 
-    private fun prepareQnnContext(context: Context, model: AiUpscaleModel, asset: String): String? = try {
+    /**
+     * Komiho (2026-09-19 模型插件化): the [AssetManager] that owns [model]'s files —
+     * the host APK's own assets for built-in models, the model-package APK's assets
+     * (via `createPackageContext`) for plugin models. The extraction/caching below is
+     * identical for both: the bytes land in `cacheDir` exactly the same way.
+     */
+    private fun assetsFor(context: Context, model: UpscaleModelSpec): AssetManager =
+        model.sourcePackage
+            ?.let { context.createPackageContext(it, Context.CONTEXT_IGNORE_SECURITY).assets }
+            ?: context.assets
+
+    private fun prepareQnnContext(context: Context, model: UpscaleModelSpec, asset: String): String? = try {
         val dir = File(context.cacheDir, "qnn-contexts")
         if (!dir.isDirectory && !dir.mkdirs() && !dir.isDirectory) {
             null
@@ -587,7 +606,7 @@ object Waifu2x {
             val versionFile = File(dir, ".model-version")
             val refresh = versionFile.takeIf { it.exists() }?.readText() != MODEL_CACHE_VERSION
             if (refresh || !out.exists() || out.length() == 0L) {
-                extractAsset(context, "${model.assetDir}/$asset", out)
+                extractAsset(assetsFor(context, model), "${model.assetDir}/$asset", out)
             }
             if (refresh) versionFile.writeText(MODEL_CACHE_VERSION)
             out.absolutePath
@@ -654,37 +673,31 @@ object Waifu2x {
         }
 
     /**
-     * UI filter: an NPU entry is offered on any device with a real Qualcomm HTP, regardless
-     * of generation.
-     *
-     * Komiho (2026-09-17): the gate deliberately does **not** compare against the packed
-     * arch set ([AiUpscaleModel.qnnArches]). We ship contexts for every generation the
-     * runtime supports (v69/v73/v75/v79/v81), and a newer HTP runs older contexts (downward
-     * compatible), so restricting by architecture would hide entries on devices that can
-     * actually run them. An unmatched arch reports an init failure and the page falls back
-     * to Vulkan — the badge then shows what really ran, which is the whole point of
-     * observing the actual execution path.
+     * UI filter: an NPU model is offered on any device with a real Qualcomm HTP.
+     * Per-generation coverage is decided separately by [contextAssetFor] / the settings
+     * UI (a family that skips this device's generation simply lists no matching model).
      *
      * Non-Qualcomm hardware reports architecture 0 (no `ON_CHIP` HTP device) and stays hidden.
      * Vulkan entries are always shown (their failure path is the CPU resampler fallback).
      */
-    fun isModelSupported(model: AiUpscaleModel): Boolean = when (model.backend) {
-        AiUpscaleModel.Backend.NCNN_VULKAN -> true
-        AiUpscaleModel.Backend.QNN_HTP -> isQnnRuntimeAvailable
+    fun isModelSupported(model: UpscaleModelSpec): Boolean = when (model.backend) {
+        UpscaleModelSpec.Backend.NCNN_VULKAN -> true
+        UpscaleModelSpec.Backend.QNN_HTP -> isQnnRuntimeAvailable
     }
 
     /**
      * Extracts the given model's assets into the cache dir and returns its absolute path.
      *
-     * Each model gets its own directory keyed by [AiUpscaleModel.id] so switching models
+     * Each model gets its own directory keyed by [UpscaleModelSpec.id] so switching models
      * never mixes files; [MODEL_CACHE_VERSION] invalidates previously extracted copies.
      */
-    private fun prepareModel(context: Context, model: AiUpscaleModel): String? = try {
+    private fun prepareModel(context: Context, model: UpscaleModelSpec): String? = try {
         val dir = File(context.cacheDir, "waifu2x-models/${model.id}")
         if (!dir.isDirectory && !dir.mkdirs() && !dir.isDirectory) {
             null
         } else {
-            val files = context.assets.list(model.assetDir).orEmpty()
+            val assets = assetsFor(context, model)
+            val files = assets.list(model.assetDir).orEmpty()
             if (files.isEmpty()) {
                 null
             } else {
@@ -696,7 +709,7 @@ object Waifu2x {
                         // Komiho: atomic, same reason as the QNN contexts — several prewarm
                         // threads run through here and a half-written model file is served
                         // back on the next launch.
-                        extractAsset(context, "${model.assetDir}/$name", out)
+                        extractAsset(assets, "${model.assetDir}/$name", out)
                     }
                 }
                 if (refresh) versionFile.writeText(MODEL_CACHE_VERSION)
@@ -763,10 +776,10 @@ object Waifu2x {
      */
     private external fun nativeInitQnn(contextPath: String, nativeLibraryDir: String, padding: Int): Boolean
 
-    // NOTE: the QNN arch set is declared at file scope in `AiUpscaleModel.kt` (the catalogue
-    // owns which generations ship; it is re-exposed as
-    // `AiUpscaleModel.packedQnnArches` for reporting), and the per-device file is resolved by
-    // [contextAssetFor]. Do NOT add a `companion object` here — `Waifu2x` is already a
-    // standalone `object`, so a second one is a compile error: "Modifier 'companion' is not
-    // applicable inside 'standalone object'".
+    // NOTE: since 2026-09-19 the QNN arch set is **per model** ([UpscaleModelSpec.qnnArches],
+    // from the plugin's `models.json`), not a host-wide constant — the host ships no
+    // contexts at all. The per-device file is still resolved by [contextAssetFor].
+    // Do NOT add a `companion object` here — `Waifu2x` is already a standalone `object`,
+    // so a second one is a compile error: "Modifier 'companion' is not applicable inside
+    // 'standalone object'".
 }
