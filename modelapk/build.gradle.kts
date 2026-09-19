@@ -1,5 +1,8 @@
 plugins {
-    alias(mihonx.plugins.android.application)
+    // Komiho: deliberately NOT the mihonx application convention — it force-enables core
+    // library desugaring and injects the desugar runtime, which AGP dexes into the APK
+    // (~2.2 MB classes.dex) even for a source-less module. This package must be asset-only.
+    alias(libs.plugins.android.application)
 }
 
 // Komiho (2026-09-19 模型插件化): asset-only model-package APK — **one SoC per APK**.
@@ -25,18 +28,14 @@ plugins {
 
 android {
     namespace = "cn.ruzhe.komiho.modelpkg"
-
-    // The mihonx application convention force-enables core library desugaring for every
-    // module — that would dex the desugar runtime into this APK, producing classes.dex in
-    // what must be a code-free asset package (the workflow fails on classes.dex on
-    // purpose). Disable it here; this module has no sources at all.
-    compileOptions {
-        isCoreLibraryDesugaringEnabled = false
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = (project.findProperty("modelId") as String?)?.takeIf { it.isNotBlank() }
             ?: "cn.ruzhe.komiho.model.template"
+
+        minSdk = 26
+        targetSdk = 36
 
         versionCode = (project.findProperty("modelVersionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("modelVersionName") as String?) ?: "1.0"
@@ -67,10 +66,4 @@ android {
             signingConfig = signingConfigs.getByName("komihoRelease")
         }
     }
-}
-
-// The convention also injects the desugar artifact into the coreLibraryDesugaring
-// configuration; drop it so nothing can be dexed into the asset-only package.
-configurations.matching { it.name == "coreLibraryDesugaring" }.all {
-    artifacts.clear()
 }
