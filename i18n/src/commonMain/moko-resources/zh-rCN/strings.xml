@@ -401,7 +401,7 @@
     <string name="ai_model_anime_video">AnimeVideo</string>
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
-    <string name="ai_model_plugin_hint">NPU 模型包需另行安装 — 点击前往 GitHub 下载</string>
+    <string name="ai_model_plugin_hint">NPU模型包需另行安装-点击前往》模型包下载</string>
     <string name="pref_ai_tile_size">分块大小</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>
@@ -993,4 +993,40 @@
     <string name="extensionStoresScreen.deleteStore.title">移除插件商店</string>
     <string name="extensionStoresScreen.deleteStore.body">是否移除插件商店 \"%1$s\" (%2$s)？</string>
     <string name="pref_webtoon_vertical_navigator_on_left">将垂直导航栏放在左侧</string>
+
+    <!-- Komiho: 列表 / 分区 / 收藏 / 阅读列表 空态与加载错误 -->
+    <string name="load_failed_error">加载失败：%s</string>
+    <string name="empty_collection">该收藏暂无系列</string>
+    <string name="empty_readlist">该阅读列表暂无书籍</string>
+    <string name="empty_section_list">暂无内容</string>
+    <string name="read_status_read">已读</string>
+    <string name="read_status_read_pages">已读 %1$s 页</string>
+
+    <!-- Komiho: Komga 连接页 -->
+    <string name="connect_ok">连接正常</string>
+    <string name="connect_title_new">连接 Komga 服务器</string>
+    <string name="connect_title_edit">编辑服务器</string>
+    <string name="action_back">返回</string>
+    <string name="connect_name_label">名称（可选）</string>
+    <string name="connect_name_placeholder">默认用服务器地址，如 192.168.1.10:25600</string>
+    <string name="connect_server_label">服务器地址</string>
+    <string name="connect_server_placeholder">http://192.168.1.10:25600</string>
+    <string name="connect_auth_apikey">API Key（推荐）</string>
+    <string name="connect_auth_basic">账号密码</string>
+    <string name="connect_apikey_label">API Key</string>
+    <string name="connect_apikey_placeholder">在 Komga 设置 → 用户 → API Key 生成</string>
+    <string name="connect_username_label">用户名</string>
+    <string name="connect_password_label">密码</string>
+    <string name="action_test_connection">测试连接</string>
+    <string name="action_connect">连接</string>
+    <string name="connect_error_unknown">连接失败：未知错误</string>
+    <string name="connect_error_401">认证失败（401）：请检查 API Key 或账号密码</string>
+    <string name="connect_error_403">权限不足（403）：请在 Komga 用户设置 → API Key 创建时勾选 Library 权限</string>
+    <string name="connect_error_server">服务器错误（%s）：请查看 Komga 服务端日志</string>
+    <string name="connect_error_network">网络失败：%s（请检查服务器地址和端口）</string>
+    <string name="connect_error_generic">连接失败：%s</string>
+
+    <!-- Komiho: 书架图标无障碍描述 -->
+    <string name="desc_download">下载</string>
+    <string name="desc_downloaded">已下载</string>
 </resources>

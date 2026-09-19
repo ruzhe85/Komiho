@@ -561,7 +561,7 @@
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <!-- 2026-09-19 模型插件化: NPU 模型不再内置，UI 在 NPU 分组显示此空态提示（点击跳 GitHub 下载模型包）。 -->
-    <string name="ai_model_plugin_hint">NPU models are delivered as separate packages — tap to download from GitHub</string>
+    <string name="ai_model_plugin_hint">NPU model package requires separate installation — tap to download »</string>
     <string name="pref_ai_tile_size">Tile size</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>
@@ -1125,4 +1125,40 @@
     <string name="migrationListScreen.migrateDialog.cancelLabel">Cancel</string>
     <string name="migrationListScreen.progressDialog.cancelLabel">Cancel</string>
     <string name="migrationListScreen.matchWithoutChapterToast">No chapters found, this entry cannot be used for migration</string>
+
+    <!-- Komiho: 列表 / 分区 / 收藏 / 阅读列表 空态与加载错误 -->
+    <string name="load_failed_error">Loading failed: %s</string>
+    <string name="empty_collection">This collection has no series</string>
+    <string name="empty_readlist">This reading list has no books</string>
+    <string name="empty_section_list">Nothing here yet</string>
+    <string name="read_status_read">Read</string>
+    <string name="read_status_read_pages">Read %1$s pages</string>
+
+    <!-- Komiho: Komga 连接页 -->
+    <string name="connect_ok">Connected</string>
+    <string name="connect_title_new">Connect to Komga server</string>
+    <string name="connect_title_edit">Edit server</string>
+    <string name="action_back">Back</string>
+    <string name="connect_name_label">Name (optional)</string>
+    <string name="connect_name_placeholder">Defaults to server address, e.g. 192.168.1.10:25600</string>
+    <string name="connect_server_label">Server address</string>
+    <string name="connect_server_placeholder">http://192.168.1.10:25600</string>
+    <string name="connect_auth_apikey">API Key (recommended)</string>
+    <string name="connect_auth_basic">Account &amp; password</string>
+    <string name="connect_apikey_label">API Key</string>
+    <string name="connect_apikey_placeholder">Generate in Komga Settings → User → API Key</string>
+    <string name="connect_username_label">Username</string>
+    <string name="connect_password_label">Password</string>
+    <string name="action_test_connection">Test connection</string>
+    <string name="action_connect">Connect</string>
+    <string name="connect_error_unknown">Connection failed: unknown error</string>
+    <string name="connect_error_401">Authentication failed (401): check API Key or account password</string>
+    <string name="connect_error_403">Insufficient permission (403): enable Library permission when creating the API Key in Komga user settings</string>
+    <string name="connect_error_server">Server error (%s): check Komga server logs</string>
+    <string name="connect_error_network">Network failed: %s (check server address and port)</string>
+    <string name="connect_error_generic">Connection failed: %s</string>
+
+    <!-- Komiho: 书架图标无障碍描述 -->
+    <string name="desc_download">Download</string>
+    <string name="desc_downloaded">Downloaded</string>
 </resources>
