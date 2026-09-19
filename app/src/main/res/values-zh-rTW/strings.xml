@@ -386,5 +386,11 @@
     <string name="downloads_empty">還沒有下載的書</string>
     <string name="downloads_empty_hint">在系列頁點「下載整個系列」即可離線保存</string>
     <string name="download_progress">已下載 %1$d / %2$d</string>
+    <!-- SY: Komiho 閱讀器內分頁書籤與增強角標 -->
+    <string name="reader_bookmarks_title">書籤</string>
+    <string name="reader_bookmark_add_current">在當前頁加書籤（第 %1$d 頁）</string>
+    <string name="reader_bookmark_remove">刪除書籤</string>
+    <string name="reader_bookmark_page">第 %1$d 頁</string>
+    <string name="reader_enhancement_skipped">已跳過</string>
 
 </resources>

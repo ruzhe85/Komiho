@@ -125,6 +125,7 @@ import app.mihonsy.komga.data.download.KomgaBookDownloader
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.download.KomgaDownloadEvent
 import app.mihonsy.komga.source.KomgaSource
+import app.mihonsy.komga.data.withAppLanguage
 import logcat.LogPriority
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.i18n.pluralStringResource
@@ -187,6 +188,16 @@ class ReaderActivity : BaseActivity() {
     /**
      * Configuration at reader level, like background color or forced orientation.
      */
+    /**
+     * Komiho: 阅读器继承 Mihon 的 BaseActivity（AppCompatActivity），其 attachBaseContext 只套了
+     * prepareTabletUiContext，没有应用「应用语言」。本 fork 的应用语言由
+     * [app.mihonsy.komga.data.withAppLanguage] 在 Context 上包装实现（见 KomgaBaseActivity），
+     * 阅读器不套就会一直回退系统 locale（中文设备→锁死中文）。这里补上，与 Komga 其它界面一致。
+     */
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(newBase.withAppLanguage())
+    }
+
     private var config: ReaderConfig? = null
 
     private var menuToggleToast: Toast? = null

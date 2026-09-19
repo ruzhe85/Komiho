@@ -391,5 +391,11 @@
     <string name="downloads_empty">Nothing downloaded yet</string>
     <string name="downloads_empty_hint">Tap \"Download whole series\" on a series page to save offline</string>
     <string name="download_progress">Downloaded %1$d / %2$d</string>
+    <!-- SY: Komiho reader in-page bookmarks & enhancement badge -->
+    <string name="reader_bookmarks_title">Bookmarks</string>
+    <string name="reader_bookmark_add_current">Add bookmark on current page (page %1$d)</string>
+    <string name="reader_bookmark_remove">Remove bookmark</string>
+    <string name="reader_bookmark_page">Page %1$d</string>
+    <string name="reader_enhancement_skipped">Skipped</string>
 
 </resources>
