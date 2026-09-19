@@ -171,7 +171,7 @@ jobs:
           cp modelapk/build/outputs/apk/release/modelapk-release.apk "komiho-model-${FAMILY}.apk"
           ls -la komiho-model-*.apk
 
-      - name: Upload to CI Release (tag: CI)
+      - name: "Upload to CI Release (tag: CI)"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
