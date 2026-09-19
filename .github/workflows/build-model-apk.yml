@@ -217,11 +217,11 @@ jobs:
           cp modelapk/build/outputs/apk/release/modelapk-release.apk "komiho-model-${SOC}.apk"
           ls -la komiho-model-*.apk
 
-      - name: "Upload to CI Release (tag: CI)"
+      - name: "Upload to qnn-model Release (tag: qnn-model)"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="CI"
+          TAG="qnn-model"
           upload_with_retry() {
             for attempt in 1 2 3; do
               if gh release upload "$TAG" "$1" --repo "${{ github.repository }}" --clobber; then
@@ -235,6 +235,6 @@ jobs:
           }
           if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release create "$TAG" --repo "${{ github.repository }}" \
-              --title "Komiho-CI" --notes "CI channel" --prerelease
+              --title "Komiho NPU Models" --notes "QNN/HTP NPU model packages (one APK per SoC generation). Host CI APKs live in the \`CI\` tag, not here." --prerelease
           fi
           upload_with_retry "komiho-model-${SOC}.apk"
