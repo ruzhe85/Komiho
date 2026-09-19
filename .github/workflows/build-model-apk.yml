@@ -1,34 +1,31 @@
 name: Build model package APK
 
-# Komiho (2026-09-19 模型插件化): packages one NPU model family into an asset-only plugin
-# APK (`:modelapk` module). The host app scans these packages at runtime — building a new
-# model package NEVER requires a host release.
+# Komiho (2026-09-19 模型插件化): packages ONE SoC's worth of NPU contexts into an
+# asset-only plugin APK (`:modelapk` module). The host app scans these packages at
+# runtime — building a new model package NEVER requires a host release.
 #
-# Prerequisites
-#   * Model sources live on the `model-sources` branch of THIS repo, organised **by SoC**
-#     (one directory per HTP generation — that is how the compile pipeline emits them):
-#       v<arch>/<stem>.v<arch>.bin                 (v69/v73/v75/v79/v81)
-#       families/<family>/models.json              (protocol v1: id/stem/scale/padding/
-#                                                   arches/label — padding is derived
-#                                                   from the ONNX by the packaging
-#                                                   pipeline, never hand-edited)
-#     A family package is assembled by walking each model's `stem × arches` back through
-#     the SoC directories.
-#   * The branch is data-only (bins + json); main never sees the payloads, so the host APK
-#     stays small.
+# Data layout (branch `model-sources`, organised **by SoC** — that is how the compile
+# pipeline emits them):
+#   v<arch>/<stem>.v<arch>.bin    one directory per HTP generation (v69/v73/v75/v79/v81)
+#   models.json                   global model registry (protocol v1: id/stem/scale/
+#                                 padding/label — padding is derived from the ONNX by
+#                                 the packaging pipeline, never hand-edited)
+# The workflow walks the chosen SoC directory, looks every stem up in the registry and
+# generates the package manifest with `arches = [<soc>]` — so installing a package for
+# the wrong generation is harmless: the host filters those models out instead of
+# offering chips that could only fall back.
 #
-# Usage: run this workflow with family=<name> (e.g. `nomosuni`). The package is signed with
-# the SAME release keystore as the host (the scanner rejects mismatched signatures) and
-# uploaded to the `CI` pre-release next to the host APKs.
+# Usage: run with soc=v79 (etc). Signed with the SAME release keystore as the host (the
+# scanner rejects mismatched signatures); uploaded to the `CI` pre-release.
 #
-# Install the produced `komiho-model-<family>.apk`, then open 增强设置 — the models appear
-# in the NPU group immediately (the list refreshes on every resume of that screen).
+# Install `komiho-model-v<soc>.apk`, then open 增强设置 — every model of that generation
+# appears in the NPU group immediately (the list refreshes on every resume of the screen).
 
 "on":
   workflow_dispatch:
     inputs:
-      family:
-        description: 'Model family (families/<family>/models.json), e.g. nomosuni'
+      soc:
+        description: 'HTP generation to package: v69 / v73 / v75 / v79 / v81'
         required: true
         type: string
       model_version_name:
@@ -57,43 +54,58 @@ jobs:
           ref: model-sources
           path: model-sources
 
-      - name: Resolve family inputs
+      - name: Validate SoC input
         env:
-          FAMILY: ${{ inputs.family }}
+          SOC: ${{ inputs.soc }}
         run: |
-          [ -f "model-sources/families/${FAMILY}/models.json" ] \
-            || { echo "::error::missing model-sources/families/${FAMILY}/models.json"; exit 1; }
-          echo "FAMILY=${FAMILY}" >> "$GITHUB_ENV"
-          cat "model-sources/families/${FAMILY}/models.json"
+          case "$SOC" in
+            v69|v73|v75|v79|v81) ;;
+            *) echo "::error::soc must be one of v69/v73/v75/v79/v81, got '$SOC'"; exit 1 ;;
+          esac
+          [ -d "model-sources/$SOC" ] || { echo "::error::missing model-sources/$SOC"; exit 1; }
+          [ -f "model-sources/models.json" ] || { echo "::error::missing model-sources/models.json"; exit 1; }
+          echo "SOC=${SOC}" >> "$GITHUB_ENV"
+          echo "ARCH=${SOC#v}" >> "$GITHUB_ENV"
 
       - name: Stage assets into the modelapk module
         env:
-          FAMILY: ${{ inputs.family }}
+          SOC: ${{ inputs.soc }}
         run: |
           python3 - <<'PY'
           import json, os, shutil, sys
-          fam = os.environ["FAMILY"]
+          soc = os.environ["SOC"]            # e.g. v79
+          arch = os.environ["ARCH"]          # e.g. 79
           src = "model-sources"
-          man = json.load(open(f"{src}/families/{fam}/models.json", encoding="utf-8"))
-          if man.get("protocolVersion", 1) > 1:
-              sys.exit("::error::manifest protocol newer than the packager")
+          registry = json.load(open(f"{src}/models.json", encoding="utf-8"))
+          if registry.get("protocolVersion", 1) > 1:
+              sys.exit("::error::registry protocol newer than the packager")
+          by_stem = {m["stem"]: m for m in registry.get("models", [])}
+          bins = sorted(f for f in os.listdir(f"{src}/{soc}") if f.endswith(".bin"))
+          if not bins:
+              sys.exit(f"::error::no context bins under {src}/{soc}")
           os.makedirs("modelapk/src/main/assets/qnn-contexts", exist_ok=True)
-          count = 0
-          for m in man.get("models", []):
-              stem, arches, padding = m.get("stem"), m.get("arches"), m.get("padding", 0)
-              if not stem or not arches or padding <= 0:
-                  sys.exit(f"::error::incomplete entry in models.json: {m}")
-              for arch in arches:
-                  srcf = f"{src}/v{arch}/{stem}.v{arch}.bin"
-                  if not os.path.isfile(srcf):
-                      sys.exit(f"::error::missing {srcf}")
-                  shutil.copy2(srcf, f"modelapk/src/main/assets/qnn-contexts/{stem}.v{arch}.bin")
-                  count += 1
-          shutil.copy2(f"{src}/families/{fam}/models.json",
-                       "modelapk/src/main/assets/models.json")
-          print(f"staged {count} contexts from the SoC directories")
+          models = []
+          for fname in bins:
+              suffix = f".{soc}.bin"
+              if not fname.endswith(suffix):
+                  sys.exit(f"::error::{fname} does not match the <stem>.{soc}.bin naming")
+              stem = fname[: -len(suffix)]
+              m = by_stem.get(stem)
+              if m is None:
+                  sys.exit(f"::error::{stem} has no entry in models.json registry")
+              if not m.get("id") or not m.get("label") or m.get("padding", 0) <= 0:
+                  sys.exit(f"::error::incomplete registry entry for {stem}: {m}")
+              shutil.copy2(f"{src}/{soc}/{fname}",
+                           f"modelapk/src/main/assets/qnn-contexts/{fname}")
+              models.append({"id": m["id"], "stem": stem, "scale": m.get("scale", 2),
+                             "padding": m["padding"], "arches": [arch], "label": m["label"]})
+          manifest = {"protocolVersion": 1, "models": models}
+          with open("modelapk/src/main/assets/models.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, ensure_ascii=False, indent=2)
           with open(os.environ["GITHUB_ENV"], "a") as f:
-              f.write(f"BIN_COUNT={count}\n")
+              f.write(f"BIN_COUNT={len(models)}\n")
+          print(f"staged {len(models)} models for {soc}: "
+                + ", ".join(m["id"] for m in models))
           PY
           find modelapk/src/main/assets -type f | sort
 
@@ -147,8 +159,8 @@ jobs:
           KOMIHO_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KOMIHO_RELEASE_KEYSTORE_PASSWORD }}
         run: |
           ./gradlew :modelapk:assembleRelease \
-            -PmodelId="cn.ruzhe.komiho.model.${FAMILY}" \
-            -PmodelLabel="Komiho-${FAMILY}" \
+            -PmodelId="cn.ruzhe.komiho.model.${SOC}" \
+            -PmodelLabel="Komiho-${SOC}" \
             -PmodelVersionName="${{ inputs.model_version_name }}" \
             -PmodelVersionCode="${{ inputs.model_version_code }}" \
             --no-daemon --stacktrace
@@ -166,9 +178,9 @@ jobs:
             echo "::error::model package must not contain code"; exit 1
           fi
 
-      - name: Rename to komiho-model-<family>.apk
+      - name: Rename to komiho-model-<soc>.apk
         run: |
-          cp modelapk/build/outputs/apk/release/modelapk-release.apk "komiho-model-${FAMILY}.apk"
+          cp modelapk/build/outputs/apk/release/modelapk-release.apk "komiho-model-${SOC}.apk"
           ls -la komiho-model-*.apk
 
       - name: "Upload to CI Release (tag: CI)"
@@ -191,4 +203,4 @@ jobs:
             gh release create "$TAG" --repo "${{ github.repository }}" \
               --title "Komiho-CI" --notes "CI channel" --prerelease
           fi
-          upload_with_retry "komiho-model-${FAMILY}.apk"
+          upload_with_retry "komiho-model-${SOC}.apk"
