@@ -165,6 +165,31 @@ jobs:
             -PmodelVersionCode="${{ inputs.model_version_code }}" \
             --no-daemon --stacktrace
 
+      - name: "Strip dex and re-sign (asset-only guarantee)"
+        # AGP 9 dexes ~2.2MB (convention/catalog-injected code) into this source-less
+        # module no matter what the DSL says. The package is hasCode=false, so the dex is
+        # dead weight: delete it, re-align, re-sign with the host keystore.
+        env:
+          KOMIHO_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KOMIHO_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          APK=modelapk/build/outputs/apk/release/modelapk-release.apk
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          if unzip -l "$APK" | grep -q 'classes.dex'; then
+            echo "stripping dex:"
+            unzip -l "$APK" | grep 'classes.dex'
+            zip -d "$APK" 'classes*.dex'
+            "$BT/zipalign" -f 4 "$APK" "$APK.aligned"
+            mv "$APK.aligned" "$APK"
+            "$BT/apksigner" sign \
+              --ks keystore/komiho-release.jks --ks-type PKCS12 \
+              --ks-key-alias komiho-release \
+              --ks-pass "pass:${KOMIHO_RELEASE_KEYSTORE_PASSWORD}" \
+              --key-pass "pass:${KOMIHO_RELEASE_KEYSTORE_PASSWORD}" \
+              --out "$APK.signed" "$APK"
+            mv "$APK.signed" "$APK"
+            "$BT/apksigner" verify "$APK" && echo "re-signed OK"
+          fi
+
       - name: Verify package contents
         run: |
           APK=modelapk/build/outputs/apk/release/modelapk-release.apk
