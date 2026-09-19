@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.2.0" changeDate="September 19,2026">
+        <changelogtext>[b]Komiho 1.2.0[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 图像增强 AI 超分（GPU / NPU）：基础代码移植自 mihon_img_upscale</changelogtext>
+        <changelogtext>[b]新增[/b] 来源管理新增启动区，选择冷启动默认行为</changelogtext>
+        <changelogtext>[b]新增[/b] 同路径文件夹自动加载，散图目录读完自动续下一卷</changelogtext>
+        <changelogtext>[b]优化[/b] 阅读器性能提升，修复了若干 BUG</changelogtext>
+        <changelogtext>[b]优化[/b] 阅读器页面模式和条漫模式缓存数值可调</changelogtext>
+        <changelogtext>[b]优化[/b] 图像增强切换实时生效</changelogtext>
+        <changelogtext>[b]优化[/b] Komga UI，下载可用了</changelogtext>
+        <changelogtext>[b]优化[/b] 增强状态角标按页准确显示引擎与耗时</changelogtext>
+        <changelogtext>[b]修复[/b] i18n 全面本地化（简 / 繁 / 英），切换语言后所有界面正确显示</changelogtext>
+        <changelogtext>[b]修复[/b] 冷启动每次都进欢迎页</changelogtext>
+        <changelogtext>[b]修复[/b] SMB / CIFS 共享浏览偶发读取被系统中断导致加载失败</changelogtext>
+        <changelogtext>[b]修复[/b] Komga 最近阅读封面误用系列封面</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.1.0" changeDate="September 12,2026">
         <changelogtext>[b]Komiho 1.1.0 (8)[/b]</changelogtext>
         <changelogtext>[b]新增[/b] 本地文件浏览</changelogtext>
