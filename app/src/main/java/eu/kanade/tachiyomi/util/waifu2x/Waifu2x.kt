@@ -118,8 +118,9 @@ object Waifu2x {
      *
      * A device whose arch we do not ship returns null; [ensureEngine] then logs the
      * mismatch and falls back to Vulkan rather than handing the engine a file that cannot
-     * load. This is intentionally a *runtime* lookup: the same APK serves v75 and v79
-     * devices, and the choice is made from the probed hardware, not a build-time constant.
+     * load. This is intentionally a *runtime* lookup: one APK serves every generation we
+     * ship (currently v69/v73/v75/v79/v81), and the choice is made from the probed
+     * hardware, not a build-time constant.
      */
     fun contextAssetFor(model: AiUpscaleModel, arch: Int): String? {
         if (arch <= 0) return null
@@ -656,11 +657,12 @@ object Waifu2x {
      * of generation.
      *
      * Komiho (2026-09-17): the gate deliberately does **not** compare against the packed
-     * arch set ([AiUpscaleModel.qnnArches]). We ship contexts for v75 and v79, but a newer
-     * HTP runs older contexts (downward compatible), so restricting by architecture would
-     * hide entries on devices that can actually run them. An unmatched arch reports an init
-     * failure and the page falls back to Vulkan — the badge then shows what really ran,
-     * which is the whole point of observing the actual execution path.
+     * arch set ([AiUpscaleModel.qnnArches]). We ship contexts for every generation the
+     * runtime supports (v69/v73/v75/v79/v81), and a newer HTP runs older contexts (downward
+     * compatible), so restricting by architecture would hide entries on devices that can
+     * actually run them. An unmatched arch reports an init failure and the page falls back
+     * to Vulkan — the badge then shows what really ran, which is the whole point of
+     * observing the actual execution path.
      *
      * Non-Qualcomm hardware reports architecture 0 (no `ON_CHIP` HTP device) and stays hidden.
      * Vulkan entries are always shown (their failure path is the CPU resampler fallback).

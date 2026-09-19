@@ -4,20 +4,23 @@ import dev.icerock.moko.resources.StringResource
 import tachiyomi.i18n.MR
 
 /**
- * Komiho: HTP generations every NPU entry ships a context for — v75 (SM8650 / 8 Gen 3)
- * and v79 (SM8750 / 8 Elite), so one APK covers both test devices.
+ * Komiho: HTP generations every NPU entry ships a context for — **all five** of the
+ * generations the QNN runtime supports: v69, v73, v75 (SM8650 / 8 Gen 3), v79 (SM8750 /
+ * 8 Elite) and v81. One APK therefore covers any 8-series device instead of only the two
+ * on the bench.
  *
  * ⚠️ Must stay in sync with the `<stem>.v<arch>.bin` files under `assets/qnn-contexts/`
- * and the `libQnnHtpV<arch>{Skel,Stub}.so` pair under `jniLibs/arm64-v8a/`. The DSP looks
- * the Skel up by its own on-chip arch **before** any context is read, so a missing Skel
- * fails the whole init (`loadRemoteSymbols failed with err 4000`) even when the context
- * itself would have loaded.
+ * (3 models × 5 generations = 15 files) **and** the `libQnnHtpV<arch>{Skel,Stub}.so` pairs
+ * under `jniLibs/arm64-v8a/`. The DSP looks the Skel up by its own on-chip arch **before**
+ * any context is read, so a missing Skel fails the whole init (`loadRemoteSymbols failed
+ * with err 4000`) even when the context itself would have loaded. Note this also means the
+ * Skel set and the context set are **independent**: we ship five Skel pairs either way.
  *
  * Declared here — at file scope, *not* in the companion object — because enum entries are
  * initialised before the companion: `qnnArches = QNN_ARCHES` inside an entry only compiles
  * against a top-level declaration. See the class KDoc for the full explanation.
  */
-private val QNN_ARCHES: List<Int> = listOf(75, 79)
+private val QNN_ARCHES: List<Int> = listOf(69, 73, 75, 79, 81)
 
 /**
  * Komiho: the model catalogue for the AI upscaler.
@@ -183,9 +186,11 @@ enum class AiUpscaleModel(
      *
      * Why fp16 instead of int8: **fp16 needs no calibration set**, which is what makes local
      * compilation practical (int8/W8A16 would need a representative image set). The cost is
-     * size — 1,726,776 B (v75) / 1,734,968 B (v79) per arch, against 907,336 B for the int8
-     * sibling with the same weight count. No native change was needed for the dtype:
-     * `qnn_backend.cpp` already accepts fp16 tensors (`is_fp16_tensor`).
+     * size — roughly 1.72–1.76 MB per generation, against ~0.91 MB for the int8 sibling with
+     * the same weight count. Compiled for all five generations (v69 1,755,448 B / v73
+     * 1,726,776 B / v75 1,726,776 B / v79 1,734,968 B / v81 1,718,584 B); only `soc_model`
+     * differs between them (v69→42, v73→43, v75→57, v79→69, v81→87). No native change was
+     * needed for the dtype: `qnn_backend.cpp` already accepts fp16 tensors (`is_fp16_tensor`).
      *
      * padding = 18: same 40-layer / 18-convolution topology as [QnnW2xexPhotoSmallX2Int8],
      * verified by parsing its `.param` (18 Convolution + 17 PReLU, PixelShuffle 0=2).
