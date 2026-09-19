@@ -82,6 +82,8 @@ import android.text.format.DateUtils
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material3.CardDefaults
 import app.mihonsy.komga.source.KomgaSource
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
 // SY <--
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download

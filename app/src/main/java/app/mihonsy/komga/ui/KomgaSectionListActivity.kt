@@ -124,7 +124,7 @@ private fun KomgaSectionListScreen(section: HomeSection, modifier: Modifier = Mo
                 books = client.getBooks(readStatus = readStatus, sort = sort, size = 200).content
             }
         }.onFailure {
-            error = context.ctxStringRes(MR.strings.load_failed_error, it.message)
+            error = context.ctxStringRes(MR.strings.load_failed_error, it.message ?: "")
         }
         loading = false
     }
@@ -184,7 +184,7 @@ private fun KomgaSectionListScreen(section: HomeSection, modifier: Modifier = Mo
                                 runCatching { KomgaReaderLauncher.open(context, client, b) }
                                     .onFailure {
                                         android.widget.Toast.makeText(
-                                            context, context.ctxStringRes(MR.strings.open_reader_failed, it.message), android.widget.Toast.LENGTH_LONG,
+                                            context, context.ctxStringRes(MR.strings.open_reader_failed, it.message ?: ""), android.widget.Toast.LENGTH_LONG,
                                         ).show()
                                     }
                             }
