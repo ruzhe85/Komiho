@@ -16,6 +16,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.WebtoonLayoutManager
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
@@ -577,12 +578,17 @@ class WebtoonViewer(
      * Used when an image configuration is changed.
      */
     private fun refreshAdapter() {
-        val position = layoutManager.findLastEndVisibleItemPosition()
-        adapter.refresh()
-        adapter.notifyItemRangeChanged(
-            max(0, position - 3),
-            min(position + 3, adapter.itemCount - 1),
-        )
+        // 强制重建适配器（与 pager 的 pager.adapter = adapter 同款）：销毁并重建所有可见
+        // WebtoonPageHolder，重新走加载链并按最新增强设置重解码，保证切换增强实时生效。
+        // 重设 adapter 会清空滚动位置，故先记下首可见项与像素偏移，重建后再还原，避免跳页。
+        val lm = layoutManager as? LinearLayoutManager
+        val firstPos = lm?.findFirstVisibleItemPosition() ?: 0
+        val firstView = if (firstPos >= 0) lm.findViewByPosition(firstPos) else null
+        val offset = firstView?.let { it.top - recycler.paddingTop } ?: 0
+        recycler.adapter = adapter
+        if (firstPos >= 0) {
+            lm.scrollToPositionWithOffset(firstPos, offset)
+        }
     }
 }
 

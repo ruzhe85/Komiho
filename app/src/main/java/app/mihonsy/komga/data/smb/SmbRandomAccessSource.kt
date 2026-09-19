@@ -63,12 +63,26 @@ class SmbRandomAccessSource(
 
             val want = minOf(length.toLong(), MAX_READ.toLong(), total - offset).toInt()
             val buf = ByteArray(want)
+
+            // A：读前刷新连接空闲计时，正在读 = 连接活着，空闲回收不再误杀正在用的共享。
+            SmbSessionManager.touch(conn)
+
             val n = try {
                 f.read(buf, offset)
             } catch (e: Exception) {
-                // 会话可能已被 NAS 断开：作废后抛出，调用方重试即触发重连（见 ChapterLoader 兜底）
-                SmbSessionManager.invalidate(conn)
-                throw IOException("SMB 读取失败 @$offset: ${e.message}", e)
+                // B：读失败先在本源内重开 file 重试一次（走 ensureOpen 重连）；
+                //    仅当重开也失败才精准作废该共享（不动同连接其它源），交由调用方重试自愈。
+                file = null
+                total = -1L
+                val reopened = runCatching { ensureOpen() }.isSuccess
+                val f2 = if (reopened) file else null
+                try {
+                    f2?.read(buf, offset) ?: throw IOException("SMB 文件重开失败: $normalizedUrl")
+                } catch (e2: Exception) {
+                    // 重开仍失败：精准作废出错源所在的共享（非整连接），保留同连接其它正在读的源。
+                    SmbSessionManager.invalidateShare(conn, relPath)
+                    throw IOException("SMB 读取失败 @$offset: ${e.message}", e)
+                }
             }
             return when {
                 n <= 0 -> ByteArray(0)
