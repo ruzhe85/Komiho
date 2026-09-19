@@ -44,6 +44,9 @@ import app.mihonsy.komga.data.model.CollectionDto
 import app.mihonsy.komga.data.model.SeriesDto
 import eu.kanade.tachiyomi.R
 import kotlinx.coroutines.launch
+import tachiyomi.core.common.i18n.stringResource as ctxStringRes
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
 
 /**
  * Komiho M3: collection detail — series inside a Komga collection.
@@ -127,20 +130,20 @@ private fun KomgaCollectionScreen(collectionId: String, collectionName: String, 
             }
             error != null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
+                    Text(error ?: stringResource(MR.strings.reader_load_failed), color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(12.dp))
                     TextButton(onClick = {
                         scope.launch {
                             runCatching { client.getCollection(collectionId).seriesIds }
                                 .onSuccess { error = null; loading = true }
-                                .onFailure { error = "加载失败：${it.message}" }
+                                .onFailure { error = context.ctxStringRes(MR.strings.load_failed_error, it.message) }
                             loading = false
                         }
-                    }) { Text("重试") }
+                    }) { Text(stringResource(MR.strings.action_retry)) }
                 }
             }
             seriesList.isEmpty() -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("该收藏暂无系列")
+                Text(stringResource(MR.strings.empty_collection))
             }
             else -> Box(Modifier.fillMaxSize().padding(padding)) {
                 SeriesShelf(

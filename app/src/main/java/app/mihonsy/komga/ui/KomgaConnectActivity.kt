@@ -43,6 +43,9 @@ import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import kotlinx.coroutines.launch
+import tachiyomi.core.common.i18n.stringResource as ctxStringRes
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
 
 /**
  * Komga 服务器连接设置页（M1）。
@@ -120,13 +123,13 @@ private fun KomgaConnectScreen(editId: String? = null) {
                         (context as? Activity)?.finish()
                     }
                 } else {
-                    Toast.makeText(context, "连接正常", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.ctxStringRes(MR.strings.connect_ok), Toast.LENGTH_SHORT).show()
                 }
             } else {
                 // Komiho: surface the real failure instead of a generic message.
                 // Common case — server logs show successful auth, so a 4xx/5xx
                 // (often 403: API key missing library permission) gets swallowed.
-                val msg = describeFailure(result.exceptionOrNull())
+                val msg = describeFailure(context, result.exceptionOrNull())
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
             }
         }
@@ -135,11 +138,11 @@ private fun KomgaConnectScreen(editId: String? = null) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (editId != null) "编辑服务器" else "连接 Komga 服务器") },
+                title = { Text(stringResource(if (editId != null) MR.strings.connect_title_edit else MR.strings.connect_title_new)) },
                 navigationIcon = {
                     if (canGoBack) {
                         IconButton(onClick = { (context as? Activity)?.finish() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(MR.strings.action_back))
                         }
                     }
                 },
@@ -153,23 +156,23 @@ private fun KomgaConnectScreen(editId: String? = null) {
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp),
         ) {
-            Text("名称（可选）", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(MR.strings.connect_name_label), style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.height(6.dp))
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                placeholder = { Text("默认用服务器地址，如 192.168.1.10:25600") },
+                placeholder = { Text(stringResource(MR.strings.connect_name_placeholder)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(20.dp))
 
-            Text("服务器地址", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(MR.strings.connect_server_label), style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.height(6.dp))
             OutlinedTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it },
-                placeholder = { Text("http://192.168.1.10:25600") },
+                placeholder = { Text(stringResource(MR.strings.connect_server_placeholder)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -181,28 +184,28 @@ private fun KomgaConnectScreen(editId: String? = null) {
                     selected = authType == KomgaAuthType.API_KEY,
                     onClick = { authType = KomgaAuthType.API_KEY },
                 )
-                Text("API Key（推荐）")
+                Text(stringResource(MR.strings.connect_auth_apikey))
                 Spacer(Modifier.weight(1f))
                 RadioButton(
                     selected = authType == KomgaAuthType.BASIC,
                     onClick = { authType = KomgaAuthType.BASIC },
                 )
-                Text("账号密码")
+                Text(stringResource(MR.strings.connect_auth_basic))
             }
             Spacer(Modifier.height(12.dp))
 
             if (authType == KomgaAuthType.API_KEY) {
-                Text("API Key", style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(MR.strings.connect_apikey_label), style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it },
-                    placeholder = { Text("在 Komga 设置 → 用户 → API Key 生成") },
+                    placeholder = { Text(stringResource(MR.strings.connect_apikey_placeholder)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
-                Text("用户名", style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(MR.strings.connect_username_label), style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
                     value = username,
@@ -211,7 +214,7 @@ private fun KomgaConnectScreen(editId: String? = null) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(12.dp))
-                Text("密码", style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(MR.strings.connect_password_label), style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
                     value = password,
@@ -231,7 +234,7 @@ private fun KomgaConnectScreen(editId: String? = null) {
                     if (testing) {
                         CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("测试连接")
+                        Text(stringResource(MR.strings.action_test_connection))
                     }
                 }
                 Button(
@@ -242,7 +245,7 @@ private fun KomgaConnectScreen(editId: String? = null) {
                     if (connecting) {
                         CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("连接")
+                        Text(stringResource(MR.strings.action_connect))
                     }
                 }
             }
@@ -268,18 +271,18 @@ private fun restartMain(context: android.content.Context) {
 
 // File-private helper for surfacing connection errors. Extracted from the
 // Composable so it can be unit-tested in isolation later.
-private fun describeFailure(e: Throwable?): String {
-    if (e == null) return "连接失败：未知错误"
+private fun describeFailure(context: android.content.Context, e: Throwable?): String {
+    if (e == null) return context.ctxStringRes(MR.strings.connect_error_unknown)
     val raw = e.message.orEmpty()
     return when {
         // KomgaApiClient tags 401 / 5xx specifically
-        raw.contains("401") -> "认证失败（401）：请检查 API Key 或账号密码"
-        raw.contains("403") -> "权限不足（403）：请在 Komga 用户设置 → API Key 创建时勾选 Library 权限"
-        raw.contains("500") || raw.contains("502") || raw.contains("503") -> "服务器错误（$raw）：请查看 Komga 服务端日志"
+        raw.contains("401") -> context.ctxStringRes(MR.strings.connect_error_401)
+        raw.contains("403") -> context.ctxStringRes(MR.strings.connect_error_403)
+        raw.contains("500") || raw.contains("502") || raw.contains("503") -> context.ctxStringRes(MR.strings.connect_error_server, raw)
         raw.contains("Failed to connect") || raw.contains("Unable to resolve host") ||
             raw.contains("ConnectException") || raw.contains("UnknownHost") ->
-            "网络失败：$raw（请检查服务器地址和端口）"
-        raw.isNotBlank() -> "连接失败：$raw"
-        else -> "连接失败：${e::class.java.simpleName}"
+            context.ctxStringRes(MR.strings.connect_error_network, raw)
+        raw.isNotBlank() -> context.ctxStringRes(MR.strings.connect_error_generic, raw)
+        else -> context.ctxStringRes(MR.strings.connect_error_generic, e::class.java.simpleName)
     }
 }

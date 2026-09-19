@@ -38,6 +38,9 @@ import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.ReadingListDto
 import kotlinx.coroutines.launch
+import tachiyomi.core.common.i18n.stringResource as ctxStringRes
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
 
 /**
  * Komiho M3: readlist detail — shows the books inside a reading list.
@@ -122,19 +125,19 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String, modifi
             }
             error != null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
+                    Text(error ?: stringResource(MR.strings.reader_load_failed), color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(12.dp))
                     TextButton(onClick = {
                         scope.launch {
                             runCatching { client.getReadlistBooks(readlistId) }
                                 .onSuccess { books = it; error = null }
-                                .onFailure { error = "加载失败：${it.message}" }
+                                .onFailure { error = context.ctxStringRes(MR.strings.load_failed_error, it.message) }
                         }
-                    }) { Text("重试") }
+                    }) { Text(stringResource(MR.strings.action_retry)) }
                 }
             }
             books.isEmpty() -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("该阅读列表暂无书籍")
+                Text(stringResource(MR.strings.empty_readlist))
             }
             else -> Box(Modifier.fillMaxSize().padding(padding)) {
                 BookShelf(
@@ -147,7 +150,7 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String, modifi
                             runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                 .onFailure {
                                     android.widget.Toast.makeText(
-                                        context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                        context, context.ctxStringRes(MR.strings.open_reader_failed, it.message), android.widget.Toast.LENGTH_LONG,
                                     ).show()
                                 }
                         }

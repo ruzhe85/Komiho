@@ -71,6 +71,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource as composeStringResource
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.KomgaApiClient
@@ -775,7 +777,7 @@ fun DownloadBadge(
 ) {
     when (state) {
         DownloadUiState.NONE -> IconButton(onClick = onDownloadClick, modifier = modifier) {
-            Icon(Icons.Filled.Download, contentDescription = "下载", tint = MaterialTheme.colorScheme.onSurface)
+            Icon(Icons.Filled.Download, contentDescription = stringResource(MR.strings.desc_download), tint = MaterialTheme.colorScheme.onSurface)
         }
         DownloadUiState.QUEUED, DownloadUiState.DOWNLOADING -> CircularProgressIndicator(
             modifier = modifier,
@@ -783,12 +785,12 @@ fun DownloadBadge(
         )
         DownloadUiState.DOWNLOADED -> Icon(
             Icons.Filled.Done,
-            contentDescription = "已下载",
+            contentDescription = stringResource(MR.strings.desc_downloaded),
             tint = MaterialTheme.colorScheme.primary,
             modifier = modifier,
         )
         DownloadUiState.ERROR -> IconButton(onClick = onDownloadClick, modifier = modifier) {
-            Icon(Icons.Filled.Warning, contentDescription = "重试", tint = MaterialTheme.colorScheme.error)
+            Icon(Icons.Filled.Warning, contentDescription = stringResource(MR.strings.action_retry), tint = MaterialTheme.colorScheme.error)
         }
     }
 }

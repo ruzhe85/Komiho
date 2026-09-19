@@ -51,6 +51,9 @@ import app.mihonsy.komga.data.model.BookDto
 import app.mihonsy.komga.data.model.SeriesDto
 import kotlin.math.ceil
 import kotlinx.coroutines.launch
+import tachiyomi.core.common.i18n.stringResource as ctxStringRes
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
 
 /**
  * Komiho M3.10: full list for a Home section ("全部" button).
@@ -121,7 +124,7 @@ private fun KomgaSectionListScreen(section: HomeSection, modifier: Modifier = Mo
                 books = client.getBooks(readStatus = readStatus, sort = sort, size = 200).content
             }
         }.onFailure {
-            error = "加载失败：${it.message}"
+            error = context.ctxStringRes(MR.strings.load_failed_error, it.message)
         }
         loading = false
     }
@@ -151,16 +154,16 @@ private fun KomgaSectionListScreen(section: HomeSection, modifier: Modifier = Mo
             }
             error != null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
+                    Text(error ?: stringResource(MR.strings.reader_load_failed), color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = { scope.launch { load() } }) { Text("重试") }
+                    TextButton(onClick = { scope.launch { load() } }) { Text(stringResource(MR.strings.action_retry)) }
                 }
             }
             (section.isSeries && series.isEmpty()) || (!section.isSeries && books.isEmpty()) -> Box(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("暂无内容")
+                Text(stringResource(MR.strings.empty_section_list))
             }
             else -> Box(Modifier.fillMaxSize().padding(padding)) {
                 if (section.isSeries) {
@@ -181,7 +184,7 @@ private fun KomgaSectionListScreen(section: HomeSection, modifier: Modifier = Mo
                                 runCatching { KomgaReaderLauncher.open(context, client, b) }
                                     .onFailure {
                                         android.widget.Toast.makeText(
-                                            context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
+                                            context, context.ctxStringRes(MR.strings.open_reader_failed, it.message), android.widget.Toast.LENGTH_LONG,
                                         ).show()
                                     }
                             }
@@ -255,12 +258,12 @@ fun BookShelfCard(
                 // Read-state pill — overlay on the cover (mihon style).
                 val rp = book.readProgress
                 val pillText = when {
-                    rp?.completed == true -> "已读"
+                    rp?.completed == true -> stringResource(MR.strings.read_status_read)
                     rp != null && rp.page > 0 && book.media.pagesCount > 0 -> {
                         val pct = (rp.page.toFloat() / book.media.pagesCount * 100).toInt()
                         "$pct%"
                     }
-                    rp != null && rp.page > 0 -> "已读 ${rp.page}页"
+                    rp != null && rp.page > 0 -> stringResource(MR.strings.read_status_read_pages, rp.page)
                     else -> null
                 }
                 if (pillText != null) {
