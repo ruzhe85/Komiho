@@ -3888,7 +3888,7 @@ private fun SettingsTab(
         )
         // SY --> Komiho：备份与恢复（自写轻量 JSON：来源列表 / 个性化 / 本地历史 / 书签 / 收藏分类）
         TextPreferenceWidget(
-            title = "备份与还原",
+            title = stringResource(MR.strings.label_backup),
             icon = Icons.Outlined.Backup,
             onPreferenceClick = { showBackup = true },
         )
@@ -3964,7 +3964,7 @@ private fun SettingsTab(
             rail = settingsRail,
             railOnRight = railOnRight,
             onDismiss = { showBackup = false },
-            title = "备份与还原",
+            title = stringResource(MR.strings.label_backup),
         ) { padding -> KomgaBackupSettings(Modifier.padding(padding)) }
     }
     // SY: 「清除预览图」确认对话框（komga_covers 磁盘池）。架构与存储设置的远程/封面缓存一致。
