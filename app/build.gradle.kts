@@ -160,6 +160,11 @@ android {
             // NOTE: everything below runs after `reset()`, so it is the single source of
             // truth for both `include` and `isUniversalApk` — don't hoist an
             // `isUniversalApk = true` above the reset, it would be cleared.
+            // Komiho (2026-09-19): `-PkomihoUniversal=true` asks for the merged APK even
+            // when only one ABI was requested. Needed because the QNN runtime ships
+            // arm64-v8a only — armeabi-v7a has no AI backend, so release builds are now
+            // "arm64 + universal" rather than "v7a + arm64 + universal".
+            val wantUniversal = (project.findProperty("komihoUniversal") as String?) == "true"
             val requestedAbis = (project.findProperty("komihoAbi") as String?)
                 ?.split(',')
                 ?.map { it.trim() }
@@ -172,8 +177,8 @@ android {
                 include(*requestedAbis.toTypedArray())
                 // A single-ABI request is a "just give me a phone APK" request — the
                 // merged universal APK would be that same ABI, and it is the biggest,
-                // slowest asset in the release.
-                isUniversalApk = requestedAbis.size > 1
+                // slowest asset in the release. `komihoUniversal` opts back in.
+                isUniversalApk = requestedAbis.size > 1 || wantUniversal
             }
         }
     }
