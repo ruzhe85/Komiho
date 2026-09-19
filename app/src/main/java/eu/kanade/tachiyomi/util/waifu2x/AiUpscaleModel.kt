@@ -273,8 +273,15 @@ enum class AiUpscaleModel(
     enum class Backend { NCNN_VULKAN, QNN_HTP }
 
     companion object {
-        /** Model used on a fresh install and whenever a stored id is unknown. */
-        val Default: AiUpscaleModel = AnimeVideoMiniV18
+        /**
+         * Model used on a fresh install, whenever a stored id is unknown, and as the Vulkan
+         * target when a QNN/HTP entry cannot initialise (arch not packed).
+         *
+         * 2026-09-19: switched from [AnimeVideoMiniV18] to [OmniMiniV2] per user decision.
+         * The two are layer-for-layer identical (same compute), only the training run
+         * differs — so this change costs nothing at runtime.
+         */
+        val Default: AiUpscaleModel = OmniMiniV2
 
         /**
          * The packed HTP generations — see the file-level [QNN_ARCHES] declaration.
