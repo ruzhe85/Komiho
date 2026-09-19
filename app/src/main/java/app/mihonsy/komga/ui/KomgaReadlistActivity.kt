@@ -131,7 +131,7 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String, modifi
                         scope.launch {
                             runCatching { client.getReadlistBooks(readlistId) }
                                 .onSuccess { books = it; error = null }
-                                .onFailure { error = context.ctxStringRes(MR.strings.load_failed_error, it.message) }
+                                .onFailure { error = context.ctxStringRes(MR.strings.load_failed_error, it.message ?: "") }
                         }
                     }) { Text(stringResource(MR.strings.action_retry)) }
                 }
@@ -150,7 +150,7 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String, modifi
                             runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                                 .onFailure {
                                     android.widget.Toast.makeText(
-                                        context, context.ctxStringRes(MR.strings.open_reader_failed, it.message), android.widget.Toast.LENGTH_LONG,
+                                        context, context.ctxStringRes(MR.strings.open_reader_failed, it.message ?: ""), android.widget.Toast.LENGTH_LONG,
                                     ).show()
                                 }
                         }

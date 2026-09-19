@@ -136,7 +136,7 @@ private fun KomgaCollectionScreen(collectionId: String, collectionName: String, 
                         scope.launch {
                             runCatching { client.getCollection(collectionId).seriesIds }
                                 .onSuccess { error = null; loading = true }
-                                .onFailure { error = context.ctxStringRes(MR.strings.load_failed_error, it.message) }
+                                .onFailure { error = context.ctxStringRes(MR.strings.load_failed_error, it.message ?: "") }
                             loading = false
                         }
                     }) { Text(stringResource(MR.strings.action_retry)) }
