@@ -265,6 +265,8 @@ import androidx.compose.material.icons.outlined.Backup
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.util.system.openInBrowser
+import eu.kanade.presentation.more.NewUpdateScreen
+import tachiyomi.domain.release.model.Release
 import tachiyomi.domain.release.interactor.GetApplicationRelease
 // SY --> Komiho P0: 本地浏览（文件管理器语义，非 Mihon 图源）
 import eu.kanade.presentation.more.settings.screen.SettingsDataScreen
@@ -565,6 +567,49 @@ private fun KomgaMainScreen(
         storagePreferences.localBrowseRootPath.changes().collect { localDir = computeLocalDir() }
     }
     LaunchedEffect(permTick) { localDir = computeLocalDir() }
+
+    // Komiho (2026-09-19): in-app update prompt state. Four plain strings instead of
+    // holding a `Release` so the dialog survives rotation (Release is not Parcelable),
+    // and the pending update is not lost when the coroutine that found it has finished.
+    var pendingVersion by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingNotes by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingReleaseLink by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingDownloadLink by rememberSaveable { mutableStateOf<String?>(null) }
+    fun showUpdate(release: Release) {
+        pendingVersion = release.version
+        pendingNotes = release.info
+        pendingReleaseLink = release.releaseLink
+        pendingDownloadLink = release.getDownloadLink()
+    }
+    fun dismissUpdate() {
+        pendingVersion = null
+        pendingNotes = null
+        pendingReleaseLink = null
+        pendingDownloadLink = null
+    }
+
+    // Komiho (2026-09-19): cold-start update check. Not forced — GetApplicationRelease
+    // throttles to one real request every 3 days. The result used to be surfaced only
+    // as a system notification, and Komiho never requests POST_NOTIFICATIONS, so on
+    // Android 13+ it was silently dropped and users saw nothing at all.
+    LaunchedEffect(Unit) {
+        runCatching { AppUpdateChecker().checkForUpdate(context, forceCheck = false) }
+            .onSuccess { result ->
+                if (result is GetApplicationRelease.Result.NewUpdate) {
+                    showUpdate(result.release)
+                }
+            }
+    }
+
+    if (pendingVersion != null) {
+        UpdateAvailableDialog(
+            version = pendingVersion!!,
+            notes = pendingNotes!!,
+            releaseLink = pendingReleaseLink!!,
+            downloadLink = pendingDownloadLink!!,
+            onDismiss = ::dismissUpdate,
+        )
+    }
 
     // Filter coming from the Series detail page (tap tag/genre/author → filter Library).
     // Driven reactively by filterSignal so taps arriving via onNewIntent (when this
@@ -3951,7 +3996,7 @@ private fun SettingsTab(
             railOnRight = railOnRight,
             onDismiss = { showAbout = false },
             title = composeStringResource(R.string.about),
-        ) { padding -> KomgaAbout(Modifier.padding(padding), context) }
+        ) { padding -> KomgaAbout(Modifier.padding(padding), context, ::showUpdate) }
     }
     if (showLocalStorage) {
         SettingsCategoryDialog(
@@ -4725,7 +4770,11 @@ private fun hostOf(url: String): String {
 }
 
 @Composable
-private fun KomgaAbout(modifier: Modifier, context: android.content.Context) {
+private fun KomgaAbout(
+    modifier: Modifier,
+    context: android.content.Context,
+    onUpdateAvailable: (Release) -> Unit,
+) {
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
     var showChangelog by remember { mutableStateOf(false) }
@@ -4800,7 +4849,28 @@ private fun KomgaAbout(modifier: Modifier, context: android.content.Context) {
             enabled = !checking,
             onClick = {
                 checking = true
-                scope.launch { checkForKomihoUpdate(context) { checking = false } }
+                scope.launch {
+                    // Komiho: 检查结果一律走应用内弹窗/Toast，不再只发通知。
+                    try {
+                        when (val result = AppUpdateChecker().checkForUpdate(context, forceCheck = true)) {
+                            is GetApplicationRelease.Result.NewUpdate -> onUpdateAvailable(result.release)
+                            is GetApplicationRelease.Result.NoNewUpdate -> {
+                                Toast.makeText(context, context.getString(R.string.about_up_to_date), Toast.LENGTH_SHORT).show()
+                            }
+                            is GetApplicationRelease.Result.OsTooOld -> {
+                                Toast.makeText(context, context.getString(R.string.about_os_too_old), Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Toast.makeText(
+                            context,
+                            e.message ?: context.getString(R.string.update_check_failed),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    } finally {
+                        checking = false
+                    }
+                }
             },
             trailing = {
                 if (checking) {
@@ -4873,24 +4943,43 @@ private fun AboutActionRow(
     }
 }
 
-private suspend fun checkForKomihoUpdate(context: android.content.Context, onFinish: () -> Unit) {
-    val checker = AppUpdateChecker()
-    try {
-        when (val result = checker.checkForUpdate(context, forceCheck = true)) {
-            is GetApplicationRelease.Result.NewUpdate -> {
-                // AppUpdateChecker 内部已通过 AppUpdateNotifier 弹出更新通知
-            }
-            is GetApplicationRelease.Result.NoNewUpdate -> {
-                Toast.makeText(context, context.getString(R.string.about_up_to_date), Toast.LENGTH_SHORT).show()
-            }
-            is GetApplicationRelease.Result.OsTooOld -> {
-                Toast.makeText(context, context.getString(R.string.about_os_too_old), Toast.LENGTH_SHORT).show()
-            }
+/**
+ * 有可用更新时的应用内弹窗。
+ *
+ * Komiho (2026-09-19)：原先 AppUpdateChecker 只通过 AppUpdateNotifier 发系统通知，
+ * 而 Komiho 从未申请 POST_NOTIFICATIONS ⇒ Android 13+ 上通知被无声丢弃，用户点了
+ * 「检查更新」什么反馈都没有。这里改为应用内弹窗，完全不依赖通知权限。
+ */
+@Composable
+private fun UpdateAvailableDialog(
+    version: String,
+    notes: String,
+    releaseLink: String,
+    downloadLink: String,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val changelog = remember(notes) {
+        notes.replace("""---(\R|.)*Checksums(\R|.)*""".toRegex(), "")
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            NewUpdateScreen(
+                versionName = version,
+                changelogInfo = changelog,
+                onOpenInBrowser = { context.openInBrowser(releaseLink) },
+                onRejectUpdate = onDismiss,
+                onAcceptUpdate = {
+                    // Komiho: 直接用浏览器拉 APK 直链——AppUpdateDownloadJob 的进度与
+                    // 安装提示全走通知，在没有通知权限的机器上等于不可见。
+                    context.openInBrowser(downloadLink)
+                    onDismiss()
+                },
+            )
         }
-    } catch (e: Exception) {
-        Toast.makeText(context, e.message ?: context.getString(R.string.update_check_failed), Toast.LENGTH_SHORT).show()
-    } finally {
-        onFinish()
     }
 }
 

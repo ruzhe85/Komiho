@@ -55,17 +55,23 @@ class GetApplicationRelease(
             val currentInt = syDebugVersion.toIntOrNull()
             currentInt != null && newVersion.toInt() > currentInt
         } else {
-            // Release builds: based on releases in "jobobby04/TachiyomiSY" repo
-            // tagged as something like "0.1.2"
+            // Release builds: based on releases tagged as something like "0.1.2".
+            // Komiho (2026-09-19): the old loop indexed `newSemVer[index]` against
+            // `oldSemVer` while only ever returning early on "greater", so it both
+            // crashed when the new tag had fewer segments (e.g. "1.2" vs "1.1.0")
+            // and wrongly reported an update when an earlier segment was already
+            // smaller (1.1.9 vs 1.2.0). Pad both sides with 0 and compare strictly.
             val oldVersion = versionName.replace("[^\\d.]".toRegex(), "")
 
-            val newSemVer = newVersion.split(".").map { it.toInt() }
-            val oldSemVer = oldVersion.split(".").map { it.toInt() }
+            val newSemVer = newVersion.split(".").mapNotNull { it.toIntOrNull() }
+            val oldSemVer = oldVersion.split(".").mapNotNull { it.toIntOrNull() }
+            if (newSemVer.isEmpty() || oldSemVer.isEmpty()) return false
 
-            oldSemVer.mapIndexed { index, i ->
-                if (newSemVer[index] > i) {
-                    return true
-                }
+            repeat(maxOf(newSemVer.size, oldSemVer.size)) { index ->
+                val newPart = newSemVer.getOrElse(index) { 0 }
+                val oldPart = oldSemVer.getOrElse(index) { 0 }
+                if (newPart > oldPart) return true
+                if (newPart < oldPart) return false
             }
 
             false
