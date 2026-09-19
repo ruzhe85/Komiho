@@ -25,6 +25,8 @@ import logcat.LogPriority
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.core.common.i18n.stringResource as ctxStringRes
 import eu.kanade.tachiyomi.util.system.toast
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,10 +61,10 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                     context.contentResolver.openOutputStream(uri)?.use { os ->
                         KomihoBackup.writeBackupFile(context, password, os)
                     }
-                    withUIContext { context.toast("备份已导出") }
+                    withUIContext { context.toast(context.ctxStringRes(MR.strings.backup_exported)) }
                 } catch (e: Exception) {
                     logcat(LogPriority.ERROR, e)
-                    withUIContext { context.toast("导出失败：${e.message}") }
+                    withUIContext { context.toast(context.ctxStringRes(MR.strings.backup_export_failed, e.message ?: "")) }
                 }
             }
         }
@@ -75,7 +77,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                 try {
                     val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     if (bytes == null || bytes.isEmpty()) {
-                        withUIContext { context.toast("文件为空或无法读取") }
+                        withUIContext { context.toast(context.ctxStringRes(MR.strings.backup_file_empty)) }
                         return@launch
                     }
                     if (KomihoBackup.isEncrypted(bytes)) {
@@ -89,16 +91,16 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                     }
                 } catch (e: Exception) {
                     logcat(LogPriority.ERROR, e)
-                    withUIContext { context.toast("导入失败：${e.message}") }
+                    withUIContext { context.toast(context.ctxStringRes(MR.strings.backup_import_failed, e.message ?: "")) }
                 }
             }
         }
 
         if (showExportPwd) {
             PasswordDialog(
-                title = "设置备份密码",
-                placeholder = "留空不加密",
-                confirmLabel = "导出",
+                title = stringResource(MR.strings.backup_set_password),
+                placeholder = stringResource(MR.strings.backup_password_optional),
+                confirmLabel = stringResource(MR.strings.backup_export),
                 onConfirm = { pwd ->
                     showExportPwd = false
                     pendingExportPassword = pwd
@@ -115,9 +117,9 @@ object SettingsKomihoBackupScreen : SearchableSettings {
 
         if (showImportPwd) {
             PasswordDialog(
-                title = "输入备份密码",
-                placeholder = "该备份已加密",
-                confirmLabel = "导入",
+                title = stringResource(MR.strings.backup_enter_password),
+                placeholder = stringResource(MR.strings.backup_encrypted_hint),
+                confirmLabel = stringResource(MR.strings.backup_import),
                 onConfirm = { pwd ->
                     showImportPwd = false
                     val bytes = pendingImportBytes
@@ -130,7 +132,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                             withUIContext { context.toast(summary.toString()) }
                         } catch (e: Exception) {
                             logcat(LogPriority.ERROR, e)
-                            withUIContext { context.toast("导入失败：${e.message}") }
+                            withUIContext { context.toast(context.ctxStringRes(MR.strings.backup_import_failed, e.message ?: "")) }
                         }
                     }
                 },
@@ -141,11 +143,11 @@ object SettingsKomihoBackupScreen : SearchableSettings {
         // 不用分组：直接平铺「导出 / 导入」两条，省掉多余的分组标题行。
         return listOf(
             Preference.PreferenceItem.TextPreference(
-                title = "导出备份",
+                title = stringResource(MR.strings.backup_export),
                 onClick = { showExportPwd = true },
             ),
             Preference.PreferenceItem.TextPreference(
-                title = "导入备份",
+                title = stringResource(MR.strings.backup_import),
                 onClick = { importLauncher.launch("*/*") },
             ),
         )
@@ -175,7 +177,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                 )
             },
             confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text(text = confirmLabel) } },
-            dismissButton = { TextButton(onClick = onDismiss) { Text(text = "取消") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(text = stringResource(MR.strings.action_cancel)) } },
         )
     }
 }

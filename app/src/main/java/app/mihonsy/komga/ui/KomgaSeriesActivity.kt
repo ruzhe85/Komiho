@@ -3,6 +3,10 @@ package app.mihonsy.komga.ui
 import eu.kanade.tachiyomi.R
 import android.content.res.Configuration
 import androidx.compose.ui.res.stringResource as composeStringResource
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.core.common.i18n.stringResource as ctxStringRes
+import eu.kanade.tachiyomi.util.system.toast
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -189,9 +193,7 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
         loadScope.launch {
             runCatching { KomgaReaderLauncher.open(context, client, bookId) }
                 .onFailure {
-                    android.widget.Toast.makeText(
-                        context, "打开阅读器失败：${it.message}", android.widget.Toast.LENGTH_LONG,
-                    ).show()
+                    context.toast(context.ctxStringRes(MR.strings.open_reader_failed, it.message ?: ""))
                 }
         }
     }
@@ -200,7 +202,7 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text(series?.name ?: "系列") },
+                title = { Text(series?.name ?: stringResource(MR.strings.label_series)) },
                 actions = {
                     if (series != null) {
                         // SY: 与库页同款的三合一菜单（阅读状态 / 排序 / 显示模式）。
@@ -229,7 +231,7 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                 SmallExtendedFloatingActionButton(
                     text = {
                         Text(
-                            text = if (isReading) "继续阅读" else "开始阅读",
+                            text = stringResource(if (isReading) MR.strings.action_continue_reading else MR.strings.action_start_reading),
                         )
                     },
                     icon = { Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null) },
@@ -248,7 +250,7 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                 CircularProgressIndicator()
             }
             error != null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
+                Text(error ?: stringResource(MR.strings.reader_load_failed), color = MaterialTheme.colorScheme.error)
             }
             series != null -> {
                 val s = series!!
@@ -328,7 +330,7 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                             header = {
                                 Column {
                                     Text(
-                                        text = "书籍（${books.size}）",
+                                        text = stringResource(MR.strings.books_header, books.size),
                                         style = MaterialTheme.typography.titleMedium,
                                     )
                                     Spacer(Modifier.height(4.dp))
@@ -364,7 +366,7 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                     )
                                     Spacer(Modifier.height(4.dp))
                                     Text(
-                                        text = "书籍（${books.size}）",
+                                        text = stringResource(MR.strings.books_header, books.size),
                                         style = MaterialTheme.typography.titleMedium,
                                     )
                                 }
@@ -438,11 +440,12 @@ private fun SeriesDetailHeader(
 /**
  * Komga 系列状态英文枚举 → 中文展示。未知值原样返回，避免服务端新增枚举时显示空白。
  */
+@Composable
 private fun komgaSeriesStatusLabel(raw: String): String = when (raw.uppercase()) {
-    "ONGOING" -> "连载中"
-    "ENDED" -> "已完结"
-    "ABANDONED" -> "已放弃"
-    "HIATUS" -> "有生之年"
+    "ONGOING" -> stringResource(MR.strings.komga_status_ongoing)
+    "ENDED" -> stringResource(MR.strings.komga_status_ended)
+    "ABANDONED" -> stringResource(MR.strings.komga_status_abandoned)
+    "HIATUS" -> stringResource(MR.strings.komga_status_hiatus)
     else -> raw
 }
 
@@ -475,7 +478,7 @@ private fun SeriesHeader(
                         onChipClick("author", value)
                     }
                 }
-                val status = series.metadata.status?.let(::komgaSeriesStatusLabel)
+                val status = series.metadata.status?.let { komgaSeriesStatusLabel(it) }
                 if (!status.isNullOrBlank()) {
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -546,7 +549,7 @@ private fun ExpandableSummary(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = if (expanded) "收回" else "展开",
+                    text = if (expanded) stringResource(MR.strings.action_collapse) else stringResource(MR.strings.action_expand),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
