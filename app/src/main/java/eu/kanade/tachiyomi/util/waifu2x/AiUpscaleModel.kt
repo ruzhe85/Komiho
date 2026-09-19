@@ -10,7 +10,8 @@ import tachiyomi.i18n.MR
  * on the bench.
  *
  * ⚠️ Must stay in sync with the `<stem>.v<arch>.bin` files under `assets/qnn-contexts/`
- * (3 models × 5 generations = 15 files) **and** the `libQnnHtpV<arch>{Skel,Stub}.so` pairs
+ * (5 NPU models: 3 ship all 5 generations (15 files) + 2 NomosUni ship v69/v73/v79 (6 files)
+ * = 21 files) **and** the `libQnnHtpV<arch>{Skel,Stub}.so` pairs
  * under `jniLibs/arm64-v8a/`. The DSP looks the Skel up by its own on-chip arch **before**
  * any context is read, so a missing Skel fails the whole init (`loadRemoteSymbols failed
  * with err 4000`) even when the context itself would have loaded. Note this also means the
@@ -21,6 +22,16 @@ import tachiyomi.i18n.MR
  * against a top-level declaration. See the class KDoc for the full explanation.
  */
 private val QNN_ARCHES: List<Int> = listOf(69, 73, 75, 79, 81)
+
+/**
+ * Komiho: the subset of HTP generations the NomosUni entries ship a context for.
+ * Phase-1 wiring (2026-09-19): v69 / v73 / v79 only — v75 and v81 contexts are not
+ * yet bundled, so those two generations fall back to Vulkan for the NomosUni entries.
+ * Must stay in sync with the NomosUni `.<arch>.bin` files under `assets/qnn-contexts/`.
+ * Declared at file scope for the same enum-init-order reason as [QNN_ARCHES]: enum
+ * entries are initialised before the companion, so a top-level declaration is required.
+ */
+private val QNN_ARCHES_NOMOSUNI: List<Int> = listOf(69, 73, 79)
 
 /**
  * Komiho: the model catalogue for the AI upscaler.
@@ -204,6 +215,52 @@ enum class AiUpscaleModel(
         labelRes = MR.strings.ai_model_qnn_universal_fast,
         backend = Backend.QNN_HTP,
         qnnArches = QNN_ARCHES,
+    ),
+
+    /**
+     * Komiho: Qualcomm NPU (QNN/HTP) context — NomosUni Compact x2, **fp16** (2x output).
+     *
+     * Phase-1 wiring (2026-09-19): ships v69 / v73 / v79 only; v75 / v81 contexts are not
+     * yet bundled, so this entry falls back to Vulkan on those two generations. Architecture
+     * is SRVGGNetCompact (spandrel-identified, 18 stride-1 conv layers → [padding] = 18),
+     * a compact general-purpose 2x upscaler. Compiled locally with the same pipeline as
+     * [QnnUniversalFastV2Fp16].
+     *
+     * ⚠️ Channel order: exported as **RGB** (spandrel's natural order). If NomosUni was
+     * trained BGR the NPU output will be colour-shifted — this needs an on-device visual
+     * check, offline inspection cannot tell.
+     */
+    QnnNomosUniCompactX2(
+        id = "nomosuni-compact-x2",
+        assetDir = "qnn-contexts",
+        stem = "nomosuni-compact-x2",
+        scale = 2,
+        padding = 18,
+        labelRes = MR.strings.ai_model_nomosuni_compact,
+        backend = Backend.QNN_HTP,
+        qnnArches = QNN_ARCHES_NOMOSUNI,
+    ),
+
+    /**
+     * Komiho: Qualcomm NPU (QNN/HTP) context — NomosUni SPAN x2, **fp16** (2x output).
+     *
+     * Phase-1 wiring (2026-09-19): ships v69 / v73 / v79 only. Architecture is SPAN
+     * (Pixel-Aware 2x, spandrel-identified, 21 stride-1 conv layers + 1 identity 1×1 →
+     * [padding] = 21). Compiled locally with the same pipeline as [QnnUniversalFastV2Fp16].
+     *
+     * ⚠️ Channel order: exported as **RGB**; if NomosUni was trained BGR the NPU output
+     * will be colour-shifted — needs an on-device visual check, offline inspection cannot
+     * tell.
+     */
+    QnnNomosUniSpanX2(
+        id = "nomosuni-span-x2",
+        assetDir = "qnn-contexts",
+        stem = "nomosuni-span-x2",
+        scale = 2,
+        padding = 21,
+        labelRes = MR.strings.ai_model_nomosuni_span,
+        backend = Backend.QNN_HTP,
+        qnnArches = QNN_ARCHES_NOMOSUNI,
     ),
 
     // Photo-Small W2xEX 曾在此处（40 层 / 18 卷积 / 598,464 权重元素 = 13.4x 算力 / padding 18），
