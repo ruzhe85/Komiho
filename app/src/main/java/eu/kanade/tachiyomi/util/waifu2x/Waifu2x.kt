@@ -124,6 +124,7 @@ object Waifu2x {
      */
     fun contextAssetFor(model: AiUpscaleModel, arch: Int): String? {
         if (arch <= 0) return null
+        if (arch !in model.qnnArches) return null
         return model.stem + ".v" + arch + ".bin"
     }
 

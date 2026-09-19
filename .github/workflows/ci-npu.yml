@@ -2,8 +2,9 @@ name: CI-NPU (full package)
 
 # Komiho (2026-09-18): on-demand build for the *complete* artifact set, including the
 # universal APK. Only run this when you actually need it — it is roughly 20 minutes of
-# upload time because the universal package is ~228 MB once the fifteen QNN contexts
-# (3 models × 5 HTP generations) and the five HTP Skel/stub pairs are merged into one file.
+# upload time because the universal package is ~235 MB once the 21 QNN contexts
+# (5 models: 3 ship all 5 gens, 2 NomosUni ship v69/v73/v79 = 21) and the five HTP Skel/stub
+# pairs are merged into one file.
 #
 # Why this exists as a separate workflow rather than a second step in build.yml:
 #   * build.yml (every push to main) stays fast and green — it publishes the per-ABI
@@ -143,8 +144,8 @@ jobs:
                 exit 1
               fi
             done
-            if [ "$(unzip -l "$apk" | grep -c 'qnn-contexts/.*\.bin')" -ne 15 ]; then
-              echo "::error::$apk does not carry the 6 QNN contexts"
+            if [ "$(unzip -l "$apk" | grep -c 'qnn-contexts/.*\.bin')" -ne 21 ]; then
+              echo "::error::$apk does not carry the 21 QNN contexts"
               exit 1
             fi
           done
