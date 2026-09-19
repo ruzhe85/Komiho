@@ -174,8 +174,17 @@ jobs:
           GOT=$(unzip -l "$APK" | grep -c 'assets/qnn-contexts/.*\.bin' || true)
           echo "contexts bundled: $GOT / expected ${BIN_COUNT}"
           [ "$GOT" -eq "${BIN_COUNT}" ] || { echo "::error::context count mismatch"; exit 1; }
-          if unzip -l "$APK" | grep -q 'classes.dex'; then
-            echo "::error::model package must not contain code"; exit 1
+          # AGP 9 still emits a stub classes.dex for hasCode=false application modules.
+          # A *stub* is tiny (<200KB); real injected code (e.g. the desugar runtime the
+          # shared convention used to pull in) is MBs — fail loudly on that.
+          DEX_LINE=$(unzip -l "$APK" | grep 'classes.dex' || true)
+          if [ -n "$DEX_LINE" ]; then
+            echo "classes.dex present: $DEX_LINE"
+            DEX_SIZE=$(echo "$DEX_LINE" | awk '{print $1}')
+            if [ "$DEX_SIZE" -gt 200000 ]; then
+              echo "::error::model package contains real code (${DEX_SIZE} bytes in classes.dex)"
+              exit 1
+            fi
           fi
 
       - name: Rename to komiho-model-<soc>.apk
