@@ -174,15 +174,11 @@ object SmbSessionManager {
      *  连接未配置共享时，[relPath] 第一段即共享名（浏览根=共享列表的口径），其余为共享内路径。
      *  @param relPath `/` 分隔的相对路径。 */
     fun openFile(conn: SmbConnection, password: String, relPath: String): File {
-        val shareName: String
-        val inSharePath: String
-        if (conn.share.isBlank()) {
-            val norm = relPath.trim('/')
-            shareName = norm.substringBefore('/')
-            inSharePath = norm.substringAfter('/', "")
+        val shareName = shareNameOf(conn, relPath)
+        val inSharePath = if (conn.share.isBlank()) {
+            relPath.trim('/').substringAfter('/', "")
         } else {
-            shareName = conn.share
-            inSharePath = relPath
+            relPath
         }
         val share = share(conn, password, shareName)
         return share.openFile(
@@ -208,6 +204,36 @@ object SmbSessionManager {
         if (id.isBlank()) return
         sessions.keys.filter { it.startsWith("$id|") }.forEach { key ->
             synchronized(lockFor(key)) { closeKeyLocked(key) }
+        }
+    }
+
+    /**
+     * 刷新连接最近使用时间，防止正在读数据时该连接的会话/共享被空闲回收误杀
+     * （见 [SmbRandomAccessSource.read] 的 A 方案：每次读前调用，让「正在读」等价于
+     * 「连接活着」，[trimIdle] 不再误关正在使用的共享）。
+     */
+    fun touch(conn: SmbConnection) {
+        val now = System.currentTimeMillis()
+        val sKey = sessionKey(conn)
+        synchronized(lockFor(sKey)) {
+            sessions[sKey]?.let { it.lastUsed = now }
+            shares.keys.filter { it.startsWith("$sKey|") }.forEach { k ->
+                shares[k]?.let { it.lastUsed = now }
+            }
+        }
+    }
+
+    /**
+     * 精准作废单个共享（出错源所在的 DiskShare），不波及同连接下的其它共享/会话，
+     * 避免整连接 [invalidate] 在其它正在读的源上引发成片「DiskShare has already been closed」。
+     * 下次访问该共享时由 [share] 自动重建。
+     */
+    fun invalidateShare(conn: SmbConnection, relPath: String) {
+        val shareName = shareNameOf(conn, relPath)
+        val sKey = sessionKey(conn)
+        val shKey = "$sKey|$shareName"
+        synchronized(lockFor(sKey)) {
+            shares.remove(shKey)?.let { runCatching { it.share.close() } }
         }
     }
 
@@ -256,6 +282,12 @@ object SmbSessionManager {
     private fun sessionKey(conn: SmbConnection): String {
         val identity = "${conn.host}:${conn.port}|${conn.user}|${conn.domain}"
         return if (conn.id.isBlank()) identity else "${conn.id}|$identity"
+    }
+
+    /** 由连接与相对路径推导共享名（未配置共享时取路径第一段）。[openFile] 与 [invalidateShare] 共用。 */
+    private fun shareNameOf(conn: SmbConnection, relPath: String): String {
+        if (conn.share.isNotBlank()) return conn.share
+        return relPath.trim('/').substringBefore('/')
     }
 
     /** `/` 分隔的相对路径 → SMB 反斜杠路径（去掉首尾分隔符）。 */
