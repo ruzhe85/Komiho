@@ -583,11 +583,11 @@ class WebtoonViewer(
         // 重设 adapter 会清空滚动位置，故先记下首可见项与像素偏移，重建后再还原，避免跳页。
         val lm = layoutManager as? LinearLayoutManager
         val firstPos = lm?.findFirstVisibleItemPosition() ?: 0
-        val firstView = if (firstPos >= 0) lm.findViewByPosition(firstPos) else null
+        val firstView = if (firstPos >= 0) lm?.findViewByPosition(firstPos) else null
         val offset = firstView?.let { it.top - recycler.paddingTop } ?: 0
         recycler.adapter = adapter
         if (firstPos >= 0) {
-            lm.scrollToPositionWithOffset(firstPos, offset)
+            lm?.scrollToPositionWithOffset(firstPos, offset)
         }
     }
 }
