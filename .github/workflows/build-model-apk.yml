@@ -5,12 +5,15 @@ name: Build model package APK
 # model package NEVER requires a host release.
 #
 # Prerequisites
-#   * Model sources live on the `model-sources` branch of THIS repo:
-#       families/<family>/bin/<stem>.v<arch>.bin   (one file per HTP generation)
+#   * Model sources live on the `model-sources` branch of THIS repo, organised **by SoC**
+#     (one directory per HTP generation — that is how the compile pipeline emits them):
+#       v<arch>/<stem>.v<arch>.bin                 (v69/v73/v75/v79/v81)
 #       families/<family>/models.json              (protocol v1: id/stem/scale/padding/
 #                                                   arches/label — padding is derived
 #                                                   from the ONNX by the packaging
 #                                                   pipeline, never hand-edited)
+#     A family package is assembled by walking each model's `stem × arches` back through
+#     the SoC directories.
 #   * The branch is data-only (bins + json); main never sees the payloads, so the host APK
 #     stays small.
 #
@@ -25,7 +28,7 @@ name: Build model package APK
   workflow_dispatch:
     inputs:
       family:
-        description: 'Model family under model-sources/families/ (e.g. nomosuni)'
+        description: 'Model family (families/<family>/models.json), e.g. nomosuni'
         required: true
         type: string
       model_version_name:
@@ -58,21 +61,40 @@ jobs:
         env:
           FAMILY: ${{ inputs.family }}
         run: |
-          DIR="model-sources/families/${FAMILY}"
-          [ -d "$DIR/bin" ]    || { echo "::error::missing $DIR/bin";    exit 1; }
-          [ -f "$DIR/models.json" ] || { echo "::error::missing $DIR/models.json"; exit 1; }
-          COUNT=$(find "$DIR/bin" -name '*.bin' | wc -l)
-          [ "$COUNT" -gt 0 ]   || { echo "::error::no .bin files in $DIR/bin"; exit 1; }
+          [ -f "model-sources/families/${FAMILY}/models.json" ] \
+            || { echo "::error::missing model-sources/families/${FAMILY}/models.json"; exit 1; }
           echo "FAMILY=${FAMILY}" >> "$GITHUB_ENV"
-          echo "BIN_COUNT=${COUNT}" >> "$GITHUB_ENV"
-          echo "family=${FAMILY} bins=${COUNT}"
-          cat "$DIR/models.json"
+          cat "model-sources/families/${FAMILY}/models.json"
 
       - name: Stage assets into the modelapk module
+        env:
+          FAMILY: ${{ inputs.family }}
         run: |
-          mkdir -p modelapk/src/main/assets/qnn-contexts
-          cp model-sources/families/${FAMILY}/bin/*.bin modelapk/src/main/assets/qnn-contexts/
-          cp model-sources/families/${FAMILY}/models.json modelapk/src/main/assets/models.json
+          python3 - <<'PY'
+          import json, os, shutil, sys
+          fam = os.environ["FAMILY"]
+          src = "model-sources"
+          man = json.load(open(f"{src}/families/{fam}/models.json", encoding="utf-8"))
+          if man.get("protocolVersion", 1) > 1:
+              sys.exit("::error::manifest protocol newer than the packager")
+          os.makedirs("modelapk/src/main/assets/qnn-contexts", exist_ok=True)
+          count = 0
+          for m in man.get("models", []):
+              stem, arches, padding = m.get("stem"), m.get("arches"), m.get("padding", 0)
+              if not stem or not arches or padding <= 0:
+                  sys.exit(f"::error::incomplete entry in models.json: {m}")
+              for arch in arches:
+                  srcf = f"{src}/v{arch}/{stem}.v{arch}.bin"
+                  if not os.path.isfile(srcf):
+                      sys.exit(f"::error::missing {srcf}")
+                  shutil.copy2(srcf, f"modelapk/src/main/assets/qnn-contexts/{stem}.v{arch}.bin")
+                  count += 1
+          shutil.copy2(f"{src}/families/{fam}/models.json",
+                       "modelapk/src/main/assets/models.json")
+          print(f"staged {count} contexts from the SoC directories")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"BIN_COUNT={count}\n")
+          PY
           find modelapk/src/main/assets -type f | sort
 
       - name: Set up JDK 17
