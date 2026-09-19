@@ -1,9 +1,11 @@
 name: CI-NPU (full package)
 
-# Komiho (2026-09-18): on-demand build for the *complete* artifact set, including the
-# universal APK. Only run this when you actually need it — it is roughly 20 minutes of
-# upload time because the universal package is ~235 MB with the five HTP Skel/stub pairs
-# merged into one file.
+# Komiho (2026-09-19): on-demand build that publishes the arm64-v8a APK *plus* the
+# merged universal APK — this is the release/full channel. Only run it when those extra
+# artifacts are actually wanted; the universal asset dominates upload time.
+#
+# armeabi-v7a is no longer produced: the QNN runtime ships arm64-v8a only, so the v7a
+# split carried no AI backend and tripped this workflow's own asset check.
 #
 # 2026-09-19 模型插件化: the QNN contexts no longer ship inside the host APK — they moved
 # to asset-only model packages built by `build-model-apk.yml`. This workflow's role is now
@@ -86,15 +88,20 @@ jobs:
           echo "${{ secrets.KOMIHO_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > keystore/komiho-release.jks
           ls -la keystore/
 
-      # NOTE: deliberately NO `-PkomihoAbi` here. That property (see
-      # app/build.gradle.kts splits) narrows the build to one ABI and turns off the
-      # universal APK — build.yml passes it to keep the daily channel small/fast.
-      # This workflow exists precisely to produce every ABI *plus* the merged
-      # universal APK, so it must omit the flag and take the default branch.
-      - name: Build release APK (all ABIs + universal)
+      # NOTE: `-PkomihoAbi=arm64-v8a` + `-PkomihoUniversal=true` is deliberate. See
+      # app/build.gradle.kts splits: a single-ABI request normally turns the universal
+      # APK off, and `komihoUniversal` opts back in.
+      #
+      # armeabi-v7a is intentionally NOT built (2026-09-19): the QNN runtime ships
+      # arm64-v8a only, so the v7a split carries no AI backend and used to fail this
+      # workflow's own asset check with
+      #   `app-armeabi-v7a-release.apk is missing libQnnHtp.so`.
+      # Now that the contexts live in the model packages, this workflow's only remaining
+      # job is "publish the arm64 phone APK plus the merged universal one".
+      - name: Build release APK (arm64 + universal)
         env:
           KOMIHO_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KOMIHO_RELEASE_KEYSTORE_PASSWORD }}
-        run: ./gradlew assembleRelease -Pdisable-code-shrink --no-daemon --stacktrace
+        run: ./gradlew assembleRelease -Pdisable-code-shrink -PkomihoAbi=arm64-v8a -PkomihoUniversal=true --no-daemon --stacktrace
 
       # Sanity check: the QNN native libraries are the whole reason this workflow is
       # separate, so fail loudly here rather than shipping an APK whose DSP cannot load
@@ -103,6 +110,11 @@ jobs:
         run: |
           cd app/build/outputs/apk/release
           for apk in app-*-release.apk; do
+            # Guard: a v7a split has no arm64 QNN runtime, so it can never satisfy the
+            # checks below. Skipping it also documents that we no longer build it.
+            case "$apk" in
+              *armeabi-v7a*) echo "--- $apk (skipped: no arm64 QNN runtime)"; continue ;;
+            esac
             echo "--- $apk"
             unzip -l "$apk" | grep -E 'libQnn|qnn-contexts' | head -30
             # Every library here is dlopen()ed by NAME at runtime and is therefore
