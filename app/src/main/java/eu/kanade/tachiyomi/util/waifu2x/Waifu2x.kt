@@ -94,8 +94,19 @@ object Waifu2x {
      * contract). Note that an app **update does not clear `cacheDir`** on AOSP, so a plain
      * reinstall would otherwise keep serving the old file: during debugging two different
      * builds reported the exact same loader error because of this.
+     *
+     * 2026-09-19 v4: **re-extracts everything to flush corrupted copies.** The extraction used
+     * to write straight into the destination file, and [initQnnEngine] is reached from several
+     * prewarm threads at once, so two of them could interleave writes into the same context and
+     * leave a *corrupt but non-empty* file behind. The reuse test (`exists()` + non-zero length
+     * + matching marker) accepted it, so the bad bytes were served forever — on a v79 device
+     * this showed up as `QNN context tensor layout is not square NHWC with an integer scale`
+     * (the graph name parsed fine, the tensors were garbage). **Clearing the app cache made the
+     * same model report `NPU OK`**, which is what pinned it on the cached copy rather than on
+     * the context itself. Extraction is now atomic (see [extractAsset]), so this bump is the
+     * one-time cleanup for installs that already hold a corrupted file.
      */
-    private const val MODEL_CACHE_VERSION = "3"
+    private const val MODEL_CACHE_VERSION = "4"
 
     /**
      * Komiho: picks the context asset for [model] on a device whose on-chip HTP is [arch].
@@ -532,6 +543,39 @@ object Waifu2x {
     }
 
     /** Extracts a QNN context from assets; returns its absolute path, or null. */
+    /**
+     * Komiho: copies one asset into [target] **atomically**.
+     *
+     * Everything under `cacheDir` is read back on a background thread while other prewarm
+     * threads may still be extracting, so the destination must never be observable in a
+     * half-written state. Writing to a sibling `.tmp` first and then renaming gives every
+     * reader either the previous complete file or the new complete file — a rename inside one
+     * directory is atomic.
+     *
+     * This replaced a plain `target.outputStream()` copy. With that, two threads extracting the
+     * same context could interleave their writes and produce a *corrupt but non-empty* file;
+     * the reuse test in the callers (`exists()` + non-zero length + matching version marker)
+     * then treated it as valid and kept serving it, so the model failed permanently until the
+     * app cache was cleared (see [MODEL_CACHE_VERSION] v4).
+     */
+    private fun extractAsset(context: Context, assetPath: String, target: File) {
+        val temp = File(target.parentFile, target.name + ".tmp")
+        try {
+            context.assets.open(assetPath).use { input ->
+                temp.outputStream().use(input::copyTo)
+            }
+            if (!temp.renameTo(target)) {
+                // A refused rename must not leave the model unusable: fall back to the old
+                // in-place copy, which is still better than returning no path at all.
+                context.assets.open(assetPath).use { input ->
+                    target.outputStream().use(input::copyTo)
+                }
+            }
+        } finally {
+            if (temp.exists()) temp.delete()
+        }
+    }
+
     private fun prepareQnnContext(context: Context, model: AiUpscaleModel, asset: String): String? = try {
         val dir = File(context.cacheDir, "qnn-contexts")
         if (!dir.isDirectory && !dir.mkdirs() && !dir.isDirectory) {
@@ -541,9 +585,7 @@ object Waifu2x {
             val versionFile = File(dir, ".model-version")
             val refresh = versionFile.takeIf { it.exists() }?.readText() != MODEL_CACHE_VERSION
             if (refresh || !out.exists() || out.length() == 0L) {
-                context.assets.open("${model.assetDir}/$asset").use { input ->
-                    out.outputStream().use(input::copyTo)
-                }
+                extractAsset(context, "${model.assetDir}/$asset", out)
             }
             if (refresh) versionFile.writeText(MODEL_CACHE_VERSION)
             out.absolutePath
@@ -648,9 +690,10 @@ object Waifu2x {
                 for (name in files) {
                     val out = File(dir, name)
                     if (refresh || !out.exists() || out.length() == 0L) {
-                        context.assets.open("${model.assetDir}/$name").use { input ->
-                            out.outputStream().use(input::copyTo)
-                        }
+                        // Komiho: atomic, same reason as the QNN contexts — several prewarm
+                        // threads run through here and a half-written model file is served
+                        // back on the next launch.
+                        extractAsset(context, "${model.assetDir}/$name", out)
                     }
                 }
                 if (refresh) versionFile.writeText(MODEL_CACHE_VERSION)
