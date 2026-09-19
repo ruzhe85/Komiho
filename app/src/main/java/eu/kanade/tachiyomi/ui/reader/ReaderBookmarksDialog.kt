@@ -59,7 +59,7 @@ fun ReaderBookmarksDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null)
-                    Text(" " + stringResource(R.string.reader_bookmark_add_current) + "（第 $currentPage 页）")
+                    Text(stringResource(R.string.reader_bookmark_add_current, currentPage))
                 }
                 LazyColumn {
                     items(bookmarks, key = { it.id }) { bm ->
@@ -80,7 +80,7 @@ fun ReaderBookmarksDialog(
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                             Text(
-                                text = "第 ${bm.page + 1} 页",
+                                text = stringResource(R.string.reader_bookmark_page, bm.page + 1),
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.weight(1f),
                             )

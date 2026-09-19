@@ -16,6 +16,7 @@ import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.widget.TextView
 import android.widget.FrameLayout
+import eu.kanade.tachiyomi.R
 import androidx.annotation.AttrRes
 import androidx.annotation.CallSuper
 import androidx.annotation.StyleRes
@@ -268,7 +269,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 elapsedMillis / 1000f,
             )
         } else {
-            "跳过"
+            context.getString(R.string.reader_enhancement_skipped)
         }
         tv.visibility = View.VISIBLE
     }
