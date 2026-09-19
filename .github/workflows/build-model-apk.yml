@@ -1,0 +1,172 @@
+name: Build model package APK
+
+# Komiho (2026-09-19 模型插件化): packages one NPU model family into an asset-only plugin
+# APK (`:modelapk` module). The host app scans these packages at runtime — building a new
+# model package NEVER requires a host release.
+#
+# Prerequisites
+#   * Model sources live on the `model-sources` branch of THIS repo:
+#       families/<family>/bin/<stem>.v<arch>.bin   (one file per HTP generation)
+#       families/<family>/models.json              (protocol v1: id/stem/scale/padding/
+#                                                   arches/label — padding is derived
+#                                                   from the ONNX by the packaging
+#                                                   pipeline, never hand-edited)
+#   * The branch is data-only (bins + json); main never sees the payloads, so the host APK
+#     stays small.
+#
+# Usage: run this workflow with family=<name> (e.g. `nomosuni`). The package is signed with
+# the SAME release keystore as the host (the scanner rejects mismatched signatures) and
+# uploaded to the `CI` pre-release next to the host APKs.
+#
+# Install the produced `komiho-model-<family>.apk`, then open 增强设置 — the models appear
+# in the NPU group immediately (the list refreshes on every resume of that screen).
+
+"on":
+  workflow_dispatch:
+    inputs:
+      family:
+        description: 'Model family under model-sources/families/ (e.g. nomosuni)'
+        required: true
+        type: string
+      model_version_name:
+        description: 'Package versionName'
+        required: false
+        default: '1.0'
+        type: string
+      model_version_code:
+        description: 'Package versionCode (bump it to ship a package update)'
+        required: false
+        default: '1'
+        type: string
+
+jobs:
+  build-model-package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout host (main)
+        uses: actions/checkout@v7
+
+      - name: Checkout model sources (branch model-sources)
+        uses: actions/checkout@v7
+        with:
+          ref: model-sources
+          path: model-sources
+
+      - name: Resolve family inputs
+        env:
+          FAMILY: ${{ inputs.family }}
+        run: |
+          DIR="model-sources/families/${FAMILY}"
+          [ -d "$DIR/bin" ]    || { echo "::error::missing $DIR/bin";    exit 1; }
+          [ -f "$DIR/models.json" ] || { echo "::error::missing $DIR/models.json"; exit 1; }
+          COUNT=$(find "$DIR/bin" -name '*.bin' | wc -l)
+          [ "$COUNT" -gt 0 ]   || { echo "::error::no .bin files in $DIR/bin"; exit 1; }
+          echo "FAMILY=${FAMILY}" >> "$GITHUB_ENV"
+          echo "BIN_COUNT=${COUNT}" >> "$GITHUB_ENV"
+          echo "family=${FAMILY} bins=${COUNT}"
+          cat "$DIR/models.json"
+
+      - name: Stage assets into the modelapk module
+        run: |
+          mkdir -p modelapk/src/main/assets/qnn-contexts
+          cp model-sources/families/${FAMILY}/bin/*.bin modelapk/src/main/assets/qnn-contexts/
+          cp model-sources/families/${FAMILY}/models.json modelapk/src/main/assets/models.json
+          find modelapk/src/main/assets -type f | sort
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', '**/gradle.properties') }}
+          restore-keys: |
+            gradle-
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install SDK components
+        # NDK is not exercised by this no-code module, but the shared convention sets an
+        # ndkVersion and every other project module gets configured too — install it to
+        # keep configuration deterministic.
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
+
+      - name: Write local.properties
+        run: |
+          echo "sdk.dir=/usr/local/lib/android/sdk" > local.properties
+          cat local.properties
+
+      - name: Grant gradlew execute permission
+        run: chmod +x gradlew
+
+      - name: Decode release keystore
+        # MUST be the same keystore as the host app: NpuModelPluginScanner rejects model
+        # packages whose signing certificate does not match the host's.
+        run: |
+          mkdir -p keystore
+          echo "${{ secrets.KOMIHO_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > keystore/komiho-release.jks
+          ls -la keystore/
+
+      - name: Build model package APK
+        env:
+          KOMIHO_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KOMIHO_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          ./gradlew :modelapk:assembleRelease \
+            -PmodelId="cn.ruzhe.komiho.model.${FAMILY}" \
+            -PmodelLabel="Komiho-${FAMILY}" \
+            -PmodelVersionName="${{ inputs.model_version_name }}" \
+            -PmodelVersionCode="${{ inputs.model_version_code }}" \
+            --no-daemon --stacktrace
+
+      - name: Verify package contents
+        run: |
+          APK=modelapk/build/outputs/apk/release/modelapk-release.apk
+          [ -f "$APK" ] || { echo "::error::APK missing"; exit 1; }
+          unzip -l "$APK" | grep -q 'assets/models.json' \
+            || { echo "::error::models.json not bundled"; exit 1; }
+          GOT=$(unzip -l "$APK" | grep -c 'assets/qnn-contexts/.*\.bin' || true)
+          echo "contexts bundled: $GOT / expected ${BIN_COUNT}"
+          [ "$GOT" -eq "${BIN_COUNT}" ] || { echo "::error::context count mismatch"; exit 1; }
+          if unzip -l "$APK" | grep -q 'classes.dex'; then
+            echo "::error::model package must not contain code"; exit 1
+          fi
+
+      - name: Rename to komiho-model-<family>.apk
+        run: |
+          cp modelapk/build/outputs/apk/release/modelapk-release.apk "komiho-model-${FAMILY}.apk"
+          ls -la komiho-model-*.apk
+
+      - name: Upload to CI Release (tag: CI)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="CI"
+          upload_with_retry() {
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG" "$1" --repo "${{ github.repository }}" --clobber; then
+                return 0
+              fi
+              echo "::warning::upload of $1 failed (attempt $attempt/3), retrying in 30s"
+              sleep 30
+            done
+            echo "::error::upload of $1 failed after 3 attempts"
+            return 1
+          }
+          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "${{ github.repository }}" \
+              --title "Komiho-CI" --notes "CI channel" --prerelease
+          fi
+          upload_with_retry "komiho-model-${FAMILY}.apk"

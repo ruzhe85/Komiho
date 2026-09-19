@@ -2,9 +2,13 @@ name: CI-NPU (full package)
 
 # Komiho (2026-09-18): on-demand build for the *complete* artifact set, including the
 # universal APK. Only run this when you actually need it — it is roughly 20 minutes of
-# upload time because the universal package is ~235 MB once the 21 QNN contexts
-# (5 models: 3 ship all 5 gens, 2 NomosUni ship v69/v73/v79 = 21) and the five HTP Skel/stub
-# pairs are merged into one file.
+# upload time because the universal package is ~235 MB with the five HTP Skel/stub pairs
+# merged into one file.
+#
+# 2026-09-19 模型插件化: the QNN contexts no longer ship inside the host APK — they moved
+# to asset-only model packages built by `build-model-apk.yml`. This workflow's role is now
+# purely "publish every ABI + universal". The QNN runtime libraries (libQnnHtp/System
+# + five Skel/Stub pairs) stay in the host — they are what makes any model package work.
 #
 # Why this exists as a separate workflow rather than a second step in build.yml:
 #   * build.yml (every push to main) stays fast and green — it publishes the per-ABI
@@ -12,9 +16,8 @@ name: CI-NPU (full package)
 #   * the universal APK is what `gh release upload` timed out on (18 minutes, then
 #     `HTTP 400`), which used to turn an otherwise successful build red.
 #
-# The code, the QNN assets and the Skel libraries are the SAME in both workflows — this
-# is purely about which artifacts get published, not about compiling anything differently.
-# There is no NPU-specific branch to keep in sync.
+# The code and the Skel libraries are the SAME in both workflows — this is purely about
+# which artifacts get published, not about compiling anything differently.
 
 "on":
   workflow_dispatch:
@@ -144,8 +147,12 @@ jobs:
                 exit 1
               fi
             done
-            if [ "$(unzip -l "$apk" | grep -c 'qnn-contexts/.*\.bin')" -ne 21 ]; then
-              echo "::error::$apk does not carry the 21 QNN contexts"
+            # 2026-09-19 模型插件化: the host ships NO contexts — they come from the model
+            # packages. Guard against accidentally re-bundling them (the whole point of the
+            # plugin rework was to stop paying ~27 MiB for contexts a device may never use).
+            GOT=$(unzip -l "$apk" | grep -c 'assets/qnn-contexts/.*\.bin' || true)
+            if [ "$GOT" -ne 0 ]; then
+              echo "::error::$apk bundles $GOT QNN contexts — hosts must not ship contexts anymore"
               exit 1
             fi
           done

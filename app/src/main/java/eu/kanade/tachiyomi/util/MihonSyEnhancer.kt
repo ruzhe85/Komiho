@@ -5,7 +5,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.os.SystemClock
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
+import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelRegistry
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -326,14 +326,19 @@ object MihonSyEnhancer {
             // Komiho: model and tile geometry are user preferences. Both are pushed before
             // the pass and applied lazily — only a real change reaches the native side
             // (the model rebuilds the engine, the tile size takes the engine lock).
-            Waifu2x.setModel(AiUpscaleModel.fromId(preferences.aiModelId.get()))
+            // 2026-09-19 模型插件化: the persisted id may belong to a plugin model package,
+            // so resolve through the registry (which lazily scans plugin APKs once per
+            // process) instead of the built-in enum alone.
+            val app = Injekt.get<Application>()
+            UpscaleModelRegistry.ensureScanned(app)
+            Waifu2x.setModel(UpscaleModelRegistry.findById(preferences.aiModelId.get()))
             // Komiho（跨 HTP 试验期）：不接 onQnnFallback —— 回写偏好会把用户选的 NPU
             // 条目改成 Default，导致「换台机器重试同一个模型」这件事做不了。失败只留日志
             // （Waifu2x 的 `NPU UNAVAILABLE` WARN 带 on-chip arch），当页仍回落 Vulkan 出图。
             // 回落现在是**可见**的：角标读 Waifu2x.lastEngine，QNN 没跑成就会显示 GPU OK。
             Waifu2x.setTileSize(preferences.aiTileSize.get())
             Waifu2x.process(
-                Injekt.get<Application>(),
+                app,
                 input,
                 id = pageIndex,
                 tag = sourceTag,

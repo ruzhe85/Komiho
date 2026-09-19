@@ -379,11 +379,7 @@
     <string name="ai_model_anime_video">AnimeVideo</string>
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
-    <string name="ai_model_qnn_w2xex_photo_int8">W2xEX Photo Small</string>
-    <string name="ai_model_qnn_realesrgan_general_x4v3_int8">Real-ESRGAN Photo</string>
-    <string name="ai_model_qnn_universal_fast">W2xEX Universal Fast</string>
-    <string name="ai_model_nomosuni_compact">NomosUni Compact</string>
-    <string name="ai_model_nomosuni_span">NomosUni SPAN</string>
+    <string name="ai_model_plugin_hint">NPU 模型包需另行安装 — 点击前往 GitHub 下载</string>
     <string name="pref_ai_tile_size">分块大小</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>
