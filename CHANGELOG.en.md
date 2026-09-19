@@ -1,5 +1,31 @@
 # Komiho Changelog
 
+## v1.2.0 (2026-09-19)
+
+- New AI image upscaling (GPU / NPU): base code ported from [mihon_img_upscale](https://github.com/HaoweiLi97/mihon_img_upscale)
+- New Source management gains a "Startup" section to pick the default cold-start behavior
+- New Same-path folder auto-load; loose-image folder continues to the next volume after finishing one
+- Improved Reader performance improved, several bugs fixed
+- Improved Reader paged and WebToon mode cache values are now adjustable
+- Improved Image enhancement applies in real time
+- Improved Komga UI reworked — downloads now work
+- Improved Enhancement badge shows engine and timing accurately per page
+- Fixed Full i18n (zh / zh-TW / en); all screens display correctly after switching language
+- Fixed Cold start always landed on the welcome page
+- Fixed SMB / CIFS browsing could intermittently fail when the OS reclaimed the idle connection
+- Fixed Komga recents cover used the series cover instead of the book cover
+
+## v1.1.0 (Komiho) (2026-09-12)
+
+- New Local file browsing
+- New WebDAV share browsing
+- New SMB/CIFS share browsing
+- New Local bookmarks and history
+- New Source management — one place to manage every source
+- New Recents, now the default start page
+- Improved Komga UI redone — much nicer to use now
+- Improved Manga reader performance improvements
+
 ## v1.0.6 (Komiho)
 
 The first publicly released Komiho version, with the following capabilities:

@@ -6,6 +6,21 @@
   Keep both files in sync when adding a release.
 -->
 <changelog bulletedList="true">
+    <changelogversion versionName="1.2.0" changeDate="September 19, 2026">
+        <changelogtext>[b]Komiho 1.2.0[/b]</changelogtext>
+        <changelogtext>[b]New[/b] AI image upscaling (GPU / NPU): base code ported from mihon_img_upscale</changelogtext>
+        <changelogtext>[b]New[/b] Source management gains a "Startup" section to pick the default cold-start behavior</changelogtext>
+        <changelogtext>[b]New[/b] Same-path folder auto-load; loose-image folder continues to the next volume after finishing one</changelogtext>
+        <changelogtext>[b]Improved[/b] Reader performance improved, several bugs fixed</changelogtext>
+        <changelogtext>[b]Improved[/b] Reader paged and WebToon mode cache values are now adjustable</changelogtext>
+        <changelogtext>[b]Improved[/b] Image enhancement applies in real time</changelogtext>
+        <changelogtext>[b]Improved[/b] Komga UI reworked — downloads now work</changelogtext>
+        <changelogtext>[b]Improved[/b] Enhancement badge shows engine and timing accurately per page</changelogtext>
+        <changelogtext>[b]Fixed[/b] Full i18n (zh / zh-TW / en); all screens display correctly after switching language</changelogtext>
+        <changelogtext>[b]Fixed[/b] Cold start always landed on the welcome page</changelogtext>
+        <changelogtext>[b]Fixed[/b] SMB / CIFS browsing could intermittently fail when the OS reclaimed the idle connection</changelogtext>
+        <changelogtext>[b]Fixed[/b] Komga recents cover used the series cover instead of the book cover</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.1.0" changeDate="September 12, 2026">
         <changelogtext>[b]Komiho 1.1.0 (8)[/b]</changelogtext>
         <changelogtext>[b]New[/b] Local file browsing</changelogtext>
