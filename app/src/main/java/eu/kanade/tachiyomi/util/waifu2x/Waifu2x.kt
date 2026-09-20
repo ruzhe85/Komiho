@@ -630,29 +630,33 @@ object Waifu2x {
     @Volatile
     private var cdspAvailable: Boolean? = null
 
-    /** Kernel control nodes fastrpc exposes for the compute DSP (CDSP). */
-    private val cdspControlNodes = listOf(
+    /** Functional device nodes a working CDSP publishes under `/dev`. Used as a fallback when
+     *  the app context cannot readdir `/dev` (SELinux). Names vary a little by kernel/OEM, but a
+     *  CDSP that is actually up always exposes at least one of these; when the DSP is disabled in
+     *  firmware only the debug node `rdbg_cdsp` remains. */
+    private val cdspFunctionalNodes = listOf(
+        "/dev/glink_pkt_ctrl_cdsp",
+        "/dev/glink_pkt_data_cdsp",
+        "/dev/remoteproc-cdsp-md",
         "/dev/fastrpc-cdsp",
         "/dev/fastrpc-cdsp-unsigned",
-        "/dev/fastrpc_cdsp",
-        "/dev/cdsp",
     )
 
     /**
      * Whether this device actually exposes a compute DSP the QNN HTP backend could run on.
      *
      * Komiho (2026-09-21): some devices carry Qualcomm silicon but have the CDSP switched
-     * off in firmware (`vendor.fastrpc.disable.cdsprpcd.daemon=1`, no `fastrpc-cdsp` node
-     * under `/dev`). Those still report a plausible HTP generation
-     * from [nativeGetQnnArchitecture] and ship every runtime library, so
-     * [isQnnRuntimeAvailable] passed and the NPU group was offered — only for every model to
-     * fail deep inside with `Transport layer setup failed: 14001` and silently fall back to
-     * Vulkan, which the user cannot tell apart from a working NPU.
+     * off in firmware (observed: only the debug node `rdbg_cdsp` exists, every functional
+     * CDSP node is absent). Those still report a plausible HTP generation from
+     * [nativeGetQnnArchitecture], so [isQnnRuntimeAvailable] passed and the NPU group was
+     * offered — only for every model to fail deep inside with
+     * `Transport layer setup failed: 14001` and silently fall back to Vulkan.
      *
-     * No control node means no fastrpc session can ever be booted, hence no Skel can be
-     * loaded, so nothing we could offer would work. We only test **existence** and never
-     * `open()` the node: SELinux may legitimately deny opening it on a healthy device,
-     * whereas listing `/dev` is always permitted.
+     * Detection: prefer scanning `/dev` for any node whose name contains `cdsp` *other than*
+     * the debug node `rdbg_cdsp` (covers every OEM naming). If the app context cannot readdir
+     * `/dev` (SELinux may deny it), fall back to `stat`-ing the known functional node names.
+     * We never `open()` a node — SELinux may deny even that, but `stat`/`readdir` are what the
+     * QNN backend itself needs, so they are permitted on any device where NPU can work.
      *
      * This probe is cheap, and every NPU gate evaluates it **first**, so a disabled DSP
      * short-circuits before we even dlopen `libQnnHtp.so`.
@@ -660,14 +664,18 @@ object Waifu2x {
     val isCdspAvailable: Boolean
         get() {
             cdspAvailable?.let { return it }
-            val node = cdspControlNodes.firstOrNull { File(it).exists() }
-            val available = node != null
+            val devFiles = File("/dev").listFiles()
+            val found: String? = devFiles
+                ?.firstOrNull { f -> "cdsp" in f.name && f.name != "rdbg_cdsp" }
+                ?.name
+                ?: cdspFunctionalNodes.firstOrNull { File(it).exists() }
+            val available = found != null
             logcat(LogPriority.WARN) {
                 if (available) {
-                    "Waifu2x: CDSP available (control node $node)"
+                    "Waifu2x: CDSP available (control node /dev/$found)"
                 } else {
-                    "Waifu2x: CDSP unavailable — no fastrpc control node under /dev; " +
-                        "hiding NPU models (compute DSP is switched off on this device)"
+                    "Waifu2x: CDSP unavailable — no functional CDSP node under /dev " +
+                        "(only rdbg_cdsp or none); hiding NPU models (compute DSP is switched off)"
                 }
             }
             cdspAvailable = available
