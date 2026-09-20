@@ -45,9 +45,11 @@ import tachiyomi.presentation.core.util.collectAsState
  *  - **CPU** group — Lanczos3 / Catmull-Rom, plus the scale row while a CPU mode is active;
  *  - **GPU** group — one chip per built-in Vulkan model, plus the tile-size row while a GPU
  *    mode is active;
- *  - **NPU** group — models delivered by installed plugin APKs, shown only on devices with
- *    a usable NPU runtime. 2026-09-19 模型插件化: the host APK ships **no** NPU contexts
- *    anymore, so this group has three states:
+ *  - **NPU** group — models delivered by installed plugin APKs. Gated on
+ *    `Waifu2x.isCdspAvailable` **first**: firmware-disabled compute DSPs (no fastrpc control
+ *    node) skip the group entirely, since nothing there could ever run. 2026-09-19 模型插件化:
+ *    the host APK ships **no** NPU contexts anymore, so with a CDSP present this group has
+ *    three states:
  *      1. no QNN runtime (non-Qualcomm) — the whole group is not rendered;
  *      2. runtime present, no compatible plugin installed — a non-selectable hint that
  *         links to the model-package release on GitHub (installing a package and returning
@@ -141,8 +143,11 @@ fun ImageEnhancementSection(
             }
         }
 
-        // NPU group — models from installed plugin APKs, only where an NPU runtime exists.
-        if (Waifu2x.isQnnRuntimeAvailable) {
+        // NPU group — models from installed plugin APKs, only where a compute DSP *and* an
+        // NPU runtime exist. The CDSP probe comes first: with the DSP switched off in firmware
+        // there is nothing to load `libQnnHtp.so` for, and every model would only fall back to
+        // Vulkan, which looks identical to a working NPU from the outside.
+        if (Waifu2x.isCdspAvailable && Waifu2x.isQnnRuntimeAvailable) {
             EnhancementGroupLabel(MR.strings.enhancement_group_npu)
 
             val context = LocalContext.current

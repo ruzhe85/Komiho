@@ -626,6 +626,54 @@ object Waifu2x {
     @Volatile
     private var qnnArchitecture: Int = -1
 
+    /** Cached result of the CDSP control-node probe; null = not probed yet. */
+    @Volatile
+    private var cdspAvailable: Boolean? = null
+
+    /** Kernel control nodes fastrpc exposes for the compute DSP (CDSP). */
+    private val cdspControlNodes = listOf(
+        "/dev/fastrpc-cdsp",
+        "/dev/fastrpc-cdsp-unsigned",
+        "/dev/fastrpc_cdsp",
+        "/dev/cdsp",
+    )
+
+    /**
+     * Whether this device actually exposes a compute DSP the QNN HTP backend could run on.
+     *
+     * Komiho (2026-09-21): some devices carry Qualcomm silicon but have the CDSP switched
+     * off in firmware (`vendor.fastrpc.disable.cdsprpcd.daemon=1`, no `fastrpc-cdsp` node
+     * under `/dev`). Those still report a plausible HTP generation
+     * from [nativeGetQnnArchitecture] and ship every runtime library, so
+     * [isQnnRuntimeAvailable] passed and the NPU group was offered — only for every model to
+     * fail deep inside with `Transport layer setup failed: 14001` and silently fall back to
+     * Vulkan, which the user cannot tell apart from a working NPU.
+     *
+     * No control node means no fastrpc session can ever be booted, hence no Skel can be
+     * loaded, so nothing we could offer would work. We only test **existence** and never
+     * `open()` the node: SELinux may legitimately deny opening it on a healthy device,
+     * whereas listing `/dev` is always permitted.
+     *
+     * This probe is cheap, and every NPU gate evaluates it **first**, so a disabled DSP
+     * short-circuits before we even dlopen `libQnnHtp.so`.
+     */
+    val isCdspAvailable: Boolean
+        get() {
+            cdspAvailable?.let { return it }
+            val node = cdspControlNodes.firstOrNull { File(it).exists() }
+            val available = node != null
+            logcat(LogPriority.WARN) {
+                if (available) {
+                    "Waifu2x: CDSP available (control node $node)"
+                } else {
+                    "Waifu2x: CDSP unavailable — no fastrpc control node under /dev; " +
+                        "hiding NPU models (compute DSP is switched off on this device)"
+                }
+            }
+            cdspAvailable = available
+            return available
+        }
+
     /**
      * Whether an NPU model entry should be offered on this device.
      *
@@ -682,7 +730,8 @@ object Waifu2x {
      */
     fun isModelSupported(model: UpscaleModelSpec): Boolean = when (model.backend) {
         UpscaleModelSpec.Backend.NCNN_VULKAN -> true
-        UpscaleModelSpec.Backend.QNN_HTP -> isQnnRuntimeAvailable
+        // CDSP first: no compute DSP means no model could ever run on this device.
+        UpscaleModelSpec.Backend.QNN_HTP -> isCdspAvailable && isQnnRuntimeAvailable
     }
 
     /**
