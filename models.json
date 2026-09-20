@@ -28,13 +28,6 @@
       "scale": 2,
       "padding": 21,
       "label": "NomosUni Span"
-    },
-    {
-      "id": "qnn-realcugan-pro-x2-conservative-int8",
-      "stem": "realcugan-pro-x2-conservative-int8",
-      "scale": 2,
-      "padding": 18,
-      "label": "Real-CUGAN Conservative"
     }
   ]
 }
