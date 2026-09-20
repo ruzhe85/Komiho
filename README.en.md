@@ -8,7 +8,7 @@
 
 Supports **Komga, local files, WebDAV, SMB** and more comic sources
 
-Package `cn.ruzhe.komiho` ｜ Version 1.1.0 (8) ｜ Android 8.0+
+Package `cn.ruzhe.komiho` ｜ Version 1.2.0 (9) ｜ Android 8.0+
 
 [English](./README.en.md) | [中文](./README.md)
 
@@ -55,11 +55,18 @@ Full-featured history, reading progress and bookmarks, so you can quickly resume
 
 ### 🖼️ Image enhancement
 
-Built-in image enhancement provides:
-
-**1.5× / 2× / 2.5× / 3×**
+Built-in image enhancement runs on CPU / GPU / NPU (Qualcomm SoC only; requires downloading the matching model pack).
 
 Tuned for manga line art, balancing quality, speed and memory usage.
+
+## Special notes
+
+Komiho's image enhancement runs at the decode stage; please allow some time on first launch with GPU / NPU.
+AnimeVideo suits color comics better, Omni-Mini suits black-and-white comics, and Omni-Turbo is more powerful but slower.
+GPU tile size affects processing speed; 192 is recommended.
+For the best experience, choose a model that fits your device.
+
+NPU models may show slight color shift — a trade-off for speed and performance, not a bug.
 
 ### 🖥️ Tablet & large screen
 
