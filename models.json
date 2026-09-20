@@ -28,13 +28,6 @@
       "scale": 2,
       "padding": 21,
       "label": "NomosUni Span 2x"
-    },
-    {
-      "id": "qnn-nomosuni-span-x4-int8",
-      "stem": "nomosuni-span-x4-int8",
-      "scale": 4,
-      "padding": 21,
-      "label": "NomosUni Span 4x"
     }
   ]
 }
