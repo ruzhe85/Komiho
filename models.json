@@ -12,8 +12,8 @@
       "id": "qnn-realesrgan-general-x4v3-x2-int8",
       "stem": "realesrgan-general-x4v3-x2-int8",
       "scale": 2,
-      "padding": 10,
-      "label": "Real-ESRGAN Photo"
+      "padding": 35,
+      "label": "realesr"
     },
     {
       "id": "qnn-universal-fast-v2-fp16",
@@ -27,7 +27,7 @@
       "stem": "nomosuni-span-x2-int8",
       "scale": 2,
       "padding": 21,
-      "label": "NomosUni Span 2x"
+      "label": "NomosUni Span"
     }
   ]
 }
