@@ -37,11 +37,25 @@
       "label": "W2xEX Omni Small"
     },
     {
+      "id": "qnn-w2xex-omni-smallv2-x2-int8",
+      "stem": "w2xex-omni-smallv2-x2-int8",
+      "scale": 2,
+      "padding": 18,
+      "label": "W2xEX Omni Small INT8"
+    },
+    {
       "id": "qnn-w2xex-omni-turbo-v15-x2-fp16",
       "stem": "w2xex-omni-turbo-v15-x2-fp16",
       "scale": 2,
       "padding": 10,
       "label": "W2xEX Omni Turbo"
+    },
+    {
+      "id": "qnn-w2xex-omni-turbo-v15-x2-int8",
+      "stem": "w2xex-omni-turbo-v15-x2-int8",
+      "scale": 2,
+      "padding": 10,
+      "label": "W2xEX Omni Turbo INT8"
     }
   ]
 }
