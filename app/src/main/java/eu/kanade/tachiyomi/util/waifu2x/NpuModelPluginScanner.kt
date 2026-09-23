@@ -41,6 +41,20 @@ object NpuModelPluginScanner {
     const val MODEL_PACKAGE_PREFIX = "cn.ruzhe.komiho.model."
 
     /**
+     * HTP generation numbers asked for by name.
+     *
+     * A model package's applicationId is `cn.ruzhe.komiho.model.v<arch>` (`v69`, `v75`, …), so
+     * the candidate names are enumerable even where the installed-package list is not: some
+     * ROMs hand `getInstalledPackages` back with only the calling package inside, while the
+     * per-name lookup path still answers. Sweeping a range instead of listing today's
+     * generations keeps a future SoC working without a host release.
+     */
+    private val PROBE_ARCH_CODES = 64..96
+
+    /** Package declared in this app's `<queries>`; used to sanity-check the per-name lookup. */
+    private const val CONTROL_PROBE_PACKAGE = "com.android.settings"
+
+    /**
      * Manifest protocol this host understands. Bump only on a semantic redesign of
      * `models.json`; additive optional fields do NOT require a bump (they are ignored).
      */
@@ -96,21 +110,43 @@ object NpuModelPluginScanner {
             }
         }
 
-        val candidates = try {
+        // Two independent discovery channels. Enumeration is the natural one, but a ROM may
+        // answer `getInstalledPackages` with only the calling package (seen on Android 16 even
+        // with QUERY_ALL_PACKAGES granted and the model package installed), while the per-name
+        // lookup path still works — so ask for the names we expect as well.
+        val names = LinkedHashSet<String>()
+        val enumerated = try {
             pm.getInstalledPackages(0)
         } catch (e: Exception) {
             diag.append("package enumeration FAILED: ").append(e).append('\n')
-            writeDiagnostics(context, diag)
             logcat(LogPriority.WARN, e) { "ModelPlugins: package enumeration failed" }
-            return emptyList()
+            null
         }
-        diag.append("installed packages: ").append(candidates.size).append('\n')
+        enumerated?.forEach { info -> info.packageName?.let(names::add) }
+        diag.append("installed packages: ").append(enumerated?.size ?: -1)
+            .append(" -> [").append(names.joinToString(",")).append("]\n")
+
+        var probed = 0
+        for (arch in PROBE_ARCH_CODES) {
+            val pkg = MODEL_PACKAGE_PREFIX + "v" + arch
+            if (names.contains(pkg)) continue
+            if (runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess) {
+                names += pkg
+                probed++
+            }
+        }
+        // Control probe: a package this app declares in <queries>. Separates "per-name lookup
+        // works, the list API is what is blocked" from "every package query is blocked".
+        diag.append("control probe ($CONTROL_PROBE_PACKAGE): ")
+            .append(runCatching { pm.getPackageInfo(CONTROL_PROBE_PACKAGE, 0) }.isSuccess)
+            .append('\n')
+        diag.append("name probes: ").append(PROBE_ARCH_CODES.count())
+            .append(" tried, ").append(probed).append(" hit\n")
         diag.append("prefix: ").append(MODEL_PACKAGE_PREFIX).append('\n')
 
         val models = mutableListOf<PluginUpscaleModel>()
         val seenIds = mutableSetOf<String>()
-        for (info in candidates) {
-            val pkg = info.packageName ?: continue
+        for (pkg in names) {
             if (!pkg.startsWith(MODEL_PACKAGE_PREFIX)) continue
             diag.append("candidate: ").append(pkg).append('\n')
 

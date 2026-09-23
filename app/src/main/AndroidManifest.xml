@@ -51,27 +51,31 @@
 
     <!-- Komiho: 移除第三方 AAR 合并进来的死权限——
          CAMERA 来自 zxing-android-embedded（仅用其 Intents 常量类，无扫码功能）；
-         SYSTEM_ALERT_WINDOW 来自 Shizuku api（无悬浮窗代码）；
-         QUERY_ALL_PACKAGES 为扩展扫描遗留（扩展组已隐藏——Komiho 已移除 source/扩展体系，不保留）。 -->
+         SYSTEM_ALERT_WINDOW 来自 Shizuku api（无悬浮窗代码）。
+         注：QUERY_ALL_PACKAGES 曾在此处被 remove，但那是无效写法（tools:node="remove" 只抵消
+         依赖库合并进来的元素，不抵消主 manifest 自己的声明）——NPU 模型包扫描需要它，保留。 -->
     <uses-permission
         android:name="android.permission.CAMERA"
         tools:node="remove" />
     <uses-permission
         android:name="android.permission.SYSTEM_ALERT_WINDOW"
         tools:node="remove" />
-    <uses-permission
-        android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:node="remove" />
 
-    <!-- Komiho: 包可见性白名单（替代 QUERY_ALL_PACKAGES）——
+    <!-- Komiho: 包可见性白名单——
          WebViewUtil.spoofedPackageName 需要看见 chrome/系统设置/YT-TV。
          注意：不能加 VIEW+https intent（浏览器可见性）——Google 政策与鸿蒙
-         均视其为「读取已安装应用列表」，会重新触发风险标签。 -->
+         均视其为「读取已安装应用列表」，会重新触发风险标签。
+         NPU 模型包无任何组件（纯 asset APK），无法用 intent 匹配发现，只能按包名列出。 -->
     <queries>
         <package android:name="com.google.android.webview" />
         <package android:name="com.android.chrome" />
         <package android:name="com.android.settings" />
         <package android:name="com.google.android.youtube.tv" />
+        <package android:name="cn.ruzhe.komiho.model.v69" />
+        <package android:name="cn.ruzhe.komiho.model.v73" />
+        <package android:name="cn.ruzhe.komiho.model.v75" />
+        <package android:name="cn.ruzhe.komiho.model.v79" />
+        <package android:name="cn.ruzhe.komiho.model.v81" />
     </queries>
 
     <!-- SY: 关闭 predictive back（enableOnBackInvokedCallback=false）—— 系统跨 Activity 预览动画
