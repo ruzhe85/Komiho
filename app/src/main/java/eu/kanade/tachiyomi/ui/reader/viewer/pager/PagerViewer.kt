@@ -48,6 +48,12 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     private var refreshJob: Job? = null
 
     /**
+     * Komiho: 上一次「真正重建」时的成像指纹（见 `ViewerConfig.imageFingerprint()`）。
+     * 构造时先按当前偏好记下基线，随后 config 里各 register 的首发回调就会因指纹相同而被跳过。
+     */
+    private var lastImageFingerprint: String? = null
+
+    /**
      * View pager used by this viewer. It's abstract to implement L2R, R2L and vertical pagers on
      * top of this class.
      */
@@ -189,6 +195,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         config.imagePropertyChangedListener = {
             refreshAdapter()
         }
+
+        // 基线：此刻适配器就是按这些设置建的，所以紧接着的首发回调不该触发重建。
+        lastImageFingerprint = config.imageFingerprint()
 
         config.navigationModeChangedListener = {
             val showOnStart = config.navigationOverlayOnStart || config.forceNavigationOverlay
@@ -560,10 +569,18 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * changed.
      */
     private fun refreshAdapter() {
-        // Komiho (2026-09-23): 合并连续触发（理由同 WebtoonViewer.refreshAdapter）—— config 里
-        // 每个 register() 订阅时会先发一次当前值，一连串触发会让适配器被反复重建，而每次重建都要
-        // 重新解码 + 增强（请求 memory/disk 双 DISABLED，没有缓存兜底）。并成一次，同时避免
-        // preparedCache 被连续清空（清一次就够）。
+        // Komiho (2026-09-24): 先过指纹门 —— config 里每个 `register()` 订阅时会**首发一次当前值**
+        // （`AndroidPreference.changes()` 的 `onStart { emit(…) }`，`distinctUntilChanged` 在赋值之后
+        // 挡不住这第一次），刚建好 viewer 时这一批回调不代表设置变了；照着重建会把可见页重新解码 +
+        // 增强（请求 memory/disk 双 DISABLED，没有缓存兜底）。指纹相同直接返回。
+        val fingerprint = config.imageFingerprint()
+        if (fingerprint == lastImageFingerprint) {
+            android.util.Log.d(KOMIHA_REBUILD_TAG, "skip rebuild: image settings unchanged")
+            return
+        }
+        lastImageFingerprint = fingerprint
+
+        // 合并连续触发：一串真变更并成一次重建，同时避免 preparedCache 被连续清空（清一次就够）。
         refreshJob?.cancel()
         refreshJob = scope.launch {
             delay(REFRESH_COALESCE_DELAY_MS)

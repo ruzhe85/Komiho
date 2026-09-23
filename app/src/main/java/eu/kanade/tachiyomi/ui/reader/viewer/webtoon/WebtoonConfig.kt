@@ -211,6 +211,25 @@ class WebtoonConfig(
             field = value.also { it.invertMode = tappingInverted }
         }
 
+    /**
+     * Komiho: 见 [ViewerConfig.imageFingerprint]。必须覆盖 init 里所有注册到
+     * `imagePropertyChangedListener` 的偏好 —— 新增这类 register 时记得同步补进来。
+     * 增强类偏好由 [ReaderPreferences.enhancementCacheKey]（模式/倍率/模型/tile + 两处 cropBorders）
+     * 一次覆盖。
+     */
+    override fun imageFingerprint(): String = buildString {
+        append(readerPreferences.enhancementCacheKey())
+        append('|').append(readerPreferences.webtoonSidePadding.get())
+        append('|').append(readerPreferences.dualPageSplitWebtoon.get())
+        append('|').append(readerPreferences.dualPageInvertWebtoon.get())
+        append('|').append(readerPreferences.dualPageRotateToFitWebtoon.get())
+        append('|').append(readerPreferences.dualPageRotateToFitInvertWebtoon.get())
+        append('|').append(readerPreferences.cropBordersContinuousVertical.get())
+        append('|').append(readerPreferences.pageTransitionsWebtoon.get())
+        append('|').append(readerPreferences.pageTransitionsWebtoonV2.get())
+        append('|').append(readerPreferences.webtoonOriginalSize.get())
+    }
+
     override fun defaultNavigation(): ViewerNavigation {
         return LNavigation()
     }

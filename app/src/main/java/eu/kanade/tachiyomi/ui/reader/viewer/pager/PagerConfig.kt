@@ -229,6 +229,27 @@ class PagerConfig(
             field = value.also { it.invertMode = this.tappingInverted }
         }
 
+    /**
+     * Komiho: 见 [ViewerConfig.imageFingerprint]。必须覆盖 init 里所有注册到
+     * `imagePropertyChangedListener` 的偏好 —— 新增这类 register 时记得同步补进来。
+     * 增强类偏好由 [ReaderPreferences.enhancementCacheKey]（模式/倍率/模型/tile + 两处 cropBorders）
+     * 一次覆盖。
+     */
+    override fun imageFingerprint(): String = buildString {
+        append(readerPreferences.enhancementCacheKey())
+        append('|').append(readerPreferences.readerTheme.get())
+        append('|').append(readerPreferences.imageScaleType.get())
+        append('|').append(readerPreferences.zoomStart.get())
+        append('|').append(readerPreferences.landscapeZoom.get())
+        append('|').append(readerPreferences.dualPageSplitPaged.get())
+        append('|').append(readerPreferences.dualPageInvertPaged.get())
+        append('|').append(readerPreferences.dualPageRotateToFit.get())
+        append('|').append(readerPreferences.dualPageRotateToFitInvert.get())
+        append('|').append(readerPreferences.pageTransitionsPager.get())
+        append('|').append(readerPreferences.centerMarginType.get())
+        append('|').append(readerPreferences.invertDoublePages.get())
+    }
+
     override fun defaultNavigation(): ViewerNavigation {
         return when (viewer) {
             is VerticalPagerViewer -> LNavigation()

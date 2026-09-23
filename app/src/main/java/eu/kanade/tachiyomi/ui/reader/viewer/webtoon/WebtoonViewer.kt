@@ -56,6 +56,12 @@ class WebtoonViewer(
     private var refreshJob: Job? = null
 
     /**
+     * Komiho: 上一次「真正重建」时的成像指纹（见 `ViewerConfig.imageFingerprint()`）。
+     * 构造时先按当前偏好记下基线，随后 config 里各 register 的首发回调就会因指纹相同而被跳过。
+     */
+    private var lastImageFingerprint: String? = null
+
+    /**
      * Recycler view used by this viewer.
      */
     val recycler = WebtoonRecyclerView(activity)
@@ -231,6 +237,9 @@ class WebtoonViewer(
         config.imagePropertyChangedListener = {
             refreshAdapter()
         }
+
+        // 基线：此刻适配器就是按这些设置建的，所以紧接着的首发回调不该触发重建。
+        lastImageFingerprint = config.imageFingerprint()
 
         config.themeChangedListener = {
             ActivityCompat.recreate(activity)
@@ -584,10 +593,20 @@ class WebtoonViewer(
      * Used when an image configuration is changed.
      */
     private fun refreshAdapter() {
-        // Komiho (2026-09-23): 合并连续触发。config 里每个 register() 在订阅时都会先发出一次当前值
-        // （distinctUntilChanged 只挡后续的等值重复），viewer 恰好建在页面 Ready 前后时，这些「首发」
-        // 回调会挤在一起 —— 而每次重建都会销毁所有可见 holder，让它们**重跑解码 + 增强**
-        // （请求是 memory/disk 双 DISABLED、没有任何缓存兜底，实测单页 2.5~6s）。一串触发并成一次。
+        // Komiho (2026-09-24): 只有「成像设置真的变了」才重建。config 里每个 `register()` 在订阅时
+        // 都会**首发一次当前值**（`AndroidPreference.changes()` 的 `onStart { emit(…) }`），
+        // `distinctUntilChanged` 在赋值之后、挡不住这第一次 —— viewer 刚建好时十几个 register 各发
+        // 一次，全部打到这个回调上。而每次重建都会销毁所有可见 holder、让它们**重跑解码 + 增强**
+        // （请求 memory/disk 双 DISABLED，没有缓存兜底），于是刚打开一本书就会把可见页渲染两遍。
+        // 指纹把「首发噪音」与「用户真改了设置」区分开；指纹相同直接跳过。
+        val fingerprint = config.imageFingerprint()
+        if (fingerprint == lastImageFingerprint) {
+            android.util.Log.d(KOMIHA_REBUILD_TAG, "skip rebuild: image settings unchanged")
+            return
+        }
+        lastImageFingerprint = fingerprint
+
+        // 合并连续触发：一串真变更并成一次重建（理由同上，代价与上面一致）。
         refreshJob?.cancel()
         refreshJob = scope.launch {
             delay(REFRESH_COALESCE_DELAY_MS)
