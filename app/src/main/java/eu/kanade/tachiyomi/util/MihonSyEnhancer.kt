@@ -39,6 +39,12 @@ object MihonSyEnhancer {
      */
     private const val MAX_ENHANCE_OUTPUT_PIXELS = 32_000_000L
 
+    /**
+     * 倍率。AI 档（mode 5）由模型固定为 2x；CPU 档（2/3）用 [ReaderPreferences.lanczosScale]。
+     * 只用于 [exceedsOutputCap] 的预判，实际缩放仍由各自分支决定。
+     */
+    private const val AI_UPSCALE_FACTOR = 2f
+
     init {
         System.loadLibrary("mihonsy-enhance")
     }
@@ -164,7 +170,9 @@ object MihonSyEnhancer {
 
     /**
      * Synchronously enhances [input] according to the current reader preferences.
-     * Returns the enhanced bitmap, or null when no enhancement applies / fails.
+     * Returns the enhanced bitmap, or null when no enhancement applies / fails — including the
+     * case where the source is already so large that the scaled result would not survive
+     * [capOutputSize], in which case enhancement is skipped outright (see [exceedsOutputCap]).
      *
      * @param input must be an ARGB_8888 bitmap.
      * @param onComplete optional callback invoked with (enhanced != null, elapsedMillis, gpuWaitMillis)
@@ -199,6 +207,24 @@ object MihonSyEnhancer {
         // Single selector: 0 = Off, 2 = Lanczos3, 3 = Catmull-Rom.
         // (MihonSY: Anime4K (1) and Spline36 (4) are disabled and excluded from the build.)
         val mode = preferences.enhancementMode.get()
+
+        // Komiho (2026-09-23): 拦「注定白做」的增强。输入已经大到 × scale 之后必然超过
+        // [MAX_ENHANCE_OUTPUT_PIXELS]，输出就会被 [capOutputSize] 缩回来 —— 先超分再缩，
+        // 不但白烧算力（实测单页 2.5~6s，串行排队时单页总耗可达 15s），最后那次非整数重采样
+        // 还会抹细节：实测 1600×20164 → AI 2x = 3200×40328 (129MP) → 缩到 1593×20082，
+        // **比源宽 1600 还窄**。这类输入（本地已超分好的大图正是典型）直接不增强。
+        if (mode != 0 && exceedsOutputCap(input, mode, preferences)) {
+            logcat(LogPriority.WARN) {
+                val inPx = input.width.toLong() * input.height.toLong()
+                val scale = scaleFor(mode, preferences)
+                "Enhancement skipped: ${input.width}x${input.height} (${inPx / 1_000_000}MP) " +
+                    "x$scale -> ${(inPx * scale * scale / 1_000_000).toLong()}MP " +
+                    "exceeds the ${MAX_ENHANCE_OUTPUT_PIXELS / 1_000_000}MP output cap"
+            }
+            onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
+            return null
+        }
+
         // Komiho: GPU 档单独收集耗时拆分 —— 角标要显示「剔除等锁」的实际计算消耗。
         val gpuTiming = if (mode == 5) Waifu2x.Timing() else null
         val result = when (mode) {
@@ -264,6 +290,23 @@ object MihonSyEnhancer {
             gpuTiming?.totalWaitMs() ?: 0L,
         )
         return capped
+    }
+
+    /** 当前档位实际会用到的放大倍率（AI 档固定见 [AI_UPSCALE_FACTOR]，CPU 档取偏好）。 */
+    private fun scaleFor(mode: Int, preferences: ReaderPreferences): Float =
+        if (mode == 5) AI_UPSCALE_FACTOR else preferences.lanczosScale.get() / 100f
+
+    /**
+     * [input] 经当前档位放大后，像素总量是否会超过 [MAX_ENHANCE_OUTPUT_PIXELS]。
+     *
+     * 超过就说明 [capOutputSize] 必然把结果缩回来：这次增强拿不到标称倍率，只白白多出
+     * 一次非整数重采样。调用方据此整页跳过（见 [enhance]）。
+     */
+    private fun exceedsOutputCap(input: Bitmap, mode: Int, preferences: ReaderPreferences): Boolean {
+        val scale = scaleFor(mode, preferences)
+        if (scale <= 1f) return false
+        val output = input.width.toDouble() * input.height.toDouble() * scale * scale
+        return output > MAX_ENHANCE_OUTPUT_PIXELS.toDouble()
     }
 
     /**
