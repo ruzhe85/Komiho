@@ -295,7 +295,16 @@ class ReaderActivity : BaseActivity() {
             .map { it.viewerChapters }
             .distinctUntilChanged()
             .filterNotNull()
-            .onEach(::setChapters)
+            .onEach { chapters ->
+                // Komiho (2026-09-24): 喂章节前先定阅读模式。本地目录 / 归档 / SMB·WebDAV 散图源
+                // 在列页时就把页面置 Ready，而判定只读图片头，所以能在这里（viewer 尚未拿到任何页、
+                // 还没解码）完成 —— 否则会「先按页漫把首页解码出来、再切条漫重建」，白解码一遍。
+                // 内部只探已 Ready 的页且有预算上限，在线源会立即返回（不等待），不会拖首屏。
+                if (viewModel.preResolveAutoWebtoon(chapters.currChapter)) {
+                    updateViewer()
+                }
+                setChapters(chapters)
+            }
             .launchIn(lifecycleScope)
 
         viewModel.eventFlow
