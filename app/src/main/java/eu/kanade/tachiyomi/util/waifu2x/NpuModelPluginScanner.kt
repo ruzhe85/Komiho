@@ -7,6 +7,7 @@ import android.os.Build
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import org.json.JSONObject
+import java.security.MessageDigest
 
 /**
  * Komiho (2026-09-19 模型插件化): discovers installed NPU model-package APKs and turns them
@@ -65,10 +66,18 @@ object NpuModelPluginScanner {
      */
     fun scan(context: Context): List<PluginUpscaleModel> {
         val pm = context.packageManager
+        // Komiho (2026-09-23): the host's own certificate is not always reachable through
+        // SigningInfo — some OEM ROMs hand back a null `apkContentsSigners` for a v2-only
+        // signed APK, and then this whole scan used to bail out before looking at a single
+        // package (the model list went empty while the very same packages loaded fine in a
+        // sibling build on the same device). Losing the host certificate must NOT disable
+        // discovery: [ALLOWED_PLUGIN_CERT_SHA256] still separates our packages from foreign
+        // ones. The host certificate stays the primary check whenever it is available.
         val hostSignature = firstSignature(pm, context.packageName)
         if (hostSignature == null) {
-            logcat(LogPriority.WARN) { "ModelPlugins: host signature unavailable — refusing to scan" }
-            return emptyList()
+            logcat(LogPriority.WARN) {
+                "ModelPlugins: host signature unavailable — falling back to the cert whitelist"
+            }
         }
 
         val candidates = try {
@@ -85,9 +94,9 @@ object NpuModelPluginScanner {
             if (!pkg.startsWith(MODEL_PACKAGE_PREFIX)) continue
 
             val pluginSignature = firstSignature(pm, pkg)
-            if (pluginSignature == null || !pluginSignature.contentEquals(hostSignature)) {
+            if (pluginSignature == null || !isTrustedSignature(pluginSignature, hostSignature)) {
                 logcat(LogPriority.WARN) {
-                    "ModelPlugins: $pkg signature does not match the host — skipped"
+                    "ModelPlugins: $pkg signature is not trusted — skipped"
                 }
                 continue
             }
@@ -96,6 +105,31 @@ object NpuModelPluginScanner {
         }
         return models
     }
+
+    /**
+     * Trusted = the package carries the host's own certificate, or its SHA-256 is listed in
+     * [ALLOWED_PLUGIN_CERT_SHA256].
+     *
+     * The whitelist covers the "host certificate unreadable" case above. It is not
+     * cryptography-grade anti-tampering — the release keystore ships with the repository —
+     * it only tells "a package we produced" apart from "some other package".
+     */
+    private fun isTrustedSignature(plugin: ByteArray, host: ByteArray?): Boolean {
+        if (host != null && plugin.contentEquals(host)) return true
+        return try {
+            val hex = MessageDigest.getInstance("SHA-256")
+                .digest(plugin)
+                .joinToString(":") { "%02X".format(it) }
+            hex in ALLOWED_PLUGIN_CERT_SHA256
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** SHA-256 of the Komiho release certificate — what every model package is signed with. */
+    private val ALLOWED_PLUGIN_CERT_SHA256 = setOf(
+        "A2:B7:E5:24:EE:59:9F:84:15:60:8A:D7:BE:1A:90:A1:C8:37:9C:51:92:3A:15:A7:93:79:29:36:29:81:64:D2",
+    )
 
     /** Opens [pkg]'s `models.json` and converts each valid entry into a [PluginUpscaleModel]. */
     private fun parsePackage(context: Context, pkg: String, seenIds: MutableSet<String>): List<PluginUpscaleModel> {
