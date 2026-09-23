@@ -63,6 +63,9 @@ object NpuModelPluginScanner {
     private const val MANIFEST_ASSET = "models.json"
     private const val DEFAULT_ASSET_DIR = "qnn-contexts"
 
+    /** Name of the trace file written only when a scan finds nothing (see [scan]). */
+    private const val DIAG_FILE = "npu-diag.txt"
+
     private const val KEY_PROTOCOL_VERSION = "protocolVersion"
     private const val KEY_MODELS = "models"
     private const val KEY_ID = "id"
@@ -81,10 +84,11 @@ object NpuModelPluginScanner {
      */
     fun scan(context: Context): List<PluginUpscaleModel> {
         val pm = context.packageManager
-        // Komiho (2026-09-23, temporary): this device reports dead logcat buffers for
-        // main/system (`0 B readable` — even a self-written probe never comes back), so when
-        // discovery yields nothing there is no way to see which step failed. Collect a trace
-        // and drop it in the app's external files dir. Remove once discovery is verified.
+        // Komiho (2026-09-23): a scan that finds nothing has to say *why* somewhere. Some OEM
+        // ROMs also swallow logcat (a Nubia/RedMagic build reports `0 B readable` for main and
+        // system even for a self-written probe), so the only reliable channel is a trace in the
+        // app's own external files dir. It is written **only when discovery comes up empty**
+        // (and a stale one is dropped on success), so a healthy device never touches disk.
         val diag = StringBuilder()
 
         // Komiho (2026-09-23): the host's own certificate is not always reachable through
@@ -171,20 +175,32 @@ object NpuModelPluginScanner {
         }
 
         diag.append("RESULT: ").append(models.size).append(" models\n")
-        writeDiagnostics(context, diag)
         if (models.isEmpty()) {
+            writeDiagnostics(context, diag)
             logcat(LogPriority.WARN) {
-                "ModelPlugins: no model discovered — trace written to npu-diag.txt"
+                "ModelPlugins: no model discovered — trace written to $DIAG_FILE"
             }
+        } else {
+            // Discovery worked, so nothing to explain: drop the trace of an earlier failure —
+            // whatever sits on disk must describe the latest attempt, not an old one.
+            clearDiagnostics(context)
         }
         return models
     }
 
-    /** Writes the scan trace to `Android/data/<pkg>/files/npu-diag.txt` (see [scan]). */
+    /** Writes the scan trace to `Android/data/<pkg>/files/<DIAG_FILE>` (see [scan]). */
     private fun writeDiagnostics(context: Context, diag: StringBuilder) {
         runCatching {
             val dir = context.getExternalFilesDir(null) ?: return
-            File(dir, "npu-diag.txt").writeText(diag.toString())
+            File(dir, DIAG_FILE).writeText(diag.toString())
+        }
+    }
+
+    /** Drops the trace left by an earlier empty scan, so it can never be read as current. */
+    private fun clearDiagnostics(context: Context) {
+        runCatching {
+            val dir = context.getExternalFilesDir(null) ?: return
+            File(dir, DIAG_FILE).delete()
         }
     }
 
