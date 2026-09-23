@@ -7,6 +7,7 @@ import android.os.Build
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import org.json.JSONObject
+import java.io.File
 import java.security.MessageDigest
 
 /**
@@ -66,6 +67,12 @@ object NpuModelPluginScanner {
      */
     fun scan(context: Context): List<PluginUpscaleModel> {
         val pm = context.packageManager
+        // Komiho (2026-09-23, temporary): this device reports dead logcat buffers for
+        // main/system (`0 B readable` — even a self-written probe never comes back), so when
+        // discovery yields nothing there is no way to see which step failed. Collect a trace
+        // and drop it in the app's external files dir. Remove once discovery is verified.
+        val diag = StringBuilder()
+
         // Komiho (2026-09-23): the host's own certificate is not always reachable through
         // SigningInfo — some OEM ROMs hand back a null `apkContentsSigners` for a v2-only
         // signed APK, and then this whole scan used to bail out before looking at a single
@@ -74,6 +81,15 @@ object NpuModelPluginScanner {
         // discovery: [ALLOWED_PLUGIN_CERT_SHA256] still separates our packages from foreign
         // ones. The host certificate stays the primary check whenever it is available.
         val hostSignature = firstSignature(pm, context.packageName)
+        diag.append("host signature: ")
+            .append(
+                if (hostSignature == null) {
+                    "UNREADABLE (whitelist only)"
+                } else {
+                    "${hostSignature.size} bytes"
+                },
+            )
+            .append('\n')
         if (hostSignature == null) {
             logcat(LogPriority.WARN) {
                 "ModelPlugins: host signature unavailable — falling back to the cert whitelist"
@@ -83,27 +99,57 @@ object NpuModelPluginScanner {
         val candidates = try {
             pm.getInstalledPackages(0)
         } catch (e: Exception) {
+            diag.append("package enumeration FAILED: ").append(e).append('\n')
+            writeDiagnostics(context, diag)
             logcat(LogPriority.WARN, e) { "ModelPlugins: package enumeration failed" }
             return emptyList()
         }
+        diag.append("installed packages: ").append(candidates.size).append('\n')
+        diag.append("prefix: ").append(MODEL_PACKAGE_PREFIX).append('\n')
 
         val models = mutableListOf<PluginUpscaleModel>()
         val seenIds = mutableSetOf<String>()
         for (info in candidates) {
             val pkg = info.packageName ?: continue
             if (!pkg.startsWith(MODEL_PACKAGE_PREFIX)) continue
+            diag.append("candidate: ").append(pkg).append('\n')
 
             val pluginSignature = firstSignature(pm, pkg)
-            if (pluginSignature == null || !isTrustedSignature(pluginSignature, hostSignature)) {
+            if (pluginSignature == null) {
+                diag.append("  signature: UNREADABLE -> skipped\n")
+                logcat(LogPriority.WARN) { "ModelPlugins: $pkg signature unreadable — skipped" }
+                continue
+            }
+            if (!isTrustedSignature(pluginSignature, hostSignature)) {
+                diag.append("  signature: UNTRUSTED -> skipped\n")
                 logcat(LogPriority.WARN) {
                     "ModelPlugins: $pkg signature is not trusted — skipped"
                 }
                 continue
             }
+            diag.append("  signature: ok\n")
 
-            models += parsePackage(context, pkg, seenIds)
+            val parsed = parsePackage(context, pkg, seenIds, diag)
+            diag.append("  parsed models: ").append(parsed.size).append('\n')
+            models += parsed
+        }
+
+        diag.append("RESULT: ").append(models.size).append(" models\n")
+        writeDiagnostics(context, diag)
+        if (models.isEmpty()) {
+            logcat(LogPriority.WARN) {
+                "ModelPlugins: no model discovered — trace written to npu-diag.txt"
+            }
         }
         return models
+    }
+
+    /** Writes the scan trace to `Android/data/<pkg>/files/npu-diag.txt` (see [scan]). */
+    private fun writeDiagnostics(context: Context, diag: StringBuilder) {
+        runCatching {
+            val dir = context.getExternalFilesDir(null) ?: return
+            File(dir, "npu-diag.txt").writeText(diag.toString())
+        }
     }
 
     /**
@@ -132,14 +178,21 @@ object NpuModelPluginScanner {
     )
 
     /** Opens [pkg]'s `models.json` and converts each valid entry into a [PluginUpscaleModel]. */
-    private fun parsePackage(context: Context, pkg: String, seenIds: MutableSet<String>): List<PluginUpscaleModel> {
+    private fun parsePackage(
+        context: Context,
+        pkg: String,
+        seenIds: MutableSet<String>,
+        diag: StringBuilder,
+    ): List<PluginUpscaleModel> {
         return try {
             val pluginContext = context.createPackageContext(pkg, Context.CONTEXT_IGNORE_SECURITY)
             val manifest = pluginContext.assets.open(MANIFEST_ASSET).bufferedReader().use { it.readText() }
             val root = JSONObject(manifest)
 
             val protocol = root.optInt(KEY_PROTOCOL_VERSION, 1)
+            diag.append("  models.json read ok, protocol=").append(protocol).append('\n')
             if (protocol > SUPPORTED_PROTOCOL_VERSION) {
+                diag.append("  protocol newer than supported -> skipped\n")
                 logcat(LogPriority.WARN) {
                     "ModelPlugins: $pkg manifest protocol v$protocol > supported " +
                         "v$SUPPORTED_PROTOCOL_VERSION — update the host app to use it; skipped"
@@ -147,11 +200,14 @@ object NpuModelPluginScanner {
                 return emptyList()
             }
 
-            val entries = root.optJSONArray(KEY_MODELS) ?: return emptyList()
+            val entries = root.optJSONArray(KEY_MODELS)
+            diag.append("  entries: ").append(entries?.length() ?: -1).append('\n')
+            if (entries == null) return emptyList()
+
             val result = mutableListOf<PluginUpscaleModel>()
             for (i in 0 until entries.length()) {
                 val entry = entries.optJSONObject(i) ?: continue
-                val model = entryOrNull(pkg, entry) ?: continue
+                val model = entryOrNull(pkg, entry, diag) ?: continue
                 if (!seenIds.add(model.id)) {
                     logcat(LogPriority.WARN) { "ModelPlugins: duplicate model id ${model.id} — skipped" }
                     continue
@@ -164,24 +220,27 @@ object NpuModelPluginScanner {
             result
         } catch (e: Exception) {
             // No manifest, unparseable JSON, absent assets — treat as "no models here".
+            diag.append("  models.json FAILED -> ").append(e).append('\n')
             logcat(LogPriority.WARN, e) { "ModelPlugins: failed to read $pkg — skipped" }
             emptyList()
         }
     }
 
     /** Validates one manifest entry; `null` when a required field is missing or nonsense. */
-    private fun entryOrNull(pkg: String, entry: JSONObject): PluginUpscaleModel? {
+    private fun entryOrNull(pkg: String, entry: JSONObject, diag: StringBuilder): PluginUpscaleModel? {
         val id = entry.optString(KEY_ID).trim()
         val stem = entry.optString(KEY_STEM).trim()
         val label = entry.optString(KEY_LABEL).trim()
         val padding = entry.optInt(KEY_PADDING, -1)
         val scale = entry.optInt(KEY_SCALE, 2)
         val assetDir = entry.optString(KEY_ASSET_DIR).trim().ifEmpty { DEFAULT_ASSET_DIR }
-        val arches = entry.optJSONArray(KEY_ARCHES)?.let { array ->
-            (0 until array.length()).mapNotNull { array.optInt(it, -1).takeIf { v -> v > 0 } }
-        }.orEmpty()
+        val arches = parseArches(entry)
 
         if (id.isEmpty() || stem.isEmpty() || label.isEmpty() || padding <= 0 || arches.isEmpty()) {
+            diag.append("  entry '").append(id).append("' rejected: padding=").append(padding)
+                .append(" arches=").append(arches)
+                .append(" rawArches=").append(entry.optJSONArray(KEY_ARCHES))
+                .append('\n')
             logcat(LogPriority.WARN) { "ModelPlugins: incomplete entry in $pkg — skipped" }
             return null
         }
@@ -195,6 +254,26 @@ object NpuModelPluginScanner {
             scale = if (scale > 0) scale else 2,
             assetDir = assetDir,
         )
+    }
+
+    /**
+     * HTP generations from a manifest entry.
+     *
+     * Komiho (2026-09-23): the packager writes these as **strings** (`os.environ` values are
+     * always strings, so `models.json` really contains `"arches": ["75"]`), while this reader
+     * used to call `optInt` — a number-only accessor. Accept either shape so a package built
+     * by the workflow is readable as-is.
+     */
+    private fun parseArches(entry: JSONObject): List<Int> {
+        val array = entry.optJSONArray(KEY_ARCHES) ?: return emptyList()
+        return (0 until array.length()).mapNotNull { i ->
+            when (val raw = array.opt(i)) {
+                is Int -> raw
+                is Number -> raw.toInt()
+                is String -> raw.trim().toIntOrNull()
+                else -> null
+            }?.takeIf { it > 0 }
+        }
     }
 
     /** First signing certificate of [pkg] as raw bytes, or null when unreadable. */
