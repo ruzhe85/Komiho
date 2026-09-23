@@ -22,8 +22,10 @@ import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withLock
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
@@ -40,6 +42,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     val downloadManager: DownloadManager by injectLazy()
 
     val scope = MainScope()
+
+    /** Komiho: 合并中的适配器重建任务（见 [refreshAdapter]），null = 没有待办。 */
+    private var refreshJob: Job? = null
 
     /**
      * View pager used by this viewer. It's abstract to implement L2R, R2L and vertical pagers on
@@ -554,11 +559,20 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * changed.
      */
     private fun refreshAdapter() {
-        val currentItem = pager.currentItem
-        preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
-        adapter.refresh()
-        pager.adapter = adapter
-        pager.setCurrentItem(currentItem, false)
+        // Komiho (2026-09-23): 合并连续触发（理由同 WebtoonViewer.refreshAdapter）—— config 里
+        // 每个 register() 订阅时会先发一次当前值，一连串触发会让适配器被反复重建，而每次重建都要
+        // 重新解码 + 增强（请求 memory/disk 双 DISABLED，没有缓存兜底）。并成一次，同时避免
+        // preparedCache 被连续清空（清一次就够）。
+        refreshJob?.cancel()
+        refreshJob = scope.launch {
+            delay(REFRESH_COALESCE_DELAY_MS)
+            android.util.Log.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
+            val currentItem = pager.currentItem
+            preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
+            adapter.refresh()
+            pager.adapter = adapter
+            pager.setCurrentItem(currentItem, false)
+        }
     }
 
     /**
@@ -658,3 +672,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
  * XLog 的 WARN 级别吞掉，所以这里直接用 android.util.Log。
  */
 private fun prewarmLog(msg: String) = android.util.Log.d("Waifu2xPrewarm", msg)
+
+/** Komiho 诊断：适配器重建日志（webtoon 侧同名 tag，便于一起 grep）。 */
+private const val KOMIHA_REBUILD_TAG = "Waifu2xRebuild"
+
+/** Komiho: 适配器重建的合并窗口 —— 把同一批 register 首发回调并成一次重建。 */
+private const val REFRESH_COALESCE_DELAY_MS = 120L

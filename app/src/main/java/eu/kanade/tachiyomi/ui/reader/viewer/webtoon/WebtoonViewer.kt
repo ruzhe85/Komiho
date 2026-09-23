@@ -26,8 +26,10 @@ import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -48,6 +50,9 @@ class WebtoonViewer(
     val downloadManager: DownloadManager by injectLazy()
 
     private val scope = MainScope()
+
+    /** Komiho: 合并中的适配器重建任务（见 [refreshAdapter]），null = 没有待办。 */
+    private var refreshJob: Job? = null
 
     /**
      * Recycler view used by this viewer.
@@ -578,6 +583,20 @@ class WebtoonViewer(
      * Used when an image configuration is changed.
      */
     private fun refreshAdapter() {
+        // Komiho (2026-09-23): 合并连续触发。config 里每个 register() 在订阅时都会先发出一次当前值
+        // （distinctUntilChanged 只挡后续的等值重复），viewer 恰好建在页面 Ready 前后时，这些「首发」
+        // 回调会挤在一起 —— 而每次重建都会销毁所有可见 holder，让它们**重跑解码 + 增强**
+        // （请求是 memory/disk 双 DISABLED、没有任何缓存兜底，实测单页 2.5~6s）。一串触发并成一次。
+        refreshJob?.cancel()
+        refreshJob = scope.launch {
+            delay(REFRESH_COALESCE_DELAY_MS)
+            android.util.Log.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
+            rebuildAdapter()
+        }
+    }
+
+    /** 真正重建适配器：销毁并重建所有可见 holder，按最新图像设置重解码。 */
+    private fun rebuildAdapter() {
         // 强制重建适配器（与 pager 的 pager.adapter = adapter 同款）：销毁并重建所有可见
         // WebtoonPageHolder，重新走加载链并按最新增强设置重解码，保证切换增强实时生效。
         // 重设 adapter 会清空滚动位置，故先记下首可见项与像素偏移，重建后再还原，避免跳页。
@@ -599,6 +618,12 @@ private val RECYCLER_VIEW_CACHE_SIZE = if (Build.VERSION.SDK_INT >= Build.VERSIO
 // preset, mirroring ComicScreen's set_menu_pagekey_offset default (23dp). A sliver of
 // the next page stays visible so each tap feels like one full screen changed.
 private const val TAP_SCROLL_PEEK_MARGIN_DP = 23f
+
+/** Komiho 诊断：适配器重建日志（pager 侧同名 tag，便于一起 grep）。 */
+private const val KOMIHA_REBUILD_TAG = "Waifu2xRebuild"
+
+/** Komiho: 适配器重建的合并窗口 —— 把同一批 register 首发回调并成一次重建。 */
+private const val REFRESH_COALESCE_DELAY_MS = 120L
 
 // Komiho 翻页动画 v2 的曲线：三次方减速 (t-1)^3 + 1（等价于 1-(1-t)^3）。
 // ComicScreen / RecyclerView 默认用的是五次方（(t-1)^5+1），但五次方在 50% 时间就

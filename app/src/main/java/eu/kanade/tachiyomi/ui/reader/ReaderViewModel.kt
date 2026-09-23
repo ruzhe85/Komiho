@@ -121,6 +121,12 @@ import java.util.HashSet
 import java.util.concurrent.ConcurrentHashMap
 
 /**
+ * Komiho 诊断：自动条漫切换 / viewer 重建的日志 tag（与条漫 holder 的 `Waifu2xWebtoon` 同名，
+ * 一起 grep 即可看到「检测命中 → 重建 viewer → 页面重算」的完整时序）。
+ */
+private const val KOMIHA_AUTOWEBTOON_TAG = "Waifu2xWebtoon"
+
+/**
  * Presenter used by the activity to perform background operations.
  */
 class ReaderViewModel @JvmOverloads constructor(
@@ -796,6 +802,13 @@ class ReaderViewModel @JvmOverloads constructor(
         // 已经是条漫（如全局默认/标签推断）则只需记账，无需重建
         if (getMangaReadingMode() == previousMode) return
         logcat { "MihonSY auto-webtoon: chapter $chapterUrl switches to webtoon (in-memory, not saved)" }
+        // Komiho 诊断：这条切换会让 Activity 重建 viewer ⇒ 所有可见页重新解码 + 增强。
+        // 上面那句 logcat{} 走 XLog，不进 logcat，所以这里补一条 android.util.Log。
+        android.util.Log.d(
+            KOMIHA_AUTOWEBTOON_TAG,
+            "auto-webtoon switch chapter=$chapterUrl mode=$previousMode->${getMangaReadingMode()} " +
+                "(viewer will be recreated)",
+        )
         recreateViewerForAutoMode()
     }
 
@@ -808,6 +821,12 @@ class ReaderViewModel @JvmOverloads constructor(
         val currChapters = state.value.viewerChapters ?: return
         val currChapter = currChapters.currChapter
         currChapter.requestedPage = currChapter.chapter.last_page_read
+        // Komiho 诊断：viewer 重建 = 可见页全部重算（增强不留缓存），值得在日志里留痕。
+        android.util.Log.d(
+            KOMIHA_AUTOWEBTOON_TAG,
+            "recreateViewerForAutoMode: sending Event.RecreateViewer " +
+                "(requestedPage=${currChapter.requestedPage})",
+        )
         // Channel 默认 RENDEZVOUS，trySend 在无接收者时会丢——用 send 保证送达
         viewModelScope.launchIO { eventChannel.send(Event.RecreateViewer) }
     }

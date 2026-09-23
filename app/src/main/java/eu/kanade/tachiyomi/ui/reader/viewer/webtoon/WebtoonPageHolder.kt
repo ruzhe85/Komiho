@@ -15,6 +15,7 @@ import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
@@ -34,6 +35,14 @@ import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+
+/**
+ * Komiho 诊断：条漫路径的绑定 / 增强日志。pager 那侧用的是 `Waifu2xPrefetch` / `Waifu2xHolder`，
+ * 条漫原先一条日志都没有，重复解码只能从 Waifu2xTiming 的 `holder#N` 反推。
+ */
+private const val KOMIHA_WEBTOON_TAG = "Waifu2xWebtoon"
 
 /**
  * Holder of the webtoon reader for a single page of a chapter.
@@ -81,6 +90,23 @@ class WebtoonPageHolder(
      */
     private var loadJob: Job? = null
 
+    /**
+     * Komiho (2026-09-23): 已经渲染出来的页，以及当时的增强指纹。
+     *
+     * [bind] 每次都会重启 [loadPageAndProcessStatus]，而后者用 `collectLatest` 订阅
+     * [ReaderPage.statusFlow] —— StateFlow 会把当前值**重放**给新订阅者，所以一页只要已经是
+     * Ready，**任何一次重新绑定都会立刻再跑一遍 [setImage]**。偏偏增强请求是 memory/disk 双
+     * DISABLED 的（[ReaderPageImageView] 里刻意不留缓存），重跑一次就是一次完整解码 + 增强
+     * （实测单页 2.5~6s，日志里同一页连着算两遍）。
+     *
+     * pager 那边靠 `renderedKey` 系列挡住同页重复渲染，条漫一直没有这道守卫 —— 这里补上。
+     * 指纹取 [ReaderPreferences.enhancementCacheKey]：换模型 / 换倍率 / 改裁边都会变，
+     * 所以「改设置要立刻生效」不受影响；只有设置没变时的重复绑定才会被跳过（画面还在，不需重画）。
+     */
+    private var renderedPage: ReaderPage? = null
+    private var renderedEnhancementMode = -1
+    private var renderedEnhancementKey = ""
+
     init {
         refreshLayoutParams()
 
@@ -106,6 +132,12 @@ class WebtoonPageHolder(
      * Binds the given [page] with this view holder, subscribing to its state.
      */
     fun bind(page: ReaderPage) {
+        // Komiho 诊断：条漫没有 pager 那套 holder 日志，重复绑定只能靠这一行看出来
+        // （同一 id 出现两次 = 同一个 holder 被重绑；不同 id = holder 被重建）。
+        android.util.Log.d(
+            KOMIHA_WEBTOON_TAG,
+            "bind page=${page.index} id=${System.identityHashCode(this)}",
+        )
         this.page = page
         loadJob?.cancel()
         loadJob = scope.launch { loadPageAndProcessStatus() }
@@ -199,9 +231,28 @@ class WebtoonPageHolder(
      * Called when the page is ready.
      */
     private suspend fun setImage() {
+        val currentPage = page ?: return
+        val preferences = Injekt.get<ReaderPreferences>()
+        val enhancementMode = preferences.enhancementMode.get()
+        val enhancementKey = preferences.enhancementCacheKey()
+        if (
+            renderedPage === currentPage &&
+            renderedEnhancementMode == enhancementMode &&
+            renderedEnhancementKey == enhancementKey
+        ) {
+            // 同一页 + 同一套「影响像素的设置」已经渲染过（另一条状态重发，或同一 holder 被重绑）
+            // → 直接退出，不再烧一次解码 + 增强。画面还在，跳过不影响显示。
+            android.util.Log.d(
+                KOMIHA_WEBTOON_TAG,
+                "page=${currentPage.index} skip reason=already-rendered " +
+                    "id=${System.identityHashCode(this)}",
+            )
+            return
+        }
+
         progressIndicator.setProgress(0)
 
-        val streamFn = page?.stream ?: return
+        val streamFn = currentPage.stream ?: return
 
         try {
             val (source, isAnimated) = withIOContext {
@@ -229,6 +280,15 @@ class WebtoonPageHolder(
                 )
                 removeErrorLayout()
             }
+            // 真的把图交出去之后才记账：上面的 catch 分支走不到这里 ⇒ 失败后仍可重来。
+            renderedPage = currentPage
+            renderedEnhancementMode = enhancementMode
+            renderedEnhancementKey = enhancementKey
+            android.util.Log.d(
+                KOMIHA_WEBTOON_TAG,
+                "render page=${currentPage.index} mode=$enhancementMode " +
+                    "id=${System.identityHashCode(this)}",
+            )
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e)
             withUIContext {
