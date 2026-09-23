@@ -58,9 +58,10 @@ object KomgaReaderLauncher {
         val book = client.getBook(bookId)
         val seriesId = book.seriesId ?: throw IllegalStateException("书缺少 seriesId")
         val series = client.getSeriesDetail(seriesId)
-        // Auto reading mode from Komga series metadata (LTR/RTL/VERTICAL→webtoon).
-        // 交给 ensureManga 一次性完成，保证「任何同步入口」都会落库（下载 / 首页卡片 / 打开阅读）。
-        val manga = KomgaDbBridge.ensureManga(client, series.id, series.name, series.metadata.readingDirection)
+        // 交给 ensureManga 一次性完成：阅读方向 → 阅读模式（LTR/RTL/VERTICAL/WEBTOON），
+        // genres + tags → ogGenre（标签里的 webtoon/long strip 让阅读器**打开前**就定好条漫模式）。
+        // 放这里而不是各调用点，是为了保证下载 / 首页卡片 / 打开阅读这三条入口口径一致。
+        val manga = KomgaDbBridge.ensureManga(client, series.id, series.name, series.metadata)
         val chapters = KomgaDbBridge.ensureChapters(client, series.id, manga.id)
         val chapter = chapters.firstOrNull { it.url == bookUrl }
             ?: throw IllegalStateException("章节未同步")

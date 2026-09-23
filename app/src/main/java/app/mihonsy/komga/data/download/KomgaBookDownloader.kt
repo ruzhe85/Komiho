@@ -122,12 +122,11 @@ class KomgaBookDownloader(
     private suspend fun syncSeriesToDb(seriesId: String, seriesName: String) {
         if (seriesId.isBlank()) return
         runCatching {
-            // 顺带把阅读方向落库：已下载的书走离线打开路径（不联网），那时取不到 series metadata，
-            // 只能靠下载期写过的值，否则会退回按图片比例自动判定、晚一两页才切模式。
-            val readingDirection = runCatching {
-                client.getSeriesDetail(seriesId).metadata.readingDirection
-            }.getOrNull()
-            val manga = KomgaDbBridge.ensureManga(client, seriesId, seriesName, readingDirection)
+            // 顺带把 series metadata 落库（阅读方向 → 阅读模式，genres + tags → ogGenre）：
+            // 已下载的书走离线打开路径（不联网），那时取不到 metadata，只能靠下载期写过的值，
+            // 否则会退回按图片比例自动判定、晚一两页才切模式。
+            val metadata = runCatching { client.getSeriesDetail(seriesId).metadata }.getOrNull()
+            val manga = KomgaDbBridge.ensureManga(client, seriesId, seriesName, metadata)
             KomgaDbBridge.ensureChapters(client, seriesId, manga.id)
         }.onFailure { Log.w("KomgaDL", "series 同步 DB 失败：${it.message}") }
     }

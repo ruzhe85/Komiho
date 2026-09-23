@@ -1,6 +1,8 @@
 package app.mihonsy.komga.data
 
 import app.mihonsy.komga.source.KomgaSource
+import app.mihonsy.komga.data.model.SeriesMetadataDto
+import app.mihonsy.komga.data.model.combinedTags
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import kotlinx.serialization.json.JsonObject
 import mihon.core.common.extensions.EMPTY
@@ -26,26 +28,37 @@ object KomgaDbBridge {
     /**
      * Returns the DB manga for a Komga series, inserting it on first visit.
      *
-     * [readingDirection] 是 Komga series metadata 的阅读方向；非空时顺带落库（见 [applyReadingMode]）。
-     * 之所以必须在这里写：**已下载的书走离线优先的打开路径**（不联网、拿不到 series metadata），
-     * 只能靠同步期写过的值，否则它会退回「按图片比例自动判定」，晚一两页才切模式。
+     * [metadata] 是 Komga series metadata，用来一次带出两样东西：
+     *  - 阅读方向 → 顺带落库（见 [applyReadingMode]）。**必须在同步期写**：已下载的书走离线优先的
+     *    打开路径（不联网、拿不到 metadata），只能靠这里写过的值，否则会退回「按图片比例自动判定」。
+     *  - `genres + tags` → 落进 ogGenre。`Manga.mangaType()` 靠标签里的 webtoon / long strip 判条漫，
+     *    而这条判断在**打开阅读器之前**就生效（优先于按比例探测）。
      */
     suspend fun ensureManga(
         client: KomgaApiClient,
         seriesId: String,
         seriesName: String,
-        readingDirection: String? = null,
+        metadata: SeriesMetadataDto? = null,
     ): Manga {
         val url = KomgaSource.SERIES_URL_PREFIX + seriesId
         // Komga 系列缩略图 URL：聚合页 Komga 卡片封面、历史行的封面都依赖它
         // （history 查询 join mangas.thumbnail_url = ogThumbnailUrl）。
         val thumb = client.seriesThumbnailUrl(seriesId)
+        val genres = metadata?.combinedTags().orEmpty()
         val existing = mangaRepository.getMangaByUrlAndSourceId(url, KomgaSource.ID)
         val manga = if (existing != null) {
-            // 补全封面：早期插入记录 ogThumbnailUrl=null，导致聚合页 Komga 卡片无封面。
-            // 打开时按需补写系列缩略图 URL。
-            if (existing.thumbnailUrl.isNullOrBlank()) {
-                mangaRepository.update(MangaUpdate(id = existing.id, thumbnailUrl = thumb))
+            // 补全：早期插入的记录既没有封面也没有标签（ogThumbnailUrl / ogGenre 为 null）。
+            // 标签必须补 —— 缺了就只能退回按图片比例探测（晚一两页才切模式）。
+            val needThumb = existing.thumbnailUrl.isNullOrBlank()
+            val needGenre = genres.isNotEmpty() && existing.ogGenre.isNullOrEmpty()
+            if (needThumb || needGenre) {
+                mangaRepository.update(
+                    MangaUpdate(
+                        id = existing.id,
+                        thumbnailUrl = thumb.takeIf { needThumb },
+                        genre = genres.takeIf { needGenre },
+                    ),
+                )
                 mangaRepository.getMangaByUrlAndSourceId(url, KomgaSource.ID) ?: existing
             } else {
                 existing
@@ -70,7 +83,7 @@ object KomgaDbBridge {
                         ogAuthor = null,
                         ogThumbnailUrl = thumb,
                         ogDescription = null,
-                        ogGenre = null,
+                        ogGenre = genres.ifEmpty { null },
                         ogStatus = 0,
                         updateStrategy = eu.kanade.tachiyomi.source.model.UpdateStrategy.ALWAYS_UPDATE,
                         initialized = true,
@@ -83,9 +96,7 @@ object KomgaDbBridge {
                 ),
             ).first()
         }
-        if (readingDirection != null) {
-            applyReadingMode(manga, readingDirection)
-        }
+        metadata?.readingDirection?.let { applyReadingMode(manga, it) }
         return manga
     }
 

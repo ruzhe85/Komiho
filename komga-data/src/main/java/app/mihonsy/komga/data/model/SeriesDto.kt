@@ -40,6 +40,16 @@ data class AuthorDto(
     val role: String? = null,
 )
 
+/**
+ * Komiho: Komga 的 `genres` + `tags` 合并后的标签列表（去空、去重，genres 在前）。
+ *
+ * 用途：`Manga.mangaType()` 靠标签里的 `webtoon` / `long strip` 识别条漫，这是「打开前就知道
+ * 该用哪种阅读模式」的首选信号（比按图片比例探测更早、更准）。**源详情与 DB 桥接两处写入必须
+ * 用同一个口径**，否则两条入口对同一本书判断不一致。
+ */
+fun SeriesMetadataDto.combinedTags(): List<String> =
+    (genres + tags).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
 @Serializable
 data class GenreDto(
     val name: String = "",

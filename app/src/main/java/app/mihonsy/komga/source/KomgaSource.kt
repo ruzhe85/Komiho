@@ -4,6 +4,7 @@ import android.content.Context
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.data.model.combinedTags
 import app.mihonsy.komga.data.withAppLanguage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
@@ -76,7 +77,10 @@ class KomgaSource(private val context: Context) : HttpSource() {
             artist = series.metadata.authors.firstOrNull { it.role == "ARTIST" }?.name,
             author = series.metadata.authors.firstOrNull { it.role == "WRITER" }?.name,
             description = series.metadata.summary,
-            genre = series.metadata.genres.joinToString(","),
+            // Komiho: genres 与 tags 一起给 —— Manga.mangaType() 靠标签里的 webtoon / long strip
+            // 判定条漫。分隔符必须是 ", "（SManga.getGenres() 就是按这个切的，原先用 "," 会把
+            // 整串当成一个标签）。
+            genre = series.metadata.combinedTags().joinToString(", "),
             initialized = true,
         )
     }
