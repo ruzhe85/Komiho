@@ -34,7 +34,9 @@ object KomgaReaderLauncher {
     suspend fun open(context: Context, client: KomgaApiClient, bookId: String) {
         val bookUrl = KomgaSource.BOOK_URL_PREFIX + bookId
 
-        // 离线优先：已下载则纯本地启动，跳过所有网络请求
+        // 离线优先：已下载则纯本地启动，跳过所有网络请求。
+        // 阅读方向不在这里解析 —— 它在同步/下载期就已由 ensureManga 落库（见 [KomgaDbBridge.ensureManga]），
+        // 离线读到的就是那个值。
         if (KomgaDownloadStore(context).isDownloaded(bookId)) {
             val chapterRepository: ChapterRepository = Injekt.get()
             val getManga: GetManga = Injekt.get()
@@ -56,9 +58,9 @@ object KomgaReaderLauncher {
         val book = client.getBook(bookId)
         val seriesId = book.seriesId ?: throw IllegalStateException("书缺少 seriesId")
         val series = client.getSeriesDetail(seriesId)
-        val manga = KomgaDbBridge.ensureManga(client, series.id, series.name)
-        // Auto reading mode from Komga series metadata (LTR/RTL/VERTICAL→webtoon)
-        KomgaDbBridge.applyReadingMode(manga, series.metadata.readingDirection)
+        // Auto reading mode from Komga series metadata (LTR/RTL/VERTICAL→webtoon).
+        // 交给 ensureManga 一次性完成，保证「任何同步入口」都会落库（下载 / 首页卡片 / 打开阅读）。
+        val manga = KomgaDbBridge.ensureManga(client, series.id, series.name, series.metadata.readingDirection)
         val chapters = KomgaDbBridge.ensureChapters(client, series.id, manga.id)
         val chapter = chapters.firstOrNull { it.url == bookUrl }
             ?: throw IllegalStateException("章节未同步")

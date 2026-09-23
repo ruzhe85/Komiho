@@ -23,53 +23,70 @@ object KomgaDbBridge {
     private val mangaRepository: MangaRepository by lazy { Injekt.get() }
     private val chapterRepository: ChapterRepository by lazy { Injekt.get() }
 
-    /** Returns the DB manga for a Komga series, inserting it on first visit. */
-    suspend fun ensureManga(client: KomgaApiClient, seriesId: String, seriesName: String): Manga {
+    /**
+     * Returns the DB manga for a Komga series, inserting it on first visit.
+     *
+     * [readingDirection] 是 Komga series metadata 的阅读方向；非空时顺带落库（见 [applyReadingMode]）。
+     * 之所以必须在这里写：**已下载的书走离线优先的打开路径**（不联网、拿不到 series metadata），
+     * 只能靠同步期写过的值，否则它会退回「按图片比例自动判定」，晚一两页才切模式。
+     */
+    suspend fun ensureManga(
+        client: KomgaApiClient,
+        seriesId: String,
+        seriesName: String,
+        readingDirection: String? = null,
+    ): Manga {
         val url = KomgaSource.SERIES_URL_PREFIX + seriesId
         // Komga 系列缩略图 URL：聚合页 Komga 卡片封面、历史行的封面都依赖它
         // （history 查询 join mangas.thumbnail_url = ogThumbnailUrl）。
         val thumb = client.seriesThumbnailUrl(seriesId)
         val existing = mangaRepository.getMangaByUrlAndSourceId(url, KomgaSource.ID)
-        if (existing != null) {
+        val manga = if (existing != null) {
             // 补全封面：早期插入记录 ogThumbnailUrl=null，导致聚合页 Komga 卡片无封面。
             // 打开时按需补写系列缩略图 URL。
             if (existing.thumbnailUrl.isNullOrBlank()) {
                 mangaRepository.update(MangaUpdate(id = existing.id, thumbnailUrl = thumb))
-                return mangaRepository.getMangaByUrlAndSourceId(url, KomgaSource.ID) ?: existing
+                mangaRepository.getMangaByUrlAndSourceId(url, KomgaSource.ID) ?: existing
+            } else {
+                existing
             }
-            return existing
-        }
-        return mangaRepository.insertNetworkManga(
-            listOf(
-                Manga(
-                    id = 0,
-                    source = KomgaSource.ID,
-                    favorite = false,
-                    lastUpdate = 0,
-                    nextUpdate = 0,
-                    fetchInterval = -1,
-                    dateAdded = System.currentTimeMillis(),
-                    viewerFlags = 0,
-                    chapterFlags = 0,
-                    coverLastModified = 0,
-                    url = url,
-                    ogTitle = seriesName,
-                    ogArtist = null,
-                    ogAuthor = null,
-                    ogThumbnailUrl = thumb,
-                    ogDescription = null,
-                    ogGenre = null,
-                    ogStatus = 0,
-                    updateStrategy = eu.kanade.tachiyomi.source.model.UpdateStrategy.ALWAYS_UPDATE,
-                    initialized = true,
-                    lastModifiedAt = 0,
-                    favoriteModifiedAt = null,
-                    version = 1,
-                    notes = "",
-                    memo = JsonObject.EMPTY,
+        } else {
+            mangaRepository.insertNetworkManga(
+                listOf(
+                    Manga(
+                        id = 0,
+                        source = KomgaSource.ID,
+                        favorite = false,
+                        lastUpdate = 0,
+                        nextUpdate = 0,
+                        fetchInterval = -1,
+                        dateAdded = System.currentTimeMillis(),
+                        viewerFlags = 0,
+                        chapterFlags = 0,
+                        coverLastModified = 0,
+                        url = url,
+                        ogTitle = seriesName,
+                        ogArtist = null,
+                        ogAuthor = null,
+                        ogThumbnailUrl = thumb,
+                        ogDescription = null,
+                        ogGenre = null,
+                        ogStatus = 0,
+                        updateStrategy = eu.kanade.tachiyomi.source.model.UpdateStrategy.ALWAYS_UPDATE,
+                        initialized = true,
+                        lastModifiedAt = 0,
+                        favoriteModifiedAt = null,
+                        version = 1,
+                        notes = "",
+                        memo = JsonObject.EMPTY,
+                    ),
                 ),
-            ),
-        ).first()
+            ).first()
+        }
+        if (readingDirection != null) {
+            applyReadingMode(manga, readingDirection)
+        }
+        return manga
     }
 
     /**

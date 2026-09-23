@@ -7524,7 +7524,13 @@ private fun SourceDashboardPane(
                             if (seriesId in failedSeries) error("series $seriesId already failed")
                             seriesCache.getOrPut(seriesId) {
                                 val detail = client.getSeriesDetail(seriesId)
-                                val m = KomgaDbBridge.ensureManga(client, seriesId, detail.name)
+                                // 顺带落库阅读方向：已下载的书走离线路径，读取不到 series metadata。
+                                val m = KomgaDbBridge.ensureManga(
+                                    client,
+                                    seriesId,
+                                    detail.name,
+                                    detail.metadata.readingDirection,
+                                )
                                 Triple(detail.name, m, KomgaDbBridge.ensureChapters(client, seriesId, m.id))
                             }
                         }.onFailure {
