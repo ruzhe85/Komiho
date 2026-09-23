@@ -1081,6 +1081,11 @@ class ReaderActivity : BaseActivity() {
             showReadingModeToast(viewModel.getMangaReadingMode())
         }
 
+        // Komiho: 先摘掉上一次的加载指示器再挂新的。updateViewer() 现在可能在**首次 setChapters
+        // 之前**被调用两次（喂章节前的条漫判定命中会重建 viewer，见上面 viewerChapters 的收集处），
+        // 而 setChapters 只会摘掉「当前」那一个 —— 不摘旧的话，第一个指示器会永久留在
+        // readerContainer 上（表现：转圈一直转、不消失）。
+        loadingIndicator?.let { binding.readerContainer.removeView(it) }
         loadingIndicator = ReaderProgressIndicator(this)
         binding.readerContainer.addView(loadingIndicator)
 
@@ -1137,7 +1142,11 @@ class ReaderActivity : BaseActivity() {
      */
     @SuppressLint("RestrictedApi")
     private fun setChapters(viewerChapters: ViewerChapters) {
-        binding.readerContainer.removeView(loadingIndicator)
+        // Komiho: 摘掉后置空 —— 指示器的生命周期就到此为止，之后若再 updateViewer() 会重新挂一个。
+        loadingIndicator?.let {
+            binding.readerContainer.removeView(it)
+            loadingIndicator = null
+        }
         // SY -->
         val state = viewModel.state.value
         if (state.indexChapterToShift != null && state.indexPageToShift != null) {

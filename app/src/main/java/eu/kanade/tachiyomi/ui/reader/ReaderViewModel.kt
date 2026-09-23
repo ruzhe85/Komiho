@@ -826,13 +826,24 @@ class ReaderViewModel @JvmOverloads constructor(
                 deadlineMillis = System.currentTimeMillis() + PRE_RESOLVE_BUDGET_MS,
             )
             if (hit != null) {
+                // Komiho 诊断：这条决策要能在 logcat 里看见（logcat{} 走 XLog，不进 logcat），
+                // 否则排查「第一帧用了哪种 viewer」时只能靠猜。
+                android.util.Log.d(
+                    KOMIHA_AUTOWEBTOON_TAG,
+                    "pre-resolve: page ${hit.number} is a tall strip -> webtoon before first feed",
+                )
                 logcat {
                     "MihonSY auto-webtoon: page ${hit.number} is a tall strip, " +
                         "switching to webtoon mode (before first feed)"
                 }
                 markAutoWebtoonForChapter(chapterUrl)
             } else {
-                concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)
+                if (concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)) {
+                    android.util.Log.d(
+                        KOMIHA_AUTOWEBTOON_TAG,
+                        "pre-resolve: none of the first $checkCount pages is tall -> keep page mode",
+                    )
+                }
                 false
             }
         }
