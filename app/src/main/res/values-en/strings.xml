@@ -396,6 +396,6 @@
     <string name="reader_bookmark_add_current">Add bookmark on current page (page %1$d)</string>
     <string name="reader_bookmark_remove">Remove bookmark</string>
     <string name="reader_bookmark_page">Page %1$d</string>
-    <string name="reader_enhancement_skipped">Skipped</string>
+    <string name="reader_enhancement_skipped">SKIP</string>
 
 </resources>

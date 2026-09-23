@@ -391,6 +391,6 @@
     <string name="reader_bookmark_add_current">在當前頁加書籤（第 %1$d 頁）</string>
     <string name="reader_bookmark_remove">刪除書籤</string>
     <string name="reader_bookmark_page">第 %1$d 頁</string>
-    <string name="reader_enhancement_skipped">已跳過</string>
+    <string name="reader_enhancement_skipped">SKIP</string>
 
 </resources>

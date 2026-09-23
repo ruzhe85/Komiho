@@ -193,6 +193,8 @@ object MihonSyEnhancer {
     ): Bitmap? {
         val start = SystemClock.uptimeMillis()
         if (input.isRecycled) {
+            // Komiho: 什么都没做 —— 角标记成 skip，别落回 engineLabel 的默认值 CPU OK。
+            EnhanceTimings.markSkipped(pageIndex)
             onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
             return null
         }
@@ -200,6 +202,7 @@ object MihonSyEnhancer {
         // (can produce all-black frames on some devices). Decode-time enhancement runs
         // on software bitmaps, so a HARDWARE input simply skips enhancement.
         if (input.config == Bitmap.Config.HARDWARE) {
+            EnhanceTimings.markSkipped(pageIndex)
             onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
             return null
         }
@@ -222,6 +225,8 @@ object MihonSyEnhancer {
                     "exceeds the ${MAX_ENHANCE_OUTPUT_PIXELS / 1_000_000}MP output cap"
             }
             onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
+            // Komiho: 这一页没有引擎参与，角标要显示 skip 而不是 CPU OK。
+            EnhanceTimings.markSkipped(pageIndex)
             return null
         }
 
