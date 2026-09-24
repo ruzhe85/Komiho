@@ -35,7 +35,7 @@ import tachiyomi.core.metadata.comicinfo.ComicInfoPublishingStatus
 import tachiyomi.core.metadata.comicinfo.copyFromComicInfo
 import tachiyomi.core.metadata.comicinfo.getComicInfo
 import tachiyomi.core.metadata.tachiyomi.MangaDetails
-import tachiyomi.domain.chapter.service.ChapterRecognition
+import tachiyomi.domain.chapter.service.ChapterNumbering
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.filter.OrderBy
@@ -366,11 +366,19 @@ actual class LocalSource(
 
     // Chapters
     private suspend fun getChapterList(manga: SManga): List<SChapter> = withIOContext {
-        val chapters = fileSystem.getFilesInMangaDirectory(manga.url)
+        val chapterFiles = fileSystem.getFilesInMangaDirectory(manga.url)
             // Only keep supported formats
             .filterNot { it.name.orEmpty().startsWith('.') }
             .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) }
-            .map { chapterFile ->
+            // Komiho: 先按文件名自然序排好，章节号才能按这个顺序兜底（见 ChapterNumbering）。
+            .sortedWith { a, b ->
+                a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
+            }
+        // Komiho: 文件名里的编号优先，但一批编号随自然序不再严格递增时（s1_01/s2_01 会被
+        // ChapterRecognition 抹掉季标记、都解析成 1.0）改用自然序编号 —— 否则阅读器「下一章」错序。
+        val chapterNumbers = ChapterNumbering.assign(chapterFiles.map { it.name.orEmpty() }, manga.title)
+        val chapters = chapterFiles
+            .mapIndexed { index, chapterFile ->
                 SChapter.create().apply {
                     // SY --> Komiho: chapter.url 也用真实绝对路径（与 manga.url 同源），
                     // 跨模式续读才能定位到同一文件。
@@ -381,9 +389,8 @@ actual class LocalSource(
                         chapterFile.nameWithoutExtension
                     }.orEmpty()
                     date_upload = chapterFile.lastModified()
-                    chapter_number = ChapterRecognition
-                        .parseChapterNumber(manga.title, this.name, this.chapter_number.toDouble())
-                        .toFloat()
+                    // ComicInfo / EPUB 里的显式编号在这之后覆盖，仍然优先。
+                    chapter_number = chapterNumbers[index].toFloat()
 
                     val format = Format.valueOf(chapterFile)
                     if (format is Format.Epub) {

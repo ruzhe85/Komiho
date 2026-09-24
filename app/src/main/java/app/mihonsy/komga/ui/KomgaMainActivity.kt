@@ -284,7 +284,7 @@ import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.model.BookmarkItem
-import tachiyomi.domain.chapter.service.ChapterRecognition
+import tachiyomi.domain.chapter.service.ChapterNumbering
 import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.domain.chapter.repository.BookmarkRepository
 import tachiyomi.domain.chapter.repository.ChapterRepository
@@ -5181,6 +5181,33 @@ private data class LocalEntry(
 /** 与 Archive.isSupported 对齐的归档扩展名（含 epub，因阅读器也支持）。 */
 private val LOCAL_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "tar", "cbt", "epub")
 
+/**
+ * Komiho: 从远程（WebDAV/SMB）文件 URL/路径里取文件名，用于自然序比较与章节号兜底
+ * —— 服务器返回的顺序不保证，章节顺序必须自己按文件名定。
+ */
+private fun siblingName(raw: String): String {
+    val tail = raw.substringAfterLast('/')
+    return runCatching { java.net.URLDecoder.decode(tail, "UTF-8") }.getOrDefault(tail)
+}
+
+/**
+ * Komiho: 章节已存在时把章节号纠正为按自然序算出的值。
+ *
+ * 只插入不纠正的话，老库里那些「解析丢了季标记」的旧编号（s1_01/s2_01 都是 1.0）会一直保持错序
+ * —— 光改代码不生效。纠正在值不同时才写，所以是幂等的。
+ */
+private suspend fun syncChapterNumber(
+    chapterRepo: ChapterRepository,
+    url: String,
+    mangaId: Long,
+    chapterNumber: Double,
+) {
+    val existing = chapterRepo.getChapterByUrlAndMangaId(url, mangaId) ?: return
+    if (existing.chapterNumber != chapterNumber) {
+        chapterRepo.update(ChapterUpdate(id = existing.id, chapterNumber = chapterNumber))
+    }
+}
+
 private fun localEntryComparator(sort: LocalFileSort): Comparator<LocalEntry> {
     val dirFirst = compareBy<LocalEntry> { !it.isDirectory }
     val field: Comparator<LocalEntry> = when (sort.sortBy) {
@@ -5975,56 +6002,70 @@ private suspend fun openLocalFile(
             val chapter = if (file.isLocalArchive() || file.extension.equals("epub", true)) {
                 // 归档/epub：把同目录所有归档/epub 都建成章节（去重），使阅读器能自动加载下一章。
                 // 章节 url 用真实绝对路径（与 manga.url 同源），翻完当前卷自动续到下一卷。
-                bookDirUni.listFiles().orEmpty().toList()
+                val archiveSiblings = bookDirUni.listFiles().orEmpty().toList()
                     .filter { it.isLocalArchive() || it.extension.equals("epub", true) }
                     .sortedWith { a, b ->
                         a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
                     }
-                    .forEach { sib ->
-                        val url = fs.realPathOf(sib) ?: "$seriesDir/${sib.name}"
-                        if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
-                            chapterRepo.addAll(
-                                listOf(
-                                    Chapter.create().copy(
-                                        mangaId = manga.id!!,
-                                        url = url,
-                                        name = sib.nameWithoutExtension ?: sib.name.orEmpty(),
-                                        chapterNumber = ChapterRecognition
-                                            .parseChapterNumber(seriesTitle, sib.name.orEmpty(), -1.0),
-                                        dateUpload = sib.lastModified(),
-                                    ),
+                // Komiho: 章节号按自然序兜底 —— s1_01/s2_01 会被 ChapterRecognition 抹掉季标记撞成
+                // 同一个 1.0，按编号排序会把「下一章」变乱（见 ChapterNumbering）。
+                val archiveNumbers = ChapterNumbering.assign(
+                    archiveSiblings.map { it.name.orEmpty() },
+                    seriesTitle,
+                )
+                archiveSiblings.forEachIndexed { idx, sib ->
+                    val url = fs.realPathOf(sib) ?: "$seriesDir/${sib.name}"
+                    if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                        chapterRepo.addAll(
+                            listOf(
+                                Chapter.create().copy(
+                                    mangaId = manga.id!!,
+                                    url = url,
+                                    name = sib.nameWithoutExtension ?: sib.name.orEmpty(),
+                                    chapterNumber = archiveNumbers[idx],
+                                    dateUpload = sib.lastModified(),
                                 ),
-                            )
-                        }
+                            ),
+                        )
+                    } else {
+                        // 已存在：把旧编号纠正过来，否则老库里的错序会一直保留
+                        syncChapterNumber(chapterRepo, url, manga.id!!, archiveNumbers[idx])
                     }
+                }
                 chapterRepo.getChapterByUrlAndMangaId(canonicalFile, manga.id!!)
                     ?: error(context.getString(R.string.chapter_not_written, canonicalFile))
             } else {
                 // 散图目录：把系列目录（= 当前目录的父目录）下所有子目录（卷）都建成章节，
                 // 使翻完当前卷自动续到下一卷（issue #2）；章节 url 用真实绝对路径。
                 // 当前打开的目录本身就是其中一章，正常无需保底。
-                bookDirUni.listFiles().orEmpty().toList()
+                val dirSiblings = bookDirUni.listFiles().orEmpty().toList()
                     .filter { it.isDirectory }
                     .sortedWith { a, b ->
                         a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
                     }
-                    .forEach { sib ->
-                        val url = fs.realPathOf(sib) ?: "$seriesDir/${sib.name}"
-                        if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
-                            chapterRepo.addAll(
-                                listOf(
-                                    Chapter.create().copy(
-                                        mangaId = manga.id!!,
-                                        url = url,
-                                        name = sib.nameWithoutExtension ?: sib.name.orEmpty(),
-                                        chapterNumber = ChapterRecognition
-                                            .parseChapterNumber(seriesTitle, sib.name.orEmpty(), -1.0),
-                                        dateUpload = sib.lastModified(),
-                                    ),
+                val dirNumbers = ChapterNumbering.assign(
+                    dirSiblings.map { it.name.orEmpty() },
+                    seriesTitle,
+                )
+                dirSiblings.forEachIndexed { idx, sib ->
+                    val url = fs.realPathOf(sib) ?: "$seriesDir/${sib.name}"
+                    if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                        chapterRepo.addAll(
+                            listOf(
+                                Chapter.create().copy(
+                                    mangaId = manga.id!!,
+                                    url = url,
+                                    name = sib.nameWithoutExtension ?: sib.name.orEmpty(),
+                                    chapterNumber = dirNumbers[idx],
+                                    dateUpload = sib.lastModified(),
                                 ),
-                            )
-                        }
+                            ),
+                        )
+                    } else {
+                        // 已存在：把旧编号纠正过来，否则老库里的错序会一直保留
+                        syncChapterNumber(chapterRepo, url, manga.id!!, dirNumbers[idx])
                     }
+                }
                 // 保底：当前目录若未被兄弟扫描覆盖（如无子目录的叶子散图目录），
                 // 仍保留为单章节，避免读不了当前图。
                 chapterRepo.getChapterByUrlAndMangaId(canonicalFile, manga.id!!)
@@ -6428,24 +6469,26 @@ private suspend fun openWebDavTestFile(
                     logcat(LogPriority.WARN) { "[WebDav] 卷目录扫描失败: ${it.message}" }
                 }.getOrDefault(emptyList())
                     .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                // Komiho: 章节号按自然序兜底（s1_01/s2_01 会被抹掉季标记撞成同一个 1.0），见 ChapterNumbering。
+                val webDavDirNumbers = ChapterNumbering.assign(siblingDirs.map { it.name }, seriesTitle)
                 siblingDirs.forEachIndexed { idx, sib ->
                     val dirHttp = if (sib.url.endsWith('/')) sib.url else "${sib.url}/"
                     val url = WebDavConnectionStore.toChapterUrl(conn.id, dirHttp)
                     if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
-                        val parsed =
-                            ChapterRecognition.parseChapterNumber(seriesTitle, sib.name, -1.0)
                         chapterRepo.addAll(
                             listOf(
                                 Chapter.create().copy(
                                     mangaId = manga.id!!,
                                     url = url,
                                     name = sib.name,
-                                    // 无编号的按列表序兜底：避免全落到 1.0 把「下一卷」顺序打乱
-                                    chapterNumber = if (parsed > 0) parsed else idx + 1.0,
+                                    chapterNumber = webDavDirNumbers[idx],
                                     dateUpload = sib.lastModified.takeIf { it > 0 } ?: 0L,
                                 ),
                             ),
                         )
+                    } else {
+                        // 已存在：把旧编号纠正过来，否则老库里的错序会一直保留
+                        syncChapterNumber(chapterRepo, url, manga.id!!, webDavDirNumbers[idx])
                     }
                 }
                 // 保底：扫描失败 / 当前目录不在列表里（如目录就是 WebDAV 根）→ 仍建当前目录单章，
@@ -6467,36 +6510,39 @@ private suspend fun openWebDavTestFile(
                 }
                 // SY <--
                 } else {
-            // 同目录归档全部建成章节（去重），顺序 = PROPFIND 自然排序，翻完自动续卷
+            // 同目录归档全部建成章节（去重），顺序 = 文件名自然序（PROPFIND 本身不保证顺序，
+            // 这里显式排一次），翻完自动续卷。
             val siblings = runCatching {
                 WebDavPropfind.list(conn, mangaUrl).filter { it.isArchive }.map { it.url }
             }.onFailure {
                 logcat(LogPriority.WARN) { "[WebDav] 章节扫描失败，仅打开当前文件: ${it.message}" }
             }.getOrDefault(emptyList())
-            (siblings + httpUrl).distinct().forEach { fileHttpUrl ->
+            val orderedSiblings = (siblings + httpUrl).distinct()
+                .sortedWith { a, b ->
+                    siblingName(a).compareToCaseInsensitiveNaturalOrder(siblingName(b))
+                }
+            // Komiho: 章节号按自然序兜底（见 ChapterNumbering）。
+            val siblingNumbers = ChapterNumbering.assign(orderedSiblings.map { siblingName(it) }, seriesTitle)
+            orderedSiblings.forEachIndexed { idx, fileHttpUrl ->
                 val url = WebDavConnectionStore.toChapterUrl(conn.id, fileHttpUrl)
                 if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
                     val fn = fileHttpUrl.substringAfterLast('/')
                     val decoded =
                         runCatching { java.net.URLDecoder.decode(fn, "UTF-8") }.getOrDefault(fn)
                     val name = decoded.substringBeforeLast('.').ifBlank { decoded }
-                    val parsed =
-                        ChapterRecognition.parseChapterNumber(seriesTitle, decoded, -1.0)
                     chapterRepo.addAll(
                         listOf(
                             Chapter.create().copy(
                                 mangaId = manga.id!!,
                                 url = url,
                                 name = name,
-                                // 无编号的按列表序兜底（不在列表内的当前文件按第 1 个），保证排序稳定
-                                chapterNumber = if (parsed > 0) {
-                                    parsed
-                                } else {
-                                    siblings.indexOf(fileHttpUrl).coerceAtLeast(0) + 1.0
-                                },
+                                chapterNumber = siblingNumbers[idx],
                             ),
                         ),
                     )
+                } else {
+                    // 已存在：把旧编号纠正过来，否则老库里的错序会一直保留
+                    syncChapterNumber(chapterRepo, url, manga.id!!, siblingNumbers[idx])
                 }
             }
             }
@@ -6905,23 +6951,25 @@ private suspend fun openSmbFile(
                     logcat(LogPriority.WARN) { "[Smb] 卷目录扫描失败: ${it.message}" }
                 }.getOrDefault(emptyList())
                     .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                // Komiho: 章节号按自然序兜底（s1_01/s2_01 会被抹掉季标记撞成同一个 1.0），见 ChapterNumbering。
+                val smbDirNumbers = ChapterNumbering.assign(siblingDirs.map { it.name }, seriesTitle)
                 siblingDirs.forEachIndexed { idx, sib ->
                     val url = SmbConnectionStore.toChapterUrl(conn.id, sib.path) + "/"
                     if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
-                        val parsed =
-                            ChapterRecognition.parseChapterNumber(seriesTitle, sib.name, -1.0)
                         chapterRepo.addAll(
                             listOf(
                                 Chapter.create().copy(
                                     mangaId = manga.id!!,
                                     url = url,
                                     name = sib.name,
-                                    // 无编号的按列表序兜底：避免全落到 1.0 把「下一卷」顺序打乱
-                                    chapterNumber = if (parsed > 0) parsed else idx + 1.0,
+                                    chapterNumber = smbDirNumbers[idx],
                                     dateUpload = sib.lastModified.takeIf { it > 0 } ?: 0L,
                                 ),
                             ),
                         )
+                    } else {
+                        // 已存在：把旧编号纠正过来，否则老库里的错序会一直保留
+                        syncChapterNumber(chapterRepo, url, manga.id!!, smbDirNumbers[idx])
                     }
                 }
                 // 保底：扫描失败 / 当前目录不在列表里（如目录就是共享根）→ 仍建当前目录单章，
@@ -6946,26 +6994,32 @@ private suspend fun openSmbFile(
                 }.onFailure {
                     logcat(LogPriority.WARN) { "[Smb] 章节扫描失败，仅打开当前文件: ${it.message}" }
                 }.getOrDefault(emptyList())
-                (siblings + relPath).distinct().forEach { siblingRel ->
+                // Komiho: 显式按文件名自然序排 —— 原先直接用 SMB 返回的顺序建章节，
+                // 服务器顺序变了章节顺序就会变（且自然序下标兜底也没了意义）。
+                val orderedSiblings = (siblings + relPath).distinct()
+                    .sortedWith { a, b ->
+                        siblingName(a).compareToCaseInsensitiveNaturalOrder(siblingName(b))
+                    }
+                // Komiho: 章节号按自然序兜底（见 ChapterNumbering）。
+                val siblingNumbers = ChapterNumbering.assign(orderedSiblings.map { siblingName(it) }, seriesTitle)
+                orderedSiblings.forEachIndexed { idx, siblingRel ->
                     val url = SmbConnectionStore.toChapterUrl(conn.id, siblingRel)
                     if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
                         val fn = siblingRel.substringAfterLast('/')
                         val name = fn.substringBeforeLast('.').ifBlank { fn }
-                        val parsed = ChapterRecognition.parseChapterNumber(seriesTitle, fn, -1.0)
                         chapterRepo.addAll(
                             listOf(
                                 Chapter.create().copy(
                                     mangaId = manga.id!!,
                                     url = url,
                                     name = name,
-                                    chapterNumber = if (parsed > 0) {
-                                        parsed
-                                    } else {
-                                        siblings.indexOf(siblingRel).coerceAtLeast(0) + 1.0
-                                    },
+                                    chapterNumber = siblingNumbers[idx],
                                 ),
                             ),
                         )
+                    } else {
+                        // 已存在：把旧编号纠正过来，否则老库里的错序会一直保留
+                        syncChapterNumber(chapterRepo, url, manga.id!!, siblingNumbers[idx])
                     }
                 }
             }
