@@ -13,7 +13,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
-import kotlin.math.minOf
+import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -405,7 +405,7 @@ object MihonSyEnhancer {
                 if (upscaled.width > input.width) {
                     val goalW = if (targetWidth > 0) targetWidth else input.width
                     val goalH = if (targetHeight > 0) targetHeight else input.height
-                    val scale = minOf(
+                    val scale = min(
                         goalW.toFloat() / upscaled.width.toFloat(),
                         goalH.toFloat() / upscaled.height.toFloat(),
                     )
