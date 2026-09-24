@@ -13,6 +13,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
+import kotlin.math.minOf
 import kotlin.math.sqrt
 
 /**
@@ -190,6 +191,8 @@ object MihonSyEnhancer {
         onComplete: ((enhanced: Boolean, elapsedMillis: Long, gpuWaitMillis: Long) -> Unit)? = null,
         sourceTag: String = "",
         pageIndex: Int = -1,
+        targetWidth: Int = -1,
+        targetHeight: Int = -1,
     ): Bitmap? {
         val start = SystemClock.uptimeMillis()
         if (input.isRecycled) {
@@ -280,7 +283,7 @@ object MihonSyEnhancer {
             }
 
             // Komiho: GPU AI upscale (ncnn + Vulkan). Scale is fixed by the model (2x).
-            5 -> enhanceWithGpu(input, preferences, sourceTag, gpuTiming, pageIndex)
+            5 -> enhanceWithGpu(input, preferences, sourceTag, gpuTiming, pageIndex, targetWidth, targetHeight)
 
             else -> null
         }
@@ -369,6 +372,8 @@ object MihonSyEnhancer {
         sourceTag: String = "",
         timing: Waifu2x.Timing? = null,
         pageIndex: Int = -1,
+        targetWidth: Int = -1,
+        targetHeight: Int = -1,
     ): Bitmap? {
         if (Waifu2x.isSupported) {
             // Komiho: model and tile geometry are user preferences. Both are pushed before
@@ -391,7 +396,32 @@ object MihonSyEnhancer {
                 id = pageIndex,
                 tag = sourceTag,
                 timing = timing,
-            )?.let { return it }
+            )?.let { upscaled ->
+                // Komiho: AI 固定 2x，SSIV 显示时用双线性把 2x 结果缩到适应显示尺寸，
+                // 网点图高频细节被双线性抹糊。改为软件层用 Lanczos3 先把 2x 结果缩到
+                // 适应屏幕尺寸（fit-into targetW×targetH），让 SSIV 缩放比≈1，网点细节
+                // 由 Lanczos3 保住，不再被双线性重采样一次。
+                // 长条页的 targetH 已是全高，fit-into 自然退化为按宽度缩放，无需单独分支。
+                if (upscaled.width > input.width) {
+                    val goalW = if (targetWidth > 0) targetWidth else input.width
+                    val goalH = if (targetHeight > 0) targetHeight else input.height
+                    val scale = minOf(
+                        goalW.toFloat() / upscaled.width.toFloat(),
+                        goalH.toFloat() / upscaled.height.toFloat(),
+                    )
+                    if (scale < 1f) {
+                        val argb = ensureArgb(upscaled) ?: return upscaled
+                        val down = nativeLanczosProcess(argb, scale)
+                        if (down != null && down !== argb) {
+                            if (argb !== upscaled) argb.recycle()
+                            upscaled.recycle()
+                            return down
+                        }
+                        if (argb !== upscaled) argb.recycle()
+                    }
+                }
+                return upscaled
+            }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
         } else {
             logcat(LogPriority.WARN) { "AI upscale unavailable for this ABI; falling back to Lanczos3" }
