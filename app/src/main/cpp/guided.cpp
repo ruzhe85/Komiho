@@ -6,21 +6,22 @@
 // Guided filter 的代价与窗口大小无关（box filter 滑动窗口 O(1)/像素），
 // 3.1MP 单页 ~100-200ms。
 //
-// 去噪原理：引导统计 = 预平滑亮度 gI，待滤信号 p = 各 RGB 通道独立滤波。
-//   a = cov(gI,p) / (var(gI) + eps),  b = mean(p) − a·mean(gI),  q = mean(a)·p + mean(b)
-// 平坦区 var(gI) << eps → a≈0 → q≈局部均值（颗粒/色噪被抹掉）；
-// 线稿/文字区 var(gI) 大 → a≈cov/var → 边缘结构保留（比 NLM 更稳，不会断线）。
+// 去噪原理（亮度引导的强度缩放，色相守恒）：
+//   1) 只平滑「亮度」：qL = guided_filter(I, guide=预平滑亮度 gI)，保边去颗粒；
+//      a = cov(gI,I)/(var(gI)+eps), b = mean(I) − a·mean(gI), qL = a·I + b（重建用原始 I）。
+//   2) 保留色相：out_c = p_c · (qL / pL)，三通道同乘一个因子 → R:G:B 比例不变，永不色偏。
+// 平坦区 var(gI) << eps → a≈0 → qL≈局部均值 → 因子≈局部均值/原值 → 颗粒被抹掉；
+// 线稿/文字区 var(gI) 大 → a≈1 → qL≈I → 因子≈1 → 边缘清晰（保边）。
 // ⚠️ 引导图必须先预平滑（GUIDE_SMOOTH_R）：含噪亮度直接当引导时，噪声方差顶高
-// var(gI) → 噪区 a 偏大 → 噪声被当「结构」保留（第一版开强档也看不出降噪的根因之一）。
-// ⚠️⚠️ 逐像素重建必须用原始像素 p，绝不能用 gI（第二版踩坑实录）：
-//   q = a·gI + b 会在 a≈1 的所有细节区把输出换成 7×7 模糊后的亮度 → 整页全糊
-//   （「开弱档图片都全糊了」的根因）。gI 只参与统计，细节永远来自 p 本身。
-// eps 越大 a 越小、平滑越强（a = var(gI)/(var(gI)+eps)），但过大会软化中等对比
-// 细节 —— 三档由 Kotlin 侧映射 (radius, eps)：
-//   弱 (4, 8) / 中 (8, 24) / 强 (12, 64)，真机按画质实测再调。
+// var(gI) → 噪区 a 偏大 → 噪声被当「结构」保留（早期开强档也看不出降噪的根因）。
+// ⚠️ 为什么不能「逐通道独立 guided filter」（早期版本）：每个通道各自算 a/b，弱档 eps
+// 小时通道与亮度相关性差的区块 a 放大甚至变号、各通道窗口常量 meanB 互不相同 → 整体色相
+// 漂移（弱档图片变色）；中档 eps 适中时薄笔画边缘被逐通道重建平均掉 → 字体糊。
+// 强度缩放法只用亮度算单一因子、色相由同因子守恒，从根上消除这两类失真。
+// eps 越大 a 越小、平滑越强（a = var(gI)/(var(gI)+eps)），但过大会软化中等对比细节 ——
+// 三档由 Kotlin 侧映射 (radius, eps)：弱 (4, 8) / 中 (8, 24) / 强 (12, 64)，真机实测再调。
 // 预平滑后平坦区 var(gI) ≈ σ²/49（7×7 box），σ²≈100 → var(gI)≈2：
-//   弱 a≈0.2（留 20% 噪声）/ 中 a≈0.08 / 强 a≈0.03；中等对比细节（var≈45）
-//   三档 a≈0.85/0.65/0.41，纹理保留度可辨。
+//   弱 a≈0.2 / 中 a≈0.08 / 强 a≈0.03，约保留 80%/92%/97% 亮度平滑。
 //
 // 内存：按 band 处理（band 高 64 行 + r 边界），中间平面只活在一个 band 里，
 // 峰值 ~30MB，不随页高增长（对比：全图 float 平面方案要 100MB+）。
@@ -78,11 +79,11 @@ void boxBlur(const float *src, float *dst, float *tmp, int W, int H, int r) {
 }
 
 // 对一个 ext band 跑完整 guided 流程，把输出（按 ext 行存）写进 outR/outG/outB。
-// I 与 pR/pG/pB 由调用方从源位图提取（ext 范围）。
+// I 为亮度，pR/pG/pB 为原始 RGB（调用方从源位图提取，ext 范围）。
 //
-// ⚠️ 缓冲管理纪律（上一版在这里崩过）：所有平面在进入通道循环前**一次性分配**，
+// ⚠️ 缓冲管理纪律（早期版本在此崩过）：所有平面在进入循环前**一次性分配**，
 // 全函数只用不再归还 —— 空向量 .data() 是 nullptr，boxBlur 直接写 0x0 必 SEGV。
-// 12 个 ext 平面 × ~0.72MB（64+2r 行 × 2048 宽）≈ 9MB/worker，可接受。
+// 约 11 个 ext 平面 × ~0.72MB（64+2r 行 × 2048 宽）≈ 8MB/worker，可接受。
 void guidedBand(const float *I, const float *pR, const float *pG, const float *pB, int W, int Hb,
                 int r, float eps, float *outR, float *outG, float *outB) {
     constexpr int GUIDE_SMOOTH_R = 3;
@@ -90,13 +91,14 @@ void guidedBand(const float *I, const float *pR, const float *pG, const float *p
     auto mk = [&]() { return std::vector<float>(plane); };
     std::vector<float> work = mk();   // boxBlur 的可分离工作缓冲
     std::vector<float> gI = mk(), meanI = mk(), sq = mk(), varI = mk();
-    std::vector<float> P = mk(), meanP = mk(), IP = mk(), corrIP = mk();
+    std::vector<float> meanP = mk(), IP = mk(), corrIP = mk();
     std::vector<float> a = mk(), b = mk(), meanA = mk(), meanB = mk();
+    std::vector<float> qL = mk();     // 平滑后的亮度
 
     // 引导图 = 预平滑亮度（固定小半径，与档位 radius 无关）。
     boxBlur(I, gI.data(), work.data(), W, Hb, GUIDE_SMOOTH_R);
 
-    // 引导统计（全通道共享）：mean_gI、分母 var_gI + eps = box(gI²) − mean_gI² + eps
+    // 引导统计：mean_gI、分母 var_gI + eps = box(gI²) − mean_gI² + eps
     boxBlur(gI.data(), meanI.data(), work.data(), W, Hb, r);
     for (size_t i = 0; i < plane; ++i) sq[i] = gI[i] * gI[i];
     boxBlur(sq.data(), varI.data(), work.data(), W, Hb, r);
@@ -105,24 +107,29 @@ void guidedBand(const float *I, const float *pR, const float *pG, const float *p
         varI[i] = varI[i] - mi * mi + eps;
     }
 
+    // 信号 = 亮度 I；统计用引导 gI。
+    boxBlur(I, meanP.data(), work.data(), W, Hb, r);
+    for (size_t i = 0; i < plane; ++i) IP[i] = gI[i] * I[i];
+    boxBlur(IP.data(), corrIP.data(), work.data(), W, Hb, r);
+    for (size_t i = 0; i < plane; ++i) {
+        const float cov = corrIP[i] - meanI[i] * meanP[i];
+        a[i] = cov / varI[i];
+        b[i] = meanP[i] - a[i] * meanI[i];
+    }
+    boxBlur(a.data(), meanA.data(), work.data(), W, Hb, r);
+    boxBlur(b.data(), meanB.data(), work.data(), W, Hb, r);
+    // 重建用原始亮度 I（保边）：qL 是平滑后的亮度。
+    for (size_t i = 0; i < plane; ++i) {
+        qL[i] = meanA[i] * I[i] + meanB[i];
+    }
+
+    // 强度缩放：三通道同乘 factor = qL / max(I,1)，色相（R:G:B 比）严格守恒。
     const float *srcCh[3] = {pR, pG, pB};
     float *dstCh[3] = {outR, outG, outB};
     for (int c = 0; c < 3; ++c) {
-        std::memcpy(P.data(), srcCh[c], plane * sizeof(float));
-        boxBlur(P.data(), meanP.data(), work.data(), W, Hb, r);
-        for (size_t i = 0; i < plane; ++i) IP[i] = gI[i] * P[i];
-        boxBlur(IP.data(), corrIP.data(), work.data(), W, Hb, r);
         for (size_t i = 0; i < plane; ++i) {
-            const float cov = corrIP[i] - meanI[i] * meanP[i];
-            a[i] = cov / varI[i];
-            b[i] = meanP[i] - a[i] * meanI[i];
-        }
-        boxBlur(a.data(), meanA.data(), work.data(), W, Hb, r);
-        boxBlur(b.data(), meanB.data(), work.data(), W, Hb, r);
-        for (size_t i = 0; i < plane; ++i) {
-            // 重建用原始像素 P（全分辨率细节），统计引导 gI 只到这里为止——
-            // 用 gI 重建 = 输出细节被 7×7 box 模糊替换（全糊 bug，见文件头注释）。
-            dstCh[c][i] = meanA[i] * P[i] + meanB[i];
+            const float denom = I[i] > 1.0f ? I[i] : 1.0f;
+            dstCh[c][i] = srcCh[c][i] * (qL[i] / denom);
         }
     }
 }
