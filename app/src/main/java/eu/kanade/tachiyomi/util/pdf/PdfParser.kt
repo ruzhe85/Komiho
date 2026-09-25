@@ -60,7 +60,7 @@ class PdfParser(path: String) {
 
     private fun findStartXref(): Int {
         // 最后一个 startxref 之后是 EOF 偏移
-        var idx = data.lastIndexOf("startxref".toByteArray(ISO))
+        var idx = data.lastIndexOfBytes("startxref".toByteArray(ISO))
         if (idx < 0) return -1
         val len = (data.size - idx).coerceAtMost(64)
         val tail = String(data, idx, len, ISO)
@@ -125,7 +125,7 @@ class PdfParser(path: String) {
     }
 
     private fun parseXrefStream(offset: Int) {
-        val objStartPos = data.lastIndexOf("obj".toByteArray(ISO), offset + 16)
+        val objStartPos = data.lastIndexOfBytes("obj".toByteArray(ISO), offset + 16)
         if (objStartPos < 0) return
         val bytes = objectBytesAt(objStartPos)
         val dict = parseDict(bytes, firstDictStart(bytes), dictEnd(bytes)) ?: return
@@ -180,7 +180,7 @@ class PdfParser(path: String) {
         val pairs = nums.chunked(2)
         for ((onum, off) in pairs) {
             val segStart = first + off
-            val e = inner.indexOf("endobj".toByteArray(ISO), segStart)
+            val e = inner.indexOfBytes("endobj".toByteArray(ISO), segStart)
             val seg = if (e >= 0) inner.copyOfRange(segStart, e) else inner.copyOfRange(segStart, inner.size)
             objStmInner[onum] = seg
             fromObjStm.add(onum)
@@ -194,9 +194,9 @@ class PdfParser(path: String) {
     }
 
     private fun parseTrailerAt(i: Int): Map<String, ByteArray> {
-        val td = data.indexOf("<<".toByteArray(ISO), i)
+        val td = data.indexOfBytes("<<".toByteArray(ISO), i)
         if (td < 0) return emptyMap()
-        val te = data.indexOf(">>".toByteArray(ISO), td)
+        val te = data.indexOfBytes(">>".toByteArray(ISO), td)
         return parseDict(data, td, te + 2) ?: emptyMap()
     }
 
@@ -299,7 +299,7 @@ class PdfParser(path: String) {
     // ---------- 对象模型 ----------
 
     private fun objectBytesAt(offset: Int): ByteArray {
-        val e = data.indexOf("endobj".toByteArray(ISO), offset)
+        val e = data.indexOfBytes("endobj".toByteArray(ISO), offset)
         val end = if (e >= 0) e else data.size
         return data.copyOfRange(offset, end)
     }
@@ -416,12 +416,12 @@ class PdfParser(path: String) {
 
     /** 抽取对象流字节（"stream" 之后到 "endstream" 之前）。 */
     private fun streamBytesOf(bytes: ByteArray): ByteArray? {
-        val s = bytes.indexOf("stream".toByteArray(ISO))
+        val s = bytes.indexOfBytes("stream".toByteArray(ISO))
         if (s < 0) return null
         var p = s + 6
         if (bytes.getOrElse(p) { 0.toByte() } == '\r'.code.toByte()) p++
         if (bytes.getOrElse(p) { 0.toByte() } == '\n'.code.toByte()) p++
-        val e = bytes.indexOf("endstream".toByteArray(ISO), p)
+        val e = bytes.indexOfBytes("endstream".toByteArray(ISO), p)
         return if (e >= p) bytes.copyOfRange(p, e) else null
     }
 
@@ -542,8 +542,8 @@ class PdfParser(path: String) {
     }
 }
 
-/** 在字节数组中查找子串（替代标准库仅支持 Byte 元素的 indexOf）。 */
-private fun ByteArray.indexOf(sub: ByteArray, from: Int = 0): Int {
+/** 在字节数组中查找子串（独立命名，避免遮蔽标准库 ByteArray.indexOf(Byte)）。 */
+private fun ByteArray.indexOfBytes(sub: ByteArray, from: Int = 0): Int {
     if (sub.isEmpty()) return from.coerceAtMost(size)
     val hi = (size - sub.size).coerceAtLeast(from)
     var i = from.coerceAtLeast(0)
@@ -559,7 +559,7 @@ private fun ByteArray.indexOf(sub: ByteArray, from: Int = 0): Int {
 }
 
 /** 从 from 位置向前查找子串最后一次出现。 */
-private fun ByteArray.lastIndexOf(sub: ByteArray, from: Int = size): Int {
+private fun ByteArray.lastIndexOfBytes(sub: ByteArray, from: Int = size): Int {
     if (sub.isEmpty()) return from.coerceAtMost(size)
     val start = (from - sub.size + 1).coerceAtLeast(0)
     val hi = (size - sub.size).coerceAtLeast(0)
