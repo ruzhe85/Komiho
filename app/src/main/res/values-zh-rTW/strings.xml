@@ -72,6 +72,7 @@
     <string name="no_match_results">無符合結果</string>
     <string name="search_failed">搜尋失敗：%1$s</string>
     <string name="search_subdir">搜尋下級目錄</string>
+    <string name="searching">搜尋中…</string>
 
     <!-- 庫選擇 -->
     <string name="select_library">選擇庫</string>

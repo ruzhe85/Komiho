@@ -263,6 +263,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 import uy.kohesive.injekt.api.get
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Storage
@@ -5307,28 +5308,46 @@ private fun fallbackList(current: UniFile): List<LocalEntry> =
     }
 
 /**
- * Komiho: 本地递归搜索——从 [dir] 起深度遍历，收集名称包含 [query]（不区分大小写）的全部条目
- * （目录 + 归档 + 图片，与 visibleEntries 过滤口径一致）。供「搜索下级目录」开关开启时使用。
- * [depth] 限深避免异常深目录导致的栈溢出；正常漫画目录远不会触顶。
+ * Komiho: 递归搜索——从根目录起**广度优先**遍历整棵子树，命中项通过 [sink] 即时回传（不等到全部
+ * 扫完），收集名称包含 [query]（不区分大小写）的条目（目录 + 归档 + 图片，与浏览过滤口径一致）。
+ * 供「搜索下级目录」开关开启时使用。
+ * - [collected] 共享计数器，达 [maxResults] 即提前终止，避免超大目录无限扫描。
+ * - 单目录列举失败（权限/断线）仅跳过该层，不中断整棵扫描。
+ * - BFS 命中项按「近层优先」流式出现，体感更快。
  */
+private const val RECURSIVE_MAX_RESULTS = 500
+
 private suspend fun searchLocalRecursive(
     context: android.content.Context,
     base: UniFile,
-    dir: UniFile,
+    rootDir: UniFile,
     hasAllFilesAccess: Boolean,
     query: String,
-    depth: Int = 0,
-): List<LocalEntry> {
-    if (depth > 20) return emptyList()
-    val direct = withContext(Dispatchers.IO) {
-        if (hasAllFilesAccess) fallbackList(dir) else listLocalEntries(context, base, dir, false)
+    sink: suspend (LocalEntry) -> Unit,
+    collected: AtomicInteger,
+    maxResults: Int = RECURSIVE_MAX_RESULTS,
+) {
+    val queue: ArrayDeque<Pair<UniFile, Int>> = ArrayDeque()
+    queue.addLast(rootDir to 0)
+    while (queue.isNotEmpty()) {
+        if (collected.get() >= maxResults) return
+        val (dir, d) = queue.removeFirst()
+        if (d > 20) continue
+        val direct = runCatching {
+            withContext(Dispatchers.IO) {
+                if (hasAllFilesAccess) fallbackList(dir) else listLocalEntries(context, base, dir, false)
+            }
+        }.getOrDefault(emptyList())
+        val dirs = mutableListOf<UniFile>()
+        for (e in direct) {
+            if (e.name.contains(query, ignoreCase = true)) {
+                sink(e)
+                if (collected.incrementAndGet() >= maxResults) return
+            }
+            if (e.isDirectory) dirs.add(e.uni)
+        }
+        for (dd in dirs) queue.addLast(dd to d + 1)
     }
-    val out = mutableListOf<LocalEntry>()
-    for (e in direct) {
-        if (e.name.contains(query, ignoreCase = true)) out += e
-        if (e.isDirectory) out += searchLocalRecursive(context, base, e.uni, hasAllFilesAccess, query, depth + 1)
-    }
-    return out
 }
 
 /** 从浏览根 [base] 与递归命中的条目 [uni] 反推其相对路径段，供点击后跳转到该条目所在位置。 */
@@ -5347,39 +5366,61 @@ private fun localRelSegments(base: UniFile, uni: UniFile, hasAllFilesAccess: Boo
         }
     }.getOrNull()
 
-/** SMB 递归搜索（[relPath] 为共享内相对路径），收集名称匹配项。 */
+/** SMB 递归搜索（[rootRelPath] 为共享内相对路径），BFS 流式收集名称匹配项。 */
 private suspend fun searchSmbRecursive(
     conn: SmbConnection,
     password: String,
-    relPath: String,
+    rootRelPath: String,
     query: String,
-    depth: Int = 0,
-): List<SmbEntry> {
-    if (depth > 20) return emptyList()
-    val direct = SmbBrowse.list(conn, password, relPath)
-    val out = mutableListOf<SmbEntry>()
-    for (e in direct) {
-        if (e.name.contains(query, ignoreCase = true)) out += e
-        if (e.isDir) out += searchSmbRecursive(conn, password, e.path, query, depth + 1)
+    sink: suspend (SmbEntry) -> Unit,
+    collected: AtomicInteger,
+    maxResults: Int = RECURSIVE_MAX_RESULTS,
+) {
+    val queue: ArrayDeque<Pair<String, Int>> = ArrayDeque()
+    queue.addLast(rootRelPath to 0)
+    while (queue.isNotEmpty()) {
+        if (collected.get() >= maxResults) return
+        val (relPath, d) = queue.removeFirst()
+        if (d > 20) continue
+        val direct = runCatching { SmbBrowse.list(conn, password, relPath) }.getOrDefault(emptyList())
+        val dirs = mutableListOf<String>()
+        for (e in direct) {
+            if (e.name.contains(query, ignoreCase = true)) {
+                sink(e)
+                if (collected.incrementAndGet() >= maxResults) return
+            }
+            if (e.isDir) dirs.add(e.path)
+        }
+        for (dd in dirs) queue.addLast(dd to d + 1)
     }
-    return out
 }
 
-/** WebDAV 递归搜索（[dirUrl] 为目录完整 URL），收集名称匹配项。 */
+/** WebDAV 递归搜索（[rootUrl] 为目录完整 URL），BFS 流式收集名称匹配项。 */
 private suspend fun searchWebDavRecursive(
     conn: WebDavConnection,
-    dirUrl: String,
+    rootUrl: String,
     query: String,
-    depth: Int = 0,
-): List<WebDavEntry> {
-    if (depth > 20) return emptyList()
-    val direct = WebDavPropfind.list(conn, dirUrl)
-    val out = mutableListOf<WebDavEntry>()
-    for (e in direct) {
-        if (e.name.contains(query, ignoreCase = true)) out += e
-        if (e.isDir) out += searchWebDavRecursive(conn, e.url, query, depth + 1)
+    sink: suspend (WebDavEntry) -> Unit,
+    collected: AtomicInteger,
+    maxResults: Int = RECURSIVE_MAX_RESULTS,
+) {
+    val queue: ArrayDeque<Pair<String, Int>> = ArrayDeque()
+    queue.addLast(rootUrl to 0)
+    while (queue.isNotEmpty()) {
+        if (collected.get() >= maxResults) return
+        val (url, d) = queue.removeFirst()
+        if (d > 20) continue
+        val direct = runCatching { WebDavPropfind.list(conn, url) }.getOrDefault(emptyList())
+        val dirs = mutableListOf<String>()
+        for (e in direct) {
+            if (e.name.contains(query, ignoreCase = true)) {
+                sink(e)
+                if (collected.incrementAndGet() >= maxResults) return
+            }
+            if (e.isDir) dirs.add(e.url)
+        }
+        for (dd in dirs) queue.addLast(dd to d + 1)
     }
-    return out
 }
 
 private fun UniFile.isLocalArchive(): Boolean =
@@ -5457,7 +5498,7 @@ private fun LocalFileBrowser(
     var searchQuery by remember { mutableStateOf("") }
     var searchActive by remember { mutableStateOf(false) }
     var searchRecursive by remember { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<LocalEntry>>(emptyList()) }
+    val searchResults = remember { mutableStateListOf<LocalEntry>() }
     var searchScanning by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     // SY <--
@@ -5548,20 +5589,33 @@ private fun LocalFileBrowser(
         loading = false
     }
 
-    // SY --> Komiho: 「搜索下级目录」开启时，按关键词递归遍历当前目录整棵子树，收集名称匹配项。
+    // SY --> Komiho: 「搜索下级目录」开启时，按关键词 BFS 递归遍历当前目录整棵子树，命中项流式回传。
+    // 防抖 300ms（连续输入不立即重扫）；命中项边扫边显（近层优先）；上限 RECURSIVE_MAX_RESULTS。
     // 输入变化即重启（旧 job 被取消），退出搜索或关掉递归则清空结果。
     LaunchedEffect(searchActive, searchRecursive, searchQuery) {
         if (searchActive && searchRecursive && searchQuery.isNotBlank()) {
+            delay(300)
+            if (!(searchActive && searchRecursive && searchQuery.isNotBlank())) return@LaunchedEffect
+            searchResults.clear()
             searchScanning = true
             try {
-                searchResults = withContext(Dispatchers.IO) {
-                    searchLocalRecursive(context, base, current, hasAllFilesAccess, searchQuery)
+                val collected = AtomicInteger(0)
+                val sink: suspend (LocalEntry) -> Unit = { e ->
+                    withContext(Dispatchers.Main.immediate) { searchResults.add(e) }
                 }
+                withContext(Dispatchers.IO) {
+                    searchLocalRecursive(context, base, current, hasAllFilesAccess, searchQuery, sink, collected)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN) { "[Local搜索] 递归扫描中断: ${e.message}" }
             } finally {
                 searchScanning = false
             }
         } else {
-            searchResults = emptyList()
+            searchResults.clear()
+            searchScanning = false
         }
     }
     // SY <--
@@ -5630,7 +5684,17 @@ private fun LocalFileBrowser(
     // SY --> Komiho: 递归搜索开启且有关键词时，列表改为展示递归命中结果；否则维持当前目录视图。
     val showRecursive = searchActive && searchRecursive && searchQuery.isNotBlank()
     val displayList = if (showRecursive) searchResults else visibleEntries
-    val onOpenItem: (LocalEntry) -> Unit = if (showRecursive) onSearchItemOpen else onItemOpen
+    val onOpenItem: (LocalEntry) -> Unit =
+        if (showRecursive) {
+            onSearchItemOpen
+        } else { e ->
+            onItemOpen(e)
+            if (searchActive) {
+                searchActive = false
+                searchQuery = ""
+                searchRecursive = false
+            }
+        }
     // SY <--
 
     Column(Modifier.fillMaxSize()) {
@@ -5794,9 +5858,26 @@ private fun LocalFileBrowser(
 
         }
 
+        // 递归搜索进行中：顶部细进度条（不遮挡已流式出现的命中项）。
+        if (showRecursive && searchScanning) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
         // 列目录内容。
         when {
-            loading || searchScanning -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            // 递归搜索进行中：优先于 loading 展示，避免误显「正在连接」。
+            showRecursive && searchScanning && displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = composeStringResource(R.string.searching),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = composeStringResource(if (showRecursive) R.string.no_match_results else R.string.local_empty_dir),
@@ -6351,7 +6432,7 @@ private fun WebDavBrowsePane(
     var searchQuery by remember { mutableStateOf("") }
     var searchActive by remember { mutableStateOf(false) }
     var searchRecursive by remember { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
+    val searchResults = remember { mutableStateListOf<WebDavEntry>() }
     var searchScanning by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     // SY <--
@@ -6428,19 +6509,31 @@ private fun WebDavBrowsePane(
         loading = false
     }
 
-    // SY --> Komiho: 「搜索下级目录」开启时，递归遍历当前目录子树收集名称匹配项。
+    // SY --> Komiho: 「搜索下级目录」开启时，BFS 递归遍历当前目录子树，命中项流式回传。防抖 300ms。
     LaunchedEffect(searchActive, searchRecursive, searchQuery) {
         if (searchActive && searchRecursive && searchQuery.isNotBlank()) {
+            delay(300)
+            if (!(searchActive && searchRecursive && searchQuery.isNotBlank())) return@LaunchedEffect
+            searchResults.clear()
             searchScanning = true
             try {
-                searchResults = withContext(Dispatchers.IO) {
-                    searchWebDavRecursive(conn, dirUrl, searchQuery)
+                val collected = AtomicInteger(0)
+                val sink: suspend (WebDavEntry) -> Unit = { e ->
+                    withContext(Dispatchers.Main.immediate) { searchResults.add(e) }
                 }
+                withContext(Dispatchers.IO) {
+                    searchWebDavRecursive(conn, dirUrl, searchQuery, sink, collected)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN) { "[WebDav搜索] 递归扫描中断: ${e.message}" }
             } finally {
                 searchScanning = false
             }
         } else {
-            searchResults = emptyList()
+            searchResults.clear()
+            searchScanning = false
         }
     }
     // SY <--
@@ -6484,7 +6577,17 @@ private fun WebDavBrowsePane(
     // SY --> Komiho: 递归搜索开启且有关键词时，列表改为展示递归命中结果；否则维持当前目录视图。
     val showRecursive = searchActive && searchRecursive && searchQuery.isNotBlank()
     val displayList = if (showRecursive) searchResults else visible
-    val onOpenItem: (WebDavEntry) -> Unit = if (showRecursive) onSearchItemOpen else onItemOpen
+    val onOpenItem: (WebDavEntry) -> Unit =
+        if (showRecursive) {
+            onSearchItemOpen
+        } else { e ->
+            onItemOpen(e)
+            if (searchActive) {
+                searchActive = false
+                searchQuery = ""
+                searchRecursive = false
+            }
+        }
     // SY <--
 
     Column(Modifier.fillMaxSize()) {
@@ -6597,8 +6700,25 @@ private fun WebDavBrowsePane(
         }
 
         // 列目录内容（空目录提示已按要求去掉：非加载、无错误且无条目时留白）。
+        // 递归搜索进行中：顶部细进度条（不遮挡已流式出现的命中项）。
+        if (showRecursive && searchScanning) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
         when {
-            loading || searchScanning -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            // 递归搜索进行中：优先于 loading 展示，避免误显「正在连接」。
+            showRecursive && searchScanning && displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = composeStringResource(R.string.searching),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             errorText != null -> Column(
                 Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -6941,7 +7061,7 @@ private fun SmbBrowsePane(
     var searchQuery by remember { mutableStateOf("") }
     var searchActive by remember { mutableStateOf(false) }
     var searchRecursive by remember { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<SmbEntry>>(emptyList()) }
+    val searchResults = remember { mutableStateListOf<SmbEntry>() }
     var searchScanning by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     // SY <--
@@ -7009,19 +7129,31 @@ private fun SmbBrowsePane(
         loading = false
     }
 
-    // SY --> Komiho: 「搜索下级目录」开启时，递归遍历当前目录子树收集名称匹配项。
+    // SY --> Komiho: 「搜索下级目录」开启时，BFS 递归遍历当前目录子树，命中项流式回传。防抖 300ms。
     LaunchedEffect(searchActive, searchRecursive, searchQuery) {
         if (searchActive && searchRecursive && searchQuery.isNotBlank()) {
+            delay(300)
+            if (!(searchActive && searchRecursive && searchQuery.isNotBlank())) return@LaunchedEffect
+            searchResults.clear()
             searchScanning = true
             try {
-                searchResults = withContext(Dispatchers.IO) {
-                    searchSmbRecursive(conn, password, dirPath, searchQuery)
+                val collected = AtomicInteger(0)
+                val sink: suspend (SmbEntry) -> Unit = { e ->
+                    withContext(Dispatchers.Main.immediate) { searchResults.add(e) }
                 }
+                withContext(Dispatchers.IO) {
+                    searchSmbRecursive(conn, password, dirPath, searchQuery, sink, collected)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN) { "[Smb搜索] 递归扫描中断: ${e.message}" }
             } finally {
                 searchScanning = false
             }
         } else {
-            searchResults = emptyList()
+            searchResults.clear()
+            searchScanning = false
         }
     }
     // SY <--
@@ -7061,7 +7193,17 @@ private fun SmbBrowsePane(
     // SY --> Komiho: 递归搜索开启且有关键词时，列表改为展示递归命中结果；否则维持当前目录视图。
     val showRecursive = searchActive && searchRecursive && searchQuery.isNotBlank()
     val displayList = if (showRecursive) searchResults else visible
-    val onOpenItem: (SmbEntry) -> Unit = if (showRecursive) onSearchItemOpen else onItemOpen
+    val onOpenItem: (SmbEntry) -> Unit =
+        if (showRecursive) {
+            onSearchItemOpen
+        } else { e ->
+            onItemOpen(e)
+            if (searchActive) {
+                searchActive = false
+                searchQuery = ""
+                searchRecursive = false
+            }
+        }
     // SY <--
 
     Column(Modifier.fillMaxSize()) {
@@ -7167,8 +7309,25 @@ private fun SmbBrowsePane(
 
         }
 
+        // 递归搜索进行中：顶部细进度条（不遮挡已流式出现的命中项）。
+        if (showRecursive && searchScanning) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
         when {
-            loading || searchScanning -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // 递归搜索进行中：优先于 loading 展示，避免与「正在连接 NAS…」混淆。
+            showRecursive && searchScanning && displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = composeStringResource(R.string.searching),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(12.dp))

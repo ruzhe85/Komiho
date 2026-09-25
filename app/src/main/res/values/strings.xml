@@ -82,6 +82,7 @@
     <string name="search_failed">搜索失败：%1$s</string>
     <string name="search_current_dir_hint">搜索当前目录…</string>
     <string name="search_subdir">搜索下级目录</string>
+    <string name="searching">正在搜索…</string>
 
     <!-- 库选择 -->
     <string name="select_library">选择库</string>

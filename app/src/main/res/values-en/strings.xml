@@ -74,6 +74,7 @@
     <string name="no_match_results">No matches</string>
     <string name="search_failed">Search failed: %1$s</string>
     <string name="search_subdir">Search subfolders</string>
+    <string name="searching">Searching…</string>
 
     <!-- Library picker -->
     <string name="select_library">Select library</string>
