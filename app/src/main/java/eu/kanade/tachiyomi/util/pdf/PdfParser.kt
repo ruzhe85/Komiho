@@ -291,7 +291,8 @@ class PdfParser(path: String) {
         // 可能含多滤镜（数组）或带方括号；取第一个
         val cleaned = f.trim().removeSurrounding("[", "]").trim()
         val first = cleaned.splitWs().firstOrNull() ?: cleaned
-        return first
+        // PDF name 对象带前导斜杠（如 /DCTDecode），取裸名以匹配 openStream 的比较。
+        return if (first.startsWith("/")) first.substring(1) else first
     }
 
     /** 抽取内嵌图的原始流字节（DCTDecode 即 JPEG，可交解码器直解）。 */

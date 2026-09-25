@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.util.pdf
 
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import java.io.ByteArrayOutputStream
@@ -14,10 +15,15 @@ import java.io.File
  */
 object PdfRenderFallback {
 
-    private const val MAX_LONG_SIDE = 2200
+    /** 阅读器兜底渲染的目标长边：低分辨率矢量/文本页（约 595×842 @72DPI）上采样到此值保证清晰。 */
+    private const val TARGET_LONG_SIDE = 2000
 
-    /** 渲染指定页为 Bitmap（按 maxLongSide 等比缩放，避免超大 PDF 爆内存）。 */
-    fun renderPageBitmap(path: String, pageIndex: Int, maxLongSide: Int = MAX_LONG_SIDE): Bitmap? {
+    /** 渲染指定页为 Bitmap：
+     *  - 先填白底，避免矢量/文本 PDF 无色块区域透出（原先透明 → 底色消失）。
+     *  - 按 [maxLongSide] 等比缩放：小页面（低 DPI 矢量/文本）上采样到该值保证清晰；
+     *    大页面下采样到该值控制内存。封面缩略可传更小值（见 LocalCoverFetcher）。
+     */
+    fun renderPageBitmap(path: String, pageIndex: Int, maxLongSide: Int = TARGET_LONG_SIDE): Bitmap? {
         val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
         val renderer = PdfRenderer(pfd)
         try {
@@ -25,6 +31,7 @@ object PdfRenderFallback {
             val page = renderer.openPage(pageIndex)
             val (tw, th) = fit(page.width, page.height, maxLongSide)
             val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+            bmp.eraseColor(Color.WHITE)
             page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             page.close()
             return bmp
@@ -62,11 +69,11 @@ object PdfRenderFallback {
 
     private const val TAG = "KomihoPdfRender"
 
-    private fun fit(w: Int, h: Int, maxLong: Int): Pair<Int, Int> {
-        if (w <= 0 || h <= 0) return maxLong to maxLong
+    /** 按目标长边等比缩放：小则上采样（矢量/文本更清晰），大则下采样（控制内存/封面缩略）。 */
+    private fun fit(w: Int, h: Int, target: Int): Pair<Int, Int> {
+        if (w <= 0 || h <= 0) return target to target
         val long = maxOf(w, h)
-        if (long <= maxLong) return w to h
-        val scale = maxLong.toFloat() / long
+        val scale = target.toFloat() / long
         return (w * scale).toInt().coerceAtLeast(1) to (h * scale).toInt().coerceAtLeast(1)
     }
 }
