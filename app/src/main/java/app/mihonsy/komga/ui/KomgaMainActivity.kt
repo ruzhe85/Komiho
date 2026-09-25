@@ -164,6 +164,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -5372,6 +5376,11 @@ private fun LocalFileBrowser(
     var showCover by remember { mutableStateOf(prefs.localBrowseShowCover.get()) }
     var columnCount by remember { mutableStateOf(prefs.localBrowseColumns.get()) }
     var showOptions by remember { mutableStateOf(false) }
+    // SY --> Komiho: 文件浏览器顶部搜索（范围 = 当前目录，便于在数百子目录中快速定位）。
+    var searchQuery by remember { mutableStateOf("") }
+    var searchActive by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    // SY <--
 
     // SY --> Komiho: 真实路径模式标记（持有 MANAGE_EXTERNAL_STORAGE 时列目录走 UniFile 直读）。
     val hasAllFilesAccess = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
@@ -5495,9 +5504,56 @@ private fun LocalFileBrowser(
 
     // 只显示「可读文件（图片）+ 压缩包 + 目录」：其余文件（txt/apk/pdf 等）对漫画阅读器无意义，
     // 直接过滤掉，避免列表塞满不可读条目。目录始终保留以便下钻导航。
-    val visibleEntries = entries.filter { it.isDirectory || it.isArchive || it.isImage }
+    // SY --> Komiho: 顶部搜索激活时，在当前目录范围内按名称（不区分大小写）进一步过滤。
+    val visibleEntries = entries
+        .filter { it.isDirectory || it.isArchive || it.isImage }
+        .let { list ->
+            if (searchQuery.isBlank()) list
+            else list.filter { it.name.contains(searchQuery, ignoreCase = true) }
+        }
+    // SY <--
 
     Column(Modifier.fillMaxSize()) {
+        // SY --> Komiho: 顶部搜索激活时显示搜索框（范围=当前目录），否则显示面包屑 + 搜索/Tune 按钮。
+        if (searchActive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { searchActive = false; searchQuery = "" }) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowBack,
+                        contentDescription = composeStringResource(R.string.cd_close_search),
+                    )
+                }
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(searchFocus),
+                    placeholder = { Text(composeStringResource(R.string.search_current_dir_hint)) },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(20.dp))
+                    },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = composeStringResource(R.string.clear),
+                                )
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+            }
+            LaunchedEffect(searchActive) { if (searchActive) searchFocus.requestFocus() }
+        } else {
         // 顶栏：面包屑（可点跳层）+ 显示选项 Tune 按钮。
         Row(
             modifier = Modifier
@@ -5585,12 +5641,21 @@ private fun LocalFileBrowser(
                     }
                 }
             }
+            IconButton(onClick = { searchActive = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = composeStringResource(R.string.cd_search),
+                )
+            }
             IconButton(onClick = { showOptions = true }) {
                 Icon(
                     imageVector = Icons.Filled.Tune,
                     contentDescription = composeStringResource(R.string.display_mode_header),
                 )
             }
+        }
+        // SY <--
+
         }
 
         // 列目录内容。
@@ -6146,6 +6211,11 @@ private fun WebDavBrowsePane(
     var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.webdavBrowseSort.get())) }
     var columnCount by remember { mutableStateOf(prefs.webdavBrowseColumns.get()) }
     var showOptions by remember { mutableStateOf(false) }
+    // SY --> Komiho: 文件浏览器顶部搜索（范围 = 当前目录，便于在数百子目录中快速定位）。
+    var searchQuery by remember { mutableStateOf("") }
+    var searchActive by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    // SY <--
 
     // 面包屑栈：(显示名, 目录 URL)，首元素恒为根（连接名 / host）。与本地浏览的 stack 同构，
     // 但存 URL 而非段名——WebDAV 路径带 % 编码，按段名重拼会有编码往返问题。
@@ -6230,11 +6300,56 @@ private fun WebDavBrowsePane(
     }
 
     // 只显示目录 + 可读归档（与本地浏览「过滤不可读文件」口径一致），排序走本地同款排序器。
-    val visible = remember(entries, sort) {
-        entries.filter { it.isDir || it.isArchive || it.isImage }.sortedWith(webDavEntryComparator(sort))
+    // SY --> Komiho: 顶部搜索激活时，在当前目录范围内按名称（不区分大小写）进一步过滤。
+    val visible = remember(entries, sort, searchQuery) {
+        entries
+            .filter { it.isDir || it.isArchive || it.isImage }
+            .filter { searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true) }
+            .sortedWith(webDavEntryComparator(sort))
     }
+    // SY <--
 
     Column(Modifier.fillMaxSize()) {
+        // SY --> Komiho: 顶部搜索激活时显示搜索框（范围=当前目录），否则显示面包屑 + 搜索/Tune 按钮。
+        if (searchActive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { searchActive = false; searchQuery = "" }) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowBack,
+                        contentDescription = composeStringResource(R.string.cd_close_search),
+                    )
+                }
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(searchFocus),
+                    placeholder = { Text(composeStringResource(R.string.search_current_dir_hint)) },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(20.dp))
+                    },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = composeStringResource(R.string.clear),
+                                )
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+            }
+            LaunchedEffect(searchActive) { if (searchActive) searchFocus.requestFocus() }
+        } else {
         // 顶栏：面包屑（可点跳层）+ 显示选项 Tune 按钮（与本地浏览一致）。
         Row(
             modifier = Modifier
@@ -6270,12 +6385,21 @@ private fun WebDavBrowsePane(
                     }
                 }
             }
+            IconButton(onClick = { searchActive = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = composeStringResource(R.string.cd_search),
+                )
+            }
             IconButton(onClick = { showOptions = true }) {
                 Icon(
                     imageVector = Icons.Filled.Tune,
                     contentDescription = composeStringResource(R.string.display_mode_header),
                 )
             }
+        }
+        // SY <--
+
         }
 
         // 列目录内容（空目录提示已按要求去掉：非加载、无错误且无条目时留白）。
@@ -6612,6 +6736,11 @@ private fun SmbBrowsePane(
     // Komiho: 首次浏览要建 SMB 会话（NAS 慢时可达十几秒），给出明确反馈，避免无提示白等。
     val smbConnectingMsg = composeStringResource(R.string.smb_connecting)
     var showOptions by remember { mutableStateOf(false) }
+    // SY --> Komiho: 文件浏览器顶部搜索（范围 = 当前目录，便于在数百子目录中快速定位）。
+    var searchQuery by remember { mutableStateOf("") }
+    var searchActive by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    // SY <--
 
     val rootLabel = remember(conn.id) { conn.name.ifBlank { conn.host } }
     val rootPath = remember(conn.id) { SmbBrowse.rootPath(conn) }
@@ -6684,11 +6813,56 @@ private fun SmbBrowsePane(
         if (e.isDir) trail = trail + (e.name to e.path) else onOpenFile(e.path)
     }
 
-    val visible = remember(entries, sort) {
-        entries.filter { it.isDir || it.isArchive || it.isImage }.sortedWith(smbEntryComparator(sort))
+    // SY --> Komiho: 顶部搜索激活时，在当前目录范围内按名称（不区分大小写）进一步过滤。
+    val visible = remember(entries, sort, searchQuery) {
+        entries
+            .filter { it.isDir || it.isArchive || it.isImage }
+            .filter { searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true) }
+            .sortedWith(smbEntryComparator(sort))
     }
+    // SY <--
 
     Column(Modifier.fillMaxSize()) {
+        // SY --> Komiho: 顶部搜索激活时显示搜索框（范围=当前目录），否则显示面包屑 + 搜索/Tune 按钮。
+        if (searchActive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { searchActive = false; searchQuery = "" }) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowBack,
+                        contentDescription = composeStringResource(R.string.cd_close_search),
+                    )
+                }
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(searchFocus),
+                    placeholder = { Text(composeStringResource(R.string.search_current_dir_hint)) },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(20.dp))
+                    },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = composeStringResource(R.string.clear),
+                                )
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+            }
+            LaunchedEffect(searchActive) { if (searchActive) searchFocus.requestFocus() }
+        } else {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -6718,12 +6892,21 @@ private fun SmbBrowsePane(
                     }
                 }
             }
+            IconButton(onClick = { searchActive = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = composeStringResource(R.string.cd_search),
+                )
+            }
             IconButton(onClick = { showOptions = true }) {
                 Icon(
                     imageVector = Icons.Filled.Tune,
                     contentDescription = composeStringResource(R.string.display_mode_header),
                 )
             }
+        }
+        // SY <--
+
         }
 
         when {
