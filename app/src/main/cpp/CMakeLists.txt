@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 17)
 # =====================================================================================
 add_library(mihonsy-enhance SHARED
     lanczos3.cpp
-    nlmeans.cpp
+    guided.cpp
 )
 
 target_include_directories(mihonsy-enhance PRIVATE ${CMAKE_SOURCE_DIR})

@@ -260,10 +260,11 @@ class ReaderPreferences(
     )
 
     /**
-     * Komiho: AI/NPU 档（mode 5）超分前的 CPU Fast NLM 漫画降噪档位。
-     * 0=关 1=弱 2=中 3=强（h/hColor = 4/4、7/5、10/5，template=7、search=21 固定）。
+     * Komiho: AI/NPU 档（mode 5）超分前的 CPU Guided Filter 漫画降噪档位。
+     * 0=关 1=弱 2=中 3=强（radius/eps = 4/400、8/120、12/50，Kotlin 侧映射）。
      * 目的是在超分前去除扫描颗粒/色噪、保住线稿与文字；**默认关** —— 先人工对比验证
-     * 「NLM + AI 是否值得」再考虑改默认。只挂 AI 档，CPU 重采样档不受影响。
+     * 「降噪 + AI 是否值得」再考虑改默认。只挂 AI 档，CPU 重采样档不受影响。
+     * （曾用 Fast NLM：3.1MP 实测单页 ~11s，判定不可行已删，见 guided.cpp 头注释。）
      */
     val denoiseLevel: Preference<Int> = preferenceStore.getInt("pref_denoise_level", 0)
 
@@ -456,8 +457,8 @@ class ReaderPreferences(
         )
 
         /**
-         * Komiho: NLM 降噪档位（flag → label）。h/hColor 档位映射在 [MihonSyEnhancer]，
-         * template=7 / search=21 固定（文档 §21 推荐值，§18 明确不许盲目加大 search）。
+         * Komiho: 降噪档位（flag → label）。Guided Filter 的 (radius, eps) 映射在
+         * [MihonSyEnhancer]，初版经验值、待真机三档画质实测再调。
          */
         val DenoiseLevelOptions = listOf(
             0 to MR.strings.denoise_off,

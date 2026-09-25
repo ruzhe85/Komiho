@@ -21,7 +21,6 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
-import eu.kanade.tachiyomi.util.MihonSyEnhancer
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -256,8 +255,6 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         if (!visible || previous < 0 || previous == pageIndex) return
         prewarmLog("preempt page=$previous by-page=$pageIndex")
         Waifu2x.abortProcessing()
-        // Komiho: CPU 降噪同样可能被上一页占住单线程增强队列 —— 一并打断让位。
-        MihonSyEnhancer.abortDenoise()
     }
 
     /** 最近一份开始跑的重活是第几页（-1 = 还没跑过）。见 [onPrepareStart]。 */
@@ -359,7 +356,6 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             val running = runningPrewarmPosition
             if (running >= 0 && abs(running - pager.currentItem) > 1) {
                 Waifu2x.abortProcessing()
-                MihonSyEnhancer.abortDenoise()
             }
         }
 

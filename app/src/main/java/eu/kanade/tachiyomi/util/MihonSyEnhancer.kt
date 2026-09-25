@@ -74,33 +74,16 @@ object MihonSyEnhancer {
     private external fun nativeResample(bitmap: Bitmap, scale: Float, kernel: Int): Bitmap
 
     /**
-     * Komiho: CPU Fast NLM 漫画降噪（亮度 h 较强 / 色度 hColor 适中 —— OpenCV
-     * fastNlMeansDenoisingColored 的 Lab 配方在 YCbCr 空间的对应物）。
-     * 成功返回新位图（尺寸不变）；被中止返回 null；失败返回入参本身。
-     * `argb` 必须是 ARGB_8888（调用方先过 [ensureArgb]）。
+     * Komiho: CPU Guided Filter 漫画降噪（引导图 = 亮度，RGB 各通道独立滤波）。
+     * 曾用 Fast NLM：真机实测 3.1MP 弱档单页 ~11s（算量 = 像素 × 441 搜索偏移的固有代价），
+     * 远超实时阅读红线 → 换 O(1) 于窗口大小的 guided filter，实测 ~100-200ms。
+     * 成功返回新位图（尺寸不变）；失败返回入参本身。`argb` 必须是 ARGB_8888（调用方先过 [ensureArgb]）。
      */
-    private external fun nativeNlmDenoise(
-        bitmap: Bitmap,
-        h: Float,
-        hColor: Float,
-        templateSize: Int,
-        searchSize: Int,
-    ): Bitmap?
+    private external fun nativeGuidedDenoise(bitmap: Bitmap, eps: Float, radius: Int): Bitmap?
 
-    private external fun nativeNlmAbort()
-
-    /**
-     * Komiho: 打断正在跑的 NLM 降噪（原生在每个搜索偏移边界生效，几十 ms 粒度）。
-     * 与 [Waifu2x.abortProcessing] 同语义：只对当前正在跑的那一次生效——
-     * [nativeNlmDenoise] 每次进入都自动清零，对后续调用是空操作。
-     */
-    fun abortDenoise() {
-        try {
-            nativeNlmAbort()
-        } catch (_: Throwable) {
-            // 老的 .so 可能没有该符号（热更新场景）——abort 只是优化，忽略。
-        }
-    }
+    /** 降噪进程级互斥：guided 虽快（~100ms），但 Coil 解码线程池会多页并发增强，
+     *  不加锁会重新出现 NLM 时代「48 线程抢核 + 内存翻倍」的争抢。 */
+    private val denoiseLock = Any()
 
     // Initialisation ----------------------------------------------------------------
 
@@ -313,10 +296,10 @@ object MihonSyEnhancer {
 
             // Komiho: GPU AI upscale (ncnn + Vulkan). Scale is fixed by the model (2x).
             5 -> {
-                // Komiho: AI/NPU 档可选前处理 —— CPU Fast NLM 漫画降噪（默认关）。
-                // 落点在解码采样之后、超分之前：满足「进入 Photo-Small 前输入更干净」的
-                // 本质目的（解码采样不可避免，全分辨率 NLM 单页要数秒不可行），并把 NLM
-                // 耗时控制在采样后尺寸（约为全分辨率的 1/4~1/9）。
+                // Komiho: AI/NPU 档可选前处理 —— CPU Guided Filter 漫画降噪（默认关）。
+                // 落点在解码采样之后、超分之前：满足「进入 AI 前输入更干净」的本质目的
+                // （解码采样不可避免），且 guided filter 代价与窗口无关，采样后尺寸
+                // （~1-3MP）单页仅 ~100-200ms（Fast NLM 方案同尺寸实测 11s，已弃）。
                 var src = input
                 val denoiseLevel = preferences.denoiseLevel.get()
                 if (denoiseLevel != 0) {
@@ -345,19 +328,17 @@ object MihonSyEnhancer {
     }
 
     /**
-     * Komiho: 降噪输入像素量护栏。NLM 耗时与像素量线性、与搜索窗口面积线性 ——
-     * 超大图（已超分页/长条漫全高图）跑 NLM 要数秒且收益存疑，直接跳过
-     * （解码管线的采样已把常规页压到 1~2MP；6MP 是长条漫按宽度采样后的常见上限）。
+     * Komiho: 降噪输入像素量护栏。超大图（已超分页/长条漫全高图）跑降噪收益存疑且耗时
+     * 随像素量线性增长，直接跳过（解码管线的采样已把常规页压到 1~3MP；
+     * 6MP 是长条漫按宽度采样后的常见上限）。
      */
     private const val MAX_DENOISE_INPUT_PIXELS = 6_000_000L
 
-    /** NLM 窗口参数固定为文档 §21 推荐值（§18 明确禁止盲目加大 search）。 */
-    private const val DENOISE_TEMPLATE = 7
-    private const val DENOISE_SEARCH = 21
-
     /**
-     * Komiho: AI 档降噪前处理。任何失败都静默回落原图（或其 ARGB 副本），绝不阻断出图。
+     * Komiho: AI 档降噪前处理（Guided Filter）。任何失败都静默回落原图（或其 ARGB 副本），
+     * 绝不阻断出图。
      *
+     * 档位参数 (radius, eps)：eps 越小平滑越强（255 域），初版经验值、待真机三档实测再调。
      * 耗时用 android.util.Log 而非项目 logcat()：release 构建下 XLog 级别是 WARN，
      * logcat() 的 DEBUG/INFO 会被整条吞掉（与 Waifu2x.process 同款口径）。
      * 角标的「解码+增强」总耗时天然包含降噪（denoise 在 enhance() 内部跑），
@@ -371,32 +352,34 @@ object MihonSyEnhancer {
             )
             return input
         }
-        // 档位参数（文档 §4）：亮度降噪较强、色彩降噪适中，保线稿/文字。
-        val (h, hColor) = when (level) {
-            1 -> 4f to 4f
-            3 -> 10f to 5f
-            else -> 7f to 5f
+        val (radius, eps) = when (level) {
+            1 -> 4 to 400f
+            3 -> 12 to 50f
+            else -> 8 to 120f
         }
         val argb = ensureArgb(input) ?: return input
         val start = SystemClock.uptimeMillis()
-        val out = try {
-            nativeNlmDenoise(argb, h, hColor, DENOISE_TEMPLATE, DENOISE_SEARCH)
-        } catch (t: Throwable) {
-            logcat(LogPriority.WARN, t) { "NLM denoise failed; using original" }
-            null
+        // 进程级互斥：多页并发增强时串行化降噪（见 [denoiseLock] 注释）。
+        val out = synchronized(denoiseLock) {
+            try {
+                nativeGuidedDenoise(argb, eps, radius)
+            } catch (t: Throwable) {
+                logcat(LogPriority.WARN, t) { "Guided denoise failed; using original" }
+                null
+            }
         }
         val ms = SystemClock.uptimeMillis() - start
         android.util.Log.d(
             "Waifu2xTiming",
-            "denoise=${ms}ms level=$level h=$h hColor=$hColor " +
+            "denoise=${ms}ms level=$level r=$radius eps=$eps " +
                 "src=${input.width}x${input.height} from=${sourceTag.ifEmpty { "?" }}",
         )
         return if (out != null && out !== argb) {
-            // NLM 成功：ARGB 中间副本（若拷过）已无消费者，立刻回收。
+            // 降噪成功：ARGB 中间副本（若拷过）已无消费者，立刻回收。
             if (argb !== input) argb.recycle()
             out
         } else {
-            // 失败 / 被中止：用（可能拷贝过的）原图继续，降噪跳过。
+            // 失败：用（可能拷贝过的）原图继续，降噪跳过。
             argb
         }
     }
