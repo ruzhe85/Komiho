@@ -322,7 +322,7 @@ class PagerPageHolder(
                         elapsedMillis = result.enhanceElapsedMillis,
                     )
                 } else {
-                    setImage(result.source.peek(), result.isAnimated, viewerImageConfig())
+                    setImage(result.source.peek(), result.isAnimated, viewerImageConfig(), page?.skipEnhance ?: false)
                 }
                 if (!result.isAnimated) {
                     pageBackground = result.background

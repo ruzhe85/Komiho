@@ -41,8 +41,17 @@ class PdfParser(path: String) {
     val pageCount: Int get() = pageList.size
     fun isEncrypted(): Boolean = encryptRef != null
 
+    /** 解析是否成功完成（失败时降级到系统渲染兜底，而非抛异常）。 */
+    var parseOk = true
+        private set
+
     init {
-        parse()
+        try {
+            parse()
+        } catch (e: Exception) {
+            Log.w(TAG, "parse failed: ${e.message}")
+            parseOk = false
+        }
     }
 
     // ---------- 入口 ----------
@@ -113,7 +122,8 @@ class PdfParser(path: String) {
                     }
                     i = lineEnd(i)
                 }
-                break
+                // 继续处理后续 subsection（如 "0 1612" 之外的分段）
+                continue
             }
             if (line.trim().startsWith("trailer")) {
                 val td = parseTrailerAt(i)
@@ -238,8 +248,12 @@ class PdfParser(path: String) {
             val s = String(resRaw, ISO)
             if (s.trim().startsWith("/")) {
                 deref(s)?.let { dictOf(it) }
+            } else if (s.trim().startsWith("<<")) {
+                // 内联 Resources 字典（常见于扫描漫画页）：就地解析出 /XObject
+                val ds = resRaw.indexOf('<'.code.toByte())
+                val de = dictEnd(resRaw)
+                parseDict(resRaw, ds, de)
             } else {
-                // 内联字典：在页面对象内就地解析 /XObject
                 null
             }
         } else null
@@ -250,8 +264,8 @@ class PdfParser(path: String) {
         val xobjStr = String(xobjRaw, ISO)
         // XObject 可能是 "<< ... >>" 内联，或 "N G R" 引用
         val xdict = if (xobjStr.trim().startsWith("<<")) {
-            val ds = xobjRaw.indexOf('<'.code.toByte()); val de = xobjRaw.indexOf('>'.code.toByte())
-            parseDict(xobjRaw, ds, de + 2)
+            val ds = xobjRaw.indexOf('<'.code.toByte()); val de = dictEnd(xobjRaw)
+            parseDict(xobjRaw, ds, de)
         } else {
             deref(xobjStr)?.let { dictOf(it) }
         } ?: return null
@@ -310,11 +324,12 @@ class PdfParser(path: String) {
         } else {
             objStart[objNum]?.let { objectBytesAt(it) } ?: return null
         }
-        val ds = bytes.indexOf('<'.code.toByte())
-        if (ds < 0 || bytes.getOrElse(ds + 1) { 0.toByte() } != '<'.code.toByte()) return null
-        val de = bytes.indexOf('>'.code.toByte())
-        val de2 = bytes.indexOfByte('>'.code.toByte(), de + 1)
-        return parseDict(bytes, ds, if (de2 > de) de2 + 2 else bytes.size)
+        val ds = firstDictStart(bytes)
+        if (ds < 0) return null
+        // 必须用嵌套感知的 dictEnd：Catalog/Pages 等常含嵌套 <<>>，
+        // 不能用 indexOf('>')（会在第一个 >> 处截断，丢失 /Pages 等键）。
+        val de = dictEnd(bytes)
+        return parseDict(bytes, ds, de)
     }
 
     // ---------- 字典/字节工具 ----------
@@ -488,20 +503,45 @@ class PdfParser(path: String) {
         return x
     }
 
+    /**
+     * 读取一个「原子」：以 ATOM_STOP 为界。
+     * 关键：以 `/` 开头的 name 值（如 `/Pages`，它是 `/Type` 的值）必须从 `/` 之后读完整段，
+     * 否则只读到一个 `/` 会让 `/Type` 的值变成空/单斜杠，页树键名判定全部错乱。
+     */
     private fun readAtom(b: ByteArray, i: Int, end: Int): Int {
+        if (b[i] == '/'.code.toByte()) {
+            var j = i + 1
+            while (j < end && b[j] !in ATOM_STOP) j++
+            return j
+        }
         var j = i
         while (j < end && b[j] !in ATOM_STOP) j++
         return j
     }
 
     private fun readLine(i: Int): String {
-        val e = data.indexOfByte('\n'.code.toByte(), i)
-        return if (e < 0) String(data, i, data.size - i, ISO) else String(data, i, e - i, ISO)
+        val e = lineEnd(i)
+        return String(data, i, e - i, ISO)
     }
 
+    /**
+     * 行尾定位：兼容 `\n`、`\r`、`\r\n` 混合。真实 PDF 常混用 CRLF/LF，
+     * 只认 `\n` 会导致 xref 表整段解析失败、objStart 为空、pageCount=0。
+     */
     private fun lineEnd(i: Int): Int {
-        val e = data.indexOfByte('\n'.code.toByte(), i)
-        return if (e < 0) data.size else e + 1
+        var j = i
+        while (j < data.size) {
+            val c = data[j]
+            if (c == '\n'.code.toByte() || c == '\r'.code.toByte()) {
+                // \r\n 连发：跳过两个字节
+                if (c == '\r'.code.toByte() && j + 1 < data.size && data[j + 1] == '\n'.code.toByte()) {
+                    return j + 2
+                }
+                return j + 1
+            }
+            j++
+        }
+        return data.size
     }
 
     private fun skipLine(i: Int): Int = lineEnd(i)

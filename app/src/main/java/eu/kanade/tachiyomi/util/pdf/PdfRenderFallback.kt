@@ -43,6 +43,25 @@ object PdfRenderFallback {
         return out.toByteArray()
     }
 
+    /** 读取 PDF 页数（渲染兜底模式用）。失败返回 0。 */
+    fun getPageCount(path: String): Int {
+        return try {
+            val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+            val renderer = PdfRenderer(pfd)
+            try {
+                renderer.pageCount
+            } finally {
+                renderer.close()
+                pfd.close()
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "getPageCount failed: ${e.message}")
+            0
+        }
+    }
+
+    private const val TAG = "KomihoPdfRender"
+
     private fun fit(w: Int, h: Int, maxLong: Int): Pair<Int, Int> {
         if (w <= 0 || h <= 0) return maxLong to maxLong
         val long = maxOf(w, h)

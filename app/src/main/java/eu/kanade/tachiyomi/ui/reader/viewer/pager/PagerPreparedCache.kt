@@ -152,7 +152,7 @@ object PagerPagePreparer {
                             enhanceElapsedMillis = -1L,
                             layoutApplied = false,
                         )
-                    finishLayout(viewer, itemSource, isAnimated, enhancementMode, config, page.index)
+                    finishLayout(viewer, itemSource, isAnimated, enhancementMode, config, page.index, page.skipEnhance)
                 } else {
                     val itemSource = mergePure(viewer, page, extraPage, source1, source2, isAnimated, viewHeight)
                     if (itemSource == null) {
@@ -169,7 +169,7 @@ object PagerPagePreparer {
                             layoutApplied = false,
                         )
                     } else {
-                        finishLayout(viewer, itemSource, isAnimated, enhancementMode, config, page.index)
+                        finishLayout(viewer, itemSource, isAnimated, enhancementMode, config, page.index, page.skipEnhance)
                     }
                 }
             } catch (e: kotlin.coroutines.cancellation.CancellationException) {
@@ -189,6 +189,7 @@ object PagerPagePreparer {
         enhancementMode: Int,
         config: PagerConfig,
         pageIndex: Int,
+        skipEnhance: Boolean,
     ): PagerPreparedPage {
         val background = if (!isAnimated && config.automaticBackground) {
             ImageUtil.chooseBackground(viewer.activity, itemSource.peek())
@@ -203,6 +204,7 @@ object PagerPagePreparer {
             enhancementMode,
             config.imageCropBorders,
             pageIndex,
+            skipEnhance,
         )
         // Komiho: 角标口径 —— 优先用解码器登记的「解码 + 增强实际计算耗时」（已剔除等锁与
         // 线程排队，见 EnhanceTimings）；取不到才回退旧口径（Coil 外层墙钟，含排队会虚高，
@@ -325,8 +327,11 @@ object PagerPagePreparer {
         enhancementMode: Int,
         cropBorders: Boolean,
         pageIndex: Int,
+        skipEnhance: Boolean,
     ): Bitmap? {
         if (isAnimated || enhancementMode == 0) return null
+        // Komiho: 系统渲染兜底产出的位图无需再做增强（避免无谓 2x 放大）。
+        if (skipEnhance) return null
         if (!isStandardImageStream(source)) return null
         val width = viewer.pager.width
         val height = viewer.pager.height

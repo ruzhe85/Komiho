@@ -277,6 +277,7 @@ class WebtoonPageHolder(
                         (viewer.config.imageCropBorders && viewer.isContinuous) ||
                             (viewer.config.continuousCropBorders && !viewer.isContinuous),
                     ),
+                    page?.skipEnhance ?: false,
                 )
                 removeErrorLayout()
             }

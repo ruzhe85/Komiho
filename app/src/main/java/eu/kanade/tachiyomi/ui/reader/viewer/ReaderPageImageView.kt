@@ -101,6 +101,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
      */
     var pageIndex: Int = -1
 
+    /**
+     * Komiho: 标记此页由系统渲染兜底产出位图（如 PDF 渲染页），无需再做图像增强。
+     * 由 holder 在调用 setImage 时通过参数写入，避免对已成位图的页做无谓 2x 放大。
+     */
+    var skipEnhance: Boolean = false
+
     @CallSuper
     open fun onImageLoaded() {
         onImageLoaded?.invoke()
@@ -183,8 +189,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
         }
     }
 
-    fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
+    fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config, skipEnhance: Boolean = false) {
         this.config = config
+        this.skipEnhance = skipEnhance
         // MihonSY: hide any leftover enhancement status from the previous image.
         enhanceStatusView?.visibility = View.GONE
         if (isAnimated) {
@@ -441,7 +448,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .data(data)
                     .memoryCachePolicy(CachePolicy.DISABLED)
                     .diskCachePolicy(CachePolicy.DISABLED)
-                    .enhanced(true)
+                    .enhanced(enhancementOn && !this@ReaderPageImageView.skipEnhance)
                     .customDecoder(true)
                     // Komiho 诊断：带上页号（prewarm 保持默认 false → 日志里显示 holder#N）。
                     .pageIndex(this@ReaderPageImageView.pageIndex)

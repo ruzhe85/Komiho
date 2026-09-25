@@ -25,4 +25,7 @@ open class ReaderPage(
             field = value
             if (value) shiftedPage = false
         }
+
+    // Komiho: 标记该页由系统渲染兜底产出位图（如 PDF 渲染页），无需再做图像增强（避免无谓 2x 放大）。
+    var skipEnhance: Boolean = false
 }
