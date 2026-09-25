@@ -87,9 +87,9 @@ internal class PdfPageLoader private constructor(
                 ReaderPage(i).apply {
                     stream = { openStream(i) }
                     status = Page.State.Ready
-                    // 渲染兜底页已按目标分辨率（~2000px）光栅化，再叠 2x 插值只会把
-                    // 已清晰的文字/线条重新放大变糊；增强只留给 DCT 抽取的低分辨率源图。
-                    skipEnhance = true
+                    // 阅读器本质消费 bitmap，PDF 不论源是矢量还是位图到阅读器层都已光栅化，
+                    // 不存在「矢量页」之分；统一交给增强管线按用户设置处理。
+                    skipEnhance = false
                 }
             }
         } else {
