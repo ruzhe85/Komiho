@@ -1,6 +1,9 @@
 package tachiyomi.source.local
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.UnmeteredSource
@@ -49,6 +52,9 @@ import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import kotlin.time.Duration.Companion.days
 import tachiyomi.domain.source.model.Source as DomainSource
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
 
 actual class LocalSource(
     private val context: Context,
@@ -369,7 +375,7 @@ actual class LocalSource(
         val chapterFiles = fileSystem.getFilesInMangaDirectory(manga.url)
             // Only keep supported formats
             .filterNot { it.name.orEmpty().startsWith('.') }
-            .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) }
+            .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) || it.extension.equals("pdf", true) }
             // Komiho: 先按文件名自然序排好，章节号才能按这个顺序兜底（见 ChapterNumbering）。
             .sortedWith { a, b ->
                 a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
@@ -393,13 +399,19 @@ actual class LocalSource(
                     chapter_number = chapterNumbers[index].toFloat()
 
                     val format = Format.valueOf(chapterFile)
-                    if (format is Format.Epub) {
-                        EpubFile(format.file.archiveReader(context)).use { epub ->
-                            epub.fillMetadata(manga, this)
+                    when (format) {
+                        is Format.Epub -> {
+                            EpubFile(format.file.archiveReader(context)).use { epub ->
+                                epub.fillMetadata(manga, this)
+                            }
                         }
-                    } else {
-                        getComicInfoForChapter(chapterFile) { stream, encrypted ->
-                            setChapterDetailsFromComicInfoFile(stream, this)
+                        // SY --> Komiho: PDF 骨架阶段不解析内部 ComicInfo（避免把 pdf 当归档打开崩溃）。
+                        is Format.Pdf -> { /* 后续补齐步再读 PDF 元数据 */ }
+                        // SY <--
+                        else -> {
+                            getComicInfoForChapter(chapterFile) { stream, encrypted ->
+                                setChapterDetailsFromComicInfoFile(stream, this)
+                            }
                         }
                     }
                 }
@@ -479,6 +491,12 @@ actual class LocalSource(
                         entry?.let { coverManager.update(manga, epub.getInputStream(it)!!) }
                     }
                 }
+                // SY --> Komiho: 本地 PDF 封面 = 系统 PdfRenderer 渲第 0 页（source-local 看不到
+                // app 模块的 PdfRenderFallback，此处自持一份最小渲染逻辑）。
+                is Format.Pdf -> {
+                    pdfCoverStream(format.file)?.let { coverManager.update(manga, it, false) }
+                }
+                // SY <--
                 // SY --> Komiho Phase3: 远程封面 Phase 4 再做（不为封面拉远程数据）
                 is Format.RemoteArchive -> null
                 // SY <--
@@ -506,3 +524,32 @@ fun Manga.isLocal(): Boolean = source == LocalSource.ID
 fun Source.isLocal(): Boolean = id == LocalSource.ID
 
 fun DomainSource.isLocal(): Boolean = id == LocalSource.ID
+
+// SY --> Komiho: 用系统 PdfRenderer 渲 PDF 第 0 页作封面字节流（source-local 看不到 app 模块的
+// PdfRenderFallback，此处自持一份最小渲染逻辑；封面只需缩略，长边限 1600 防 OOM）。
+private fun pdfCoverStream(file: UniFile): InputStream? {
+    val path = file.filePath ?: return null
+    val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+    val renderer = PdfRenderer(pfd)
+    try {
+        if (renderer.pageCount <= 0) return null
+        val page = renderer.openPage(0)
+        val longSide = maxOf(page.width, page.height)
+        val scale = if (longSide > 1600) 1600f / longSide else 1f
+        val bmp = Bitmap.createBitmap(
+            (page.width * scale).toInt().coerceAtLeast(1),
+            (page.height * scale).toInt().coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888,
+        )
+        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        page.close()
+        val out = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        bmp.recycle()
+        return ByteArrayInputStream(out.toByteArray())
+    } finally {
+        renderer.close()
+        pfd.close()
+    }
+}
+// SY <--

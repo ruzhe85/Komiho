@@ -18,6 +18,7 @@ import okio.Buffer
 import okio.FileSystem
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.source.local.io.Archive
+import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -151,6 +152,13 @@ class LocalCoverFetcher(
                 }
             }
             file.name?.endsWith("epub", ignoreCase = true) == true -> null
+            // SY --> Komiho: PDF 封面 = 系统 PdfRenderer 渲第 0 页（彩色扫描漫画常见，DCT 直通
+            // 保留网点；此处只取缩略，落到与归档一致的 450px JPEG 缓存）。
+            file.name?.endsWith("pdf", ignoreCase = true) == true -> {
+                val path = file.filePath
+                if (path != null) PdfRenderFallback.renderPageBitmap(path, 0, MAX_PX) else null
+            }
+            // SY <--
             ImageUtil.isImage(file.name) -> decodeSampled({ file.openInputStream() }, MAX_PX)
             else -> null
         }
