@@ -260,10 +260,10 @@ class ReaderPreferences(
     )
 
     /**
-     * Komiho: AI/NPU 档（mode 5）超分前的 CPU Guided Filter 漫画降噪档位。
-     * 0=关 1=弱 2=中 3=强（radius/eps = 4/400、8/120、12/50，Kotlin 侧映射）。
-     * 目的是在超分前去除扫描颗粒/色噪、保住线稿与文字；**默认关** —— 先人工对比验证
-     * 「降噪 + AI 是否值得」再考虑改默认。只挂 AI 档，CPU 重采样档不受影响。
+     * Komiho: 漫画降噪总开关（CPU Guided Filter）。
+     * 0=关 1=开启（固定强档 radius/eps=12/64，预平滑后平坦区 a≈0.03 近全平但保线稿）。
+     * 对所有增强模式（Lanczos3 / Catmull-Rom / AI）生效；**默认关** —— 先人工对比验证
+     * 「降噪 + 超分是否值得」再考虑改默认。
      * （曾用 Fast NLM：3.1MP 实测单页 ~11s，判定不可行已删，见 guided.cpp 头注释。）
      */
     val denoiseLevel: Preference<Int> = preferenceStore.getInt("pref_denoise_level", 0)
@@ -462,9 +462,7 @@ class ReaderPreferences(
          */
         val DenoiseLevelOptions = listOf(
             0 to MR.strings.denoise_off,
-            1 to MR.strings.denoise_weak,
-            2 to MR.strings.denoise_medium,
-            3 to MR.strings.denoise_strong,
+            1 to MR.strings.denoise_on,
         )
 
         /**

@@ -572,9 +572,7 @@
     <!-- Komiho: AI 档超分前的 CPU Fast NLM 降噪（默认关；仅 mode 5 生效）。 -->
     <string name="enhancement_denoise">Denoise</string>
     <string name="denoise_off">Off</string>
-    <string name="denoise_weak">Weak</string>
-    <string name="denoise_medium">Medium</string>
-    <string name="denoise_strong">Strong</string>
+    <string name="denoise_on">On</string>
     <string name="pref_hide_threshold">Sensitivity for hiding menu on scroll</string>
     <string name="pref_highest">Highest</string>
     <string name="pref_high">High</string>

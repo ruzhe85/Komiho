@@ -206,20 +206,17 @@ fun ImageEnhancementSection(
             }
         }
 
-        // Komiho: AI/NPU 档可选前处理 —— CPU Guided Filter 漫画降噪（默认关）。
-        // 档位同时作用于 GPU 与 NPU 模型（同一条超分管线），故挂在 mode==5 上而不是
-        // 某个分组内。指纹由 enhancementCacheKey() 覆盖，换档即时重渲染。
-        if (mode == 5) {
-            val denoise by preferences.denoiseLevel.collectAsState()
-            EnhancementParamLabel(MR.strings.enhancement_denoise)
-            SettingsChipRow {
-                ReaderPreferences.DenoiseLevelOptions.forEach { (value, labelRes) ->
-                    FilterChip(
-                        selected = denoise == value,
-                        onClick = { preferences.denoiseLevel.set(value) },
-                        label = { Text(stringResource(labelRes)) },
-                    )
-                }
+        // Komiho: 漫画降噪总开关（默认关）。对所有增强模式常驻显示，开启即用强档。
+        // 指纹由 enhancementCacheKey() 覆盖，切换即时重渲染。
+        val denoise by preferences.denoiseLevel.collectAsState()
+        EnhancementParamLabel(MR.strings.enhancement_denoise)
+        SettingsChipRow {
+            ReaderPreferences.DenoiseLevelOptions.forEach { (value, labelRes) ->
+                FilterChip(
+                    selected = denoise == value,
+                    onClick = { preferences.denoiseLevel.set(value) },
+                    label = { Text(stringResource(labelRes)) },
+                )
             }
         }
 

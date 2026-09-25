@@ -74,9 +74,8 @@ object MihonSyEnhancer {
     private external fun nativeResample(bitmap: Bitmap, scale: Float, kernel: Int): Bitmap
 
     /**
-     * Komiho: CPU Guided Filter 漫画降噪（引导图 = 亮度，RGB 各通道独立滤波）。
-     * 曾用 Fast NLM：真机实测 3.1MP 弱档单页 ~11s（算量 = 像素 × 441 搜索偏移的固有代价），
-     * 远超实时阅读红线 → 换 O(1) 于窗口大小的 guided filter，实测 ~100-200ms。
+     * Komiho: CPU Guided Filter 漫画降噪（亮度引导强度缩放：只平滑亮度、三通道同乘一因子，
+     * 色相守恒永不色偏）。曾用 Fast NLM：真机实测 3.1MP 弱档单页 ~11s，换 O(1) guided filter 实测 ~100-200ms。
      * 成功返回新位图（尺寸不变）；失败返回入参本身。`argb` 必须是 ARGB_8888（调用方先过 [ensureArgb]）。
      */
     private external fun nativeGuidedDenoise(bitmap: Bitmap, eps: Float, radius: Int): Bitmap?
@@ -337,12 +336,11 @@ object MihonSyEnhancer {
     private const val MAX_DENOISE_INPUT_PIXELS = 6_000_000L
 
     /**
-     * Komiho: AI 档降噪前处理（Guided Filter）。任何失败都静默回落原图（或其 ARGB 副本），
-     * 绝不阻断出图。
+     * Komiho: 漫画降噪前处理（Guided Filter，亮度引导强度缩放）。任何失败都静默回落原图
+     * （或其 ARGB 副本），绝不阻断出图。对所有增强模式（Lanczos3 / Catmull-Rom / AI）生效。
      *
-     * 档位参数 (radius, eps)：eps 越大平滑越强（255 域）。统计引导 = 预平滑亮度 gI，
-     * a = var(gI)/(var(gI)+eps)，平坦区 var(gI) ≈ σ²/49（7×7 box，σ²≈100 → ≈2）。
-     * 噪声残留 = a·噪声。eps 过大会软化中等对比细节（网点/浅线 var≈45），上限取 64。
+     * 开启即固定强档：radius=12, eps=64（eps 越大平滑越强，255 域）。统计引导 = 预平滑亮度 gI，
+     * a = var(gI)/(var(gI)+eps)，平坦区 var(gI) ≈ σ²/49（7×7 box，σ²≈100 → ≈2），噪声残留 = a·噪声。
      * 耗时用 android.util.Log 而非项目 logcat()：release 构建下 XLog 级别是 WARN，
      * logcat() 的 DEBUG/INFO 会被整条吞掉（与 Waifu2x.process 同款口径）。
      * 角标的「解码+增强」总耗时天然包含降噪（denoise 在 enhance() 内部跑），
@@ -356,15 +354,10 @@ object MihonSyEnhancer {
             )
             return input
         }
-        val (radius, eps) = when (level) {
-            // a = var(gI)/(var(gI)+eps)，var(gI) ≈ σ²/49（预平滑 7×7 box）。
-            // 第二版 (200/40/8) 把 eps 方向写反了（eps 越大越平滑）且重建误用 gI，
-            // 实测「开弱档图片都全糊了」。现按 var(gI)≈2（σ²≈100）校准：
-            // 弱 8（a≈0.2，留 20% 噪声）、中 24（a≈0.08）、强 64（a≈0.03 近全平）。
-            1 -> 4 to 8f
-            3 -> 12 to 64f
-            else -> 8 to 24f
-        }
+        // 开启即用强档：radius=12, eps=64（预平滑后平坦区 a≈0.03，近全平但保线稿）。
+        // level 仅 0/1，调用点已在 denoiseLevel!=0 时拦截，进入此处恒为 1。
+        val radius = 12
+        val eps = 64f
         val argb = ensureArgb(input) ?: return input
         val start = SystemClock.uptimeMillis()
         // 进程级互斥：多页并发增强时串行化降噪（见 [denoiseLock] 注释）。
