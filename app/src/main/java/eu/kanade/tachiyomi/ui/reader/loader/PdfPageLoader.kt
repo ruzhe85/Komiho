@@ -87,9 +87,9 @@ internal class PdfPageLoader private constructor(
                 ReaderPage(i).apply {
                     stream = { openStream(i) }
                     status = Page.State.Ready
-                    // 渲染兜底页经 PdfRenderFallback 以高分辨率 + 白底渲染，
-                    // 交给既有增强管线按用户设置处理（与 DCT 提取页一致）。
-                    skipEnhance = false
+                    // 渲染兜底页已按目标分辨率（~2000px）光栅化，再叠 2x 插值只会把
+                    // 已清晰的文字/线条重新放大变糊；增强只留给 DCT 抽取的低分辨率源图。
+                    skipEnhance = true
                 }
             }
         } else {
