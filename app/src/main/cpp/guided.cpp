@@ -68,70 +68,47 @@ void boxBlur(const float *src, float *dst, float *tmp, int W, int H, int r) {
     }
 }
 
-// band 简易平面池：ext band 尺寸 W×Hb 的 float 平面，用完归还，避免反复 malloc。
-struct PlanePool {
-    std::vector<std::vector<float>> pool;
-    std::vector<float> take(int W, int H) {
-        if (!pool.empty()) {
-            std::vector<float> p = std::move(pool.back());
-            pool.pop_back();
-            if (static_cast<int>(p.size()) >= W * H) return p;
-        }
-        return std::vector<float>(static_cast<size_t>(W) * H);
-    }
-    void give(std::vector<float> &&p) { pool.push_back(std::move(p)); }
-};
-
-// 对一个 ext band 跑完整 guided 流程，把输出行（band 内 [y0,y1) 对应的 ext 行
-// [off, off+bandN)）写进 outQ（三通道打包进 outR/outG/outB 亦按 ext 行存）。
+// 对一个 ext band 跑完整 guided 流程，把输出（按 ext 行存）写进 outR/outG/outB。
 // I 与 pR/pG/pB 由调用方从源位图提取（ext 范围）。
+//
+// ⚠️ 缓冲管理纪律（上一版在这里崩过）：所有平面在进入通道循环前**一次性分配**，
+// 全函数只用不再归还 —— 空向量 .data() 是 nullptr，boxBlur 直接写 0x0 必 SEGV。
+// 11 个 ext 平面 × ~0.72MB（64+2r 行 × 2048 宽）≈ 8MB/worker，可接受。
 void guidedBand(const float *I, const float *pR, const float *pG, const float *pB, int W, int Hb,
                 int r, float eps, float *outR, float *outG, float *outB) {
-    PlanePool pool;
     const size_t plane = static_cast<size_t>(W) * Hb;
-    auto take = [&](std::vector<float> &v) { v = pool.take(W, Hb); };
+    auto mk = [&]() { return std::vector<float>(plane); };
+    std::vector<float> work = mk();   // boxBlur 的可分离工作缓冲
+    std::vector<float> meanI = mk(), sq = mk(), varI = mk();
+    std::vector<float> P = mk(), meanP = mk(), IP = mk(), corrIP = mk();
+    std::vector<float> a = mk(), b = mk(), meanA = mk(), meanB = mk();
 
-    std::vector<float> meanI, corrII, varI, tmp, meanP, corrIP, a, b, meanA, meanB;
-    take(meanI); take(tmp);
-    // 引导统计（全通道共享）：mean_I、var_I = box(I²) − mean_I²
-    boxBlur(I, meanI.data(), tmp.data(), W, Hb, r);
-    take(corrII);
-    for (size_t i = 0; i < plane; ++i) corrII[i] = I[i] * I[i];
-    boxBlur(corrII.data(), varI.data(), tmp.data(), W, Hb, r);
+    // 引导统计（全通道共享）：mean_I、分母 var_I + eps = box(I²) − mean_I² + eps
+    boxBlur(I, meanI.data(), work.data(), W, Hb, r);
+    for (size_t i = 0; i < plane; ++i) sq[i] = I[i] * I[i];
+    boxBlur(sq.data(), varI.data(), work.data(), W, Hb, r);
     for (size_t i = 0; i < plane; ++i) {
         const float mi = meanI[i];
-        varI[i] = varI[i] - mi * mi + eps;  // 就地存分母 var+eps
+        varI[i] = varI[i] - mi * mi + eps;
     }
-    pool.give(std::move(corrII));
 
-    std::vector<float> P, IP;
-    take(P); take(IP);
     const float *srcCh[3] = {pR, pG, pB};
     float *dstCh[3] = {outR, outG, outB};
     for (int c = 0; c < 3; ++c) {
         std::memcpy(P.data(), srcCh[c], plane * sizeof(float));
-        boxBlur(P.data(), meanP.data(), tmp.data(), W, Hb, r);
+        boxBlur(P.data(), meanP.data(), work.data(), W, Hb, r);
         for (size_t i = 0; i < plane; ++i) IP[i] = I[i] * P[i];
-        boxBlur(IP.data(), corrIP.data(), tmp.data(), W, Hb, r);
-        take(a); take(b);
+        boxBlur(IP.data(), corrIP.data(), work.data(), W, Hb, r);
         for (size_t i = 0; i < plane; ++i) {
             const float cov = corrIP[i] - meanI[i] * meanP[i];
             a[i] = cov / varI[i];
             b[i] = meanP[i] - a[i] * meanI[i];
         }
-        pool.give(std::move(meanP));
-        pool.give(std::move(corrIP));
-        boxBlur(a.data(), meanA.data(), tmp.data(), W, Hb, r);
-        boxBlur(b.data(), meanB.data(), tmp.data(), W, Hb, r);
+        boxBlur(a.data(), meanA.data(), work.data(), W, Hb, r);
+        boxBlur(b.data(), meanB.data(), work.data(), W, Hb, r);
         for (size_t i = 0; i < plane; ++i) {
             dstCh[c][i] = meanA[i] * I[i] + meanB[i];
         }
-        pool.give(std::move(a));
-        pool.give(std::move(b));
-        pool.give(std::move(P));
-        pool.give(std::move(IP));
-        take(P); take(IP);
-        take(meanP); take(corrIP);
     }
 }
 
