@@ -5,6 +5,14 @@
   新增版本時三份都要同步。
 -->
 <changelog bulletedList="true">
+    <changelogversion versionName="1.3.0" changeDate="September 25, 2026">
+        <changelogtext>[b]Komiho 1.3.0[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 本地/WebDAV/SMB PDF 閱讀</changelogtext>
+        <changelogtext>[b]新增[/b] 檔案瀏覽器搜尋功能</changelogtext>
+        <changelogtext>[b]新增[/b] 影像增強-降噪</changelogtext>
+        <changelogtext>[b]優化[/b] 檔案瀏覽器現在按數字/字母/拼音首字母排序</changelogtext>
+        <changelogtext>[b]修復[/b] 努比亞/紅魔無法載入 NPU 模型</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.2.0" changeDate="September 19, 2026">
         <changelogtext>[b]Komiho 1.2.0[/b]</changelogtext>
         <changelogtext>[b]新增[/b] 影像增強 AI 超分（GPU / NPU）：基礎程式碼移植自 mihon_img_upscale</changelogtext>

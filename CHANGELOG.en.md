@@ -1,5 +1,13 @@
 # Komiho Changelog
 
+## v1.3.0 (2026-09-25)
+
+- New Local / WebDAV / SMB PDF reading
+- New File browser search
+- New Image enhancement — denoise
+- Improved File browser now sorts by number / letter / pinyin initial
+- Fixed Nubia / Red Magic failing to load NPU models
+
 ## v1.2.0 (2026-09-19)
 
 - New AI image upscaling (GPU / NPU): base code ported from [mihon_img_upscale](https://github.com/HaoweiLi97/mihon_img_upscale)

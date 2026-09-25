@@ -1,5 +1,14 @@
 # Komiho 更新公告 / Changelog
 
+## v1.3.0（2026-09-25）
+
+- 新增 本地/WebDAV/SMB PDF阅读
+- 新增 文件浏览器搜索功能
+- 新增 图像增强-降噪
+- 优化 文件浏览器现在按数字/字母/拼音首字母排序
+- 修复 努比亚/红魔无法加载NPU模型
+
+
 ## v1.2.0（2026-09-19）
 
 - 新增 图像增强 AI 超分（GPU / NPU）：基础代码移植自 [mihon\_img\_upscale](https://github.com/HaoweiLi97/mihon_img_upscale)

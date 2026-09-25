@@ -6,6 +6,14 @@
   Keep both files in sync when adding a release.
 -->
 <changelog bulletedList="true">
+    <changelogversion versionName="1.3.0" changeDate="September 25, 2026">
+        <changelogtext>[b]Komiho 1.3.0[/b]</changelogtext>
+        <changelogtext>[b]New[/b] Local / WebDAV / SMB PDF reading</changelogtext>
+        <changelogtext>[b]New[/b] File browser search</changelogtext>
+        <changelogtext>[b]New[/b] Image enhancement — denoise</changelogtext>
+        <changelogtext>[b]Improved[/b] File browser now sorts by number / letter / pinyin initial</changelogtext>
+        <changelogtext>[b]Fixed[/b] Nubia / Red Magic failing to load NPU models</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.2.0" changeDate="September 19, 2026">
         <changelogtext>[b]Komiho 1.2.0[/b]</changelogtext>
         <changelogtext>[b]New[/b] AI image upscaling (GPU / NPU): base code ported from mihon_img_upscale</changelogtext>
