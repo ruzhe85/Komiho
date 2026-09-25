@@ -756,6 +756,8 @@
     <string name="archive_password_prompt">該壓縮包已加密，請輸入密碼開啟。</string>
     <string name="password_incorrect">密碼錯誤</string>
     <string name="password_label">密碼</string>
+    <string name="pdf_password_prompt">該 PDF 已加密，請輸入密碼開啟。</string>
+    <string name="pdf_unsupported">目前 Android 版本不支援加密 PDF（需 Android 15+）。</string>
     <string name="delete_downloaded">刪除舊有下載章節</string>
     <string name="track_delete_title">移除「%s」歷程平臺？</string>
     <string name="track_delete_text">這將在本機上解除登錄該歷程平臺</string>

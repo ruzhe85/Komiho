@@ -159,6 +159,8 @@
     <string name="archive_password_prompt">This archive is encrypted. Enter the password to open it.</string>
     <string name="password_incorrect">Incorrect password</string>
     <string name="password_label">Password</string>
+    <string name="pdf_password_prompt">This PDF is encrypted. Enter the password to open it.</string>
+    <string name="pdf_unsupported">Encrypted PDF is not supported on this Android version (requires Android 15+).</string>
     <string name="action_cancel_all">Cancel all</string>
     <string name="cancel_all_for_series">Cancel all for this series</string>
     <string name="action_sort">Sort</string>

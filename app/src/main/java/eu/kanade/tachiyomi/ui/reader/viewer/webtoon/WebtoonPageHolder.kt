@@ -7,6 +7,7 @@ import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
 import mihon.core.common.archive.ArchivePasswordException
+import eu.kanade.tachiyomi.util.pdf.PdfPasswordException
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updateMargins
@@ -364,6 +365,8 @@ class WebtoonPageHolder(
         // 输对后 submitArchivePassword 会整章重载，错误占位随之消失
         if (error is ArchivePasswordException) {
             viewer.activity.viewModel.openArchivePasswordDialog()
+        } else if (error is PdfPasswordException) {
+            viewer.activity.viewModel.openPdfPasswordDialog(unsupported = error.unsupported, wrongPassword = error.wrongPassword)
         }
         if (errorLayout == null) {
             errorLayout = ReaderErrorBinding.inflate(LayoutInflater.from(context), frame, true)
@@ -371,6 +374,8 @@ class WebtoonPageHolder(
             errorLayout?.actionRetry?.setOnClickListener {
                 if (error is ArchivePasswordException) {
                     viewer.activity.viewModel.openArchivePasswordDialog()
+                } else if (error is PdfPasswordException) {
+                    viewer.activity.viewModel.openPdfPasswordDialog(unsupported = error.unsupported, wrongPassword = error.wrongPassword)
                 } else {
                     page?.let { it.chapter.pageLoader?.retryPage(it) }
                 }

@@ -92,6 +92,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import mihon.core.common.archive.ArchivePasswordException
+import eu.kanade.tachiyomi.util.pdf.PdfPasswordException
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
@@ -259,6 +260,8 @@ class ReaderActivity : BaseActivity() {
                         // SY --> 加密本缺密码：弹输入框而非关闭阅读器
                         if (exception is ArchivePasswordException) {
                             viewModel.openArchivePasswordDialog()
+                        } else if (exception is PdfPasswordException) {
+                            viewModel.openPdfPasswordDialog(unsupported = exception.unsupported, wrongPassword = exception.wrongPassword)
                         } else {
                             setInitialChapterError(exception)
                         }
@@ -478,6 +481,71 @@ class ReaderActivity : BaseActivity() {
                         TextButton(
                             enabled = password.isNotBlank(),
                             onClick = { viewModel.submitArchivePassword(password) },
+                        ) {
+                            Text(stringResource(MR.strings.action_ok))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.closeDialog()
+                                finish()
+                            },
+                        ) {
+                            Text(stringResource(MR.strings.action_cancel))
+                        }
+                    },
+                )
+            }
+            // SY <--
+
+            // SY --> Komiho: 加密 PDF 密码输入框
+            is ReaderViewModel.Dialog.PdfPassword -> {
+                val dialogState = state.dialog as ReaderViewModel.Dialog.PdfPassword
+                var password by remember { mutableStateOf("") }
+                AlertDialog(
+                    onDismissRequest = {
+                        viewModel.closeDialog()
+                        finish()
+                    },
+                    title = { Text(stringResource(MR.strings.pdf_password_prompt)) },
+                    text = {
+                        Column {
+                            if (dialogState.unsupported) {
+                                Text(
+                                    stringResource(MR.strings.pdf_unsupported),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            } else {
+                                if (dialogState.wrongPassword) {
+                                    Text(
+                                        stringResource(MR.strings.password_incorrect),
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                                OutlinedTextField(
+                                    value = password,
+                                    onValueChange = { password = it },
+                                    label = { Text(stringResource(MR.strings.password_label)) },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    keyboardOptions = KeyboardOptions(
+                                        autoCorrect = false,
+                                        imeAction = ImeAction.Done,
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onDone = {
+                                            if (password.isNotBlank()) viewModel.submitPdfPassword(password)
+                                        },
+                                    ),
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = password.isNotBlank() && !dialogState.unsupported,
+                            onClick = { viewModel.submitPdfPassword(password) },
                         ) {
                             Text(stringResource(MR.strings.action_ok))
                         }

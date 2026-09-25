@@ -7,6 +7,7 @@ import android.view.LayoutInflater
 import androidx.core.view.isVisible
 import eu.kanade.presentation.util.formattedMessage
 import mihon.core.common.archive.ArchivePasswordException
+import eu.kanade.tachiyomi.util.pdf.PdfPasswordException
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
@@ -677,6 +678,8 @@ class PagerPageHolder(
         // 输对后 submitArchivePassword 会整章重载，错误占位随之消失
         if (error is ArchivePasswordException) {
             viewer.activity.viewModel.openArchivePasswordDialog()
+        } else if (error is PdfPasswordException) {
+            viewer.activity.viewModel.openPdfPasswordDialog(unsupported = error.unsupported, wrongPassword = error.wrongPassword)
         }
         if (errorLayout == null) {
             errorLayout = ReaderErrorBinding.inflate(LayoutInflater.from(context), this, true)
@@ -684,6 +687,8 @@ class PagerPageHolder(
             errorLayout?.actionRetry?.setOnClickListener {
                 if (error is ArchivePasswordException) {
                     viewer.activity.viewModel.openArchivePasswordDialog()
+                } else if (error is PdfPasswordException) {
+                    viewer.activity.viewModel.openPdfPasswordDialog(unsupported = error.unsupported, wrongPassword = error.wrongPassword)
                 } else {
                     page.chapter.pageLoader?.retryPage(page)
                 }

@@ -5,6 +5,8 @@ import android.util.Log
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.util.pdf.PdfPasswordException
+import eu.kanade.tachiyomi.util.pdf.PdfPasswordHolder
 import eu.kanade.tachiyomi.util.pdf.PdfParser
 import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import eu.kanade.tachiyomi.util.pdf.remotePdfSource
@@ -13,6 +15,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import kotlin.math.min
+import android.os.Build
 import mihon.core.common.archive.RandomAccessSource
 import tachiyomi.core.common.util.lang.withIOContext
 
@@ -41,6 +44,8 @@ internal class PdfPageLoader private constructor(
     private lateinit var path: String
     private var parser: PdfParser? = null
     private var renderOnly = false
+    /** 本次打开需带密码渲染时使用的密码（加密 PDF 走系统渲染兜底）。 */
+    private var currentPassword: String? = null
 
     /** 本地 PDF：传 UniFile。 */
     constructor(file: UniFile, context: Context) : this(context, file, null)
@@ -60,35 +65,48 @@ internal class PdfPageLoader private constructor(
         path = resolvePath()
         Log.d(TAG, "PDF open: path=$path")
 
-        // 先尝试自写解析（提取内嵌图字节流 + 增强）；失败则整本走系统渲染兜底。
-        try {
-            val p = PdfParser(path)
-            if (p.parseOk && p.isEncrypted()) {
-                throw IllegalStateException("PDF 已加密，当前版本不支持解密，请先解除加密后重试")
+        // 探测加密状态（不消耗密码尝试）。
+        val probe = PdfParser(path)
+        val encrypted = probe.parseOk && probe.isEncrypted()
+
+        var effectivePassword: String? = null
+
+        if (encrypted) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                // 低于 Android 15 无 setPassword 入口，无法渲染加密 PDF。
+                throw PdfPasswordException(unsupported = true)
             }
-            if (p.parseOk && p.pageCount > 0) {
-                parser = p
-                renderOnly = false
-                Log.d(TAG, "PDF extract mode, pages=${p.pageCount}")
-            } else {
-                renderOnly = true
+            val pw = PdfPasswordHolder.current
+            if (pw == null) {
+                // 缺密码 → 弹框输入。
+                throw PdfPasswordException()
             }
-        } catch (e: Exception) {
-            if (e is IllegalStateException && e.message?.contains("加密") == true) throw e
-            Log.w(TAG, "PDF parse failed, fallback to render: ${e.message}")
+            // 校验密码：错误则抛 wrongPassword。
+            val n = runCatching { PdfRenderFallback.getPageCount(path, pw) }
+                .getOrElse { throw PdfPasswordException(wrongPassword = true) }
+            if (n <= 0) throw PdfPasswordException(wrongPassword = true)
+            effectivePassword = pw
             renderOnly = true
+            Log.d(TAG, "PDF encrypted, render-only with password, pages=$n")
+        } else if (probe.parseOk && probe.pageCount > 0) {
+            parser = probe
+            renderOnly = false
+            Log.d(TAG, "PDF extract mode, pages=${probe.pageCount}")
+        } else {
+            renderOnly = true
+            Log.d(TAG, "PDF parse incomplete, fallback to render-only")
         }
 
+        currentPassword = effectivePassword
+
         val pages = if (renderOnly) {
-            val n = PdfRenderFallback.getPageCount(path)
+            val n = PdfRenderFallback.getPageCount(path, currentPassword)
             Log.d(TAG, "PDF render-only mode, pages=$n")
             if (n <= 0) throw Exception("PDF 无法解析（可能已损坏或已加密）")
             List(n) { i ->
                 ReaderPage(i).apply {
                     stream = { openStream(i) }
                     status = Page.State.Ready
-                    // 阅读器本质消费 bitmap，PDF 不论源是矢量还是位图到阅读器层都已光栅化，
-                    // 不存在「矢量页」之分；统一交给增强管线按用户设置处理。
                     skipEnhance = false
                 }
             }
@@ -180,9 +198,13 @@ internal class PdfPageLoader private constructor(
                 Log.w(TAG, "PDF extract page ${index + 1} failed, render fallback: ${e.message}")
             }
         }
-        // 兜底：系统渲染
-        val rendered = PdfRenderFallback.renderPage(path, index)
-            ?: throw IllegalStateException("PDF 第 ${index + 1} 页无法渲染（可能已损坏或加密）")
+        // 兜底：系统渲染（含加密带密码；密码错误时系统抛 SecurityException → 转 wrongPassword）
+        val rendered = try {
+            PdfRenderFallback.renderPage(path, index, currentPassword)
+        } catch (e: SecurityException) {
+            if (currentPassword != null) throw PdfPasswordException(wrongPassword = true)
+            throw e
+        } ?: throw IllegalStateException("PDF 第 ${index + 1} 页无法渲染（可能已损坏或加密）")
         return ByteArrayInputStream(rendered)
     }
 

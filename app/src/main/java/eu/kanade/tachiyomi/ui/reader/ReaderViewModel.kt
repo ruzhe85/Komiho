@@ -43,6 +43,8 @@ import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import mihon.core.common.archive.ArchivePasswordException
+import eu.kanade.tachiyomi.util.pdf.PdfPasswordException
+import eu.kanade.tachiyomi.util.pdf.PdfPasswordHolder
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
@@ -348,6 +350,8 @@ class ReaderViewModel @JvmOverloads constructor(
                 downloadManager.addDownloadsToStartOfQueue(listOf(it))
             }
         }
+        // SY --> Komiho: 关闭阅读器清空 PDF 密码（session 级记忆）
+        PdfPasswordHolder.current = null
     }
 
     /**
@@ -449,8 +453,8 @@ class ReaderViewModel @JvmOverloads constructor(
                 if (e is CancellationException) {
                     throw e
                 }
-                // SY --> 加密本缺密码：暂存待重载章节，交上层弹密码框（不当致命错误）
-                if (e is ArchivePasswordException) {
+                // SY --> 加密本/加密 PDF 缺密码：暂存待重载章节，交上层弹密码框（不当致命错误）
+                if (e is ArchivePasswordException || e is PdfPasswordException) {
                     archivePasswordChapter = chapterList.firstOrNull { chapterId == it.chapter.id }
                     archivePasswordPage = page
                 }
@@ -1540,6 +1544,30 @@ class ReaderViewModel @JvmOverloads constructor(
     }
     // SY <--
 
+    // SY --> Komiho: 加密 PDF 密码输入
+    fun openPdfPasswordDialog(unsupported: Boolean = false, wrongPassword: Boolean = false) {
+        mutableState.update { it.copy(dialog = Dialog.PdfPassword(unsupported = unsupported, wrongPassword = wrongPassword)) }
+    }
+
+    fun submitPdfPassword(password: String) {
+        PdfPasswordHolder.current = password
+        val chapter = archivePasswordChapter ?: getCurrentChapter() ?: return
+        mutableState.update { it.copy(dialog = null) }
+        viewModelScope.launchIO {
+            try {
+                loadChapter(loader!!, chapter, null)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                if (e is PdfPasswordException) {
+                    mutableState.update { it.copy(dialog = Dialog.PdfPassword(unsupported = e.unsupported, wrongPassword = e.wrongPassword)) }
+                    return@launchIO
+                }
+                logcat(LogPriority.ERROR, e)
+            }
+        }
+    }
+    // SY <--
+
     fun setBrightnessOverlayValue(value: Int) {
         mutableState.update { it.copy(brightnessOverlayValue = value) }
     }
@@ -1959,6 +1987,13 @@ class ReaderViewModel @JvmOverloads constructor(
         // SY --> Komiho: 加密归档密码输入对话框
         data class ArchivePassword(
             val wrongPassword: Boolean = false,
+        ) : Dialog
+        // SY <--
+
+        // SY --> Komiho: 加密 PDF 密码输入对话框
+        data class PdfPassword(
+            val wrongPassword: Boolean = false,
+            val unsupported: Boolean = false,
         ) : Dialog
         // SY <--
 
