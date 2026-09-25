@@ -247,6 +247,18 @@ object MihonSyEnhancer {
 
         // Komiho: GPU 档单独收集耗时拆分 —— 角标要显示「剔除等锁」的实际计算消耗。
         val gpuTiming = if (mode == 5) Waifu2x.Timing() else null
+
+        // Komiho: CPU Guided Filter 漫画降噪（默认关），与增强算法解耦 —— 只要增强模式
+        // 非零（Lanczos3 / Catmull-Rom / AI 皆然）就先去噪再增强；mode 0（关增强）保持零处理。
+        // 落点在解码采样之后、各增强分支之前：满足「进入增强前输入更干净」的本质目的
+        // （解码采样不可避免），且 guided filter 代价与窗口无关，采样后尺寸
+        // （~1-3MP）单页仅 ~100-200ms（Fast NLM 方案同尺寸实测 11s，已弃）。
+        var src = input
+        val denoiseLevel = preferences.denoiseLevel.get()
+        if (denoiseLevel != 0) {
+            src = denoiseForAi(src, denoiseLevel, sourceTag)
+        }
+
         val result = when (mode) {
             // MihonSY: Anime4K branch disabled — native side no longer compiled.
             // 1 -> {
@@ -278,7 +290,7 @@ object MihonSyEnhancer {
             // (Spline36 (4) disabled; kernel id: 0 = Lanczos3, 1 = Catmull-Rom native side.)
             in 2..3 -> {
                 val scale = preferences.lanczosScale.get() / 100f
-                val argb = ensureArgb(input) ?: run {
+                val argb = ensureArgb(src) ?: run {
                     onComplete?.invoke(false, SystemClock.uptimeMillis() - start, 0L)
                     return null
                 }
@@ -296,24 +308,14 @@ object MihonSyEnhancer {
 
             // Komiho: GPU AI upscale (ncnn + Vulkan). Scale is fixed by the model (2x).
             5 -> {
-                // Komiho: AI/NPU 档可选前处理 —— CPU Guided Filter 漫画降噪（默认关）。
-                // 落点在解码采样之后、超分之前：满足「进入 AI 前输入更干净」的本质目的
-                // （解码采样不可避免），且 guided filter 代价与窗口无关，采样后尺寸
-                // （~1-3MP）单页仅 ~100-200ms（Fast NLM 方案同尺寸实测 11s，已弃）。
-                var src = input
-                val denoiseLevel = preferences.denoiseLevel.get()
-                if (denoiseLevel != 0) {
-                    src = denoiseForAi(src, denoiseLevel, sourceTag)
-                }
-                val result = enhanceWithGpu(src, preferences, sourceTag, gpuTiming, pageIndex, targetWidth, targetHeight)
-                // 降噪产物只被本次增强消费（下游返回的都是新位图，见 enhanceWithGpu），
-                // 及时回收，避免大图滞留到 GC。
-                if (src !== input && (result == null || result !== src)) src.recycle()
-                result
+                enhanceWithGpu(src, preferences, sourceTag, gpuTiming, pageIndex, targetWidth, targetHeight)
             }
 
             else -> null
         }
+        // 降噪产物只被本次增强消费（下游返回的都是新位图，见 enhanceWithGpu / 重采样），
+        // 及时回收，避免大图滞留到 GC。仅当 src 是新位图（≠ input）且不是最终返回对象时回收。
+        if (src !== input && (result == null || result !== src)) src.recycle()
         // 只在结果确实是新对象时才缩（避免误 recycle 调用方仍在用的 input）。
         val capped = if (result != null && result !== input) capOutputSize(result) else result
         onComplete?.invoke(
