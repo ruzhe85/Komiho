@@ -20,7 +20,12 @@ import java.util.zip.Inflater
  */
 class PdfParser(path: String) {
 
-    private val data: ByteArray = RandomAccessFile(path, "r").use { it.readBytes() }
+    private val data: ByteArray = RandomAccessFile(path, "r").use { raf ->
+        val len = raf.length()
+        val buf = ByteArray(len.toInt())
+        raf.readFully(buf)
+        buf
+    }
 
     /** objnum -> 对象在 data 中的起始偏移（"N G obj" 起点） */
     private val objStart = mutableMapOf<Int, Int>()
@@ -57,7 +62,8 @@ class PdfParser(path: String) {
         // 最后一个 startxref 之后是 EOF 偏移
         var idx = data.lastIndexOf("startxref".toByteArray(ISO))
         if (idx < 0) return -1
-        val tail = String(data, idx, (data.size - idx).coerceAtMost(64), ISO)
+        val len = (data.size - idx).coerceAtMost(64)
+        val tail = String(data, idx, len, ISO)
         val m = Regex("""startxref\s+(\d+)""").find(tail) ?: return -1
         return m.groupValues[1].toIntOrNull() ?: -1
     }
@@ -94,20 +100,20 @@ class PdfParser(path: String) {
         i = skipLine(i)
         while (i < data.size) {
             val line = readLine(i)
-            val hdr = line.trim().split(WHITESPACE)
+            val hdr = line.trim().splitWs()
             if (hdr.size == 2 && hdr[0].all { it.isDigit() } && hdr[1].all { it.isDigit() }) {
                 val start = hdr[0].toInt()
                 val count = hdr[1].toInt()
                 i = lineEnd(i)
                 repeat(count) {
                     val entry = readLine(i)
-                    val parts = entry.trim().split(WHITESPACE)
+                    val parts = entry.trim().splitWs()
                     if (parts.size >= 3 && parts[2] == "n") {
                         objStart[start + it] = parts[0].toInt()
                     }
                     i = lineEnd(i)
                 }
-                return@while
+                break
             }
             if (line.trim().startsWith("trailer")) {
                 val td = parseTrailerAt(i)
@@ -244,7 +250,7 @@ class PdfParser(path: String) {
         val xobjStr = String(xobjRaw, ISO)
         // XObject 可能是 "<< ... >>" 内联，或 "N G R" 引用
         val xdict = if (xobjStr.trim().startsWith("<<")) {
-            val ds = xobjRaw!!.indexOf('<'.code.toByte()); val de = xobjRaw.indexOf('>'.code.toByte())
+            val ds = xobjRaw.indexOf('<'.code.toByte()); val de = xobjRaw.indexOf('>'.code.toByte())
             parseDict(xobjRaw, ds, de + 2)
         } else {
             deref(xobjStr)?.let { dictOf(it) }
@@ -270,7 +276,7 @@ class PdfParser(path: String) {
         if (f == null) return null
         // 可能含多滤镜（数组）或带方括号；取第一个
         val cleaned = f.trim().removeSurrounding("[", "]").trim()
-        val first = cleaned.split(WHITESPACE).firstOrNull() ?: cleaned
+        val first = cleaned.splitWs().firstOrNull() ?: cleaned
         return first
     }
 
@@ -500,6 +506,10 @@ class PdfParser(path: String) {
 
     private fun skipLine(i: Int): Int = lineEnd(i)
 
+    /** 按空白切分字符串（替代 ByteArray 上不存在的 String.split）。 */
+    private fun String.splitWs(): List<String> =
+        this.split(Regex("""\s+""")).filter { it.isNotEmpty() }
+
     private fun parseIntArray(b: ByteArray): IntArray {
         return Regex("""-?\d+""").findAll(String(b, ISO)).map { it.value.toInt() }.toList().toIntArray()
     }
@@ -530,6 +540,46 @@ class PdfParser(path: String) {
     companion object {
         private const val TAG = "KomihoPdfParser"
     }
+}
+
+/** 在字节数组中查找子串（替代标准库仅支持 Byte 元素的 indexOf）。 */
+private fun ByteArray.indexOf(sub: ByteArray, from: Int = 0): Int {
+    if (sub.isEmpty()) return from.coerceAtMost(size)
+    val hi = (size - sub.size).coerceAtLeast(from)
+    var i = from.coerceAtLeast(0)
+    while (i <= hi) {
+        var ok = true
+        for (j in sub.indices) {
+            if (this[i + j] != sub[j]) { ok = false; break }
+        }
+        if (ok) return i
+        i++
+    }
+    return -1
+}
+
+/** 从 from 位置向前查找子串最后一次出现。 */
+private fun ByteArray.lastIndexOf(sub: ByteArray, from: Int = size): Int {
+    if (sub.isEmpty()) return from.coerceAtMost(size)
+    val start = (from - sub.size + 1).coerceAtLeast(0)
+    val hi = (size - sub.size).coerceAtLeast(0)
+    var i = start.coerceAtMost(hi)
+    while (i >= 0) {
+        var ok = true
+        for (j in sub.indices) {
+            if (this[i + j] != sub[j]) { ok = false; break }
+        }
+        if (ok) return i
+        i--
+    }
+    return -1
+}
+
+/** 判断从 offset 起是否以 sub 开头。 */
+private fun ByteArray.startsWith(sub: ByteArray, offset: Int = 0): Boolean {
+    if (offset < 0 || offset + sub.size > size) return false
+    for (j in sub.indices) if (this[offset + j] != sub[j]) return false
+    return true
 }
 
 data class PdfImage(
