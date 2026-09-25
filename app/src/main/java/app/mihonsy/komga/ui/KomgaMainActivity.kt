@@ -6174,15 +6174,15 @@ private fun LocalBrowseOptionsMenu(
                 }
                 1 -> {
                     Text(
-                        text = composeStringResource(R.string.display_mode_header),
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "模式",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
                     )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                            .padding(horizontal = 24.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         listOf(LibraryDisplayMode.List, LibraryDisplayMode.CompactGrid).forEach { m ->
