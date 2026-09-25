@@ -5540,10 +5540,10 @@ private fun LocalFileBrowser(
                     },
                     trailingIcon = if (searchQuery.isNotEmpty()) {
                         {
-                            IconButton(onClick = { searchQuery = "" }) {
+                            IconButton(onClick = { searchActive = false; searchQuery = "" }) {
                                 Icon(
                                     imageVector = Icons.Filled.Close,
-                                    contentDescription = composeStringResource(R.string.clear),
+                                    contentDescription = composeStringResource(R.string.cd_close_search),
                                 )
                             }
                         }
@@ -6336,10 +6336,10 @@ private fun WebDavBrowsePane(
                     },
                     trailingIcon = if (searchQuery.isNotEmpty()) {
                         {
-                            IconButton(onClick = { searchQuery = "" }) {
+                            IconButton(onClick = { searchActive = false; searchQuery = "" }) {
                                 Icon(
                                     imageVector = Icons.Filled.Close,
-                                    contentDescription = composeStringResource(R.string.clear),
+                                    contentDescription = composeStringResource(R.string.cd_close_search),
                                 )
                             }
                         }
@@ -6849,10 +6849,10 @@ private fun SmbBrowsePane(
                     },
                     trailingIcon = if (searchQuery.isNotEmpty()) {
                         {
-                            IconButton(onClick = { searchQuery = "" }) {
+                            IconButton(onClick = { searchActive = false; searchQuery = "" }) {
                                 Icon(
                                     imageVector = Icons.Filled.Close,
-                                    contentDescription = composeStringResource(R.string.clear),
+                                    contentDescription = composeStringResource(R.string.cd_close_search),
                                 )
                             }
                         }
