@@ -6,15 +6,21 @@
 // Guided filter 的代价与窗口大小无关（box filter 滑动窗口 O(1)/像素），
 // 3.1MP 单页 ~100-200ms。
 //
-// 去噪原理：引导图 = 预平滑亮度 gI，待滤信号 p = 各 RGB 通道独立滤波。
-//   a = cov(gI,p) / (var(gI) + eps),  b = mean(p) − a·mean(gI),  q = mean(a)·gI + mean(b)
+// 去噪原理：引导统计 = 预平滑亮度 gI，待滤信号 p = 各 RGB 通道独立滤波。
+//   a = cov(gI,p) / (var(gI) + eps),  b = mean(p) − a·mean(gI),  q = mean(a)·p + mean(b)
 // 平坦区 var(gI) << eps → a≈0 → q≈局部均值（颗粒/色噪被抹掉）；
 // 线稿/文字区 var(gI) 大 → a≈cov/var → 边缘结构保留（比 NLM 更稳，不会断线）。
 // ⚠️ 引导图必须先预平滑（GUIDE_SMOOTH_R）：含噪亮度直接当引导时，噪声方差顶高
 // var(gI) → 噪区 a 偏大 → 噪声被当「结构」保留（第一版开强档也看不出降噪的根因之一）。
-// eps 越小平滑越强 —— 三档由 Kotlin 侧映射 (radius, eps)：
-//   弱 (4, 200) / 中 (8, 40) / 强 (12, 8)，真机按画质实测再调。
-// 输出略软（q 用平滑引导重建）是预期行为——后续 AI 超分负责细节重建。
+// ⚠️⚠️ 逐像素重建必须用原始像素 p，绝不能用 gI（第二版踩坑实录）：
+//   q = a·gI + b 会在 a≈1 的所有细节区把输出换成 7×7 模糊后的亮度 → 整页全糊
+//   （「开弱档图片都全糊了」的根因）。gI 只参与统计，细节永远来自 p 本身。
+// eps 越大 a 越小、平滑越强（a = var(gI)/(var(gI)+eps)），但过大会软化中等对比
+// 细节 —— 三档由 Kotlin 侧映射 (radius, eps)：
+//   弱 (4, 8) / 中 (8, 24) / 强 (12, 64)，真机按画质实测再调。
+// 预平滑后平坦区 var(gI) ≈ σ²/49（7×7 box），σ²≈100 → var(gI)≈2：
+//   弱 a≈0.2（留 20% 噪声）/ 中 a≈0.08 / 强 a≈0.03；中等对比细节（var≈45）
+//   三档 a≈0.85/0.65/0.41，纹理保留度可辨。
 //
 // 内存：按 band 处理（band 高 64 行 + r 边界），中间平面只活在一个 band 里，
 // 峰值 ~30MB，不随页高增长（对比：全图 float 平面方案要 100MB+）。
@@ -114,7 +120,9 @@ void guidedBand(const float *I, const float *pR, const float *pG, const float *p
         boxBlur(a.data(), meanA.data(), work.data(), W, Hb, r);
         boxBlur(b.data(), meanB.data(), work.data(), W, Hb, r);
         for (size_t i = 0; i < plane; ++i) {
-            dstCh[c][i] = meanA[i] * gI[i] + meanB[i];
+            // 重建用原始像素 P（全分辨率细节），统计引导 gI 只到这里为止——
+            // 用 gI 重建 = 输出细节被 7×7 box 模糊替换（全糊 bug，见文件头注释）。
+            dstCh[c][i] = meanA[i] * P[i] + meanB[i];
         }
     }
 }
