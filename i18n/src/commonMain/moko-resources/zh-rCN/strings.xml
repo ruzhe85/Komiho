@@ -407,6 +407,12 @@
     <string name="ai_tile_size_128">128</string>
     <string name="ai_tile_size_192">192</string>
     <string name="ai_tile_size_256">256</string>
+    <!-- Komiho: AI 档超分前的 CPU Fast NLM 降噪（默认关；仅 mode 5 生效）。 -->
+    <string name="enhancement_denoise">降噪</string>
+    <string name="denoise_off">关闭</string>
+    <string name="denoise_weak">弱</string>
+    <string name="denoise_medium">中</string>
+    <string name="denoise_strong">强</string>
     <string name="vertical_plus_viewer">条漫（页间有空隙）</string>
     <string name="action_select_inverse">反选</string>
     <string name="add_tracking">添加进度记录</string>

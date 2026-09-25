@@ -259,6 +259,14 @@ class ReaderPreferences(
         AiUpscaleModel.Default.id,
     )
 
+    /**
+     * Komiho: AI/NPU 档（mode 5）超分前的 CPU Fast NLM 漫画降噪档位。
+     * 0=关 1=弱 2=中 3=强（h/hColor = 4/4、7/5、10/5，template=7、search=21 固定）。
+     * 目的是在超分前去除扫描颗粒/色噪、保住线稿与文字；**默认关** —— 先人工对比验证
+     * 「NLM + AI 是否值得」再考虑改默认。只挂 AI 档，CPU 重采样档不受影响。
+     */
+    val denoiseLevel: Preference<Int> = preferenceStore.getInt("pref_denoise_level", 0)
+
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
 
@@ -280,6 +288,7 @@ class ReaderPreferences(
         append('|').append(lanczosScale.get())
         append('|').append(aiModelId.get())
         append('|').append(aiTileSize.get())
+        append('|').append(denoiseLevel.get())
         append('|').append(cropBorders.get())
         append('|').append(cropBordersWebtoon.get())
     }
@@ -444,6 +453,17 @@ class ReaderPreferences(
             128 to MR.strings.ai_tile_size_128,
             192 to MR.strings.ai_tile_size_192,
             256 to MR.strings.ai_tile_size_256,
+        )
+
+        /**
+         * Komiho: NLM 降噪档位（flag → label）。h/hColor 档位映射在 [MihonSyEnhancer]，
+         * template=7 / search=21 固定（文档 §21 推荐值，§18 明确不许盲目加大 search）。
+         */
+        val DenoiseLevelOptions = listOf(
+            0 to MR.strings.denoise_off,
+            1 to MR.strings.denoise_weak,
+            2 to MR.strings.denoise_medium,
+            3 to MR.strings.denoise_strong,
         )
 
         /**

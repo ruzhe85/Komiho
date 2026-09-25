@@ -73,6 +73,35 @@ object MihonSyEnhancer {
     private external fun nativeLanczosProcess(bitmap: Bitmap, scale: Float): Bitmap
     private external fun nativeResample(bitmap: Bitmap, scale: Float, kernel: Int): Bitmap
 
+    /**
+     * Komiho: CPU Fast NLM 漫画降噪（亮度 h 较强 / 色度 hColor 适中 —— OpenCV
+     * fastNlMeansDenoisingColored 的 Lab 配方在 YCbCr 空间的对应物）。
+     * 成功返回新位图（尺寸不变）；被中止返回 null；失败返回入参本身。
+     * `argb` 必须是 ARGB_8888（调用方先过 [ensureArgb]）。
+     */
+    private external fun nativeNlmDenoise(
+        bitmap: Bitmap,
+        h: Float,
+        hColor: Float,
+        templateSize: Int,
+        searchSize: Int,
+    ): Bitmap?
+
+    private external fun nativeNlmAbort()
+
+    /**
+     * Komiho: 打断正在跑的 NLM 降噪（原生在每个搜索偏移边界生效，几十 ms 粒度）。
+     * 与 [Waifu2x.abortProcessing] 同语义：只对当前正在跑的那一次生效——
+     * [nativeNlmDenoise] 每次进入都自动清零，对后续调用是空操作。
+     */
+    fun abortDenoise() {
+        try {
+            nativeNlmAbort()
+        } catch (_: Throwable) {
+            // 老的 .so 可能没有该符号（热更新场景）——abort 只是优化，忽略。
+        }
+    }
+
     // Initialisation ----------------------------------------------------------------
 
     // MihonSY: Anime4K disabled — init/size helpers removed with the native build.
@@ -283,7 +312,22 @@ object MihonSyEnhancer {
             }
 
             // Komiho: GPU AI upscale (ncnn + Vulkan). Scale is fixed by the model (2x).
-            5 -> enhanceWithGpu(input, preferences, sourceTag, gpuTiming, pageIndex, targetWidth, targetHeight)
+            5 -> {
+                // Komiho: AI/NPU 档可选前处理 —— CPU Fast NLM 漫画降噪（默认关）。
+                // 落点在解码采样之后、超分之前：满足「进入 Photo-Small 前输入更干净」的
+                // 本质目的（解码采样不可避免，全分辨率 NLM 单页要数秒不可行），并把 NLM
+                // 耗时控制在采样后尺寸（约为全分辨率的 1/4~1/9）。
+                var src = input
+                val denoiseLevel = preferences.denoiseLevel.get()
+                if (denoiseLevel != 0) {
+                    src = denoiseForAi(src, denoiseLevel, sourceTag)
+                }
+                val result = enhanceWithGpu(src, preferences, sourceTag, gpuTiming, pageIndex, targetWidth, targetHeight)
+                // 降噪产物只被本次增强消费（下游返回的都是新位图，见 enhanceWithGpu），
+                // 及时回收，避免大图滞留到 GC。
+                if (src !== input && (result == null || result !== src)) src.recycle()
+                result
+            }
 
             else -> null
         }
@@ -298,6 +342,63 @@ object MihonSyEnhancer {
             gpuTiming?.totalWaitMs() ?: 0L,
         )
         return capped
+    }
+
+    /**
+     * Komiho: 降噪输入像素量护栏。NLM 耗时与像素量线性、与搜索窗口面积线性 ——
+     * 超大图（已超分页/长条漫全高图）跑 NLM 要数秒且收益存疑，直接跳过
+     * （解码管线的采样已把常规页压到 1~2MP；6MP 是长条漫按宽度采样后的常见上限）。
+     */
+    private const val MAX_DENOISE_INPUT_PIXELS = 6_000_000L
+
+    /** NLM 窗口参数固定为文档 §21 推荐值（§18 明确禁止盲目加大 search）。 */
+    private const val DENOISE_TEMPLATE = 7
+    private const val DENOISE_SEARCH = 21
+
+    /**
+     * Komiho: AI 档降噪前处理。任何失败都静默回落原图（或其 ARGB 副本），绝不阻断出图。
+     *
+     * 耗时用 android.util.Log 而非项目 logcat()：release 构建下 XLog 级别是 WARN，
+     * logcat() 的 DEBUG/INFO 会被整条吞掉（与 Waifu2x.process 同款口径）。
+     * 角标的「解码+增强」总耗时天然包含降噪（denoise 在 enhance() 内部跑），
+     * 这里另拆出 denoiseMs 单项供评估。
+     */
+    private fun denoiseForAi(input: Bitmap, level: Int, sourceTag: String): Bitmap {
+        if (input.width.toLong() * input.height.toLong() > MAX_DENOISE_INPUT_PIXELS) {
+            android.util.Log.d(
+                "Waifu2xTiming",
+                "denoise=skipped(level=$level, ${input.width}x${input.height} exceeds cap) from=${sourceTag.ifEmpty { "?" }}",
+            )
+            return input
+        }
+        // 档位参数（文档 §4）：亮度降噪较强、色彩降噪适中，保线稿/文字。
+        val (h, hColor) = when (level) {
+            1 -> 4f to 4f
+            3 -> 10f to 5f
+            else -> 7f to 5f
+        }
+        val argb = ensureArgb(input) ?: return input
+        val start = SystemClock.uptimeMillis()
+        val out = try {
+            nativeNlmDenoise(argb, h, hColor, DENOISE_TEMPLATE, DENOISE_SEARCH)
+        } catch (t: Throwable) {
+            logcat(LogPriority.WARN, t) { "NLM denoise failed; using original" }
+            null
+        }
+        val ms = SystemClock.uptimeMillis() - start
+        android.util.Log.d(
+            "Waifu2xTiming",
+            "denoise=${ms}ms level=$level h=$h hColor=$hColor " +
+                "src=${input.width}x${input.height} from=${sourceTag.ifEmpty { "?" }}",
+        )
+        return if (out != null && out !== argb) {
+            // NLM 成功：ARGB 中间副本（若拷过）已无消费者，立刻回收。
+            if (argb !== input) argb.recycle()
+            out
+        } else {
+            // 失败 / 被中止：用（可能拷贝过的）原图继续，降噪跳过。
+            argb
+        }
     }
 
     /** 当前档位实际会用到的放大倍率（AI 档固定见 [AI_UPSCALE_FACTOR]，CPU 档取偏好）。 */

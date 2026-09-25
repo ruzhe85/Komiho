@@ -413,6 +413,12 @@
     <string name="ai_tile_size_128">128</string>
     <string name="ai_tile_size_192">192</string>
     <string name="ai_tile_size_256">256</string>
+    <!-- Komiho: AI 档超分前的 CPU Fast NLM 降噪（默认关；仅 mode 5 生效）。 -->
+    <string name="enhancement_denoise">降噪</string>
+    <string name="denoise_off">關閉</string>
+    <string name="denoise_weak">弱</string>
+    <string name="denoise_medium">中</string>
+    <string name="denoise_strong">強</string>
     <string name="add_tracking">新增閱讀歷程</string>
     <string name="channel_new_chapters">章節更新</string>
     <string name="in_library">在書櫃中</string>

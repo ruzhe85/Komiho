@@ -206,6 +206,23 @@ fun ImageEnhancementSection(
             }
         }
 
+        // Komiho: AI/NPU 档可选前处理 —— CPU Fast NLM 漫画降噪（默认关）。
+        // 档位同时作用于 GPU 与 NPU 模型（同一条超分管线），故挂在 mode==5 上而不是
+        // 某个分组内。指纹由 enhancementCacheKey() 覆盖，换档即时重渲染。
+        if (mode == 5) {
+            val denoise by preferences.denoiseLevel.collectAsState()
+            EnhancementParamLabel(MR.strings.enhancement_denoise)
+            SettingsChipRow {
+                ReaderPreferences.DenoiseLevelOptions.forEach { (value, labelRes) ->
+                    FilterChip(
+                        selected = denoise == value,
+                        onClick = { preferences.denoiseLevel.set(value) },
+                        label = { Text(stringResource(labelRes)) },
+                    )
+                }
+            }
+        }
+
         CheckboxItem(
             label = stringResource(MR.strings.pref_show_enhancement_status),
             pref = preferences.showEnhancementStatus,
