@@ -5208,6 +5208,19 @@ private suspend fun syncChapterNumber(
     }
 }
 
+// SY --> Komiho: 旧版把 pdf 误判为散图目录，章节名被错置成父文件夹名；打开时纠正回文件名。
+private suspend fun syncChapterName(
+    chapterRepo: ChapterRepository,
+    url: String,
+    mangaId: Long,
+    name: String,
+) {
+    val existing = chapterRepo.getChapterByUrlAndMangaId(url, mangaId) ?: return
+    if (existing.name != name) {
+        chapterRepo.update(ChapterUpdate(id = existing.id, name = name))
+    }
+}
+
 private fun localEntryComparator(sort: LocalFileSort): Comparator<LocalEntry> {
     val dirFirst = compareBy<LocalEntry> { !it.isDirectory }
     val field: Comparator<LocalEntry> = when (sort.sortBy) {
@@ -5290,6 +5303,12 @@ private fun fallbackList(current: UniFile): List<LocalEntry> =
 
 private fun UniFile.isLocalArchive(): Boolean =
     !isDirectory && (Archive.isSupported(this) || extension.equals("epub", true))
+
+// SY --> Komiho: 本地可独立打开的「书」：归档/epub/pdf 都按单文件章节处理（章节名取文件名）。
+// 注意与 LocalEntry.isArchive（LOCAL_ARCHIVE_EXTS 含 pdf）对齐——openLocalFile 内部若只用
+// isLocalArchive() 会漏掉 pdf，使 pdf 误入散图目录分支、章节名被错置成父文件夹名。
+private fun UniFile.isLocalBook(): Boolean =
+    !isDirectory && (Archive.isSupported(this) || extension.equals("epub", true) || extension.equals("pdf", true))
 
 private fun fileIcon(entry: LocalEntry): ImageVector =
     fileKindIcon(entry.isDirectory, entry.isArchive, entry.isImage)
@@ -5946,7 +5965,7 @@ private suspend fun openLocalFile(
             // 作为 manga.url / chapter.url 即可让书签/历史跨模式互认。
             val canonicalFile = fs.realPathOf(file)
                 ?: throw Exception(context.getString(R.string.file_not_found, relPath))
-            val isArchive = file.isLocalArchive() || file.extension.equals("epub", true)
+            val isArchive = file.isLocalBook()
             // 系列目录口径统一为「条目所在的那一级容器」：归档/epub 取该文件的父目录；
             // 散图目录取**自身的父目录** —— 当前目录即一卷，父目录下的兄弟目录是其它卷，
             // 这样读完当前卷才能自动续到下一卷（issue #2：「阅读文件夹中的图片时也能跳转到下一文件夹」）。
@@ -5999,11 +6018,11 @@ private suspend fun openLocalFile(
             if (manga.ogTitle != title) {
                 mangaRepo.update(MangaUpdate(id = manga.id!!, title = title))
             }
-            val chapter = if (file.isLocalArchive() || file.extension.equals("epub", true)) {
+            val chapter = if (file.isLocalBook()) {
                 // 归档/epub：把同目录所有归档/epub 都建成章节（去重），使阅读器能自动加载下一章。
                 // 章节 url 用真实绝对路径（与 manga.url 同源），翻完当前卷自动续到下一卷。
                 val archiveSiblings = bookDirUni.listFiles().orEmpty().toList()
-                    .filter { it.isLocalArchive() || it.extension.equals("epub", true) }
+                    .filter { it.isLocalBook() }
                     .sortedWith { a, b ->
                         a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
                     }
@@ -6030,6 +6049,8 @@ private suspend fun openLocalFile(
                     } else {
                         // 已存在：把旧编号纠正过来，否则老库里的错序会一直保留
                         syncChapterNumber(chapterRepo, url, manga.id!!, archiveNumbers[idx])
+                        // 已存在：旧版曾把 pdf 当散图目录、章节名错置成父文件夹名，纠正回文件名
+                        syncChapterName(chapterRepo, url, manga.id!!, sib.nameWithoutExtension ?: sib.name.orEmpty())
                     }
                 }
                 chapterRepo.getChapterByUrlAndMangaId(canonicalFile, manga.id!!)
