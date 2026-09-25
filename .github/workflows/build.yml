@@ -13,6 +13,15 @@ name: Build Komiho V2 APK
       - '.github/readme-images/**'
       - 'docs/**'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "发布模式: ci = 测试版(默认, 固定 tag CI), formal = 正式版 (vX.Y.Z)"
+        required: false
+        default: ci
+        type: choice
+        options:
+          - ci
+          - formal
 
 jobs:
   build:
@@ -79,6 +88,28 @@ jobs:
           echo "${{ secrets.KOMIHO_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > keystore/komiho-release.jks
           ls -la keystore/
 
+      # Komiho: resolve publish mode —— 必须在构建之前定，因为两种模式的 ABI 集合不同
+      # （ci 只要 arm64，正式版要 arm64 + 合并包）。
+      # - push: HEAD commit message 含 "[release]"（或 "正式版"）→ formal，其余 → ci。
+      # - workflow_dispatch: 用 mode 输入。
+      # 两种模式都签同一个 release keystore（komiho-release.jks），所以 CI 与正式版
+      # 在设备上可互相覆盖。
+      - name: Resolve publish mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ github.event.inputs.mode }}"
+          else
+            MSG=$(git log -1 --format=%s)
+            if echo "$MSG" | grep -qiE '\[release\]|正式版'; then
+              MODE=formal
+            else
+              MODE=ci
+            fi
+          fi
+          echo "mode=$MODE"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+
       # Komiho V2: build Release (not Debug) so the bundled native LZ3 gets full
       # compiler optimization (-O2/-O3 + NDEBUG). Debug builds leave the C++ at -O0,
       # which made Lanczos3 ~30-40x slower than MihonSY's Release APK on the same
@@ -89,47 +120,50 @@ jobs:
       # app/build.gradle.kts): the daily channel only ever needs the arm64 phone APK,
       # and it also disables the merged universal APK, which is the single slowest
       # asset to upload. `ci-npu.yml` builds every ABI for real releases.
+      #
+      # Komiho (2026-09-26): ABI 按发布模式收敛 —— QNN/HTP 运行时只有 arm64 实现。
+      #   ci     → 只出 arm64 单包（构建 + 上传最快）
+      #   formal → arm64 + 合并包（= `-PkomihoUniversal=true`），供不挑 ABI 的用户直接装
       - name: Build release APK
         env:
           KOMIHO_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KOMIHO_RELEASE_KEYSTORE_PASSWORD }}
-        run: ./gradlew assembleRelease -Pdisable-code-shrink -PkomihoAbi=arm64-v8a --no-daemon --stacktrace
-
-      # Fixed CI Release: tag "CI", title "Komiho-CI". Every build overwrites the
-      # same release (single CI channel, no per-build tag sprawl). The git tag "CI"
-      # is reused — if a release already exists we just re-upload (clobber) the APKs
-      # and keep the title fixed. Pre-release (yellow), never the green "Latest".
-      #
-      # Komiho (2026-09-18): only the per-ABI APKs are uploaded here. The universal
-      # APK (all ABIs merged) is ~270 MB once the QNN contexts, both HTP Skel/stub
-      # pairs and the 79 MB libQnnHtpPrepare.so are bundled, and `gh release upload`
-      # gave up on it after 18 minutes with
-      # `HTTP 400: 400 Bad Request` — the per-ABI APKs had already landed by then, so
-      # the build "failed" purely on the biggest asset. Dropping it keeps this channel
-      # fast and green; the universal package is produced by `ci-npu.yml` on demand.
-      # ABI list is arm64-v8a + armeabi-v7a only (see app/build.gradle.kts splits).
-      #
-      # Komiho (2026-09-18, later): arm64-v8a ONLY for the daily channel.
-      # Measured on run 35248730805 — of 23m40s total, "Build release APK" was only
-      # 5m26s while "Upload APK" burned 16m51s (71%). The release upload API is
-      # single-connection and large assets dominate everything else. Uploading just
-      # one ABI ~halves that. armeabi-v7a is still built by `ci-npu.yml` when needed;
-      # the daily channel is a smoke/perf channel and the test device is arm64. Restore
-      # the v7a upload here if the daily v7a package is ever wanted again.
-      - name: "Rename APKs to komiho-ci-*"
         run: |
-          cd app/build/outputs/apk/release
+          EXTRA=""
+          if [ "${{ steps.mode.outputs.mode }}" = "formal" ]; then
+            EXTRA="-PkomihoUniversal=true"
+          fi
+          echo "ABI flags: -PkomihoAbi=arm64-v8a $EXTRA"
+          ./gradlew assembleRelease -Pdisable-code-shrink -PkomihoAbi=arm64-v8a $EXTRA --no-daemon --stacktrace
+
+      # 按发布模式重命名：ci → komiho-ci-{abi}.apk；formal → komiho-{version}-{abi}.apk。
+      # formal 才出 universal（见上方 -PkomihoUniversal=true），ci 单 ABI 不会有 universal。
+      - name: "Rename APKs"
+        run: |
+          MODE="${{ steps.mode.outputs.mode }}"
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' "$GITHUB_WORKSPACE/app/build.gradle.kts" | head -1)
+          cd "$GITHUB_WORKSPACE/app/build/outputs/apk/release"
           for apk in app-*.apk; do
             [ -e "$apk" ] || continue
             abi=$(echo "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
             [ "$abi" = "$apk" ] && abi=universal
-            mv "$apk" "komiho-ci-${abi}.apk"
+            if [ "$MODE" = "formal" ]; then
+              mv "$apk" "komiho-${VERSION_NAME}-${abi}.apk"
+            else
+              mv "$apk" "komiho-ci-${abi}.apk"
+            fi
           done
-          # Only arm64-v8a is built (-PkomihoAbi) so neither of these should exist;
-          # the rm's are belt-and-braces in case the ABI flag ever regresses.
-          rm -f komiho-ci-universal.apk komiho-ci-armeabi-v7a.apk
           ls -la
 
-      - name: "Upload APK to CI Release (tag: CI, title: Komiho-CI)"
+      # Komiho CI Release: 固定 tag "CI"，prerelease（黄标），永不成为绿色 Latest。
+      # 每次构建覆盖同一 release（单一 CI 通道，不产生每构建一个 tag 的碎片化）。
+      #
+      # Komiho (2026-09-18): arm64-v8a ONLY for the daily channel。
+      # 实测 run 35248730805 —— 23m40s 里 "Build release APK" 仅 5m26s，而 "Upload APK"
+      # 烧了 16m51s（71%）。release 上传 API 是单连接、大文件主导一切。只传一个 ABI
+      # 约减半耗时。armeabi-v7a 仍由 ci-npu.yml 在需要时构建；daily 通道是冒烟/性能通道，
+      # 测试机为 arm64。若日后想要 daily v7a 包，再在此处恢复 v7a 上传。
+      - name: "Publish CI release (test build)"
+        if: steps.mode.outputs.mode == 'ci'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -140,19 +174,15 @@ jobs:
           NOTES="Auto build #${RUN_NO} · ${{ github.sha }} · ${BUILD_DATE}T$(date -u +%H:%M:%SZ)"
           cd app/build/outputs/apk/release
 
-          # Komiho (2026-09-18): retry the asset upload. Bundling libQnnHtpPrepare.so
-          # pushed the arm64 APK from ~80 MB to ~110 MB, and the release-asset upload
-          # endpoint is single-connection with no resumable chunks — at that size it
-          # started returning a bare
+          # Komiho (2026-09-18): retry the asset upload. 打包 libQnnHtpPrepare.so 后
+          # arm64 APK 从 ~80 MB 涨到 ~110 MB，release-asset 上传端点单连接、无断点续传，
+          # 在该尺寸下约 5.5 分钟后返回裸
           #
           #     HTTP 500: Error saving asset (.../komiho-ci-arm64-v8a.apk)
           #
-          # after ~5.5 minutes of transfer (run 35256372680). The build itself was
-          # green: the APK existed at 115784119 bytes and the QNN asset check passed.
-          # 500 from uploads.github.com is transient far more often than not, so retry
-          # with a growing backoff before declaring the job failed. Do NOT drop this
-          # in favour of "upload faster" — without it a single backend hiccup turns a
-          # perfectly good build red, which is exactly what happened.
+          # （run 35256372680）。构建本身绿：APK 已存在且 QNN 资产校验通过。uploads.github.com
+          # 的 500 绝大多数是瞬时故障，故用递增退避重试，失败才宣告 job 红。不要为了
+          # "传更快" 去掉它——没有它，单后端抖动就会把一次好构建变红。
           upload_with_retry() {
             local file="$1" attempt delay
             for attempt in 1 2 3 4 5; do
@@ -170,10 +200,9 @@ jobs:
             return 1
           }
 
-          # Upload smallest-first so the APKs people actually flash land before any
-          # long transfer can time out.
+          # 先小后大上传，确保用户真要刷的 APK 在任何长传输超时前先落地。
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            # Release exists: overwrite APKs in place, keep fixed title.
+            # Release 已存在：就地覆盖 APK，保留固定标题。
             for apk in $(ls -S -r komiho-ci-*.apk); do
               upload_with_retry "$apk"
             done
@@ -182,10 +211,8 @@ jobs:
               --title "$TITLE" \
               --notes "$NOTES"
           else
-            # First time: create the release with no assets, then push each one
-            # through the retrying helper. Passing the files straight to
-            # `gh release create` would give us exactly one shot per asset, which is
-            # the path that failed on run 35256372680.
+            # 首次：先建无资产的 release，再逐个走重试 helper。直接把文件传给
+            # `gh release create` 每资产只有一次机会，正是 run 35256372680 失败的那条路径。
             gh release create "$TAG" \
               --repo "${{ github.repository }}" \
               --title "$TITLE" \
@@ -195,3 +222,64 @@ jobs:
               upload_with_retry "$apk"
             done
           fi
+
+      # Komiho formal release: 版本化 tag v{x.y.z} + changelog，成为 GitHub Latest。
+      - name: "Publish formal release"
+        if: steps.mode.outputs.mode == 'formal'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          APK_DIR="$GITHUB_WORKSPACE/app/build/outputs/apk/release"
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' "$GITHUB_WORKSPACE/app/build.gradle.kts" | head -1)
+          TAG="v${VERSION_NAME}"
+
+          echo "Publishing formal release ${TAG}"
+
+          # 删除同名 release/tag，使重构建可原地重发。
+          cd "$GITHUB_WORKSPACE"
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+          git tag -d "$TAG" 2>/dev/null || true
+          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+
+          # 从 changelog 文件抽取本版本段落。
+          extract_section() {
+            awk -v ver="v${VERSION_NAME}" '
+              /^## / {
+                if (section) exit
+                if (index($0, ver) > 0) { section=1; next }
+              }
+              section { print }
+            ' "$1"
+          }
+
+          NOTES_FILE=$(mktemp)
+          {
+            echo "## 中文 / Chinese"
+            echo ""
+            extract_section CHANGELOG.md || true
+            echo ""
+            echo "---"
+            echo ""
+            echo "## English"
+            echo ""
+            extract_section CHANGELOG.en.md || true
+          } > "$NOTES_FILE"
+
+          # 两段都没匹配到时的兜底。
+          if ! grep -qE '^## ' "$NOTES_FILE"; then
+            {
+              echo "Komiho ${VERSION_NAME}"
+              echo ""
+              echo "Built automatically from the main branch."
+            } > "$NOTES_FILE"
+          fi
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Komiho ${VERSION_NAME}" \
+            --notes-file "$NOTES_FILE" \
+            "${APK_DIR}/komiho-${VERSION_NAME}-"*.apk
+
+          echo "Published release $TAG"
