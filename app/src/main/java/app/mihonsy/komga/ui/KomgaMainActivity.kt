@@ -5179,7 +5179,7 @@ private data class LocalEntry(
 }
 
 /** 与 Archive.isSupported 对齐的归档扩展名（含 epub，因阅读器也支持）。 */
-private val LOCAL_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "tar", "cbt", "epub")
+private val LOCAL_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "tar", "cbt", "epub", "pdf")
 
 /**
  * Komiho: 从远程（WebDAV/SMB）文件 URL/路径里取文件名，用于自然序比较与章节号兜底

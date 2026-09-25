@@ -442,6 +442,11 @@ actual class LocalSource(
         // （前缀判定收口在 core.common 的 RemoteScheme：source-local 看不到 app 层的
         //  SMB 连接存储，但两边都依赖 core.common。）
         if (RemoteScheme.isRemote(chapter.url)) {
+            // SY --> Komiho Phase3/Phase7: 远程 PDF 走专用变体（整本落缓存后复用本地解析），
+            // 不能进 RemoteArchive，否则被当 zip 解析失败。
+            if (chapter.url.substringBefore('?').lowercase().endsWith(".pdf")) {
+                return Format.RemotePdf(chapter.url)
+            }
             return Format.RemoteArchive(chapter.url)
         }
         // SY <--
@@ -499,6 +504,8 @@ actual class LocalSource(
                 // SY <--
                 // SY --> Komiho Phase3: 远程封面 Phase 4 再做（不为封面拉远程数据）
                 is Format.RemoteArchive -> null
+                // SY --> Komiho Phase3/Phase7: 远程 PDF 封面同样不拉远程数据（与 RemoteArchive 同口径）。
+                is Format.RemotePdf -> null
                 // SY <--
             }
         } catch (e: Throwable) {

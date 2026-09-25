@@ -47,7 +47,7 @@ data class WebDavEntry(
 
     private companion object {
         // epub 同为 zip 容器，阅读器有专门分支（与 SMB / 本地来源同口径）。
-        val ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "epub")
+        val ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "epub", "pdf")
         val IMAGE_EXTS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "heic", "heif")
     }
 }

@@ -39,7 +39,7 @@ data class SmbEntry(
 }
 
 /** 支持的归档扩展名（浏览过滤与条目判定共用）。epub 同为 zip 容器，阅读器有专门分支。 */
-internal val SMB_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "epub")
+internal val SMB_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "epub", "pdf")
 
 /** 支持的图片扩展名（散图目录成员；与阅读器解码口径一致）。 */
 internal val SMB_IMAGE_EXTS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "heic", "heif")

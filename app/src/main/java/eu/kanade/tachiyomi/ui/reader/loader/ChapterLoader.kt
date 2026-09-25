@@ -153,6 +153,8 @@ class ChapterLoader(
                             is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
                             // SY --> Komiho: 本地 PDF（彩色扫描漫画常见）—— 自写提取内嵌图 + 系统渲染兜底。
                             is Format.Pdf -> PdfPageLoader(format.file, context)
+                            // SY --> Komiho Phase3/Phase7: 远程 PDF（WebDAV/SMB）—— 整本落缓存后复用本地解析。
+                            is Format.RemotePdf -> PdfPageLoader(format.remoteUrl, context)
                             // SY <--
                             // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）
                             // SY: SMB 且 URL 以 / 结尾 = 散图目录章节（点目录内图片打开）。
@@ -185,6 +187,8 @@ class ChapterLoader(
                     is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
                     // SY --> Komiho: 本地 PDF（彩色扫描漫画常见）—— 自写提取内嵌图 + 系统渲染兜底。
                     is Format.Pdf -> PdfPageLoader(format.file, context)
+                    // SY --> Komiho Phase3/Phase7: 远程 PDF（WebDAV/SMB）—— 整本落缓存后复用本地解析。
+                    is Format.RemotePdf -> PdfPageLoader(format.remoteUrl, context)
                     // SY <--
                     // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）
                     // SY: SMB 且 URL 以 / 结尾 = 散图目录章节（点目录内图片打开）。
