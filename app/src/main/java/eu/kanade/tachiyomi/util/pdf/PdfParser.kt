@@ -313,7 +313,7 @@ class PdfParser(path: String) {
         val ds = bytes.indexOf('<'.code.toByte())
         if (ds < 0 || bytes.getOrElse(ds + 1) { 0.toByte() } != '<'.code.toByte()) return null
         val de = bytes.indexOf('>'.code.toByte())
-        val de2 = bytes.indexOf('>'.code.toByte(), de + 1)
+        val de2 = bytes.indexOfByte('>'.code.toByte(), de + 1)
         return parseDict(bytes, ds, if (de2 > de) de2 + 2 else bytes.size)
     }
 
@@ -450,7 +450,7 @@ class PdfParser(path: String) {
         for (m in re) {
             val num = m.groupValues[1].toInt()
             // 定位 "obj" 起点
-            val at = data.indexOf(m.value.toByteArray(ISO))
+            val at = data.indexOfBytes(m.value.toByteArray(ISO))
             if (at >= 0) objStart[num] = at
         }
         // 末一个 trailer 的 Root
@@ -495,12 +495,12 @@ class PdfParser(path: String) {
     }
 
     private fun readLine(i: Int): String {
-        val e = data.indexOf('\n'.code.toByte(), i)
+        val e = data.indexOfByte('\n'.code.toByte(), i)
         return if (e < 0) String(data, i, data.size - i, ISO) else String(data, i, e - i, ISO)
     }
 
     private fun lineEnd(i: Int): Int {
-        val e = data.indexOf('\n'.code.toByte(), i)
+        val e = data.indexOfByte('\n'.code.toByte(), i)
         return if (e < 0) data.size else e + 1
     }
 
@@ -554,6 +554,14 @@ private fun ByteArray.indexOfBytes(sub: ByteArray, from: Int = 0): Int {
         }
         if (ok) return i
         i++
+    }
+    return -1
+}
+
+/** 从 from 起查找单个字节（标准库 ByteArray.indexOf(Byte) 不支持 fromIndex）。 */
+private fun ByteArray.indexOfByte(element: Byte, from: Int): Int {
+    for (i in from.coerceAtLeast(0) until size) {
+        if (this[i] == element) return i
     }
     return -1
 }
