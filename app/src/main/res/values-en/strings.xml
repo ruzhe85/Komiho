@@ -126,7 +126,7 @@
     <string name="cd_filter_sort">Filter/sort</string>
     <string name="read_status_header">Read status</string>
     <string name="sort_header">Sort</string>
-    <string name="display_mode_header">Display mode</string>
+    <string name="display_mode_header">Display</string>
     <string name="cd_display_options">Display options</string>
     <string name="pref_library_columns">Items per row</string>
     <string name="label_auto">Auto</string>

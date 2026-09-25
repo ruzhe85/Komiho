@@ -135,7 +135,7 @@
     <string name="cd_filter_sort">筛选/排序</string>
     <string name="read_status_header">阅读状态</string>
     <string name="sort_header">排序</string>
-    <string name="display_mode_header">显示模式</string>
+    <string name="display_mode_header">显示</string>
     <string name="cd_display_options">显示选项</string>
     <string name="pref_library_columns">每行数量</string>
     <string name="label_auto">自动</string>
