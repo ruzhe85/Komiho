@@ -138,6 +138,7 @@ import androidx.compose.material3.NavigationRailItem
 // SY <--
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -5305,6 +5306,82 @@ private fun fallbackList(current: UniFile): List<LocalEntry> =
         )
     }
 
+/**
+ * Komiho: 本地递归搜索——从 [dir] 起深度遍历，收集名称包含 [query]（不区分大小写）的全部条目
+ * （目录 + 归档 + 图片，与 visibleEntries 过滤口径一致）。供「搜索下级目录」开关开启时使用。
+ * [depth] 限深避免异常深目录导致的栈溢出；正常漫画目录远不会触顶。
+ */
+private suspend fun searchLocalRecursive(
+    context: android.content.Context,
+    base: UniFile,
+    dir: UniFile,
+    hasAllFilesAccess: Boolean,
+    query: String,
+    depth: Int = 0,
+): List<LocalEntry> {
+    if (depth > 20) return emptyList()
+    val direct = withContext(Dispatchers.IO) {
+        if (hasAllFilesAccess) fallbackList(dir) else listLocalEntries(context, base, dir, false)
+    }
+    val out = mutableListOf<LocalEntry>()
+    for (e in direct) {
+        if (e.name.contains(query, ignoreCase = true)) out += e
+        if (e.isDirectory) out += searchLocalRecursive(context, base, e.uni, hasAllFilesAccess, query, depth + 1)
+    }
+    return out
+}
+
+/** 从浏览根 [base] 与递归命中的条目 [uni] 反推其相对路径段，供点击后跳转到该条目所在位置。 */
+private fun localRelSegments(base: UniFile, uni: UniFile, hasAllFilesAccess: Boolean): List<String>? =
+    runCatching {
+        if (hasAllFilesAccess) {
+            val basePath = File(base.uri.path ?: return@runCatching null).canonicalPath
+            val childPath = File(uni.uri.path ?: return@runCatching null).canonicalPath
+            val rel = childPath.removePrefix(basePath).trim('/')
+            if (rel.isBlank()) emptyList() else rel.split('/')
+        } else {
+            val baseDoc = DocumentsContract.getTreeDocumentId(base.uri)
+            val childDoc = DocumentsContract.getDocumentId(uni.uri)
+            val rel = childDoc.removePrefix(baseDoc).trim('/')
+            if (rel.isBlank()) emptyList() else rel.split('/')
+        }
+    }.getOrNull()
+
+/** SMB 递归搜索（[relPath] 为共享内相对路径），收集名称匹配项。 */
+private suspend fun searchSmbRecursive(
+    conn: SmbConnection,
+    password: String,
+    relPath: String,
+    query: String,
+    depth: Int = 0,
+): List<SmbEntry> {
+    if (depth > 20) return emptyList()
+    val direct = SmbBrowse.list(conn, password, relPath)
+    val out = mutableListOf<SmbEntry>()
+    for (e in direct) {
+        if (e.name.contains(query, ignoreCase = true)) out += e
+        if (e.isDir) out += searchSmbRecursive(conn, password, e.path, query, depth + 1)
+    }
+    return out
+}
+
+/** WebDAV 递归搜索（[dirUrl] 为目录完整 URL），收集名称匹配项。 */
+private suspend fun searchWebDavRecursive(
+    conn: WebDavConnection,
+    dirUrl: String,
+    query: String,
+    depth: Int = 0,
+): List<WebDavEntry> {
+    if (depth > 20) return emptyList()
+    val direct = WebDavPropfind.list(conn, dirUrl)
+    val out = mutableListOf<WebDavEntry>()
+    for (e in direct) {
+        if (e.name.contains(query, ignoreCase = true)) out += e
+        if (e.isDir) out += searchWebDavRecursive(conn, e.url, query, depth + 1)
+    }
+    return out
+}
+
 private fun UniFile.isLocalArchive(): Boolean =
     !isDirectory && (Archive.isSupported(this) || extension.equals("epub", true))
 
@@ -5379,6 +5456,9 @@ private fun LocalFileBrowser(
     // SY --> Komiho: 文件浏览器顶部搜索（范围 = 当前目录，便于在数百子目录中快速定位）。
     var searchQuery by remember { mutableStateOf("") }
     var searchActive by remember { mutableStateOf(false) }
+    var searchRecursive by remember { mutableStateOf(false) }
+    var searchResults by remember { mutableStateOf<List<LocalEntry>>(emptyList()) }
+    var searchScanning by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     // SY <--
 
@@ -5468,6 +5548,24 @@ private fun LocalFileBrowser(
         loading = false
     }
 
+    // SY --> Komiho: 「搜索下级目录」开启时，按关键词递归遍历当前目录整棵子树，收集名称匹配项。
+    // 输入变化即重启（旧 job 被取消），退出搜索或关掉递归则清空结果。
+    LaunchedEffect(searchActive, searchRecursive, searchQuery) {
+        if (searchActive && searchRecursive && searchQuery.isNotBlank()) {
+            searchScanning = true
+            try {
+                searchResults = withContext(Dispatchers.IO) {
+                    searchLocalRecursive(context, base, current, hasAllFilesAccess, searchQuery)
+                }
+            } finally {
+                searchScanning = false
+            }
+        } else {
+            searchResults = emptyList()
+        }
+    }
+    // SY <--
+
     // 封面改为网格格子「可见时懒加载」（见 LocalFileGridItem）：进入目录不再批量预取全部
     // 封面，避免点目录/滚动突发卡顿；列表模式仅在开启「显示封面」时按需解码（替代 icon）。
 
@@ -5502,6 +5600,22 @@ private fun LocalFileBrowser(
     val isItemClickable: (LocalEntry) -> Boolean =
         { it.isDirectory || it.isArchive || it.isImage }
 
+    // SY --> Komiho: 递归搜索结果点击：目录→跳进该子目录；归档→直接打开；图片→跳到所在目录。
+    // 命中项按真实相对路径定位（不再是「当前目录的子项」），点完即退出搜索回到目标位置。
+    val onSearchItemOpen: (LocalEntry) -> Unit = { e ->
+        val segs = localRelSegments(base, e.uni, hasAllFilesAccess)
+        when {
+            e.isDirectory -> segs?.let { navigateTo(it) }
+            e.isArchive -> scope.launch {
+                openLocalFile(context, e.uni, segs?.joinToString("/").orEmpty())
+            }
+            else -> segs?.dropLast(1)?.let { navigateTo(it) }
+        }
+        searchActive = false
+        searchQuery = ""
+        searchRecursive = false
+    }
+
     // 只显示「可读文件（图片）+ 压缩包 + 目录」：其余文件（txt/apk/pdf 等）对漫画阅读器无意义，
     // 直接过滤掉，避免列表塞满不可读条目。目录始终保留以便下钻导航。
     // SY --> Komiho: 顶部搜索激活时，在当前目录范围内按名称（不区分大小写）进一步过滤。
@@ -5511,6 +5625,12 @@ private fun LocalFileBrowser(
             if (searchQuery.isBlank()) list
             else list.filter { it.name.contains(searchQuery, ignoreCase = true) }
         }
+    // SY <--
+
+    // SY --> Komiho: 递归搜索开启且有关键词时，列表改为展示递归命中结果；否则维持当前目录视图。
+    val showRecursive = searchActive && searchRecursive && searchQuery.isNotBlank()
+    val displayList = if (showRecursive) searchResults else visibleEntries
+    val onOpenItem: (LocalEntry) -> Unit = if (showRecursive) onSearchItemOpen else onItemOpen
     // SY <--
 
     Column(Modifier.fillMaxSize()) {
@@ -5550,6 +5670,22 @@ private fun LocalFileBrowser(
                     } else null,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = searchRecursive,
+                    onCheckedChange = { searchRecursive = it },
+                )
+                Text(
+                    text = composeStringResource(R.string.search_subdir),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.clickable(onClick = { searchRecursive = !searchRecursive }),
                 )
             }
             LaunchedEffect(searchActive) { if (searchActive) searchFocus.requestFocus() }
@@ -5660,21 +5796,21 @@ private fun LocalFileBrowser(
 
         // 列目录内容。
         when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            visibleEntries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            loading || searchScanning -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    text = composeStringResource(R.string.local_empty_dir),
+                    text = composeStringResource(if (showRecursive) R.string.no_match_results else R.string.local_empty_dir),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(Modifier.fillMaxSize()) {
-                    items(visibleEntries, key = { it.uni.uri.toString() }) { file ->
+                    items(displayList, key = { it.uni.uri.toString() }) { file ->
                         FileRow(
                             entry = file,
                             showCover = showCover,
                             clickable = isItemClickable(file),
-                            onOpen = { onItemOpen(file) },
+                            onOpen = { onOpenItem(file) },
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
@@ -5694,12 +5830,12 @@ private fun LocalFileBrowser(
                     verticalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(visibleEntries, key = { it.uni.uri.toString() }) { file ->
+                    items(displayList, key = { it.uni.uri.toString() }) { file ->
                         LocalFileGridItem(
                             entry = file,
                             showCover = showCover,
                             clickable = isItemClickable(file),
-                            onClick = { onItemOpen(file) },
+                            onClick = { onOpenItem(file) },
                         )
                     }
                 }
@@ -6214,6 +6350,9 @@ private fun WebDavBrowsePane(
     // SY --> Komiho: 文件浏览器顶部搜索（范围 = 当前目录，便于在数百子目录中快速定位）。
     var searchQuery by remember { mutableStateOf("") }
     var searchActive by remember { mutableStateOf(false) }
+    var searchRecursive by remember { mutableStateOf(false) }
+    var searchResults by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
+    var searchScanning by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     // SY <--
 
@@ -6289,6 +6428,23 @@ private fun WebDavBrowsePane(
         loading = false
     }
 
+    // SY --> Komiho: 「搜索下级目录」开启时，递归遍历当前目录子树收集名称匹配项。
+    LaunchedEffect(searchActive, searchRecursive, searchQuery) {
+        if (searchActive && searchRecursive && searchQuery.isNotBlank()) {
+            searchScanning = true
+            try {
+                searchResults = withContext(Dispatchers.IO) {
+                    searchWebDavRecursive(conn, dirUrl, searchQuery)
+                }
+            } finally {
+                searchScanning = false
+            }
+        } else {
+            searchResults = emptyList()
+        }
+    }
+    // SY <--
+
     // 返回键回上一层；已在根目录时不拦截（交还外层）。
     BackHandler(enabled = trail.size > 1) {
         trail = trail.dropLast(1)
@@ -6299,6 +6455,22 @@ private fun WebDavBrowsePane(
         if (e.isDir) trail = trail + (e.name to e.url) else onOpenFile(e.url)
     }
 
+    // SY --> Komiho: 递归搜索结果点击：目录→跳进该子目录；归档/图片→直接打开（按真实 URL 定位）。
+    val onSearchItemOpen: (WebDavEntry) -> Unit = { e ->
+        if (e.isDir) {
+            var acc = conn.baseUrl.trimEnd('/')
+            val urls = e.url.removePrefix(conn.baseUrl).trim('/').split('/')
+                .filter { it.isNotBlank() }
+                .map { seg -> acc = "$acc/$seg"; acc }
+            trail = listOf(rootLabel to conn.baseUrl) + urls.map { url -> webDavCrumbName(url) to url }
+        } else {
+            onOpenFile(e.url)
+        }
+        searchActive = false
+        searchQuery = ""
+        searchRecursive = false
+    }
+
     // 只显示目录 + 可读归档（与本地浏览「过滤不可读文件」口径一致），排序走本地同款排序器。
     // SY --> Komiho: 顶部搜索激活时，在当前目录范围内按名称（不区分大小写）进一步过滤。
     val visible = remember(entries, sort, searchQuery) {
@@ -6307,6 +6479,12 @@ private fun WebDavBrowsePane(
             .filter { searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true) }
             .sortedWith(webDavEntryComparator(sort))
     }
+    // SY <--
+
+    // SY --> Komiho: 递归搜索开启且有关键词时，列表改为展示递归命中结果；否则维持当前目录视图。
+    val showRecursive = searchActive && searchRecursive && searchQuery.isNotBlank()
+    val displayList = if (showRecursive) searchResults else visible
+    val onOpenItem: (WebDavEntry) -> Unit = if (showRecursive) onSearchItemOpen else onItemOpen
     // SY <--
 
     Column(Modifier.fillMaxSize()) {
@@ -6346,6 +6524,22 @@ private fun WebDavBrowsePane(
                     } else null,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = searchRecursive,
+                    onCheckedChange = { searchRecursive = it },
+                )
+                Text(
+                    text = composeStringResource(R.string.search_subdir),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.clickable(onClick = { searchRecursive = !searchRecursive }),
                 )
             }
             LaunchedEffect(searchActive) { if (searchActive) searchFocus.requestFocus() }
@@ -6404,7 +6598,7 @@ private fun WebDavBrowsePane(
 
         // 列目录内容（空目录提示已按要求去掉：非加载、无错误且无条目时留白）。
         when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            loading || searchScanning -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             errorText != null -> Column(
                 Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -6416,11 +6610,18 @@ private fun WebDavBrowsePane(
                 )
                 TextButton(onClick = { retryTick++ }) { Text(composeStringResource(R.string.retry)) }
             }
-            visible.isEmpty() -> Box(Modifier.fillMaxSize())
+            displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                if (showRecursive) {
+                    Text(
+                        text = composeStringResource(R.string.no_match_results),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(Modifier.fillMaxSize()) {
-                    items(visible, key = { it.url }) { e ->
-                        WebDavFileRow(entry = e, onOpen = { onItemOpen(e) })
+                    items(displayList, key = { it.url }) { e ->
+                        WebDavFileRow(entry = e, onOpen = { onOpenItem(e) })
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -6435,8 +6636,8 @@ private fun WebDavBrowsePane(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(visible, key = { it.url }) { e ->
-                        WebDavGridItem(entry = e, onClick = { onItemOpen(e) })
+                    items(displayList, key = { it.url }) { e ->
+                        WebDavGridItem(entry = e, onClick = { onOpenItem(e) })
                     }
                 }
             }
@@ -6739,6 +6940,9 @@ private fun SmbBrowsePane(
     // SY --> Komiho: 文件浏览器顶部搜索（范围 = 当前目录，便于在数百子目录中快速定位）。
     var searchQuery by remember { mutableStateOf("") }
     var searchActive by remember { mutableStateOf(false) }
+    var searchRecursive by remember { mutableStateOf(false) }
+    var searchResults by remember { mutableStateOf<List<SmbEntry>>(emptyList()) }
+    var searchScanning by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     // SY <--
 
@@ -6805,12 +7009,44 @@ private fun SmbBrowsePane(
         loading = false
     }
 
+    // SY --> Komiho: 「搜索下级目录」开启时，递归遍历当前目录子树收集名称匹配项。
+    LaunchedEffect(searchActive, searchRecursive, searchQuery) {
+        if (searchActive && searchRecursive && searchQuery.isNotBlank()) {
+            searchScanning = true
+            try {
+                searchResults = withContext(Dispatchers.IO) {
+                    searchSmbRecursive(conn, password, dirPath, searchQuery)
+                }
+            } finally {
+                searchScanning = false
+            }
+        } else {
+            searchResults = emptyList()
+        }
+    }
+    // SY <--
+
     BackHandler(enabled = trail.size > 1) {
         trail = trail.dropLast(1)
     }
 
     val onItemOpen: (SmbEntry) -> Unit = { e ->
         if (e.isDir) trail = trail + (e.name to e.path) else onOpenFile(e.path)
+    }
+
+    // SY --> Komiho: 递归搜索结果点击：目录→跳进该子目录；归档/图片→直接打开（按真实路径定位）。
+    val onSearchItemOpen: (SmbEntry) -> Unit = { e ->
+        if (e.isDir) {
+            val segs = e.path.trim('/').split('/').filter { it.isNotBlank() }
+            var acc = rootPath.trim('/')
+            val paths = segs.map { seg -> acc = if (acc.isEmpty()) seg else "$acc/$seg"; acc }
+            trail = listOf(rootLabel to rootPath) + paths.map { p -> p.substringAfterLast('/') to p }
+        } else {
+            onOpenFile(e.path)
+        }
+        searchActive = false
+        searchQuery = ""
+        searchRecursive = false
     }
 
     // SY --> Komiho: 顶部搜索激活时，在当前目录范围内按名称（不区分大小写）进一步过滤。
@@ -6820,6 +7056,12 @@ private fun SmbBrowsePane(
             .filter { searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true) }
             .sortedWith(smbEntryComparator(sort))
     }
+    // SY <--
+
+    // SY --> Komiho: 递归搜索开启且有关键词时，列表改为展示递归命中结果；否则维持当前目录视图。
+    val showRecursive = searchActive && searchRecursive && searchQuery.isNotBlank()
+    val displayList = if (showRecursive) searchResults else visible
+    val onOpenItem: (SmbEntry) -> Unit = if (showRecursive) onSearchItemOpen else onItemOpen
     // SY <--
 
     Column(Modifier.fillMaxSize()) {
@@ -6859,6 +7101,22 @@ private fun SmbBrowsePane(
                     } else null,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = searchRecursive,
+                    onCheckedChange = { searchRecursive = it },
+                )
+                Text(
+                    text = composeStringResource(R.string.search_subdir),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.clickable(onClick = { searchRecursive = !searchRecursive }),
                 )
             }
             LaunchedEffect(searchActive) { if (searchActive) searchFocus.requestFocus() }
@@ -6910,7 +7168,7 @@ private fun SmbBrowsePane(
         }
 
         when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            loading || searchScanning -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(12.dp))
@@ -6932,11 +7190,18 @@ private fun SmbBrowsePane(
                 )
                 TextButton(onClick = { retryTick++ }) { Text(composeStringResource(R.string.retry)) }
             }
-            visible.isEmpty() -> Box(Modifier.fillMaxSize())
+            displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                if (showRecursive) {
+                    Text(
+                        text = composeStringResource(R.string.no_match_results),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(Modifier.fillMaxSize()) {
-                    items(visible, key = { it.path }) { e ->
-                        SmbFileRow(conn = conn, entry = e, showCover = showCover, onOpen = { onItemOpen(e) })
+                    items(displayList, key = { it.path }) { e ->
+                        SmbFileRow(conn = conn, entry = e, showCover = showCover, onOpen = { onOpenItem(e) })
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -6950,8 +7215,8 @@ private fun SmbBrowsePane(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(visible, key = { it.path }) { e ->
-                        SmbGridItem(conn = conn, entry = e, showCover = showCover, onClick = { onItemOpen(e) })
+                    items(displayList, key = { it.path }) { e ->
+                        SmbGridItem(conn = conn, entry = e, showCover = showCover, onClick = { onOpenItem(e) })
                     }
                 }
             }
