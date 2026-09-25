@@ -298,7 +298,7 @@ import com.hippo.unifile.UniFile
 import tachiyomi.core.common.storage.displayablePath
 import tachiyomi.core.common.storage.extension
 import tachiyomi.core.common.storage.nameWithoutExtension
-import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import eu.kanade.tachiyomi.util.lang.compareToNaturalPinyin
 // SY --> Komiho 本地浏览器：显示模式 + 排序 + 封面
 import androidx.compose.ui.text.style.TextAlign
 import mihon.core.common.archive.archiveReader
@@ -5225,7 +5225,7 @@ private fun localEntryComparator(sort: LocalFileSort): Comparator<LocalEntry> {
     val dirFirst = compareBy<LocalEntry> { !it.isDirectory }
     val field: Comparator<LocalEntry> = when (sort.sortBy) {
         // SY: 名称改自然排序（Chapter2 < Chapter10），与 Komga 书列表 / 阅读器页序同一口径。
-        LocalFileSortBy.Name -> Comparator<LocalEntry> { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+        LocalFileSortBy.Name -> Comparator<LocalEntry> { a, b -> a.name.compareToNaturalPinyin(b.name) }
         LocalFileSortBy.DateModified -> compareBy { it.lastModified }
         LocalFileSortBy.Size -> compareBy { if (it.isDirectory) 0L else it.size }
     }
@@ -5992,7 +5992,7 @@ private suspend fun openLocalFile(
                     ?.listFiles()
                     ?.filter { !it.isDirectory && ImageUtil.isImage(it.name) { it.openInputStream() } }
                     ?.sortedWith { a, b ->
-                        a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
+                        a.name.orEmpty().compareToNaturalPinyin(b.name.orEmpty())
                     }
                     ?.indexOfFirst { it.name == startImageName }
                     ?.takeIf { it >= 0 }
@@ -6024,7 +6024,7 @@ private suspend fun openLocalFile(
                 val archiveSiblings = bookDirUni.listFiles().orEmpty().toList()
                     .filter { it.isLocalBook() }
                     .sortedWith { a, b ->
-                        a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
+                        a.name.orEmpty().compareToNaturalPinyin(b.name.orEmpty())
                     }
                 // Komiho: 章节号按自然序兜底 —— s1_01/s2_01 会被 ChapterRecognition 抹掉季标记撞成
                 // 同一个 1.0，按编号排序会把「下一章」变乱（见 ChapterNumbering）。
@@ -6062,7 +6062,7 @@ private suspend fun openLocalFile(
                 val dirSiblings = bookDirUni.listFiles().orEmpty().toList()
                     .filter { it.isDirectory }
                     .sortedWith { a, b ->
-                        a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
+                        a.name.orEmpty().compareToNaturalPinyin(b.name.orEmpty())
                     }
                 val dirNumbers = ChapterNumbering.assign(
                     dirSiblings.map { it.name.orEmpty() },
@@ -6365,7 +6365,7 @@ private fun webDavEntryComparator(sort: LocalFileSort): Comparator<WebDavEntry> 
     val dirFirst = compareBy<WebDavEntry> { !it.isDir }
     val field: Comparator<WebDavEntry> = when (sort.sortBy) {
         // SY: 名称改自然排序（Chapter2 < Chapter10），与 Komga 书列表 / 阅读器页序同一口径。
-        LocalFileSortBy.Name -> Comparator<WebDavEntry> { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+        LocalFileSortBy.Name -> Comparator<WebDavEntry> { a, b -> a.name.compareToNaturalPinyin(b.name) }
         LocalFileSortBy.DateModified -> compareBy { it.lastModified }
         LocalFileSortBy.Size -> compareBy { if (it.isDir) 0L else it.size }
     }
@@ -6469,7 +6469,7 @@ private suspend fun openWebDavTestFile(
                 runCatching {
                     WebDavPropfind.list(conn, dirUrl)
                         .filter { it.isImage }
-                        .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                        .sortedWith { a, b -> a.name.compareToNaturalPinyin(b.name) }
                         .indexOfFirst { it.name == decodedName }
                         .takeIf { it >= 0 }
                 }.onFailure {
@@ -6489,7 +6489,7 @@ private suspend fun openWebDavTestFile(
                 }.onFailure {
                     logcat(LogPriority.WARN) { "[WebDav] 卷目录扫描失败: ${it.message}" }
                 }.getOrDefault(emptyList())
-                    .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                    .sortedWith { a, b -> a.name.compareToNaturalPinyin(b.name) }
                 // Komiho: 章节号按自然序兜底（s1_01/s2_01 会被抹掉季标记撞成同一个 1.0），见 ChapterNumbering。
                 val webDavDirNumbers = ChapterNumbering.assign(siblingDirs.map { it.name }, seriesTitle)
                 siblingDirs.forEachIndexed { idx, sib ->
@@ -6540,7 +6540,7 @@ private suspend fun openWebDavTestFile(
             }.getOrDefault(emptyList())
             val orderedSiblings = (siblings + httpUrl).distinct()
                 .sortedWith { a, b ->
-                    siblingName(a).compareToCaseInsensitiveNaturalOrder(siblingName(b))
+                    siblingName(a).compareToNaturalPinyin(siblingName(b))
                 }
             // Komiho: 章节号按自然序兜底（见 ChapterNumbering）。
             val siblingNumbers = ChapterNumbering.assign(orderedSiblings.map { siblingName(it) }, seriesTitle)
@@ -6794,7 +6794,7 @@ private fun smbEntryComparator(sort: LocalFileSort): Comparator<SmbEntry> {
     val dirFirst = compareBy<SmbEntry> { !it.isDir }
     val field: Comparator<SmbEntry> = when (sort.sortBy) {
         // SY: 名称改自然排序（Chapter2 < Chapter10），与 Komga 书列表 / 阅读器页序同一口径。
-        LocalFileSortBy.Name -> Comparator<SmbEntry> { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+        LocalFileSortBy.Name -> Comparator<SmbEntry> { a, b -> a.name.compareToNaturalPinyin(b.name) }
         LocalFileSortBy.DateModified -> compareBy { it.lastModified }
         LocalFileSortBy.Size -> compareBy { if (it.isDir) 0L else it.size }
     }
@@ -6951,7 +6951,7 @@ private suspend fun openSmbFile(
                 runCatching {
                     SmbBrowse.list(conn, password, dirRel)
                         .filter { it.isImage }
-                        .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                        .sortedWith { a, b -> a.name.compareToNaturalPinyin(b.name) }
                         .indexOfFirst { it.name == fileName }
                         .takeIf { it >= 0 }
                 }.onFailure {
@@ -6971,7 +6971,7 @@ private suspend fun openSmbFile(
                 }.onFailure {
                     logcat(LogPriority.WARN) { "[Smb] 卷目录扫描失败: ${it.message}" }
                 }.getOrDefault(emptyList())
-                    .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
+                    .sortedWith { a, b -> a.name.compareToNaturalPinyin(b.name) }
                 // Komiho: 章节号按自然序兜底（s1_01/s2_01 会被抹掉季标记撞成同一个 1.0），见 ChapterNumbering。
                 val smbDirNumbers = ChapterNumbering.assign(siblingDirs.map { it.name }, seriesTitle)
                 siblingDirs.forEachIndexed { idx, sib ->
@@ -7019,7 +7019,7 @@ private suspend fun openSmbFile(
                 // 服务器顺序变了章节顺序就会变（且自然序下标兜底也没了意义）。
                 val orderedSiblings = (siblings + relPath).distinct()
                     .sortedWith { a, b ->
-                        siblingName(a).compareToCaseInsensitiveNaturalOrder(siblingName(b))
+                        siblingName(a).compareToNaturalPinyin(siblingName(b))
                     }
                 // Komiho: 章节号按自然序兜底（见 ChapterNumbering）。
                 val siblingNumbers = ChapterNumbering.assign(orderedSiblings.map { siblingName(it) }, seriesTitle)

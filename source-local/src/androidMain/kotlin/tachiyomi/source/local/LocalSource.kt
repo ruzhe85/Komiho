@@ -14,6 +14,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import eu.kanade.tachiyomi.util.lang.naturalPinyinComparator
 import eu.kanade.tachiyomi.util.storage.EpubFile
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -123,9 +124,9 @@ actual class LocalSource(
             when (filter) {
                 is OrderBy.Popular -> {
                     mangaDirs = if (filter.state!!.ascending) {
-                        mangaDirs.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name.orEmpty() })
+                        mangaDirs.sortedWith(compareBy(naturalPinyinComparator) { it.name.orEmpty() })
                     } else {
-                        mangaDirs.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.name.orEmpty() })
+                        mangaDirs.sortedWith(compareByDescending(naturalPinyinComparator) { it.name.orEmpty() })
                     }
                 }
                 is OrderBy.Latest -> {
