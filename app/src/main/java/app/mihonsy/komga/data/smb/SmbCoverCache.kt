@@ -17,9 +17,11 @@ import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.domain.storage.service.StoragePreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlin.concurrent.thread
 import kotlin.math.max
@@ -84,6 +86,11 @@ object SmbCoverCache {
     private fun generate(context: Context, chapterUrl: String, target: File) {
         val resolved = SmbConnectionStore.resolve(chapterUrl)
             ?: throw IllegalStateException("SMB 连接不存在: $chapterUrl")
+        // SY: PDF 章节封面 = 整本落本地临时文件，系统 PdfRenderer 渲第 0 页（与 LocalCoverFetcher 同口径）。
+        if (resolved.relPath.endsWith(".pdf", ignoreCase = true)) {
+            generateFromPdf(context, resolved.conn, resolved.password, resolved.relPath, target)
+            return
+        }
         // 独立 source（不复用阅读器的 ArchivePageLoader 句柄，避免生命周期竞争）。
         val source = SmbRandomAccessSource(resolved.conn, resolved.password, resolved.relPath)
         val delegate: ArchiveHandle = try {
@@ -124,6 +131,32 @@ object SmbCoverCache {
             val bmp = decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX) ?: return
             writeCover(bmp, target)
         }
+    }
+
+    /**
+     * SY: PDF 章节封面 —— 整本落本地临时文件，系统 PdfRenderer 渲第 0 页
+     * （与 LocalCoverFetcher / SmbCoverFetcher 浏览封面同口径）。加密 PDF 渲不出来则放弃（阅读器会弹密码框）。
+     */
+    private fun generateFromPdf(
+        context: Context,
+        conn: SmbConnection,
+        password: String,
+        relPath: String,
+        target: File,
+    ) {
+        val dir = File(context.cacheDir, "komiho_smb_pdf_cover").apply { mkdirs() }
+        val tmp = File(dir, sha256("${conn.id};$relPath") + ".pdf")
+        if (!tmp.exists() || tmp.length() == 0L) {
+            runCatching {
+                SmbSessionManager.openFile(conn, password, relPath).use { f ->
+                    f.getInputStream().buffered().use { input ->
+                        FileOutputStream(tmp).use { input.copyTo(it) }
+                    }
+                }
+            }.getOrNull() ?: return
+        }
+        val bmp = PdfRenderFallback.renderPageBitmap(tmp.absolutePath, 0, MAX_PX) ?: return
+        writeCover(bmp, target)
     }
 
     /**

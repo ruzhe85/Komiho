@@ -36,6 +36,10 @@ data class SmbEntry(
     /** 是否为图片文件（散图目录成员；点它=把所在目录当一章打开）。 */
     val isImage: Boolean =
         !isDir && name.substringAfterLast('.', "").lowercase() in SMB_IMAGE_EXTS
+
+    /** 是否为 PDF 文件（封面需系统 PdfRenderer 渲第 0 页，区别于归档拆包取首图）。 */
+    val isPdf: Boolean =
+        !isDir && name.substringAfterLast('.', "").lowercase() == "pdf"
 }
 
 /** 支持的归档扩展名（浏览过滤与条目判定共用）。epub 同为 zip 容器，阅读器有专门分支。 */

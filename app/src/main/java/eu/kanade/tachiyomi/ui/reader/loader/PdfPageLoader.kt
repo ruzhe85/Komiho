@@ -65,10 +65,13 @@ internal class PdfPageLoader private constructor(
         path = resolvePath()
         Log.d(TAG, "PDF open: path=$path")
 
+        // 超大 PDF（>200MB）不整文件载入内存解析（避免 OOM），直接走系统渲染兜底；
+        // 仍用运行时探测判定加密，保证加密 PDF 弹密码框。
+        val fileSize = File(path).length()
+        val probe = if (fileSize <= MAX_PARSER_FILE_BYTES) runCatching { PdfParser(path) }.getOrNull() else null
         // 探测加密状态（不消耗密码尝试）。
-        val probe = PdfParser(path)
         // 解析器偶发漏判加密时，用系统渲染器运行时兜底探测：无密码构造加密 PDF 必抛 SecurityException。
-        var encrypted = probe.parseOk && probe.isEncrypted()
+        var encrypted = probe?.parseOk == true && probe.isEncrypted()
         if (!encrypted) {
             encrypted = runCatching { PdfRenderFallback.isEncryptedPdf(path) }.getOrDefault(false)
         }
@@ -92,13 +95,13 @@ internal class PdfPageLoader private constructor(
             effectivePassword = pw
             renderOnly = true
             Log.d(TAG, "PDF encrypted, render-only with password, pages=$n")
-        } else if (probe.parseOk && probe.pageCount > 0) {
+        } else if (probe != null && probe.parseOk && probe.pageCount > 0) {
             parser = probe
             renderOnly = false
             Log.d(TAG, "PDF extract mode, pages=${probe.pageCount}")
         } else {
             renderOnly = true
-            Log.d(TAG, "PDF parse incomplete, fallback to render-only")
+            Log.d(TAG, "PDF parse incomplete / 超大文件, fallback to render-only")
         }
 
         currentPassword = effectivePassword
@@ -218,5 +221,8 @@ internal class PdfPageLoader private constructor(
 
     companion object {
         private const val TAG = "KomihoPdfLoader"
+
+        /** 解析器整文件载入内存的阈值：超过则跳过内存解析、直接走系统渲染兜底，避免大文件 OOM。 */
+        private const val MAX_PARSER_FILE_BYTES = 200L * 1024 * 1024 // 200MB
     }
 }

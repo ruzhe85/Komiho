@@ -17,6 +17,7 @@ import app.mihonsy.komga.data.smb.SmbRandomAccessSource
 import app.mihonsy.komga.data.smb.SmbSessionManager
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import eu.kanade.tachiyomi.util.pickCoverFirstImage
+import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import mihon.core.common.archive.ArchiveHandle
 import mihon.core.common.archive.ArchiveReader
 import mihon.core.common.archive.RemoteZipReader
@@ -26,6 +27,7 @@ import tachiyomi.core.common.util.system.ImageUtil
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
 import kotlin.math.max
@@ -97,6 +99,8 @@ class SmbCoverFetcher(
             data.isDir -> readDirectoryFirstImageBytes(password)?.let { raw ->
                 decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX)
             }
+            // SY: PDF 封面 = 整本落本地临时文件，系统 PdfRenderer 渲第 0 页（与 LocalCoverFetcher 同口径）。
+            data.isPdf -> readPdfFirstPageBitmap(password)
             data.isImage ->
                 // 单图：直接读文件字节。
                 SmbSessionManager.openFile(data.conn, password, data.relPath).use { f ->
@@ -163,6 +167,22 @@ class SmbCoverFetcher(
         return readArchiveFirstImage(password, archPath)
     }
 
+    /** PDF 封面：SMB 整本落到本地临时文件，系统 PdfRenderer 渲第 0 页（与 LocalCoverFetcher 同口径）。 */
+    private fun readPdfFirstPageBitmap(password: String, relPath: String = data.relPath): Bitmap? {
+        val dir = File(context.cacheDir, "komiho_smb_pdf_cover").apply { mkdirs() }
+        val tmp = File(dir, sha256("${data.conn.id};$relPath") + ".pdf")
+        if (!tmp.exists() || tmp.length() == 0L) {
+            runCatching {
+                SmbSessionManager.openFile(data.conn, password, relPath).use { f ->
+                    f.getInputStream().buffered().use { input ->
+                        FileOutputStream(tmp).use { input.copyTo(it) }
+                    }
+                }
+            }.getOrNull() ?: return null
+        }
+        return PdfRenderFallback.renderPageBitmap(tmp.absolutePath, 0, MAX_PX)
+    }
+
     /** 两次 decode：先读边界算 inSampleSize，再采样解码。 */
     private fun decodeSampled(open: () -> InputStream, maxPx: Int): Bitmap? {
         open().use { first ->
@@ -197,6 +217,8 @@ data class SmbCoverData(
     val isImage: Boolean,
     /** SY: 目录条目（散图目录封面 = 目录内第一张图，cover 优先）。 */
     val isDir: Boolean = false,
+    /** SY: PDF 条目封面 = 系统 PdfRenderer 渲第 0 页（与 LocalCoverFetcher 同口径）。 */
+    val isPdf: Boolean = false,
 )
 
 class SmbCoverKeyer : Keyer<SmbCoverData> {

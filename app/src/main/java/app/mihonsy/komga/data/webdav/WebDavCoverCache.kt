@@ -20,12 +20,15 @@ import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.domain.storage.service.StoragePreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlin.concurrent.thread
 import kotlin.math.max
+import kotlin.math.min
 
 // SY --> Komiho Phase4: WebDAV 历史/书签封面 —— 打开章节时「顺便」生成首图封面。
 // 思路（用户定）：ChapterLoader 打开 WebDAV 章节时若封面缓存缺失，则用独立连接按
@@ -93,6 +96,12 @@ object WebDavCoverCache {
 
     private fun generate(context: Context, chapterUrl: String, target: File) {
         val credentials = WebDavConnectionStore.credentialsFor(chapterUrl)
+        // SY: PDF 章节封面 = 整本落本地临时文件，系统 PdfRenderer 渲第 0 页（与 LocalCoverFetcher 同口径）。
+        val fullUrl = WebDavConnectionStore.extractFullUrl(chapterUrl)
+        if (fullUrl.endsWith(".pdf", ignoreCase = true)) {
+            generateFromPdf(context, fullUrl, credentials, target)
+            return
+        }
         // 独立连接（不复用阅读器的 ArchivePageLoader 句柄，避免生命周期竞争）；
         // 与阅读器同一 fallback 目录，服务器不支持 Range 整本缓存时通常可命中已有文件。
         val source = WebDavRandomAccessSource(
@@ -143,6 +152,45 @@ object WebDavCoverCache {
             val bmp = decodeSampled({ ByteArrayInputStream(raw) }, MAX_PX) ?: return
             writeCover(bmp, target)
         }
+    }
+
+    /**
+     * SY: PDF 章节封面 —— 整本落本地临时文件，系统 PdfRenderer 渲第 0 页
+     * （与 LocalCoverFetcher / SmbCoverFetcher 同口径）。加密 PDF 渲不出来则放弃（阅读器会弹密码框）。
+     */
+    private fun generateFromPdf(
+        context: Context,
+        fullUrl: String,
+        credentials: Pair<String, String>?,
+        target: File,
+    ) {
+        val dir = File(context.cacheDir, "komiho_webdav_pdf_cover").apply { mkdirs() }
+        val tmp = File(dir, sha256(fullUrl) + ".pdf")
+        if (!tmp.exists() || tmp.length() == 0L) {
+            runCatching {
+                val src = WebDavRandomAccessSource(
+                    url = fullUrl,
+                    username = credentials?.first?.ifBlank { null },
+                    password = credentials?.second?.ifBlank { null },
+                    fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
+                    cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+                )
+                src.use { s ->
+                    val len = s.size
+                    FileOutputStream(tmp).use { out ->
+                        var offset = 0L
+                        while (offset < len) {
+                            val buf = s.read(offset, min(1 shl 20, (len - offset).toInt()))
+                            if (buf.isEmpty()) break
+                            out.write(buf)
+                            offset += buf.size
+                        }
+                    }
+                }
+            }.getOrNull() ?: return
+        }
+        val bmp = PdfRenderFallback.renderPageBitmap(tmp.absolutePath, 0, MAX_PX) ?: return
+        writeCover(bmp, target)
     }
 
     /**
