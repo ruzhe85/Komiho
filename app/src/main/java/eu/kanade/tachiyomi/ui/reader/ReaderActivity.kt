@@ -1059,9 +1059,12 @@ class ReaderActivity : BaseActivity() {
         if (doublePages) {
             // If we're moving from singe to double, we want the current page to be the first page
             val currentPage = viewModel.state.value.currentPage
-            viewer.config.shiftDoublePage = (
-                currentPage + (currentChapter?.pages?.take(currentPage)?.count { it.fullPage || it.isolatedPage } ?: 0)
-                ) % 2 != 0
+            // SY: currentPage 可能为 -1（章节刚载入、还没选中页面），take(-1) 会抛 IllegalArgumentException。
+            if (currentPage >= 0) {
+                viewer.config.shiftDoublePage = (
+                    currentPage + (currentChapter?.pages?.take(currentPage)?.count { it.fullPage || it.isolatedPage } ?: 0)
+                    ) % 2 != 0
+            }
         }
         viewModel.state.value.viewerChapters?.let {
             viewer.setChaptersDoubleShift(it)
