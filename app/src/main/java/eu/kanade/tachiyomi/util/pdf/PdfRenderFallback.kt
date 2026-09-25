@@ -81,6 +81,25 @@ object PdfRenderFallback {
     }
 
     /**
+     * 运行时加密探测：以无密码方式构造系统 PdfRenderer。
+     * 加密 PDF 在缺少密码时必然抛 SecurityException，借此可靠判定加密，
+     * 作为手写解析器 /Encrypt 探测的兜底（解析器偶发漏判时仍能弹出密码框，而非误报「无法解析」）。
+     */
+    fun isEncryptedPdf(path: String): Boolean {
+        return try {
+            val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+            try {
+                PdfRenderer(pfd).close()
+            } finally {
+                pfd.close()
+            }
+            false
+        } catch (e: SecurityException) {
+            true
+        }
+    }
+
+    /**
      * 按是否带密码与系统版本选择 PdfRenderer 构造方式。
      * 仅在 API≥35 且 [password] 非空时走带密码构造；否则回退无密码构造
      * （加密文档会抛 SecurityException，由上层识别）。

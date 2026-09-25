@@ -480,10 +480,11 @@ class PdfParser(path: String) {
     }
 
     private fun parseInlineDict(b: ByteArray): Map<String, ByteArray> {
-        // 简易单行字典（trailer 通常简单）：复用 parseDict 从首 << 起
-        val ds = b.indexOf('<'.code.toByte())
-        if (ds < 0) return emptyMap()
-        return parseDict(b, ds, b.size) ?: emptyMap()
+        // b 为 trailer 内联字典内容（首字符是 /Size 之类，外层 << >> 已被正则剥离），直接从 0 起解析；
+        // 不能从首个 '<' 起——/ID 的十六进制串 <...> 会让起点错进字典内部，漏掉 /Encrypt。
+        var s = 0
+        while (s < b.size && b[s] in WHITESPACE) s++
+        return parseDict(b, s, b.size) ?: emptyMap()
     }
 
     // ---------- 小工具 ----------

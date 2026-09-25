@@ -67,7 +67,11 @@ internal class PdfPageLoader private constructor(
 
         // 探测加密状态（不消耗密码尝试）。
         val probe = PdfParser(path)
-        val encrypted = probe.parseOk && probe.isEncrypted()
+        // 解析器偶发漏判加密时，用系统渲染器运行时兜底探测：无密码构造加密 PDF 必抛 SecurityException。
+        var encrypted = probe.parseOk && probe.isEncrypted()
+        if (!encrypted) {
+            encrypted = runCatching { PdfRenderFallback.isEncryptedPdf(path) }.getOrDefault(false)
+        }
 
         var effectivePassword: String? = null
 
