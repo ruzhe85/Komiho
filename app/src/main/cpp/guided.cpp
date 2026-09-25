@@ -1,20 +1,23 @@
 // Komiho: Guided Filter 漫画降噪 —— CPU 实现，零外部依赖。
 //
 // 为什么不是 NLM：Fast NLM 实测 3.1MP 弱档单页 ~11s（真机 log 实锤，
-// 算量 = 像素 × 441 搜索偏移 ≈ 79G ops/页，NLM 固有代价），远超 §17 红线，
+// 算量 = 像素 × 441 搜索偏移 ≈ 79G ops/页，NLM 固有代价），远超实时阅读红线，
 // 判定「实时阅读不值得」→ 换 guided filter（He et al., ECCV 2010）。
 // Guided filter 的代价与窗口大小无关（box filter 滑动窗口 O(1)/像素），
 // 3.1MP 单页 ~100-200ms。
 //
-// 去噪原理：引导图 = 亮度 I，待滤信号 p = 各 RGB 通道独立滤波。
-//   a = cov(I,p) / (var(I) + eps),  b = mean(p) − a·mean(I),  q = mean(a)·I + mean(b)
-// 平坦区 var(I) << eps → a≈0 → q≈局部均值（颗粒/色噪被抹掉）；
-// 线稿/文字区 var(I) 大 → a≈cov/var → 边缘结构保留（比 NLM 更稳，不会断线）。
+// 去噪原理：引导图 = 预平滑亮度 gI，待滤信号 p = 各 RGB 通道独立滤波。
+//   a = cov(gI,p) / (var(gI) + eps),  b = mean(p) − a·mean(gI),  q = mean(a)·gI + mean(b)
+// 平坦区 var(gI) << eps → a≈0 → q≈局部均值（颗粒/色噪被抹掉）；
+// 线稿/文字区 var(gI) 大 → a≈cov/var → 边缘结构保留（比 NLM 更稳，不会断线）。
+// ⚠️ 引导图必须先预平滑（GUIDE_SMOOTH_R）：含噪亮度直接当引导时，噪声方差顶高
+// var(gI) → 噪区 a 偏大 → 噪声被当「结构」保留（第一版开强档也看不出降噪的根因之一）。
 // eps 越小平滑越强 —— 三档由 Kotlin 侧映射 (radius, eps)：
-//   弱 (4, 400) / 中 (8, 120) / 强 (12, 50)，真机按画质实测再调。
+//   弱 (4, 200) / 中 (8, 40) / 强 (12, 8)，真机按画质实测再调。
+// 输出略软（q 用平滑引导重建）是预期行为——后续 AI 超分负责细节重建。
 //
 // 内存：按 band 处理（band 高 64 行 + r 边界），中间平面只活在一个 band 里，
-// 峰值 ~25MB，不随页高增长（对比：全图 float 平面方案要 100MB+）。
+// 峰值 ~30MB，不随页高增长（对比：全图 float 平面方案要 100MB+）。
 // 并行：band 间并行（min(4, cores) 个 worker，各拿各的 band、无锁无线程池）；
 // box filter 用可分离滑动窗口 O(1)/像素。
 // 失败语义：任何一步失败返回入参 bitmap（Kotlin 回落原图），绝不出黑屏/空图。
@@ -73,19 +76,23 @@ void boxBlur(const float *src, float *dst, float *tmp, int W, int H, int r) {
 //
 // ⚠️ 缓冲管理纪律（上一版在这里崩过）：所有平面在进入通道循环前**一次性分配**，
 // 全函数只用不再归还 —— 空向量 .data() 是 nullptr，boxBlur 直接写 0x0 必 SEGV。
-// 11 个 ext 平面 × ~0.72MB（64+2r 行 × 2048 宽）≈ 8MB/worker，可接受。
+// 12 个 ext 平面 × ~0.72MB（64+2r 行 × 2048 宽）≈ 9MB/worker，可接受。
 void guidedBand(const float *I, const float *pR, const float *pG, const float *pB, int W, int Hb,
                 int r, float eps, float *outR, float *outG, float *outB) {
+    constexpr int GUIDE_SMOOTH_R = 3;
     const size_t plane = static_cast<size_t>(W) * Hb;
     auto mk = [&]() { return std::vector<float>(plane); };
     std::vector<float> work = mk();   // boxBlur 的可分离工作缓冲
-    std::vector<float> meanI = mk(), sq = mk(), varI = mk();
+    std::vector<float> gI = mk(), meanI = mk(), sq = mk(), varI = mk();
     std::vector<float> P = mk(), meanP = mk(), IP = mk(), corrIP = mk();
     std::vector<float> a = mk(), b = mk(), meanA = mk(), meanB = mk();
 
-    // 引导统计（全通道共享）：mean_I、分母 var_I + eps = box(I²) − mean_I² + eps
-    boxBlur(I, meanI.data(), work.data(), W, Hb, r);
-    for (size_t i = 0; i < plane; ++i) sq[i] = I[i] * I[i];
+    // 引导图 = 预平滑亮度（固定小半径，与档位 radius 无关）。
+    boxBlur(I, gI.data(), work.data(), W, Hb, GUIDE_SMOOTH_R);
+
+    // 引导统计（全通道共享）：mean_gI、分母 var_gI + eps = box(gI²) − mean_gI² + eps
+    boxBlur(gI.data(), meanI.data(), work.data(), W, Hb, r);
+    for (size_t i = 0; i < plane; ++i) sq[i] = gI[i] * gI[i];
     boxBlur(sq.data(), varI.data(), work.data(), W, Hb, r);
     for (size_t i = 0; i < plane; ++i) {
         const float mi = meanI[i];
@@ -97,7 +104,7 @@ void guidedBand(const float *I, const float *pR, const float *pG, const float *p
     for (int c = 0; c < 3; ++c) {
         std::memcpy(P.data(), srcCh[c], plane * sizeof(float));
         boxBlur(P.data(), meanP.data(), work.data(), W, Hb, r);
-        for (size_t i = 0; i < plane; ++i) IP[i] = I[i] * P[i];
+        for (size_t i = 0; i < plane; ++i) IP[i] = gI[i] * P[i];
         boxBlur(IP.data(), corrIP.data(), work.data(), W, Hb, r);
         for (size_t i = 0; i < plane; ++i) {
             const float cov = corrIP[i] - meanI[i] * meanP[i];
@@ -107,7 +114,7 @@ void guidedBand(const float *I, const float *pR, const float *pG, const float *p
         boxBlur(a.data(), meanA.data(), work.data(), W, Hb, r);
         boxBlur(b.data(), meanB.data(), work.data(), W, Hb, r);
         for (size_t i = 0; i < plane; ++i) {
-            dstCh[c][i] = meanA[i] * I[i] + meanB[i];
+            dstCh[c][i] = meanA[i] * gI[i] + meanB[i];
         }
     }
 }
@@ -141,14 +148,6 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeGuidedDenoise(JNIEnv *env, j
     const size_t srcStride = info.stride;
 
     const auto start = std::chrono::steady_clock::now();
-
-    // band 划分：band 高 64 行，上下各留 r 行边界（box 支撑半径），边界 clamp 到整图。
-    const int bandH = 64;
-    int nWorkers = static_cast<int>(std::thread::hardware_concurrency());
-    if (nWorkers <= 0) nWorkers = 1;
-    nWorkers = std::min(nWorkers, 4);
-    const int nBands = (H + bandH - 1) / bandH;
-    nWorkers = std::min(nWorkers, nBands);
 
     // 输出位图（与 lanczos3.cpp 同款 JNI 流程）。
     jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
@@ -192,6 +191,14 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeGuidedDenoise(JNIEnv *env, j
         return bitmap;
     }
     const size_t dstStride = outInfo.stride;
+
+    // band 划分：band 高 64 行，上下各留 r 行边界（box 支撑半径），边界 clamp 到整图。
+    const int bandH = 64;
+    int nWorkers = static_cast<int>(std::thread::hardware_concurrency());
+    if (nWorkers <= 0) nWorkers = 1;
+    nWorkers = std::min(nWorkers, 4);
+    const int nBands = (H + bandH - 1) / bandH;
+    nWorkers = std::min(nWorkers, nBands);
 
     // band 间并行：每个 worker 独立取 band，互不共享中间缓冲。
     std::atomic<int> nextBand{0};

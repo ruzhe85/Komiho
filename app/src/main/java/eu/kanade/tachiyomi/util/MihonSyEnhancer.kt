@@ -338,7 +338,8 @@ object MihonSyEnhancer {
      * Komiho: AI 档降噪前处理（Guided Filter）。任何失败都静默回落原图（或其 ARGB 副本），
      * 绝不阻断出图。
      *
-     * 档位参数 (radius, eps)：eps 越小平滑越强（255 域），初版经验值、待真机三档实测再调。
+     * 档位参数 (radius, eps)：eps 越小平滑越强（255 域）。噪声残留 = a·噪声，
+     * a = σ²/(σ²+eps) —— eps 必须远小于噪声方差才有效，见下方 when 处的校准说明。
      * 耗时用 android.util.Log 而非项目 logcat()：release 构建下 XLog 级别是 WARN，
      * logcat() 的 DEBUG/INFO 会被整条吞掉（与 Waifu2x.process 同款口径）。
      * 角标的「解码+增强」总耗时天然包含降噪（denoise 在 enhance() 内部跑），
@@ -353,9 +354,12 @@ object MihonSyEnhancer {
             return input
         }
         val (radius, eps) = when (level) {
-            1 -> 4 to 400f
-            3 -> 12 to 50f
-            else -> 8 to 120f
+            // eps 必须 ≪ 噪声方差 σ²（扫描噪 σ²≈100）才能把 a=σ²/(σ²+eps) 压到接近 0。
+            // 第一版 (400/120/50) 实测「开强档也看不出降噪」——a≈0.67 只去了 1/3 噪声。
+            // 现按 σ²≈100 校准：弱 200（a≈1/3）、中 40（a≈0.2）、强 8（a≈0.07 近全平）。
+            1 -> 4 to 200f
+            3 -> 12 to 8f
+            else -> 8 to 40f
         }
         val argb = ensureArgb(input) ?: return input
         val start = SystemClock.uptimeMillis()
