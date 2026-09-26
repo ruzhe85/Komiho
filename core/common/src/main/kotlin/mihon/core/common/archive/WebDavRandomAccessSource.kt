@@ -2,6 +2,8 @@ package mihon.core.common.archive
 
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.URLEncoder
 import java.util.Base64
 import java.util.concurrent.TimeUnit
@@ -43,6 +45,9 @@ class WebDavRandomAccessSource(
     private val fallbackCacheDir: File? = null,
     /** 整本缓存磁盘上限（字节）：超限按 lastModified LRU 淘汰；0/负数 = 不限。设置-存储可调。 */
     private val cacheMaxBytes: Long = Long.MAX_VALUE,
+    // SY --> Komiho: 整本下载（rar/7z 强制回退 / 非 Range 回退）进度回调（值域 0f..1f）；不传则不报进度。
+    private val onProgress: ((Float) -> Unit)? = null,
+    // SY <--
 ) : RandomAccessSource {
 
     /** 规范化后的请求 URL（宽容中文/空格等未编码字符，逐段百分号编码补齐）。 */
@@ -195,8 +200,12 @@ class WebDavRandomAccessSource(
                         dir.mkdirs()
                         val file = fallbackFile(dir)
                         val tmp = File(dir, file.name + ".part")
+                        val totalLen = resp.header("Content-Length")?.toLongOrNull() ?: -1L
                         resp.body?.byteStream()?.use { input ->
-                            tmp.outputStream().use { output -> input.copyTo(output) }
+                            tmp.outputStream().use { output ->
+                                // SY --> Komiho: 整本下载带进度（Content-Length 可得时上报百分比）。
+                                copyWithProgress(input, output, totalLen) { p -> onProgress?.invoke(p) }
+                            }
                         } ?: throw IOException("WebDAV 空响应体: $requestUrl")
                         if (file.exists()) file.delete()
                         tmp.renameTo(file)
@@ -229,6 +238,8 @@ class WebDavRandomAccessSource(
         }
         enforceCacheBudget(dir, keepName = file.name)
         val tmp = File(dir, file.name + ".part")
+        // SY --> Komiho: 先用 HEAD 取总大小，整本下载过程上报进度百分比（取不到则不报进度，保持转圈）。
+        val totalLen = runCatching { headLength() }.getOrNull() ?: -1L
         val call = client.newCall(newRequestBuilder().build())
         currentCall = call
         try {
@@ -237,7 +248,9 @@ class WebDavRandomAccessSource(
                     throw IOException("WebDAV 下载失败 HTTP ${resp.code}: $requestUrl")
                 }
                 resp.body?.byteStream()?.use { input ->
-                    tmp.outputStream().use { output -> input.copyTo(output) }
+                    tmp.outputStream().use { output ->
+                        copyWithProgress(input, output, totalLen) { p -> onProgress?.invoke(p) }
+                    }
                 } ?: throw IOException("WebDAV 空响应体: $requestUrl")
             }
         } finally {
@@ -280,6 +293,41 @@ class WebDavRandomAccessSource(
     /** 整本缓存的稳定文件名：URL hash（8 位 hex）+ 远程扩展名（缺省 bin）。 */
     private fun fallbackFile(dir: File): File =
         File(dir, "webdav_" + String.format("%08x", requestUrl.hashCode()) + "." + remoteExt().ifBlank { "bin" })
+
+    /**
+     * 带进度拷贝：从 [input] 拷到 [output]，约每 256KB 上报一次 [onProgress]（值域 0f..1f）。
+     * [total] <= 0 时无法计算百分比，仅上报起始 0f（保持转圈，不抛异常）。
+     */
+    private fun copyWithProgress(input: InputStream, output: OutputStream, total: Long, onProgress: (Float) -> Unit) {
+        onProgress(0f)
+        if (total <= 0L) {
+            input.copyTo(output)
+            return
+        }
+        val buffer = ByteArray(256 * 1024)
+        var written = 0L
+        var read: Int
+        while (input.read(buffer).also { read = it } != -1) {
+            output.write(buffer, 0, read)
+            written += read
+            onProgress((written.toFloat() / total).coerceIn(0f, 1f))
+        }
+        output.flush()
+    }
+
+    /** HEAD 取 Content-Length（整本下载总大小）；服务器不支持 HEAD 或缺失时返回 null。 */
+    private fun headLength(): Long? {
+        val call = client.newCall(newRequestBuilder().head().build())
+        currentCall = call
+        try {
+            call.execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                return resp.header("Content-Length")?.toLongOrNull()
+            }
+        } finally {
+            currentCall = null
+        }
+    }
 
     /** Range 读取 [start]..[endInclusive]（闭区间）。416 视作越界返回空（与契约一致）。 */
     private fun rangeGet(start: Long, endInclusive: Long): ByteArray {

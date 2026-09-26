@@ -167,6 +167,12 @@ class ReaderViewModel @JvmOverloads constructor(
     private val mutableState = MutableStateFlow(State())
     val state = mutableState.asStateFlow()
 
+    // SY --> Komiho: 非流化缓存（远程整本下载）进度（值域 0f..1f，null = 无进度/转圈）。
+    // 由 ChapterLoader 的 onCacheProgress 写入，ReaderActivity 收集后驱动加载指示器。
+    private val _chapterCacheProgress = MutableStateFlow<Float?>(null)
+    val chapterCacheProgress = _chapterCacheProgress.asStateFlow()
+    // SY <--
+
     // SY --> Komiho: 加密本密码输入：暂存待重载章节与起始页
     private var archivePasswordChapter: ReaderChapter? = null
     private var archivePasswordPage: Int? = null
@@ -437,6 +443,9 @@ class ReaderViewModel @JvmOverloads constructor(
                         readerPrefs = readerPreferences,
                         mergedReferences = mergedReferences,
                         mergedManga = mergedManga, /* SY <-- */
+                        // SY --> Komiho: 非流化缓存进度通道（远程整本下载：PDF / WebDAV 回退）。
+                        onCacheProgress = { frac -> _chapterCacheProgress.value = frac },
+                        // SY <--
                     )
 
                     loadChapter(
@@ -490,6 +499,9 @@ class ReaderViewModel @JvmOverloads constructor(
         page: Int? = null,
         // SY <--
     ): ViewerChapters {
+        // SY --> Komiho: 每次加载章节先复位缓存进度（0f = 转圈；有整本下载时由加载器逐步上报）。
+        _chapterCacheProgress.value = 0f
+        // SY <--
         loader.loadChapter(chapter /* SY --> */, page/* SY <-- */)
 
         val chapterPos = chapterList.indexOf(chapter)

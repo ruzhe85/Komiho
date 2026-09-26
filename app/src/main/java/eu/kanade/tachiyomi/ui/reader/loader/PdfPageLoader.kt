@@ -173,15 +173,19 @@ internal class PdfPageLoader private constructor(
     private fun downloadTo(source: RandomAccessSource, out: File) {
         val tmp = File(out.parentFile, out.name + ".part")
         FileOutputStream(tmp).use { fos ->
-            var offset = 0L
             val size = source.size
+            var offset = 0L
+            // SY --> Komiho: 远程整本下载带进度（size 已知时上报百分比，否则仅保持转圈）。
+            if (size > 0L) progressReporter?.invoke(0f)
             while (offset < size) {
                 val len = min(1 shl 20, (size - offset).toInt())
                 val buf = source.read(offset, len)
                 if (buf.isEmpty()) break
                 fos.write(buf)
                 offset += buf.size
+                if (size > 0L) progressReporter?.invoke((offset.toFloat() / size).coerceIn(0f, 1f))
             }
+            if (size > 0L) progressReporter?.invoke(1f)
         }
         if (!tmp.renameTo(out)) tmp.copyTo(out, overwrite = true)
     }

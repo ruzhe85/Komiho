@@ -287,6 +287,11 @@ class ReaderActivity : BaseActivity() {
             .onEach(::setProgressDialog)
             .launchIn(lifecycleScope)
 
+        // SY --> Komiho: 非流化缓存进度（远程整本下载：PDF / WebDAV 回退）驱动加载指示器显示百分比。
+        viewModel.chapterCacheProgress
+            .onEach { p -> loadingIndicator?.let { if (p != null) it.setProgress((p * 100).toInt()) } }
+            .launchIn(lifecycleScope)
+
         viewModel.state
             .map { it.manga }
             .distinctUntilChanged()
@@ -1158,6 +1163,8 @@ class ReaderActivity : BaseActivity() {
         // readerContainer 上（表现：转圈一直转、不消失）。
         loadingIndicator?.let { binding.readerContainer.removeView(it) }
         loadingIndicator = ReaderProgressIndicator(this)
+        // Komiho: 创建时把当前缓存进度（若有）也带进来，避免切换 viewer 重建后错过首帧进度。
+        viewModel.chapterCacheProgress.value?.let { loadingIndicator?.setProgress((it * 100).toInt()) }
         binding.readerContainer.addView(loadingIndicator)
 
         startPostponedEnterTransition()

@@ -55,6 +55,8 @@ class ChapterLoader(
     private val readerPrefs: ReaderPreferences,
     private val mergedReferences: List<MergedMangaReference>,
     private val mergedManga: Map<Long, Manga>,
+    // SY --> Komiho: 非流化缓存（远程整本下载）进度回调（值域 0f..1f），挂接到 ViewModel 进度通道。
+    private val onCacheProgress: (Float) -> Unit = {},
     // SY <--
 ) {
 
@@ -73,6 +75,9 @@ class ChapterLoader(
             try {
                 val loader = getPageLoader(chapter)
                 chapter.pageLoader = loader
+                // SY --> Komiho: 把非流化缓存进度回调挂到加载器，供远程整本下载（PDF / WebDAV 回退）上报。
+                loader.progressReporter = { frac -> onCacheProgress(frac) }
+                // SY <--
 
                 val pages = loader.getPages()
                     .onEach { it.chapter = chapter }
@@ -256,6 +261,9 @@ class ChapterLoader(
             password = credentials?.second?.ifBlank { null },
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
             cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+            // SY --> Komiho: 把整本下载（rar/7z 强制回退 / 非 Range 回退）进度回传上层进度通道。
+            onProgress = onCacheProgress,
+            // SY <--
         )
     }
 
