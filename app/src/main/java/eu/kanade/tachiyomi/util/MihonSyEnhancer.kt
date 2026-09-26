@@ -484,18 +484,22 @@ object MihonSyEnhancer {
                 timing = timing,
             )?.let { upscaled ->
                 // Komiho: AI 固定 2x，SSIV 显示时用双线性把 2x 结果缩到适应显示尺寸，
-                // 网点图高频细节被双线性抹糊。改为软件层先把 2x 结果缩到适应屏幕尺寸
-                // （fit-into targetW×targetH），让 SSIV 缩放比≈1，网点细节不再被双线性
-                // 重采样一次。长条页的 targetH 已是全高，fit-into 自然退化为按宽度缩放。
-                // 2026-09-26：缩放核由 Lanczos3 换成 Mitchell-Netravali（B=C=1/3，
-                // kernel id 3）—— LZ3 负瓣振铃会把网点/高频纹理锐化出摩尔纹。
+                // 网点图高频细节被双线性抹糊。改为软件层先把 2x 结果缩到适应屏幕尺寸，
+                // 让 SSIV 缩放比≈1。2026-09-26：缩放核由 Lanczos3 换成 Mitchell-Netravali
+                // （B=C=1/3，kernel id 3）—— LZ3 负瓣振铃会把网点/高频纹理锐化出摩尔纹。
+                // ⚠️ targetHeight<=0（长条页约定）：只按宽度 fit，高度不约束 —— fit-into
+                // 取 min 时高度项恒为 0.5（2x 高 / 原高），会把 2x 结果整体钳回原始尺寸，
+                // AI 增益被 2:1 降采样吃掉还多一次重采样，效果反而不如原图。
                 if (upscaled.width > input.width) {
                     val goalW = if (targetWidth > 0) targetWidth else input.width
-                    val goalH = if (targetHeight > 0) targetHeight else input.height
-                    val scale = min(
-                        goalW.toFloat() / upscaled.width.toFloat(),
-                        goalH.toFloat() / upscaled.height.toFloat(),
-                    )
+                    val scale = if (targetHeight > 0) {
+                        min(
+                            goalW.toFloat() / upscaled.width.toFloat(),
+                            targetHeight.toFloat() / upscaled.height.toFloat(),
+                        )
+                    } else {
+                        goalW.toFloat() / upscaled.width.toFloat()
+                    }
                     if (scale < 1f) {
                         val argb = ensureArgb(upscaled) ?: return upscaled
                         val down = nativeResample(argb, scale, 3)

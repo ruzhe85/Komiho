@@ -98,6 +98,9 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             srcHeight.toFloat() / srcWidth.toFloat() > 2.5f
         val (targetW, targetH) = if (options.enhanced) {
             if (isTallStrip) {
+                // Komiho: 采样高度仍用 srcHeight（高度不约束解码，行为与旧版一致；
+                // 负数不能流进 calculateInSampleSize —— coil3 DecodeUtils 对它的语义未知）。
+                // 长条页的「降采样高度不约束」由下方 enhanceH = -1 单独表达。
                 enhanceTarget(dstWidth) to srcHeight
             } else {
                 enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
@@ -105,6 +108,10 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         } else {
             dstWidth to dstHeight
         }
+        // Komiho: 传给增强器的降采样目标。长条页高度传 -1 = 不约束（只按宽度 fit）——
+        // 此前传 srcHeight 会让 AI 2x 结果的 fit-into 降采样被高度项（2h/h=0.5）钳回
+        // 原始尺寸，超分增益全被吃掉。
+        val enhanceTargetH = if (options.enhanced && isTallStrip) -1 else targetH
 
         val sampleSize = DecodeUtils.calculateInSampleSize(
             srcWidth = srcWidth,
@@ -176,10 +183,10 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                         sourceTag = sourceTag,
                         // Komiho: 页号透传给增强器 —— 角标按页登记引擎，别让并发页互相覆盖。
                         pageIndex = options.pageIndex,
-                        // Komiho: 把「适应屏幕」的目标尺寸传进去，AI 2x 后由软件层 Lanczos3 缩回，
-                        // 避免 SSIV 双线性把网点糊掉。
+                        // Komiho: 把「适应屏幕」的目标尺寸传进去，AI 2x 后由软件层缩回，
+                        // 避免 SSIV 双线性把网点糊掉；长条页 enhanceTargetH=-1 只按宽度 fit。
                         targetWidth = targetW,
-                        targetHeight = targetH,
+                        targetHeight = enhanceTargetH,
                     )
                     if (enhanceOk) {
                         EnhanceTimings.put(
