@@ -28,8 +28,8 @@ android {
     defaultConfig {
         applicationId = "cn.ruzhe.komiho"
 
-        versionCode = 10
-        versionName = "1.3.0"
+        versionCode = 11
+        versionName = "1.3.1"
 
         buildConfigField("String", "UPSTREAM_VERSION", """"0.20.1"""")
 

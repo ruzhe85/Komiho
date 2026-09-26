@@ -5,6 +5,16 @@
   新增版本時三份都要同步。
 -->
 <changelog bulletedList="true">
+    <changelogversion versionName="1.3.1" changeDate="September 26, 2026">
+        <changelogtext>[b]Komiho 1.3.1[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 影像增強「大圖強制 AI 增強」開關：解析度足夠但掃描品質差的圖也能靠 AI 補細節</changelogtext>
+        <changelogtext>[b]新增[/b] 遠端快取進度動畫</changelogtext>
+        <changelogtext>[b]優化[/b] 增強狀態角標顯示輸出解析度</changelogtext>
+        <changelogtext>[b]優化[/b] 打開書籍解碼期間顯示「正在打開」提示，避免黑屏無反饋</changelogtext>
+        <changelogtext>[b]修復[/b] 條漫模式偶發載入卡轉圈</changelogtext>
+        <changelogtext>[b]修復[/b] 圖片型 EPUB 打開後回退檔案瀏覽器</changelogtext>
+        <changelogtext>[b]修復[/b] 設定-儲存「遠端快取」統計漏算 PDF 快取</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.3.0" changeDate="September 25, 2026">
         <changelogtext>[b]Komiho 1.3.0[/b]</changelogtext>
         <changelogtext>[b]新增[/b] 本地/WebDAV/SMB PDF 閱讀</changelogtext>

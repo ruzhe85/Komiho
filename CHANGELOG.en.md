@@ -1,5 +1,15 @@
 # Komiho Changelog
 
+## v1.3.1 (2026-09-26)
+
+- New Image enhancement — "Force AI on large images" toggle: images with enough resolution but poor scan quality also get AI detail restoration
+- New Remote cache progress animation
+- Improved Enhancement badge now shows the output resolution
+- Improved "Opening" hint shown while decoding to avoid a black screen with no feedback
+- Fixed WebToon mode could intermittently get stuck on the loading spinner
+- Fixed Image-type EPUB falls back to the file browser after opening
+- Fixed Settings → Storage "remote cache" stats missed the PDF cache
+
 ## v1.3.0 (2026-09-25)
 
 - New Local / WebDAV / SMB PDF reading

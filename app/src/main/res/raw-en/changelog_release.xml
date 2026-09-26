@@ -6,6 +6,16 @@
   Keep both files in sync when adding a release.
 -->
 <changelog bulletedList="true">
+    <changelogversion versionName="1.3.1" changeDate="September 26, 2026">
+        <changelogtext>[b]Komiho 1.3.1[/b]</changelogtext>
+        <changelogtext>[b]New[/b] Image enhancement — "Force AI on large images" toggle: images with enough resolution but poor scan quality also get AI detail restoration</changelogtext>
+        <changelogtext>[b]New[/b] Remote cache progress animation</changelogtext>
+        <changelogtext>[b]Improved[/b] Enhancement badge now shows the output resolution</changelogtext>
+        <changelogtext>[b]Improved[/b] "Opening" hint shown while decoding to avoid a black screen with no feedback</changelogtext>
+        <changelogtext>[b]Fixed[/b] WebToon mode could intermittently get stuck on the loading spinner</changelogtext>
+        <changelogtext>[b]Fixed[/b] Image-type EPUB falls back to the file browser after opening</changelogtext>
+        <changelogtext>[b]Fixed[/b] Settings → Storage "remote cache" stats missed the PDF cache</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.3.0" changeDate="September 25, 2026">
         <changelogtext>[b]Komiho 1.3.0[/b]</changelogtext>
         <changelogtext>[b]New[/b] Local / WebDAV / SMB PDF reading</changelogtext>
