@@ -43,14 +43,16 @@ class ReaderProgressIndicator @JvmOverloads constructor(
     }
 
     private var progress by mutableFloatStateOf(0f)
-    private var label by mutableStateOf<String?>(null)
+
+    // 命名为 labelText：避免与下方显式 setLabel() 产生 JVM 签名冲突（private var 也会生成合成 setter）。
+    private var labelText by mutableStateOf<String?>(null)
 
     @Composable
     override fun Content() {
         TachiyomiTheme {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CombinedCircularProgressIndicator(progress = { progress })
-                label?.let {
+                labelText?.let {
                     Spacer(Modifier.height(12.dp))
                     // 文字颜色随主题（TachiyomiTheme 提供的 content color），不硬编码。
                     Text(
@@ -76,6 +78,6 @@ class ReaderProgressIndicator @JvmOverloads constructor(
 
     /** 进度环下方文案（如「正在缓存」）；传 null 隐藏。 */
     fun setLabel(label: String?) {
-        this.label = label
+        this.labelText = label
     }
 }
