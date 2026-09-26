@@ -531,7 +531,7 @@
     <string name="webtoon_prefetch_3">3 screens</string>
     <string name="pref_webtoon_tap_scroll_duration">Scroll animation speed</string>
     <string name="pref_webtoon_original_resolution">Original resolution</string>
-    <string name="pref_image_enhancement_group">Image enhancement</string>
+    <string name="pref_image_enhancement_group">Image</string>
     <string name="pref_enhancement_mode">Enhancement algorithm</string>
     <string name="pref_enhancement_mode_summary">Lanczos3: the first image shows black until enhancement completes, then displays normally.</string>
     <string name="enhancement_off">Off</string>
@@ -565,6 +565,7 @@
     <!-- 2026-09-19 模型插件化: NPU 模型不再内置，UI 在 NPU 分组显示此空态提示（点击跳 GitHub 下载模型包）。 -->
     <string name="ai_model_plugin_hint">Model package download</string>
     <string name="ai_bypass_fit">Force AI on large images</string>
+    <string name="enhancement_group_title">Enhancement</string>
     <string name="pref_ai_tile_size">Tile size</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>

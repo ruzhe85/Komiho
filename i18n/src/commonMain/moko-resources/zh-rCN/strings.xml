@@ -370,7 +370,7 @@
     <string name="webtoon_prefetch_3">3 屏</string>
     <string name="pref_webtoon_tap_scroll_duration">滚动动画速度</string>
     <string name="pref_webtoon_original_resolution">原始分辨率</string>
-    <string name="pref_image_enhancement_group">图像增强</string>
+    <string name="pref_image_enhancement_group">图像</string>
     <string name="pref_enhancement_mode">增强算法</string>
     <string name="pref_enhancement_mode_summary">Lanczos3 首图进入黑屏，增强完成后正常显示。</string>
     <string name="enhancement_off">关闭</string>
@@ -403,6 +403,7 @@
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <string name="ai_model_plugin_hint">模型包下载</string>
     <string name="ai_bypass_fit">大图强制 AI 增强</string>
+    <string name="enhancement_group_title">增强</string>
     <string name="pref_ai_tile_size">分块大小</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>

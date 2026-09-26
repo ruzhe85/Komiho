@@ -257,6 +257,8 @@ object MihonSyEnhancer {
         }
 
         val result = when (mode) {
+            // Komiho: 降噪独立档——mode 0 只做降噪不增强（降噪已在上方完成，src 即结果）。
+            0 -> src
             // MihonSY: Anime4K branch disabled — native side no longer compiled.
             // 1 -> {
             //     val a4kMode = preferences.anime4kMode.get()

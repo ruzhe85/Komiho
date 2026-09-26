@@ -276,6 +276,11 @@ class ReaderPreferences(
      */
     val aiBypassFitGate: Preference<Boolean> = preferenceStore.getBoolean("pref_ai_bypass_fit_gate", false)
 
+    /**
+     * Komiho: 上一次的非关闭增强档位——「开启」chip 用它恢复（不改变像素，不进指纹）。
+     */
+    val enhancementLastMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_last_mode", 2)
+
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
 

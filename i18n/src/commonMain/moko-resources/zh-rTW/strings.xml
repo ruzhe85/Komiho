@@ -381,7 +381,7 @@
     <string name="webtoon_prefetch_3">3 螢幕</string>
     <string name="pref_webtoon_tap_scroll_duration">滾動動畫速度</string>
     <string name="pref_webtoon_original_resolution">原始解析度</string>
-    <string name="pref_image_enhancement_group">影像增強</string>
+    <string name="pref_image_enhancement_group">影像</string>
     <string name="pref_enhancement_mode">增強演算法</string>
     <string name="pref_enhancement_mode_summary">對所有閱讀模式生效（翻頁、條漫、雙頁、連續直式）</string>
     <string name="enhancement_off">關閉</string>
@@ -409,6 +409,7 @@
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <string name="ai_model_plugin_hint">模型包下載</string>
     <string name="ai_bypass_fit">大圖強制 AI 增強</string>
+    <string name="enhancement_group_title">增強</string>
     <string name="pref_ai_tile_size">分塊大小</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>

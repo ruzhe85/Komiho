@@ -186,7 +186,8 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // Applies to every image size (strips included, sampled by width only).
         if (options.enhanced) {
             try {
-                if (preferences.enhancementMode.get() != 0) {
+                // Komiho: 降噪已独立于增强档位——mode 0 + 降噪开启也要进链路（只降噪不增强）。
+                if (preferences.enhancementMode.get() != 0 || preferences.denoiseLevel.get() != 0) {
                     if (skipAi) {
                         // Komiho: AI 跳过门命中 —— 登记 skip，角标显示「跳过」，原图直出。
                         EnhanceTimings.markSkipped(options.pageIndex)

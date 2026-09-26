@@ -72,21 +72,46 @@ fun ImageEnhancementSection(
     val mode by preferences.enhancementMode.collectAsState()
 
     Column(modifier) {
-        // Off — not part of either platform group.
+        // Komiho: 降噪独立于增强档位（mode 0 也生效），常驻首行。
+        val denoise by preferences.denoiseLevel.collectAsState()
+        EnhancementParamLabel(MR.strings.enhancement_denoise)
+        SettingsChipRow {
+            ReaderPreferences.DenoiseLevelOptions.forEach { (value, labelRes) ->
+                FilterChip(
+                    selected = denoise == value,
+                    onClick = { preferences.denoiseLevel.set(value) },
+                    label = { Text(stringResource(labelRes)) },
+                )
+            }
+        }
+
+        // Komiho: 图像增强总开关——关闭/开启两个 chip；关闭时下方 CPU/GPU/NPU 分组全部隐藏。
+        EnhancementGroupLabel(MR.strings.enhancement_group_title)
+        val lastMode by preferences.enhancementLastMode.collectAsState()
+        val setMode: (Int) -> Unit = {
+            preferences.enhancementLastMode.set(it)
+            preferences.enhancementMode.set(it)
+        }
         SettingsChipRow {
             FilterChip(
                 selected = mode == 0,
                 onClick = { preferences.enhancementMode.set(0) },
-                label = { Text(stringResource(MR.strings.enhancement_off)) },
+                label = { Text(stringResource(MR.strings.denoise_off)) },
+            )
+            FilterChip(
+                selected = mode != 0,
+                onClick = { setMode(if (lastMode != 0) lastMode else 2) },
+                label = { Text(stringResource(MR.strings.denoise_on)) },
             )
         }
 
+        if (mode != 0) {
         EnhancementGroupLabel(MR.strings.enhancement_group_cpu)
         SettingsChipRow {
             ReaderPreferences.CpuEnhancementModes.forEach { (flag, labelRes) ->
                 FilterChip(
                     selected = mode == flag,
-                    onClick = { preferences.enhancementMode.set(flag) },
+                    onClick = { setMode(flag) },
                     label = { Text(stringResource(labelRes)) },
                 )
             }
@@ -122,7 +147,7 @@ fun ImageEnhancementSection(
                         selected = mode == 5 && activeModel == model,
                         onClick = {
                             preferences.aiModelId.set(model.id)
-                            preferences.enhancementMode.set(5)
+                            setMode(5)
                         },
                         label = { Text(model.displayLabel()) },
                     )
@@ -206,19 +231,7 @@ fun ImageEnhancementSection(
             }
         }
 
-        // Komiho: 漫画降噪总开关（默认关）。对所有增强模式常驻显示，开启即用强档。
-        // 指纹由 enhancementCacheKey() 覆盖，切换即时重渲染。
-        val denoise by preferences.denoiseLevel.collectAsState()
-        EnhancementParamLabel(MR.strings.enhancement_denoise)
-        SettingsChipRow {
-            ReaderPreferences.DenoiseLevelOptions.forEach { (value, labelRes) ->
-                FilterChip(
-                    selected = denoise == value,
-                    onClick = { preferences.denoiseLevel.set(value) },
-                    label = { Text(stringResource(labelRes)) },
-                )
-            }
-        }
+        }  // Komiho: if (mode != 0) —— 关闭时隐藏全部增强分组
 
         CheckboxItem(
             label = stringResource(MR.strings.pref_show_enhancement_status),
