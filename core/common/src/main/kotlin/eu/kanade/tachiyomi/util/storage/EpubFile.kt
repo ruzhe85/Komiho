@@ -7,6 +7,8 @@ import org.jsoup.parser.Parser
 import java.io.Closeable
 import java.io.File
 import java.io.InputStream
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 
 /**
  * Wrapper over ZipFile to load files in epub format.
@@ -14,6 +16,11 @@ import java.io.InputStream
  * Komiho: 参数类型是窄接口 [ArchiveHandle] 而非具体 ArchiveReader ——
  * 本地来源传 ArchiveReader，WebDAV / SMB 远程归档传 RemoteZipReader / CachingArchiveHandle。
  * 本类只用到 getInputStream，两条路径共用同一实现。
+ *
+ * 解析健壮性对齐 Koharia 的 EpubReader（2026-09）：
+ *  - spine 直接引用 image/* 条目的图片型 EPUB（漫画/条漫/Divina）也能出页；
+ *  - href 走 URLDecoder 解码（%20 / 中文 / 特殊字符不再拼错路径导致 NPE）；
+ *  - 单个条目缺失时跳过该页而非整体崩溃。
  */
 class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
 
@@ -62,37 +69,64 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
     }
 
     /**
-     * Returns all the pages from the epub.
+     * Returns all the pages from the epub, in spine reading order.
+     * 与 Mihon 原版不同：spine 直接引用 image/* 条目的「图片型 EPUB」也纳入，
+     * 否则这类书会被过滤成 0 页 → 上层报「无图片」→ 回退文件浏览器。
      */
-    private fun getPagesFromDocument(document: Document): List<String> {
-        val pages = document.select("manifest > item")
-            .filter { node -> "application/xhtml+xml" == node.attr("media-type") }
-            .associateBy { it.attr("id") }
+    private fun getPagesFromDocument(document: Document): List<ManifestItem> {
+        val manifest = getManifestFromDocument(document)
+        return document.select("*|spine > *|itemref")
+            .mapNotNull { itemRef -> manifest[itemRef.attr("idref")] }
+    }
 
-        val spine = document.select("spine > itemref").map { it.attr("idref") }
-        return spine.mapNotNull { pages[it] }.map { it.attr("href") }
+    private fun getManifestFromDocument(document: Document): Map<String, ManifestItem> {
+        return document.select("*|manifest > *|item")
+            .associate { item ->
+                item.attr("id") to ManifestItem(
+                    href = item.attr("href"),
+                    mediaType = item.attr("media-type"),
+                    properties = item.attr("properties"),
+                )
+            }
     }
 
     /**
      * Returns all the images contained in every page from the epub.
+     * 保留宽松行为（收集页面里所有 img / svg:image，不去重到「必须恰好 1 张」），
+     * 以不回归现有能正常打开的 EPUB；同时新增 image/* spine 直引页与 href 解码。
      */
-    private fun getImagesFromPages(pages: List<String>, packageHref: String): List<String> {
-        val result = mutableListOf<String>()
+    private fun getImagesFromPages(pages: List<ManifestItem>, packageHref: String): List<String> {
+        if (pages.isEmpty()) return emptyList()
         val basePath = getParentDirectory(packageHref)
+        val result = ArrayList<String>(pages.size)
         pages.forEach { page ->
-            val entryPath = resolveZipPath(basePath, page)
-            val document = getInputStream(entryPath)!!.use { Jsoup.parse(it, null, "") }
-            val imageBasePath = getParentDirectory(entryPath)
+            val entryPath = resolveZipPath(basePath, decodePathHref(page.href))
+            // 图片型 EPUB：spine 项本身就是一整页图，直接采用。
+            if (page.mediaType.startsWith("image/", ignoreCase = true)) {
+                result += entryPath
+                return@forEach
+            }
 
-            document.allElements.forEach {
-                when (it.tagName()) {
-                    "img" -> result.add(resolveZipPath(imageBasePath, it.attr("src")))
-                    "image" -> result.add(resolveZipPath(imageBasePath, it.attr("xlink:href")))
+            val document = getInputStream(entryPath)?.use { Jsoup.parse(it, null, "") } ?: return@forEach
+            val imageBasePath = getParentDirectory(entryPath)
+            val imagePaths = buildList {
+                document.allElements.forEach {
+                    when (it.tagName()) {
+                        "img" -> it.attr("src").ifBlank { null }?.let(::add)
+                        "image" -> it.attr("xlink:href").ifBlank { it.attr("href") }.ifBlank { null }?.let(::add)
+                    }
                 }
             }
+                .map { resolveZipPath(imageBasePath, decodePathHref(it)) }
+                .distinct()
+            result += imagePaths
         }
+        return result.distinct()
+    }
 
-        return result
+    /** 解码百分号转义，且不让字面 '+' 被当成空格（EPUB href 常见）。 */
+    private fun decodePathHref(href: String): String {
+        return URLDecoder.decode(href.replace("+", "%2B"), StandardCharsets.UTF_8.name())
     }
 
     /**
@@ -138,4 +172,10 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
             ""
         }
     }
+
+    private data class ManifestItem(
+        val href: String,
+        val mediaType: String,
+        val properties: String = "",
+    )
 }
