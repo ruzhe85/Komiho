@@ -104,6 +104,8 @@ class WebtoonConfig(
             .register({ }, { imagePropertyChangedListener?.invoke() })
         readerPreferences.denoiseLevel
             .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiDownscaleKernel
+            .register({ }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.webtoonSidePadding
             .register({ sidePadding = it }, { imagePropertyChangedListener?.invoke() })

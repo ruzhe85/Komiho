@@ -128,6 +128,20 @@ fun ImageEnhancementSection(
                     )
                 }
         }
+        if (mode == 5) {
+            // Komiho: AI 后软件降采样核（0=关闭交 SSIV）—— 真机 A/B 定位画质用。
+            val downscale by preferences.aiDownscaleKernel.collectAsState()
+            EnhancementParamLabel(MR.strings.ai_downscale)
+            SettingsChipRow {
+                ReaderPreferences.AiDownscaleKernelOptions.forEach { (value, labelRes) ->
+                    FilterChip(
+                        selected = downscale == value,
+                        onClick = { preferences.aiDownscaleKernel.set(value) },
+                        label = { Text(stringResource(labelRes)) },
+                    )
+                }
+            }
+        }
         if (mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.NCNN_VULKAN) {
             // Tile edge only affects the GPU path (NPU uses the fixed QNN context).
             val tileSize by preferences.aiTileSize.collectAsState()

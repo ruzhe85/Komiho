@@ -485,12 +485,20 @@ object MihonSyEnhancer {
             )?.let { upscaled ->
                 // Komiho: AI 固定 2x，SSIV 显示时用双线性把 2x 结果缩到适应显示尺寸，
                 // 网点图高频细节被双线性抹糊。改为软件层先把 2x 结果缩到适应屏幕尺寸，
-                // 让 SSIV 缩放比≈1。2026-09-26：缩放核由 Lanczos3 换成 Mitchell-Netravali
-                // （B=C=1/3，kernel id 3）—— LZ3 负瓣振铃会把网点/高频纹理锐化出摩尔纹。
+                // 让 SSIV 缩放比≈1。缩放核可选可关（aiDownscaleKernel）：
+                // 0=关闭（2x 结果直接交 SSIV，用于真机 A/B 定位画质问题）、
+                // 1=Mitchell-Netravali（B=C=1/3，无负瓣振铃，默认）、
+                // 2=Catmull-Rom、3=Lanczos3（native kernel id 3/1/0）。
                 // ⚠️ targetHeight<=0（长条页约定）：只按宽度 fit，高度不约束 —— fit-into
                 // 取 min 时高度项恒为 0.5（2x 高 / 原高），会把 2x 结果整体钳回原始尺寸，
                 // AI 增益被 2:1 降采样吃掉还多一次重采样，效果反而不如原图。
-                if (upscaled.width > input.width) {
+                val downscaleKernel = when (preferences.aiDownscaleKernel.get()) {
+                    2 -> 1
+                    3 -> 0
+                    1 -> 3
+                    else -> -1
+                }
+                if (downscaleKernel != -1 && upscaled.width > input.width) {
                     val goalW = if (targetWidth > 0) targetWidth else input.width
                     val scale = if (targetHeight > 0) {
                         min(
@@ -502,7 +510,7 @@ object MihonSyEnhancer {
                     }
                     if (scale < 1f) {
                         val argb = ensureArgb(upscaled) ?: return upscaled
-                        val down = nativeResample(argb, scale, 3)
+                        val down = nativeResample(argb, scale, downscaleKernel)
                         if (down != null && down !== argb) {
                             if (argb !== upscaled) argb.recycle()
                             upscaled.recycle()

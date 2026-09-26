@@ -402,6 +402,11 @@
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <string name="ai_model_plugin_hint">模型包下载</string>
+    <string name="ai_downscale">AI 降采样</string>
+    <string name="ai_downscale_off">关闭（SSIV）</string>
+    <string name="ai_downscale_mitchell">Mitchell-Netravali</string>
+    <string name="ai_downscale_catmull">Catmull-Rom</string>
+    <string name="ai_downscale_lanczos">Lanczos3</string>
     <string name="pref_ai_tile_size">分块大小</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>

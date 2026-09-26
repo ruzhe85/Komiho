@@ -321,6 +321,7 @@ class PagerPageHolder(
                     showEnhancementOutcome(
                         success = !enhancementSkipped,
                         elapsedMillis = result.enhanceElapsedMillis,
+                        output = "${bitmap.width}×${bitmap.height}",
                     )
                 } else {
                     setImage(result.source.peek(), result.isAnimated, viewerImageConfig(), page?.skipEnhance ?: false)

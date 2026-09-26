@@ -268,6 +268,14 @@ class ReaderPreferences(
      */
     val denoiseLevel: Preference<Int> = preferenceStore.getInt("pref_denoise_level", 0)
 
+    /**
+     * Komiho (2026-09-26): AI 档超分完成后的软件降采样核。
+     * 0 = 关闭（2x 结果直接交 SSIV 缩放显示，用于真机 A/B 定位画质问题）；
+     * 1 = Mitchell-Netravali（默认，B=C=1/3）；2 = Catmull-Rom；3 = Lanczos3。
+     * 值会进 [enhancementCacheKey] 指纹 —— 改变即触发重渲染。
+     */
+    val aiDownscaleKernel: Preference<Int> = preferenceStore.getInt("pref_ai_downscale_kernel", 1)
+
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
 
@@ -290,6 +298,7 @@ class ReaderPreferences(
         append('|').append(aiModelId.get())
         append('|').append(aiTileSize.get())
         append('|').append(denoiseLevel.get())
+        append('|').append(aiDownscaleKernel.get())
         append('|').append(cropBorders.get())
         append('|').append(cropBordersWebtoon.get())
     }
@@ -463,6 +472,14 @@ class ReaderPreferences(
         val DenoiseLevelOptions = listOf(
             0 to MR.strings.denoise_off,
             1 to MR.strings.denoise_on,
+        )
+
+        /** Komiho: AI 后软件降采样核选项（0=关闭交 SSIV）。native kernel id 见 MihonSyEnhancer。 */
+        val AiDownscaleKernelOptions = listOf(
+            0 to MR.strings.ai_downscale_off,
+            1 to MR.strings.ai_downscale_mitchell,
+            2 to MR.strings.ai_downscale_catmull,
+            3 to MR.strings.ai_downscale_lanczos,
         )
 
         /**
