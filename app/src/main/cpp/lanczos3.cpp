@@ -127,29 +127,38 @@ struct ResamplePlan {
   ResamplePlan() = default;
 
   ResamplePlan(int srcSize, int dstSize_, int radius, const KernelLUT &lut)
-      : dstSize(dstSize_), taps(2 * radius + 2),
-        indices(static_cast<size_t>(dstSize_) * taps),
-        weights(static_cast<size_t>(dstSize_) * taps),
-        weightSums(dstSize_, 0) {
+      : dstSize(dstSize_) {
     const float scale = srcSize / static_cast<float>(dstSize_);
+
+    // Komiho: 缩小时（scale>1）滤波支撑窗必须随缩小比放大（核输入也除以 scale），
+    // 否则固定 ±radius 源像素窗在 2:1 缩小时会跳过一半源像素 → 混叠/摩尔纹，
+    // 效果反而不如双线性。放大时维持原窗口不变。
+    const bool downscaling = scale > 1.0f;
+    const float support = downscaling ? radius * scale : static_cast<float>(radius);
+    const float kscale = downscaling ? scale : 1.0f;
+
+    taps = 2 * static_cast<int>(std::ceil(support)) + 2;
+    indices.assign(static_cast<size_t>(dstSize_) * taps, 0);
+    weights.assign(static_cast<size_t>(dstSize_) * taps, 0);
+    weightSums.assign(dstSize_, 0);
 
     for (int d = 0; d < dstSize_; ++d) {
       const float center = (d + 0.5f) * scale - 0.5f;
-      const int first = static_cast<int>(std::floor(center - radius));
-      const int last = static_cast<int>(std::ceil(center + radius));
+      const int first = static_cast<int>(std::floor(center - support));
+      const int last = static_cast<int>(std::ceil(center + support));
       const int base = d * taps;
 
       int sum = 0;
       int k = 0;
       for (int i = first; i <= last && k < taps; ++i, ++k) {
         const int clamped = std::max(0, std::min(srcSize - 1, i));
-        const int16_t w = lut.at(center - i);
+        const int16_t w = lut.at((center - i) / kscale);
         indices[base + k] = clamped;
         weights[base + k] = w;
         sum += w;
       }
-      // Remaining slots are harmless zero taps. Keeping a fixed tap count makes
-      // the hot loops branch-free and works for both 2/3-radius kernels.
+      // Remaining slots are harmless zero taps. Keeping a fixed tap count per
+      // plan keeps the hot loops branch-free.
       for (; k < taps; ++k) {
         indices[base + k] = indices[base + (k ? k - 1 : 0)];
         weights[base + k] = 0;
