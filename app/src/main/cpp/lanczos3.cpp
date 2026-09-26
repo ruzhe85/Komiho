@@ -33,6 +33,26 @@ inline float catmullRomKernel(float x) {
   return -0.5f * x * x * x + 2.5f * x * x - 4.0f * x + 2.0f;
 }
 
+// Komiho: Mitchell-Netravali (B=C=1/3) cubic filter — 降采样专用。Lanczos3 负瓣振铃
+// 会把网点/高频纹理锐化出摩尔纹；Mitchell 无振铃，缩图更平滑。
+inline float mitchellKernel(float x) {
+  constexpr float B = 1.0f / 3.0f;
+  constexpr float C = 1.0f / 3.0f;
+  x = std::fabs(x);
+  if (x >= 2.0f) return 0.0f;
+  const float x2 = x * x;
+  const float x3 = x2 * x;
+  if (x < 1.0f) {
+    return ((12.0f - 9.0f * B - 6.0f * C) * x3 +
+            (-18.0f + 12.0f * B + 6.0f * C) * x2 +
+            (6.0f - 2.0f * B)) / 6.0f;
+  }
+  return ((-B - 6.0f * C) * x3 +
+          (6.0f * B + 30.0f * C) * x2 +
+          (-12.0f * B - 48.0f * C) * x +
+          (8.0f * B + 24.0f * C)) / 6.0f;
+}
+
 // MihonSY: Spline36 disabled — kept for reference but no longer compiled into a
 // code path. Comments out the kernel and its resizeWithKernel case below.
 // inline float spline36Kernel(float x) {
@@ -348,6 +368,12 @@ void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *d
       resizeGeneric(src, sw, sh, dst, dw, dh, catmullRomKernel, 2, opaque);
       break;
     }
+    // Komiho: Mitchell-Netravali (kernel id 3) — GPU/AI 路线的降采样用。
+    case 3: {
+      const bool opaque = isFullyOpaque(src, sw, sh);
+      resizeGeneric(src, sw, sh, dst, dw, dh, mitchellKernel, 2, opaque);
+      break;
+    }
     // MihonSY: Spline36 (kernel id 2) disabled — spline36Kernel is commented out above.
     // case 2: {
     //   const bool opaque = isFullyOpaque(src, sw, sh);
@@ -379,7 +405,8 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeResample(
 }
 
 static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel) {
-  if (scale <= 1.0f) return bitmap;
+  // Komiho: 允许 scale < 1（GPU/AI 路线把 2x 结果缩到显示尺寸靠它）；scale==1 无事可做。
+  if (scale <= 0.0f || scale == 1.0f) return bitmap;
 
   AndroidBitmapInfo info;
   if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {

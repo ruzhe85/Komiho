@@ -286,7 +286,8 @@ object MihonSyEnhancer {
             // }
 
             // MihonSY: CPU resamplers — Lanczos3 (2), Catmull-Rom (3).
-            // (Spline36 (4) disabled; kernel id: 0 = Lanczos3, 1 = Catmull-Rom native side.)
+            // (Spline36 (4) disabled; kernel id: 0 = Lanczos3, 1 = Catmull-Rom,
+            //  3 = Mitchell-Netravali（GPU/AI 路线降采样用）native side.)
             in 2..3 -> {
                 val scale = preferences.lanczosScale.get() / 100f
                 val argb = ensureArgb(src) ?: run {
@@ -483,10 +484,11 @@ object MihonSyEnhancer {
                 timing = timing,
             )?.let { upscaled ->
                 // Komiho: AI 固定 2x，SSIV 显示时用双线性把 2x 结果缩到适应显示尺寸，
-                // 网点图高频细节被双线性抹糊。改为软件层用 Lanczos3 先把 2x 结果缩到
-                // 适应屏幕尺寸（fit-into targetW×targetH），让 SSIV 缩放比≈1，网点细节
-                // 由 Lanczos3 保住，不再被双线性重采样一次。
-                // 长条页的 targetH 已是全高，fit-into 自然退化为按宽度缩放，无需单独分支。
+                // 网点图高频细节被双线性抹糊。改为软件层先把 2x 结果缩到适应屏幕尺寸
+                // （fit-into targetW×targetH），让 SSIV 缩放比≈1，网点细节不再被双线性
+                // 重采样一次。长条页的 targetH 已是全高，fit-into 自然退化为按宽度缩放。
+                // 2026-09-26：缩放核由 Lanczos3 换成 Mitchell-Netravali（B=C=1/3，
+                // kernel id 3）—— LZ3 负瓣振铃会把网点/高频纹理锐化出摩尔纹。
                 if (upscaled.width > input.width) {
                     val goalW = if (targetWidth > 0) targetWidth else input.width
                     val goalH = if (targetHeight > 0) targetHeight else input.height
@@ -496,7 +498,7 @@ object MihonSyEnhancer {
                     )
                     if (scale < 1f) {
                         val argb = ensureArgb(upscaled) ?: return upscaled
-                        val down = nativeLanczosProcess(argb, scale)
+                        val down = nativeResample(argb, scale, 3)
                         if (down != null && down !== argb) {
                             if (argb !== upscaled) argb.recycle()
                             upscaled.recycle()
