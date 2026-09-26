@@ -408,6 +408,7 @@
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <string name="ai_model_plugin_hint">模型包下載</string>
+    <string name="ai_bypass_fit">大圖強制 AI 增強</string>
     <string name="pref_ai_tile_size">分塊大小</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>

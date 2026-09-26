@@ -96,16 +96,20 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // GPU limit.
         val isTallStrip = srcHeight > 0 && srcWidth > 0 &&
             srcHeight.toFloat() / srcWidth.toFloat() > 2.5f
-        // Komiho: 增强时解码/预缩目标 = 视图尺寸（capped 2048）。
-        // 2026-09-26 定稿：AI 只对「显示端需要放大」的源图跑（下方 skipAi 门）——这类源图
-        // < 2×视图，inSampleSize 不会丢 AI 需要的细节；r≤1 的大源图跳过 AI（AI 往返白做），
-        // 此时预缩块只负责裁掉采样粒度余量、顺带省内存，与 AI 无关。
-        // AI 2x 结果的降采样在 MihonSyEnhancer 内做（Mitchell，fit 回视图）。
+        // Komiho: 增强时解码/预缩目标。
+        // 默认 = 视图尺寸（capped 2048）：AI 只对 r>1（显示需放大）的源图跑（下方 skipAi 门），
+        // 这类图 < 2×视图，inSampleSize 无损失。
+        // 开启「大图强制 AI 增强」（aiBypassFitGate）后放宽到统一 2048 上限——大源图 AI 也能
+        // 吃到 2048 内的真实细节；MP 输出门（enhance() 里）始终兜底防 OOM。
+        // AI 2x 结果交 SSIV 缩放显示（软件层降采样已移除）。
+        val preferences = Injekt.get<ReaderPreferences>()
         val (targetW, targetH) = if (options.enhanced) {
             if (isTallStrip) {
                 // 采样高度仍用 srcHeight（高度不约束解码；负数不能流进 calculateInSampleSize
                 // —— coil3 DecodeUtils 对它的语义未知）。
-                enhanceTarget(dstWidth) to srcHeight
+                (if (preferences.aiBypassFitGate.get()) MAX_ENHANCE_SOURCE_DIMENSION else enhanceTarget(dstWidth)) to srcHeight
+            } else if (preferences.aiBypassFitGate.get()) {
+                MAX_ENHANCE_SOURCE_DIMENSION to MAX_ENHANCE_SOURCE_DIMENSION
             } else {
                 enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
             }
@@ -143,7 +147,8 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             )
         }
         val skipAi = options.enhanced &&
-            Injekt.get<ReaderPreferences>().enhancementMode.get() == 5 &&
+            preferences.enhancementMode.get() == 5 &&
+            !preferences.aiBypassFitGate.get() &&
             !bitmap.isRecycled &&
             fitRatio <= 1f
 
@@ -181,7 +186,6 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // Applies to every image size (strips included, sampled by width only).
         if (options.enhanced) {
             try {
-                val preferences = Injekt.get<ReaderPreferences>()
                 if (preferences.enhancementMode.get() != 0) {
                     if (skipAi) {
                         // Komiho: AI 跳过门命中 —— 登记 skip，角标显示「跳过」，原图直出。

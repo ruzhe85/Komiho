@@ -268,6 +268,14 @@ class ReaderPreferences(
      */
     val denoiseLevel: Preference<Int> = preferenceStore.getInt("pref_denoise_level", 0)
 
+    /**
+     * Komiho (2026-09-26): 放开 AI 尺寸门控。默认关——r≤1（图已 ≥ 屏幕）的源图跳过 AI；
+     * 开启后这类图也跑 AI（扫描质量差、需要 AI 补细节的场景），同时解码/预缩目标从视图
+     * 尺寸放宽到 2048 上限，AI 才有真实细节可补。OOM 防护不依赖此开关：enhance() 里的
+     * MP 输出门（输入×2 超 80MP 照样 skip）始终生效。变更进 [enhancementCacheKey] 指纹。
+     */
+    val aiBypassFitGate: Preference<Boolean> = preferenceStore.getBoolean("pref_ai_bypass_fit_gate", false)
+
     /** Independent toggle: show the bottom-left enhancement status overlay (elapsed seconds / OK). */
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
 
@@ -290,6 +298,7 @@ class ReaderPreferences(
         append('|').append(aiModelId.get())
         append('|').append(aiTileSize.get())
         append('|').append(denoiseLevel.get())
+        append('|').append(if (aiBypassFitGate.get()) 1 else 0)
         append('|').append(cropBorders.get())
         append('|').append(cropBordersWebtoon.get())
     }
@@ -463,6 +472,12 @@ class ReaderPreferences(
         val DenoiseLevelOptions = listOf(
             0 to MR.strings.denoise_off,
             1 to MR.strings.denoise_on,
+        )
+
+        /** Komiho: 大图强制 AI 增强开关（放开 r≤1 门控），复用通用 关闭/开启 文案。 */
+        val AiBypassFitOptions = listOf(
+            false to MR.strings.denoise_off,
+            true to MR.strings.denoise_on,
         )
 
         /**

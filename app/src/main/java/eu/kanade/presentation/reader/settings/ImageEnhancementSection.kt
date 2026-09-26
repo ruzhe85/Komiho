@@ -224,6 +224,22 @@ fun ImageEnhancementSection(
             label = stringResource(MR.strings.pref_show_enhancement_status),
             pref = preferences.showEnhancementStatus,
         )
+
+        // Komiho: 大图强制 AI 增强（放开 r≤1 尺寸门控；MP 输出门仍兜底）。
+        // 放在「显示增强状态」之下；AI 档专属，其他模式不渲染。
+        if (mode == 5) {
+            val bypass by preferences.aiBypassFitGate.collectAsState()
+            EnhancementParamLabel(MR.strings.ai_bypass_fit)
+            SettingsChipRow {
+                ReaderPreferences.AiBypassFitOptions.forEach { (value, labelRes) ->
+                    FilterChip(
+                        selected = bypass == value,
+                        onClick = { preferences.aiBypassFitGate.set(value) },
+                        label = { Text(stringResource(labelRes)) },
+                    )
+                }
+            }
+        }
     }
 }
 

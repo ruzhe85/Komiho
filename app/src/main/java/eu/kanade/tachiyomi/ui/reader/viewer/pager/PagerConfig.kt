@@ -118,6 +118,8 @@ class PagerConfig(
             .register({ }, { imagePropertyChangedListener?.invoke() })
         readerPreferences.denoiseLevel
             .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiBypassFitGate
+            .register({ }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.navigateToPan
             .register({ navigateToPan = it })
