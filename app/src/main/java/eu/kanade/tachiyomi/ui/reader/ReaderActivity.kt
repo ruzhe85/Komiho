@@ -300,12 +300,11 @@ class ReaderActivity : BaseActivity() {
             .onEach { p -> loadingIndicator?.let { if (p != null) it.setProgress((p * 100).toInt()) } }
             .launchIn(lifecycleScope)
 
-        // Komiho: 整本缓存下载进行中，进度环下方显示「正在缓存」；结束即清除。
+        // Komiho: 整本缓存下载进行中，进度环下方显示「正在缓存」。文案一旦置位便持续保留至
+        // 加载指示器被移除（章节就绪），避免快速下载时 set(true)+set(false) 同帧合并导致一闪而过不可见。
         viewModel.chapterCaching
             .onEach { caching ->
-                loadingIndicator?.setLabel(
-                    if (caching) getString(R.string.loading_caching) else null,
-                )
+                if (caching) loadingIndicator?.setLabel(getString(R.string.loading_caching))
             }
             .launchIn(lifecycleScope)
 
@@ -1258,6 +1257,7 @@ class ReaderActivity : BaseActivity() {
     private fun setChapters(viewerChapters: ViewerChapters) {
         // Komiho: 摘掉后置空 —— 指示器的生命周期就到此为止，之后若再 updateViewer() 会重新挂一个。
         loadingIndicator?.let {
+            it.setLabel(null)
             binding.readerContainer.removeView(it)
             loadingIndicator = null
         }
