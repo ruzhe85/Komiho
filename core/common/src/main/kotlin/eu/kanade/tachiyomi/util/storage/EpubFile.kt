@@ -18,7 +18,7 @@ import java.nio.charset.StandardCharsets
  * 本类只用到 getInputStream，两条路径共用同一实现。
  *
  * 解析健壮性对齐 Koharia 的 EpubReader（2026-09）：
- *  - spine 直接引用 image/* 条目的图片型 EPUB（漫画/条漫/Divina）也能出页；
+ *  - spine 直接引用 image 开头 media-type 条目的图片型 EPUB（漫画/条漫/Divina）也能出页；
  *  - href 走 URLDecoder 解码（%20 / 中文 / 特殊字符不再拼错路径导致 NPE）；
  *  - 单个条目缺失时跳过该页而非整体崩溃。
  */
@@ -70,7 +70,7 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
 
     /**
      * Returns all the pages from the epub, in spine reading order.
-     * 与 Mihon 原版不同：spine 直接引用 image/* 条目的「图片型 EPUB」也纳入，
+     * 与 Mihon 原版不同：spine 直接引用 image 开头 media-type 条目的「图片型 EPUB」也纳入，
      * 否则这类书会被过滤成 0 页 → 上层报「无图片」→ 回退文件浏览器。
      */
     private fun getPagesFromDocument(document: Document): List<ManifestItem> {
@@ -93,7 +93,7 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
     /**
      * Returns all the images contained in every page from the epub.
      * 保留宽松行为（收集页面里所有 img / svg:image，不去重到「必须恰好 1 张」），
-     * 以不回归现有能正常打开的 EPUB；同时新增 image/* spine 直引页与 href 解码。
+     * 以不回归现有能正常打开的 EPUB；同时新增 image 开头 media-type 的 spine 直引页与 href 解码。
      */
     private fun getImagesFromPages(pages: List<ManifestItem>, packageHref: String): List<String> {
         if (pages.isEmpty()) return emptyList()
