@@ -471,21 +471,6 @@ class ReaderPreferences(
         )
 
         /**
-         * Komiho: 降噪档位（flag → label）。Guided Filter 的 (radius, eps) 映射在
-         * [MihonSyEnhancer]，初版经验值、待真机三档画质实测再调。
-         */
-        val DenoiseLevelOptions = listOf(
-            0 to MR.strings.denoise_off,
-            1 to MR.strings.denoise_on,
-        )
-
-        /** Komiho: 大图强制 AI 增强开关（放开 r≤1 门控），复用通用 关闭/开启 文案。 */
-        val AiBypassFitOptions = listOf(
-            false to MR.strings.denoise_off,
-            true to MR.strings.denoise_on,
-        )
-
-        /**
          * Komiho: CPU-side modes as an explicit (flag → label) table for the grouped picker.
          * Flags match the values stored in [enhancementMode]; [EnhancementModes] stays as the
          * full index map so old stored values keep resolving.

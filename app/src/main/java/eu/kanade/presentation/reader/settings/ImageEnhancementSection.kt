@@ -72,38 +72,25 @@ fun ImageEnhancementSection(
     val mode by preferences.enhancementMode.collectAsState()
 
     Column(modifier) {
-        // Komiho: 降噪独立于增强档位（mode 0 也生效），常驻首行。
+        // Komiho: 降噪独立于增强档位（mode 0 也生效），常驻首行；打勾开关样式。
         val denoise by preferences.denoiseLevel.collectAsState()
-        EnhancementParamLabel(MR.strings.enhancement_denoise)
-        SettingsChipRow {
-            ReaderPreferences.DenoiseLevelOptions.forEach { (value, labelRes) ->
-                FilterChip(
-                    selected = denoise == value,
-                    onClick = { preferences.denoiseLevel.set(value) },
-                    label = { Text(stringResource(labelRes)) },
-                )
-            }
-        }
+        CheckboxItem(
+            label = stringResource(MR.strings.enhancement_denoise),
+            checked = denoise != 0,
+            onClick = { preferences.denoiseLevel.set(if (denoise != 0) 0 else 1) },
+        )
 
-        // Komiho: 图像增强总开关——关闭/开启两个 chip；关闭时下方 CPU/GPU/NPU 分组全部隐藏。
-        EnhancementGroupLabel(MR.strings.enhancement_group_title)
+        // Komiho: 图像增强总开关（打勾样式）；关闭时下方 CPU/GPU/NPU 分组全部隐藏。
         val lastMode by preferences.enhancementLastMode.collectAsState()
         val setMode: (Int) -> Unit = {
             preferences.enhancementLastMode.set(it)
             preferences.enhancementMode.set(it)
         }
-        SettingsChipRow {
-            FilterChip(
-                selected = mode == 0,
-                onClick = { preferences.enhancementMode.set(0) },
-                label = { Text(stringResource(MR.strings.denoise_off)) },
-            )
-            FilterChip(
-                selected = mode != 0,
-                onClick = { setMode(if (lastMode != 0) lastMode else 2) },
-                label = { Text(stringResource(MR.strings.denoise_on)) },
-            )
-        }
+        CheckboxItem(
+            label = stringResource(MR.strings.enhancement_group_title),
+            checked = mode != 0,
+            onClick = { setMode(if (mode != 0) 0 else if (lastMode != 0) lastMode else 2) },
+        )
 
         if (mode != 0) {
         EnhancementGroupLabel(MR.strings.enhancement_group_cpu)
@@ -222,7 +209,7 @@ fun ImageEnhancementSection(
                             selected = mode == 5 && activeModel == model,
                             onClick = {
                                 preferences.aiModelId.set(model.id)
-                                preferences.enhancementMode.set(5)
+                                setMode(5)
                             },
                             label = { Text(model.displayLabel()) },
                         )
@@ -231,28 +218,22 @@ fun ImageEnhancementSection(
             }
         }
 
-        }  // Komiho: if (mode != 0) —— 关闭时隐藏全部增强分组
-
+        // Komiho: 显示增强状态角标——随增强组开关隐藏。
         CheckboxItem(
             label = stringResource(MR.strings.pref_show_enhancement_status),
             pref = preferences.showEnhancementStatus,
         )
 
-        // Komiho: 大图强制 AI 增强（放开 r≤1 尺寸门控；MP 输出门仍兜底）。
-        // 放在「显示增强状态」之下；AI 档专属，其他模式不渲染。
         if (mode == 5) {
+            // Komiho: 大图强制 AI 增强（放开 r≤1 尺寸门控；MP 输出门仍兜底）。
             val bypass by preferences.aiBypassFitGate.collectAsState()
-            EnhancementParamLabel(MR.strings.ai_bypass_fit)
-            SettingsChipRow {
-                ReaderPreferences.AiBypassFitOptions.forEach { (value, labelRes) ->
-                    FilterChip(
-                        selected = bypass == value,
-                        onClick = { preferences.aiBypassFitGate.set(value) },
-                        label = { Text(stringResource(labelRes)) },
-                    )
-                }
-            }
+            CheckboxItem(
+                label = stringResource(MR.strings.ai_bypass_fit),
+                checked = bypass,
+                onClick = { preferences.aiBypassFitGate.set(!bypass) },
+            )
         }
+        }  // Komiho: if (mode != 0) —— 关闭时隐藏增强分组、模型选择、角标开关与强制增强
     }
 }
 
