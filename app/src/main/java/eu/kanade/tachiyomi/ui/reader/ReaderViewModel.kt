@@ -176,6 +176,16 @@ class ReaderViewModel @JvmOverloads constructor(
     // 由 ChapterLoader 的 onCacheProgress 置 true，章节加载结束 / 开始时置 false。
     private val _chapterCaching = MutableStateFlow(false)
     val chapterCaching = _chapterCaching.asStateFlow()
+
+    // 普通打开书籍窗口（章节列表已就绪、首图仍在解码 / 图像增强中）：首图真正绘制完成后由
+    // ReaderActivity.onPageLoaded 置 false。期间指示器保留「正在打开」文案，覆盖图像加强解码那截黑屏。
+    private val _chapterOpening = MutableStateFlow(false)
+    val chapterOpening = _chapterOpening.asStateFlow()
+
+    /** 首图已绘制完成，结束「正在打开」窗口。 */
+    fun notifyFirstPageRendered() {
+        _chapterOpening.value = false
+    }
     // SY <--
 
     // SY --> Komiho: 加密本密码输入：暂存待重载章节与起始页
@@ -510,6 +520,8 @@ class ReaderViewModel @JvmOverloads constructor(
         // SY --> Komiho: 每次加载章节先复位缓存进度（0f = 转圈；有整本下载时由加载器逐步上报）。
         _chapterCacheProgress.value = 0f
         _chapterCaching.value = false
+        // 普通打开窗口开始：首图解码 / 图像增强期间显示纯文字提示，绘制完成后置 false。
+        _chapterOpening.value = true
         // SY <--
         loader.loadChapter(chapter /* SY --> */, page/* SY <-- */)
         // SY --> Komiho: 整本下载已在 loader.loadChapter 内完成，其后只剩页面解码，不再属于「缓存中」。

@@ -17,6 +17,9 @@ import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.TextView
 import android.view.View.LAYER_TYPE_HARDWARE
 import android.view.WindowManager
 import android.widget.Toast
@@ -209,6 +212,10 @@ class ReaderActivity : BaseActivity() {
 
     private var loadingIndicator: ReaderProgressIndicator? = null
 
+    // Komiho: 普通打开书籍（首图解码 / 图像增强）期间的纯文字提示，不含进度环，
+    // 与缓存进度环（正在缓存）视觉区分，避免混淆。
+    private var openingHint: TextView? = null
+
     var isScrollingThroughPages = false
         private set
 
@@ -292,12 +299,19 @@ class ReaderActivity : BaseActivity() {
             .onEach { p -> loadingIndicator?.let { if (p != null) it.setProgress((p * 100).toInt()) } }
             .launchIn(lifecycleScope)
 
-        // Komiho: 缓存进行中时在进度环下方显示「正在缓存」文案，结束即清除。
+        // Komiho: 整本缓存下载进行中，进度环下方显示「正在缓存」；结束即清除。
         viewModel.chapterCaching
             .onEach { caching ->
                 loadingIndicator?.setLabel(
                     if (caching) getString(R.string.loading_caching) else null,
                 )
+            }
+            .launchIn(lifecycleScope)
+
+        // Komiho: 首图绘制完成（或出错）后收起「正在打开」提示。
+        viewModel.chapterOpening
+            .onEach { opening ->
+                if (!opening) hideOpeningHint()
             }
             .launchIn(lifecycleScope)
         // SY <--
@@ -1239,6 +1253,11 @@ class ReaderActivity : BaseActivity() {
             binding.readerContainer.removeView(it)
             loadingIndicator = null
         }
+        // Komiho: 章节已就绪、但首图仍在解码 / 图像增强 → 显示纯文字提示（无进度环），
+        // 避免这段黑屏无反馈；缓存进行中不显示（由进度环承担）。首图绘制完成后由 onPageLoaded 收起。
+        if (viewModel.chapterOpening.value && !viewModel.chapterCaching.value) {
+            showOpeningHint()
+        }
         // SY -->
         val state = viewModel.state.value
         if (state.indexChapterToShift != null && state.indexPageToShift != null) {
@@ -1267,6 +1286,34 @@ class ReaderActivity : BaseActivity() {
             viewModel.getChapterUrl()?.let { url ->
                 assistUrl = url
             }
+        }
+    }
+
+    /**
+     * Komiho: 普通打开书籍（首图解码 / 图像增强）期间的纯文字提示。无进度环，与缓存进度环区分。
+     */
+    private fun showOpeningHint() {
+        if (openingHint != null) return
+        openingHint = TextView(this).apply {
+            text = getString(R.string.loading_opening)
+            textSize = 14f
+            // 阅读器背景为深色，用浅灰保证可见；浅色背景下同为可读灰阶。
+            setTextColor(android.graphics.Color.LTGRAY)
+            gravity = Gravity.CENTER
+            isClickable = false
+            isFocusable = false
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+        binding.readerContainer.addView(openingHint)
+    }
+
+    private fun hideOpeningHint() {
+        openingHint?.let {
+            binding.readerContainer.removeView(it)
+            openingHint = null
         }
     }
 
@@ -1358,6 +1405,13 @@ class ReaderActivity : BaseActivity() {
      */
     fun onPageLoaded(page: ReaderPage) {
         viewModel.maybeAutoWebtoonByAspectRatio(page)
+        // Komiho: 当前章节首图绘制完成 → 收起「渲染中」文字提示（覆盖图像加强解码后的黑屏）。
+        if (viewModel.chapterOpening.value &&
+            page.chapter.chapter.id == viewModel.state.value.currentChapter?.chapter?.id
+        ) {
+            viewModel.notifyFirstPageRendered()
+            hideOpeningHint()
+        }
     }
     // MihonSY <--
 

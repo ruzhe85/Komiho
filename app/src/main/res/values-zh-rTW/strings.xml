@@ -382,6 +382,7 @@
     <string name="chapter_ordinal">第 %1$s 話</string>
     <string name="bookmarks_count_subtitle">%1$s · %2$d 個書籤</string>
     <string name="reader_page_num">第 %1$d 頁</string>
+    <string name="loading_opening">正在打開</string>
     <string name="loading_caching">正在緩存…</string>
     <string name="unknown_series">未知系列</string>
     <string name="delete_series_title">刪除整個系列？</string>
