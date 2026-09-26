@@ -235,8 +235,9 @@ class WebtoonViewer(
         }
 
         config.imagePropertyChangedListener = {
-            refreshAdapter()
+            config.onImagePropertyChanged()
         }
+        config.bindRefreshAdapter { refreshAdapter() }
 
         // 基线：此刻适配器就是按这些设置建的，所以紧接着的首发回调不该触发重建。
         lastImageFingerprint = config.imageFingerprint()
@@ -624,11 +625,15 @@ class WebtoonViewer(
         val firstPos = lm?.findFirstVisibleItemPosition() ?: 0
         val firstView = if (firstPos >= 0) lm?.findViewByPosition(firstPos) else null
         val offset = firstView?.let { it.top - recycler.paddingTop } ?: 0
-        recycler.adapter = adapter
+            recycler.adapter = adapter
         if (firstPos >= 0) {
             lm?.scrollToPositionWithOffset(firstPos, offset)
         }
     }
+
+    override fun deferImagePropertyRefresh() = config.deferImagePropertyRefresh()
+
+    override fun flushImagePropertyRefresh() = config.flushImagePropertyRefresh()
 }
 
 // Double the cache size to reduce rebinds/recycles incurred by the extra layout space on scroll direction changes

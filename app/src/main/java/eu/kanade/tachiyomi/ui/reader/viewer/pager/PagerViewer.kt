@@ -193,8 +193,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         }
 
         config.imagePropertyChangedListener = {
-            refreshAdapter()
+            config.onImagePropertyChanged()
         }
+        config.bindRefreshAdapter { refreshAdapter() }
 
         // 基线：此刻适配器就是按这些设置建的，所以紧接着的首发回调不该触发重建。
         lastImageFingerprint = config.imageFingerprint()
@@ -592,6 +593,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             pager.setCurrentItem(currentItem, false)
         }
     }
+
+    override fun deferImagePropertyRefresh() = config.deferImagePropertyRefresh()
+
+    override fun flushImagePropertyRefresh() = config.flushImagePropertyRefresh()
 
     /**
      * Called from the containing activity when a key [event] is received. It should return true

@@ -18,6 +18,51 @@ abstract class ViewerConfig(
     var imagePropertyChangedListener: (() -> Unit)? = null
 
     /**
+     * Komiho: 设置窗口打开期间延迟「影响成像」的刷新。
+     *
+     * 设置窗口（阅读器设置 Dialog）打开时调用 [deferImagePropertyRefresh]，此后的图像属性变更
+     * 只置 [pendingImagePropertyChange] 标记、不立即重建；关闭窗口时 [flushImagePropertyRefresh]
+     * 一次性触发一次重建。这样连续改增强/缩放等选项不会每改一次就重解码 + 重增强可见页。
+     */
+    var imagePropertyRefreshDeferred = false
+        private set
+    var pendingImagePropertyChange = false
+        private set
+    private var refreshAdapterAction: (() -> Unit)? = null
+
+    /** viewer 在注册 [imagePropertyChangedListener] 时一并绑定真正的重建动作。 */
+    fun bindRefreshAdapter(action: () -> Unit) {
+        refreshAdapterAction = action
+    }
+
+    /** 设置窗口打开：进入延迟模式并清空待刷新标记。 */
+    fun deferImagePropertyRefresh() {
+        imagePropertyRefreshDeferred = true
+        pendingImagePropertyChange = false
+    }
+
+    /**
+     * 图像属性变更入口：延迟模式下只置标记，否则立即重建。
+     * [imagePropertyChangedListener] 应直接委托到这里。
+     */
+    fun onImagePropertyChanged() {
+        if (imagePropertyRefreshDeferred) {
+            pendingImagePropertyChange = true
+        } else {
+            refreshAdapterAction?.invoke()
+        }
+    }
+
+    /** 设置窗口关闭：退出延迟模式，若有待刷新则一次性重建。 */
+    fun flushImagePropertyRefresh() {
+        imagePropertyRefreshDeferred = false
+        if (pendingImagePropertyChange) {
+            pendingImagePropertyChange = false
+            refreshAdapterAction?.invoke()
+        }
+    }
+
+    /**
      * Komiho: 「影响成像」的全部偏好拼成的指纹。
      *
      * 用途见 WebtoonViewer / PagerViewer 的 refreshAdapter()：`register()` 在订阅时会**首发一次
