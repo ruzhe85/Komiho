@@ -202,6 +202,8 @@ object MihonSyEnhancer {
         onComplete: ((enhanced: Boolean, elapsedMillis: Long, gpuWaitMillis: Long) -> Unit)? = null,
         sourceTag: String = "",
         pageIndex: Int = -1,
+        targetWidth: Int = -1,
+        targetHeight: Int = -1,
     ): Bitmap? {
         val start = SystemClock.uptimeMillis()
         if (input.isRecycled) {
@@ -306,7 +308,7 @@ object MihonSyEnhancer {
 
             // Komiho: GPU AI upscale (ncnn + Vulkan). Scale is fixed by the model (2x).
             5 -> {
-                enhanceWithGpu(src, preferences, sourceTag, gpuTiming, pageIndex)
+                enhanceWithGpu(src, preferences, sourceTag, gpuTiming, pageIndex, targetWidth, targetHeight)
             }
 
             else -> null
@@ -456,6 +458,8 @@ object MihonSyEnhancer {
         sourceTag: String = "",
         timing: Waifu2x.Timing? = null,
         pageIndex: Int = -1,
+        targetWidth: Int = -1,
+        targetHeight: Int = -1,
     ): Bitmap? {
         if (Waifu2x.isSupported) {
             // Komiho: model and tile geometry are user preferences. Both are pushed before
@@ -479,11 +483,33 @@ object MihonSyEnhancer {
                 tag = sourceTag,
                 timing = timing,
             )?.let { upscaled ->
-                // Komiho (2026-09-26): AI 2x 结果直接交给 SSIV 缩放显示，软件层不再降采样。
-                // 此前的「fit 回视图再降采样」方案（Lanczos3/Mitchell）真机实测对大源图
-                // 是结构性白做——采样先丢细节、AI 2x、再缩回视图 ≈ AI 输入尺寸，净画质
-                // 无收益还偏软；且网点图摩尔纹随细节增多无法避免。维持 2x 直出由 SSIV
-                // 统一缩放。
+                // Komiho (2026-09-26 定稿): AI 2x 完整 bitmap 出来后，按视图尺寸做唯一一次
+                // 软件降采样（Mitchell-Netravali B=C=1/3，无负瓣振铃），让 SSIV≈1:1 显示。
+                // 跑到这里的前提：源图 fit 比例 r>1（显示端需要放大，见解码器 skip 门），
+                // 因此本缩放比例 ∈ [0.5, 1)，温和且 AI 增益全部保留；r≤1 的大源图已在
+                // 解码器被跳过（AI 往返是白做）。
+                // ⚠️ targetHeight<=0（长条页约定）：只按宽度 fit，高度不约束。
+                if (upscaled.width > input.width) {
+                    val goalW = if (targetWidth > 0) targetWidth else input.width
+                    val scale = if (targetHeight > 0) {
+                        min(
+                            goalW.toFloat() / upscaled.width.toFloat(),
+                            targetHeight.toFloat() / upscaled.height.toFloat(),
+                        )
+                    } else {
+                        goalW.toFloat() / upscaled.width.toFloat()
+                    }
+                    if (scale < 1f) {
+                        val argb = ensureArgb(upscaled) ?: return upscaled
+                        val down = nativeResample(argb, scale, 3)
+                        if (down != null && down !== argb) {
+                            if (argb !== upscaled) argb.recycle()
+                            upscaled.recycle()
+                            return down
+                        }
+                        if (argb !== upscaled) argb.recycle()
+                    }
+                }
                 return upscaled
             }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
