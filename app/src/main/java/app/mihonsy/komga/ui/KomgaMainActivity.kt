@@ -4199,6 +4199,10 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
     // SY --> Komiho Phase5/Phase7: 页级缓存目录（WebDAV/SMB 共用 remote_pages）并入
     // usage 统计与清除。旧 webdav_pages 目录已废弃移除。
     val remotePageCacheDir = remember { File(context.cacheDir, "remote_pages") }
+    // SY --> Komiho: 远程/本地 PDF 整本缓存（PdfPageLoader 的 pdf_* / pdf_local_*），
+    // 此前统计与清除都漏了这个目录，导致远程缓存占用显示远小于实际。
+    val remotePdfCacheDir = remember { File(context.cacheDir, "remote_pdf") }
+    // SY <--
     // SY <--
     // SY: 本地/SMB/WebDAV 三套封面缓存（filesDir 各自隔离，可直接删目录重建）。
     // 注：Komga 封面缓存是 Coil 磁盘池（cacheDir/komga_covers），**独立存在**——由 Komga
@@ -4226,10 +4230,14 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 .filter { it.isDirectory }
                 .flatMap { it.listFiles()?.toList() ?: emptyList() }
                 .sumOf { it.length() }
+            // SY <-- // SY --> Komiho: PDF 整本缓存计入占用（.part 为下载中临时文件，不计）
+            val pdfBytes = remotePdfCacheDir.listFiles()?.toList().orEmpty()
+                .filter { it.isFile && !it.name.endsWith(".part") }
+                .sumOf { it.length() }
             // SY <--
             // SY: 封面缓存三套目录（本地/SMB/WebDAV，各含子目录）总占用。
             coverUsageBytes = coverCacheDirs.sumOf { dir -> dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
-            fallbackBytes + pageBytes
+            fallbackBytes + pageBytes + pdfBytes
         }
     }
     val scope = rememberCoroutineScope()
@@ -4308,7 +4316,14 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                                 bytes
                             }
                             // SY <--
-                            fallbackTotal + pageTotal
+                            // SY --> Komiho: 清除范围含 PDF 整本缓存
+                            val pdfTotal = remotePdfCacheDir.let { dir ->
+                                val bytes = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                                dir.deleteRecursively()
+                                bytes
+                            }
+                            // SY <--
+                            fallbackTotal + pageTotal + pdfTotal
                         }
                         usageTick++
                         android.widget.Toast.makeText(
