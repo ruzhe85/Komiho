@@ -8,7 +8,7 @@
 
 支持 **Komga、本地文件、WebDAV、SMB** 等多种漫画来源
 
-包名 `cn.ruzhe.komiho` ｜ 版本 1.2.0 (9) ｜ Android 8.0+
+包名 `cn.ruzhe.komiho` ｜ 版本 1.3.1 (11) ｜ Android 8.0+
 
 [中文](./README.md) | [English](./README.en.md)
 
@@ -31,10 +31,9 @@ Komiho 将不同来源的漫画统一到同一套浏览与阅读体验中：
 
 不同来源对格式的支持略有差异：
 
-* **本地 / WebDAV / SMB 直读**：漫画归档 `CBZ` `CBR` `CB7` `CBT` `ZIP` `RAR` `7Z` `TAR`、`EPUB`，以及**散图文件夹**（目录内直接放图片即可）。
-* **通过 Komga 服务器**：由 Komga 服务端负责转页，支持 Komga 所支持的全部格式（含 `PDF` 等），客户端按图片页读取。
+* **本地 / WebDAV / SMB 直读**：漫画归档 `CBZ` `CBR` `CB7` `CBT` `ZIP` `RAR` `7Z` `TAR``PDF``EPUB`，以及**散图文件夹**（目录内直接放图片即可）。
+* **通过 Komga 服务器**：由 Komga 服务端负责转页，支持 Komga 所支持的全部格式（除EPUB），客户端按图片页读取。
 
-> 💡 本地 / WebDAV / SMB 直读暂不支持 `PDF`，需经 Komga 服务器读取（由服务端将 PDF 转为图片页）。
 
 ### 📖 完整阅读体验
 
