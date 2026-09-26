@@ -208,10 +208,6 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                             sourceTag = sourceTag,
                             // Komiho: 页号透传给增强器 —— 角标按页登记引擎，别让并发页互相覆盖。
                             pageIndex = options.pageIndex,
-                            // Komiho: AI 2x 后的降采样 fit 目标 = 视图尺寸；长条页高度 -1
-                            // （只按宽度 fit，高度不约束）。
-                            targetWidth = targetW,
-                            targetHeight = if (isTallStrip) -1 else targetH,
                         )
                         if (enhanceOk) {
                             EnhanceTimings.put(
