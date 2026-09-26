@@ -387,6 +387,7 @@
     <string name="chapter_ordinal">Ch. %1$s</string>
     <string name="bookmarks_count_subtitle">%1$s · %2$d bookmarks</string>
     <string name="reader_page_num">Page %1$d</string>
+    <string name="loading_caching">Now Loading…</string>
     <string name="unknown_series">Unknown series</string>
     <string name="delete_series_title">Delete whole series?</string>
     <string name="delete_series_msg">This deletes all %2$d downloaded items of \"%1$s\" and cannot be undone.</string>

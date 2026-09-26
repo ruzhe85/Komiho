@@ -292,6 +292,16 @@ class ReaderActivity : BaseActivity() {
             .onEach { p -> loadingIndicator?.let { if (p != null) it.setProgress((p * 100).toInt()) } }
             .launchIn(lifecycleScope)
 
+        // Komiho: 缓存进行中时在进度环下方显示「正在缓存」文案，结束即清除。
+        viewModel.chapterCaching
+            .onEach { caching ->
+                loadingIndicator?.setLabel(
+                    if (caching) getString(R.string.loading_caching) else null,
+                )
+            }
+            .launchIn(lifecycleScope)
+        // SY <--
+
         viewModel.state
             .map { it.manga }
             .distinctUntilChanged()
@@ -1165,6 +1175,10 @@ class ReaderActivity : BaseActivity() {
         loadingIndicator = ReaderProgressIndicator(this)
         // Komiho: 创建时把当前缓存进度（若有）也带进来，避免切换 viewer 重建后错过首帧进度。
         viewModel.chapterCacheProgress.value?.let { loadingIndicator?.setProgress((it * 100).toInt()) }
+        // Komiho: 重建指示器时若正处于整本缓存，补上「正在缓存」文案，避免漏帧。
+        if (viewModel.chapterCaching.value) {
+            loadingIndicator?.setLabel(getString(R.string.loading_caching))
+        }
         binding.readerContainer.addView(loadingIndicator)
 
         startPostponedEnterTransition()

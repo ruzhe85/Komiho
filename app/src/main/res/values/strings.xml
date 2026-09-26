@@ -398,6 +398,7 @@
     <string name="chapter_ordinal">第 %1$s 话</string>
     <string name="bookmarks_count_subtitle">%1$s · %2$d 个书签</string>
     <string name="reader_page_num">第 %1$d 页</string>
+    <string name="loading_caching">正在缓存…</string>
     <string name="unknown_series">未知系列</string>
     <string name="delete_series_title">删除整个系列？</string>
     <string name="delete_series_msg">将删除「%1$s」全部 %2$d 本已下载内容，且无法恢复。</string>
