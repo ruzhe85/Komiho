@@ -1311,9 +1311,13 @@ class ReaderActivity : BaseActivity() {
     }
 
     private fun hideOpeningHint() {
-        openingHint?.let {
-            binding.readerContainer.removeView(it)
-            openingHint = null
+        val view = openingHint ?: return
+        // Komiho: 状态先同步清空（后续 showOpeningHint 可立即重建），实际 removeView 统一
+        // post 到下一帧 —— onPageLoaded 可能由 SSIV 在布局/绘制遍历中回调，同步 removeView
+        // 会在遍历中途改 children 数组，触发 dispatchDraw NPE（竖屏开增强打开即崩，真机实锤）。
+        openingHint = null
+        binding.readerContainer.post {
+            binding.readerContainer.removeView(view)
         }
     }
 

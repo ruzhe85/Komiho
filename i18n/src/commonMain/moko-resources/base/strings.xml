@@ -564,11 +564,6 @@
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <!-- 2026-09-19 模型插件化: NPU 模型不再内置，UI 在 NPU 分组显示此空态提示（点击跳 GitHub 下载模型包）。 -->
     <string name="ai_model_plugin_hint">Model package download</string>
-    <string name="ai_downscale">AI downscale</string>
-    <string name="ai_downscale_off">Off (SSIV)</string>
-    <string name="ai_downscale_mitchell">Mitchell-Netravali</string>
-    <string name="ai_downscale_catmull">Catmull-Rom</string>
-    <string name="ai_downscale_lanczos">Lanczos3</string>
     <string name="pref_ai_tile_size">Tile size</string>
     <string name="ai_tile_size_96">96</string>
     <string name="ai_tile_size_128">128</string>
