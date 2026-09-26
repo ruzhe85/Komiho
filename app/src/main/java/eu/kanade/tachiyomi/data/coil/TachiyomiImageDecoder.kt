@@ -96,22 +96,26 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // GPU limit.
         val isTallStrip = srcHeight > 0 && srcWidth > 0 &&
             srcHeight.toFloat() / srcWidth.toFloat() > 2.5f
+        // Komiho（2026-09-26 方案 B）: 增强时解码/预缩目标放宽为统一的 2048 上限
+        // （MAX_ENHANCE_SOURCE_DIMENSION），不再缩到视图尺寸 —— ≤2048 的源图全分辨率喂
+        // AI（与长条页语义一致），只有 inSampleSize 粒度解出仍 >2048 的真大图才预缩。
+        // AI 后的降采样目标（fit 回视图，保证 SSIV≈1:1）单独由 enhanceTargetW/H 表达。
         val (targetW, targetH) = if (options.enhanced) {
             if (isTallStrip) {
-                // Komiho: 采样高度仍用 srcHeight（高度不约束解码，行为与旧版一致；
-                // 负数不能流进 calculateInSampleSize —— coil3 DecodeUtils 对它的语义未知）。
-                // 长条页的「降采样高度不约束」由下方 enhanceH = -1 单独表达。
-                enhanceTarget(dstWidth) to srcHeight
+                // 采样高度仍用 srcHeight（高度不约束解码，行为与旧版一致；负数不能流进
+                // calculateInSampleSize —— coil3 DecodeUtils 对它的语义未知）。
+                MAX_ENHANCE_SOURCE_DIMENSION to srcHeight
             } else {
-                enhanceTarget(dstWidth) to enhanceTarget(dstHeight)
+                MAX_ENHANCE_SOURCE_DIMENSION to MAX_ENHANCE_SOURCE_DIMENSION
             }
         } else {
             dstWidth to dstHeight
         }
-        // Komiho: 传给增强器的降采样目标。长条页高度传 -1 = 不约束（只按宽度 fit）——
-        // 此前传 srcHeight 会让 AI 2x 结果的 fit-into 降采样被高度项（2h/h=0.5）钳回
-        // 原始尺寸，超分增益全被吃掉。
-        val enhanceTargetH = if (options.enhanced && isTallStrip) -1 else targetH
+        // Komiho: AI 后降采样的 fit 目标（视图尺寸）。长条页高度传 -1 = 不约束（只按宽度
+        // fit）—— 此前传 srcHeight 会让 fit-into 被高度项（2h/h=0.5）钳回原始尺寸，
+        // 超分增益全被吃掉。
+        val enhanceTargetW = enhanceTarget(dstWidth)
+        val enhanceTargetH = if (isTallStrip) -1 else enhanceTarget(dstHeight)
 
         val sampleSize = DecodeUtils.calculateInSampleSize(
             srcWidth = srcWidth,
@@ -183,9 +187,9 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                         sourceTag = sourceTag,
                         // Komiho: 页号透传给增强器 —— 角标按页登记引擎，别让并发页互相覆盖。
                         pageIndex = options.pageIndex,
-                        // Komiho: 把「适应屏幕」的目标尺寸传进去，AI 2x 后由软件层缩回，
-                        // 避免 SSIV 双线性把网点糊掉；长条页 enhanceTargetH=-1 只按宽度 fit。
-                        targetWidth = targetW,
+                        // Komiho: AI 后按视图尺寸 fit 缩回，保证 SSIV≈1:1 不再重采样；
+                        // 长条页高度不约束（enhanceTargetH=-1，只按宽度 fit）。
+                        targetWidth = enhanceTargetW,
                         targetHeight = enhanceTargetH,
                     )
                     if (enhanceOk) {
