@@ -168,6 +168,14 @@ class WebtoonPageHolder(
         frame.recycle()
         progressIndicator.setProgress(0)
         progressContainer.isVisible = true
+        // Komiho (2026-09-26): frame.recycle() 已把当前图像清空，但这里必须同步清掉
+        // 「已渲染」标记。否则 holder 被回收后重绑到同一页（该页仍 Ready）时，setImage()
+        // 的 renderedPage===currentPage 守卫会命中而直接 return —— 既不重绘清空的图、也不隐藏
+        // 转圈，表现为「转圈卡死，退出重进才恢复」。100+ 小图时回收/重绑极频繁，最易触发。
+        // 清掉后重绑必走完整 setImage 重绘并隐藏转圈；非回收的重绑（适配器通知）不受影响。
+        renderedPage = null
+        renderedEnhancementMode = -1
+        renderedEnhancementKey = ""
     }
 
     /**
