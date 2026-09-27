@@ -215,8 +215,7 @@
     <!-- Settings: reader -->
     <string name="settings_reading">Reader</string>
     <string name="settings_advanced">Advanced</string>
-    <string name="reader_progress_bubble_count">Progress bar thumbnail count</string>
-    <string name="reader_progress_bubble_count_summary">0 = off; adjustable 0–5</string>
+    <string name="reader_progress_bubble">Progress bar thumbnails</string>
     <string name="settings_reader">Reader settings</string>
     <string name="settings_reader_summary">Page turns / direction / zoom / enhance / nav…</string>
     <string name="settings_reconfigure">Reconfigure connection</string>

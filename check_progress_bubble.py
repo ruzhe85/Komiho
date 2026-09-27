@@ -129,9 +129,9 @@ else:
     fails.append("[缺失] ReaderActivity: MangaCover 构造不完整")
 
 # 4) 偏好与 key 常量
-print("== KomgaPreferences 数量 ==")
-assert_in(FILES["KomgaPreferences"], "readerProgressBubbleCount", "偏好属性 readerProgressBubbleCount")
-assert_in(FILES["KomgaPreferences"], "KEY_READER_PROGRESS_BUBBLE_COUNT", "key 常量 KEY_READER_PROGRESS_BUBBLE_COUNT")
+print("== KomgaPreferences 开关 ==")
+assert_in(FILES["KomgaPreferences"], "readerProgressBubbleEnabled", "偏好属性 readerProgressBubbleEnabled")
+assert_in(FILES["KomgaPreferences"], "KEY_READER_PROGRESS_BUBBLE_ENABLED", "key 常量 KEY_READER_PROGRESS_BUBBLE_ENABLED")
 
 # 5) API client 缩图 URL
 print("== KomgaApiClient 缩图 URL ==")
@@ -139,8 +139,7 @@ assert_in(FILES["KomgaApiClient"], "fun pageThumbnailUrl(", "pageThumbnailUrl �
 
 # 6) 字符串资源三套
 print("== 字符串资源 ==")
-for key in ("reader_progress_bubble_count", "reader_progress_bubble_count_summary",
-            "settings_advanced"):
+for key in ("reader_progress_bubble", "settings_advanced"):
     for lang, path in STRINGS.items():
         if not os.path.exists(path):
             fails.append(f"[缺失] strings({lang}): 文件不存在 {path}")
@@ -158,9 +157,10 @@ assert_in(km, "var showAdvanced by remember", "showAdvanced 子页状态")
 assert_in(km, "Icons.Filled.Tune", "高级入口图标 Tune")
 assert_in(km, "onPreferenceClick = { showAdvanced = true }", "高级行点击进入子页")
 assert_in(km, "settings_advanced", "SettingsTab 引用 settings_advanced")
-assert_in(km, "reader_progress_bubble_count", "SettingsTab 引用数量字符串")
-assert_in(km, "prefs.readerProgressBubbleCount", "SettingsTab 绑定数量状态")
-assert_in(km, "bubbleCount = n", "数量本地镜像状态即时刷新")
+assert_in(km, "reader_progress_bubble", "SettingsTab 引用开关字符串")
+assert_in(km, "prefs.readerProgressBubbleEnabled", "SettingsTab 绑定开关状态")
+assert_in(km, "bubbleEnabled = it", "开关本地镜像状态即时刷新")
+assert_in(km, "SwitchPreferenceWidget(", "高级子页用 SwitchPreferenceWidget")
 
 # 8) thumbnailCount 穿透：ChapterNavigator 签名 + ReaderAppBars 签名 + 两处调用 + ReaderActivity 传参 + PagePreviewStrip count
 print("== thumbnailCount 穿透 ==")
@@ -174,8 +174,13 @@ if cnt >= 2:
 else:
     fails.append(f"[缺失] ReaderAppBars: 只找到 {cnt} 处 thumbnailCount 传参（期望>=2）")
 assert_in(FILES["ReaderActivity"], "thumbnailCount = thumbnailCount", "ReaderActivity 传 thumbnailCount 给 ReaderAppBars")
-assert_in(FILES["ReaderActivity"], "bubbleCount <= 0", "仅 count>0（即 0 关闭）时整体关闭")
-assert_in(FILES["ReaderActivity"], "prefs.readerProgressBubbleCount", "读取数量偏好")
+assert_in(FILES["ReaderActivity"], "!bubbleEnabled", "开关关闭时整体关闭")
+assert_in(FILES["ReaderActivity"], "prefs.readerProgressBubbleEnabled", "读取开关偏好")
+ra = open(FILES["ReaderActivity"], encoding="utf-8", errors="replace").read()
+if "ORIENTATION_LANDSCAPE" in ra and "if (isLandscape) 4 else 3" in ra:
+    print("  [OK] ReaderActivity: 横屏 4 张 / 竖屏 3 张（按方向固定）")
+else:
+    fails.append("[缺失] ReaderActivity: 未实现横屏4/竖屏3 的固定数量")
 
 # 9) 本地 / SMB / WebDAV / 远程 缩图：复用 PageLoader（ReaderPageThumbnailFetcher）
 print("== 非 Komga 来源缩图（ReaderPageThumbnailFetcher） ==")

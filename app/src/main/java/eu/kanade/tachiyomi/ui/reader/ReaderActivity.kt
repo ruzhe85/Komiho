@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
@@ -885,17 +886,18 @@ class ReaderActivity : BaseActivity() {
 
         // SY --> Komiho: 进度气泡缩略图——Komga 远程走 MangaCover（服务端预生成 300px，零本地解码）；
         // 本地 / SMB / WebDAV / 远程 HttpSource 复用章节 PageLoader 加载页原图作为缩图（ReaderPageThumbnailFetcher）。
-        // count<=0 时整体关闭（传 null）。client 在 remember 内只建一次，避免拖动期间反复 new OkHttpClient。
+        // 开关控制整体开关；数量按屏幕方向固定：横屏 4 张、竖屏 3 张。client 在 remember 内只建一次。
         val prefs = remember { KomgaPreferences(applicationContext) }
-        val bubbleCount = prefs.readerProgressBubbleCount
+        val bubbleEnabled = prefs.readerProgressBubbleEnabled
+        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
         val thumbnailModelForPage: ((Int) -> Any?)? = remember(
             state.currentChapter?.chapter?.url,
             readerSource?.id,
             state.currentChapter?.pageLoader,
             state.currentChapter?.pages,
-            bubbleCount,
+            bubbleEnabled,
         ) {
-            if (bubbleCount <= 0) {
+            if (!bubbleEnabled) {
                 null
             } else if (readerSource?.id == KomgaSource.ID) {
                 val bookUrl = state.currentChapter?.chapter?.url
@@ -938,7 +940,7 @@ class ReaderActivity : BaseActivity() {
                 }
             }
         }
-        val thumbnailCount = if (thumbnailModelForPage != null) bubbleCount else 0
+        val thumbnailCount = if (thumbnailModelForPage != null) (if (isLandscape) 4 else 3) else 0
         // SY <--
 
         ReaderAppBars(

@@ -226,8 +226,7 @@
     <!-- 设置：阅读 -->
     <string name="settings_reading">阅读</string>
     <string name="settings_advanced">高级</string>
-    <string name="reader_progress_bubble_count">进度条缩略图数量</string>
-    <string name="reader_progress_bubble_count_summary">0 = 关闭；可调 0–5 张</string>
+    <string name="reader_progress_bubble">进度条缩略图</string>
     <string name="settings_reader">阅读设置</string>
     <string name="settings_reader_summary">翻页/方向/缩放/增强/导航…</string>
     <string name="settings_reconfigure">重新配置连接</string>
