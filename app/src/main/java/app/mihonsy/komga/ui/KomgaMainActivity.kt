@@ -4046,19 +4046,45 @@ private fun SettingsTab(
             onDismiss = { showAdvanced = false },
             title = composeStringResource(R.string.settings_advanced),
         ) { padding ->
-            var bubbleThumbnail by remember { mutableStateOf(prefs.readerProgressBubbleThumbnail) }
+            var bubbleCount by remember { mutableIntStateOf(prefs.readerProgressBubbleCount) }
+            var showCountDialog by remember { mutableStateOf(false) }
             Column(Modifier.padding(padding).fillMaxSize()) {
                 TextPreferenceWidget(
-                    title = composeStringResource(R.string.reader_progress_bubble_thumbnail),
-                    subtitle = composeStringResource(R.string.reader_progress_bubble_thumbnail_summary),
+                    title = composeStringResource(R.string.reader_progress_bubble_count),
+                    subtitle = composeStringResource(R.string.reader_progress_bubble_count_summary),
                     widget = {
-                        Switch(
-                            checked = bubbleThumbnail,
-                            onCheckedChange = {
-                                bubbleThumbnail = it
-                                prefs.readerProgressBubbleThumbnail = it
-                            },
+                        Text(
+                            text = bubbleCount.toString(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
                         )
+                    },
+                    onPreferenceClick = { showCountDialog = true },
+                )
+            }
+            if (showCountDialog) {
+                AlertDialog(
+                    onDismissRequest = { showCountDialog = false },
+                    title = { Text(composeStringResource(R.string.reader_progress_bubble_count)) },
+                    text = {
+                        Column {
+                            for (n in 0..5) {
+                                TextButton(
+                                    onClick = {
+                                        bubbleCount = n
+                                        prefs.readerProgressBubbleCount = n
+                                        showCountDialog = false
+                                    },
+                                ) {
+                                    Text(text = n.toString())
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showCountDialog = false }) {
+                            Text(composeStringResource(R.string.storage_cancel))
+                        }
                     },
                 )
             }

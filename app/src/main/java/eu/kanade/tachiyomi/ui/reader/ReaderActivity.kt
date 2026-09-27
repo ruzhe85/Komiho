@@ -885,14 +885,15 @@ class ReaderActivity : BaseActivity() {
         // SY --> Komiho: 进度气泡缩略图——仅 Komga 远程且开关开启时提供 MangaCover（走 MangaCoverFetcher 自带 Komga 鉴权），
         // 否则传 null（ChapterNavigator 据此不显示气泡）。client 在 remember 内只建一次，避免拖动期间反复 new OkHttpClient。
         val prefs = remember { KomgaPreferences(applicationContext) }
+        val bubbleCount = prefs.readerProgressBubbleCount
         val thumbnailModelForPage: ((Int) -> Any?)? = remember(
             state.currentChapter?.chapter?.url,
             readerSource?.id,
-            prefs.readerProgressBubbleThumbnail,
+            bubbleCount,
         ) {
             val isKomga = readerSource?.id == KomgaSource.ID
             val bookUrl = state.currentChapter?.chapter?.url
-            if (isKomga && prefs.readerProgressBubbleThumbnail && bookUrl != null) {
+            if (isKomga && bubbleCount > 0 && bookUrl != null) {
                 val bookId = bookUrl.removePrefix(KomgaSource.BOOK_URL_PREFIX)
                 val client = KomgaApiClient(prefs.connection())
                 val model: (Int) -> Any? = { page: Int ->
@@ -909,6 +910,7 @@ class ReaderActivity : BaseActivity() {
                 null
             }
         }
+        val thumbnailCount = if (thumbnailModelForPage != null) bubbleCount else 0
         // SY <--
 
         ReaderAppBars(
@@ -984,6 +986,9 @@ class ReaderActivity : BaseActivity() {
             onClickBoostPage = ::exhBoostPage,
             onClickBoostPageHelp = viewModel::openBoostPageHelp,
             currentPageText = state.currentPageText,
+            // SY --> Komiho: 缩略图条数量（0–5，0 = 关闭）
+            thumbnailCount = thumbnailCount,
+            // SY <--
             // SY --> Komiho: 进度气泡缩略图数据模型提供器
             thumbnailModelForPage = thumbnailModelForPage,
             // SY <--

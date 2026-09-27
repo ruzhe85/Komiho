@@ -82,8 +82,10 @@ fun ChapterNavigator(
     onPageIndexChange: (Int) -> Unit,
     onPageIndexChangeFinished: () -> Unit,
     // SY --> Komiho: 进度气泡缩略图——给定 0-based 页码返回 Coil data 模型（MangaCover，带 Komga 鉴权），
-    // 非 Komga 源或未开启时由调用方传 null，气泡不显示。
+    // 非 Komga 源或未开启（count=0）时由调用方传 null，气泡不显示。
     thumbnailModelForPage: ((Int) -> Any?)? = null,
+    // SY --> Komiho: 缩略图条显示数量（0–5，0 = 关闭），由设置页控制。
+    thumbnailCount: Int = 0,
     // SY <--
     modifier: Modifier = Modifier,
 ) {
@@ -137,26 +139,44 @@ fun ChapterNavigator(
         disabledContainerColor = backgroundColor,
     )
 
-    // SY --> Komiho: 用 Box 包裹，便于在滑块上方/侧边叠加进度气泡缩略图。
+    // SY --> Komiho: 用 Box 包裹；水平模式把气泡排在进度条上方（不遮挡），垂直模式气泡浮在顶部。
     Box(modifier) {
         if (type.isHorizontal()) {
-            HorizontalChapterNavigator(
-                isRtl = type == ChapterNavigatorType.HORIZONTAL_RTL,
-                state = state,
-                onNextChapter = onNextChapter,
-                enabledNext = enabledNext,
-                onPreviousChapter = onPreviousChapter,
-                enabledPrevious = enabledPrevious,
-                // SY -->
-                currentPageText = currentPageText,
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // SY --> 气泡在进度条上方（不遮挡进度条）
+                if (thumbnailModelForPage != null && totalPages > 1 && thumbnailCount > 0) {
+                    val activePage = if (previewPage >= 0) previewPage else currentPage
+                    PagePreviewStrip(
+                        centerPage = activePage,
+                        count = thumbnailCount,
+                        totalPages = totalPages,
+                        modelForPage = thumbnailModelForPage,
+                        modifier = Modifier,
+                    )
+                }
                 // SY <--
-                totalPages = totalPages,
-                interactionSource = interactionSource,
-                mainAxisPadding = mainAxisPadding,
-                backgroundColor = backgroundColor,
-                buttonColor = buttonColor,
-                modifier = Modifier,
-            )
+                HorizontalChapterNavigator(
+                    isRtl = type == ChapterNavigatorType.HORIZONTAL_RTL,
+                    state = state,
+                    onNextChapter = onNextChapter,
+                    enabledNext = enabledNext,
+                    onPreviousChapter = onPreviousChapter,
+                    enabledPrevious = enabledPrevious,
+                    // SY -->
+                    currentPageText = currentPageText,
+                    // SY <--
+                    totalPages = totalPages,
+                    interactionSource = interactionSource,
+                    mainAxisPadding = mainAxisPadding,
+                    backgroundColor = backgroundColor,
+                    buttonColor = buttonColor,
+                    modifier = Modifier,
+                )
+            }
         } else {
             VerticalChapterNavigator(
                 state = state,
@@ -174,34 +194,37 @@ fun ChapterNavigator(
                 buttonColor = buttonColor,
                 modifier = Modifier,
             )
+            // SY --> 竖向模式气泡浮在顶部居中（不挡侧边竖向滑块）
+            if (thumbnailModelForPage != null && totalPages > 1 && thumbnailCount > 0) {
+                val activePage = if (previewPage >= 0) previewPage else currentPage
+                PagePreviewStrip(
+                    centerPage = activePage,
+                    count = thumbnailCount,
+                    totalPages = totalPages,
+                    modelForPage = thumbnailModelForPage,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+            }
+            // SY <--
         }
-        // SY --> Komiho: 进度条上方常驻显示相邻页缩略图条（拖动时跟随预览页，否则居中当前页）。
-        if (thumbnailModelForPage != null && totalPages > 1) {
-            val activePage = if (previewPage >= 0) previewPage else currentPage
-            PagePreviewStrip(
-                centerPage = activePage,
-                totalPages = totalPages,
-                modelForPage = thumbnailModelForPage,
-                modifier = Modifier.align(Alignment.TopCenter),
-            )
-        }
-        // SY <--
     }
 }
 
-// SY --> Komiho: 进度条上方常驻缩略图条——显示 centerPage 前后共 3 张缩图，每张上方标注页码；
-// 边缘页自动收敛为 2 张。缩图由服务端预生成 300px，Coil 按需拉取并缓存。
+// SY --> Komiho: 进度条上方常驻缩略图条——以 centerPage 为中心显示共 count 张缩图（左右尽量对称），
+// 每张上方标注页码；边缘页自动收敛。缩图由服务端预生成 300px，Coil 按需拉取并缓存。
 @Composable
 private fun PagePreviewStrip(
     centerPage: Int,
+    count: Int,
     totalPages: Int,
     modelForPage: (Int) -> Any?,
     modifier: Modifier = Modifier,
 ) {
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     val itemSize = (screenWidth * 0.26f).coerceIn(96.dp, 160.dp)
+    val half = count / 2
     val pages = buildList {
-        for (p in centerPage - 1..centerPage + 1) {
+        for (p in (centerPage - half)..(centerPage + (count - 1 - half))) {
             if (p in 0 until totalPages) add(p)
         }
     }

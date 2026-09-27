@@ -94,6 +94,8 @@ fun ReaderAppBars(
     currentPageText: String,
     // SY --> Komiho: 进度气泡缩略图数据模型提供器（0-based 页码 → MangaCover 等 Coil 模型；非 Komga 或关闭时由调用方传 null）
     thumbnailModelForPage: ((Int) -> Any?)? = null,
+    // SY --> Komiho: 缩略图条显示数量（0–5，0 = 关闭）
+    thumbnailCount: Int = 0,
     // SY <--
     enabledButtons: Set<String>,
     currentReadingMode: ReadingMode,
@@ -174,6 +176,7 @@ fun ReaderAppBars(
                                     // SY -->
                                     currentPageText = currentPageText,
                                     thumbnailModelForPage = thumbnailModelForPage,
+                                    thumbnailCount = thumbnailCount,
                                     // SY <--
                                     totalPages = totalPages,
                                     onPageIndexChange = onPageIndexChange,
@@ -206,6 +209,7 @@ fun ReaderAppBars(
                         // SY -->
                         currentPageText = currentPageText,
                         thumbnailModelForPage = thumbnailModelForPage,
+                        thumbnailCount = thumbnailCount,
                         // SY <--
                         totalPages = totalPages,
                         onPageIndexChange = onPageIndexChange,
