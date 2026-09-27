@@ -8,7 +8,7 @@
 
 Supports **Komga, local files, WebDAV, SMB** and more comic sources
 
-Package `cn.ruzhe.komiho` ｜ Version 1.2.0 (9) ｜ Android 8.0+
+Package `cn.ruzhe.komiho` ｜ Version 1.3.1 (11) ｜ Android 8.0+
 
 [English](./README.en.md) | [中文](./README.md)
 
@@ -31,10 +31,8 @@ Komiho unifies comics from different sources into a single browsing and reading 
 
 Format support differs slightly by source:
 
-* **Local / WebDAV / SMB direct reading**: comic archives `CBZ` `CBR` `CB7` `CBT` `ZIP` `RAR` `7Z` `TAR`, `EPUB`, and **loose-image folders** (just drop images into a directory).
-* **Via a Komga server**: Komga does the page conversion server-side, so any format Komga supports (including `PDF`) works — the client reads the converted image pages.
-
-> 💡 Local / WebDAV / SMB direct reading does not yet support `PDF`; read PDF through a Komga server (Komga converts it to image pages).
+* **Local / WebDAV / SMB direct reading**: comic archives `CBZ` `CBR` `CB7` `CBT` `ZIP` `RAR` `7Z` `TAR` `PDF` `EPUB`, and **loose-image folders** (just drop images into a directory).
+* **Via a Komga server**: Komga does the page conversion server-side and supports all the formats Komga supports (except `EPUB`); the client reads the converted image pages.
 
 ### 📖 Full reading experience
 
