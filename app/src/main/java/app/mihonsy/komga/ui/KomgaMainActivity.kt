@@ -3950,6 +3950,19 @@ private fun SettingsTab(
             onPreferenceClick = { showBackup = true },
         )
         // SY <--
+        // SY --> Komiho: 高级分组（阅读器进度气泡缩略图等开关）
+        PreferenceGroupHeader(composeStringResource(R.string.settings_advanced))
+        TextPreferenceWidget(
+            title = composeStringResource(R.string.reader_progress_bubble_thumbnail),
+            subtitle = composeStringResource(R.string.reader_progress_bubble_thumbnail_summary),
+            widget = {
+                Switch(
+                    checked = prefs.readerProgressBubbleThumbnail,
+                    onCheckedChange = { prefs.readerProgressBubbleThumbnail = it },
+                )
+            },
+        )
+        // SY <--
         TextPreferenceWidget(
             title = composeStringResource(R.string.settings_about),
             icon = Icons.Outlined.Info,

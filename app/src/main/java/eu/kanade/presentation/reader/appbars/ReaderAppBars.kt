@@ -92,6 +92,9 @@ fun ReaderAppBars(
     onClickBoostPage: () -> Unit,
     onClickBoostPageHelp: () -> Unit,
     currentPageText: String,
+    // SY --> Komiho: 进度气泡缩略图数据模型提供器（0-based 页码 → MangaCover 等 Coil 模型；非 Komga 或关闭时由调用方传 null）
+    thumbnailModelForPage: ((Int) -> Any?)? = null,
+    // SY <--
     enabledButtons: Set<String>,
     currentReadingMode: ReadingMode,
     dualPageSplitEnabled: Boolean,
@@ -170,6 +173,7 @@ fun ReaderAppBars(
                                     currentPage = currentPage,
                                     // SY -->
                                     currentPageText = currentPageText,
+                                    thumbnailModelForPage = thumbnailModelForPage,
                                     // SY <--
                                     totalPages = totalPages,
                                     onPageIndexChange = onPageIndexChange,
@@ -201,6 +205,7 @@ fun ReaderAppBars(
                         currentPage = currentPage,
                         // SY -->
                         currentPageText = currentPageText,
+                        thumbnailModelForPage = thumbnailModelForPage,
                         // SY <--
                         totalPages = totalPages,
                         onPageIndexChange = onPageIndexChange,

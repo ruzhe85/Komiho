@@ -130,6 +130,7 @@ import app.mihonsy.komga.data.download.KomgaBookDownloader
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.download.KomgaDownloadEvent
 import app.mihonsy.komga.source.KomgaSource
+import tachiyomi.domain.manga.model.MangaCover
 import app.mihonsy.komga.data.withAppLanguage
 import logcat.LogPriority
 import tachiyomi.core.common.Constants
@@ -881,6 +882,34 @@ class ReaderActivity : BaseActivity() {
         val verticalNavigatorOnLeft by readerPreferences.verticalNavigatorOnLeft.collectAsState()
         val verticalNavigatorHeight by readerPreferences.verticalNavigatorHeight.collectAsState()
 
+        // SY --> Komiho: 进度气泡缩略图——仅 Komga 远程且开关开启时提供 MangaCover（走 MangaCoverFetcher 自带 Komga 鉴权），
+        // 否则传 null（ChapterNavigator 据此不显示气泡）。client 在 remember 内只建一次，避免拖动期间反复 new OkHttpClient。
+        val prefs = remember { KomgaPreferences(applicationContext) }
+        val thumbnailModelForPage: ((Int) -> Any?)? = remember(
+            state.currentChapter?.chapter?.url,
+            readerSource?.id,
+            prefs.readerProgressBubbleThumbnail,
+        ) {
+            val isKomga = readerSource?.id == KomgaSource.ID
+            val bookUrl = state.currentChapter?.chapter?.url
+            if (isKomga && prefs.readerProgressBubbleThumbnail && bookUrl != null) {
+                val bookId = bookUrl.removePrefix(KomgaSource.BOOK_URL_PREFIX)
+                val client = KomgaApiClient(prefs.connection())
+                { page: Int ->
+                    MangaCover(
+                        mangaId = 0L,
+                        sourceId = KomgaSource.ID,
+                        isMangaFavorite = false,
+                        ogUrl = client.pageThumbnailUrl(bookId, page + 1),
+                        lastModified = 0L,
+                    )
+                }
+            } else {
+                null
+            }
+        }
+        // SY <--
+
         ReaderAppBars(
             visible = state.menuVisible,
 
@@ -954,6 +983,9 @@ class ReaderActivity : BaseActivity() {
             onClickBoostPage = ::exhBoostPage,
             onClickBoostPageHelp = viewModel::openBoostPageHelp,
             currentPageText = state.currentPageText,
+            // SY --> Komiho: 进度气泡缩略图数据模型提供器
+            thumbnailModelForPage = thumbnailModelForPage,
+            // SY <--
             enabledButtons = readerBottomButtons,
             currentReadingMode = ReadingMode.fromPreference(
                 viewModel.getMangaReadingMode(resolveDefault = true),

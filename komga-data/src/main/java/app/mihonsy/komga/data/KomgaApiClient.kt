@@ -220,6 +220,14 @@ class KomgaApiClient(
     }
 
     /**
+     * 单页缩图 URL（阅读器进度气泡用）。服务端预生成，最大边固定缩到 300px，
+     * 走与页图片相同的认证，本地零解码成本。需 PAGE_STREAMING 角色。
+     */
+    fun pageThumbnailUrl(bookId: String, pageNumber: Int): String {
+        return apiUrl("/api/v1/books/$bookId/pages/$pageNumber/thumbnail")
+    }
+
+    /**
      * Cover thumbnail URLs. NOTE: Komga's thumbnail endpoints accept NO size
      * query parameters (openapi confirmed — /series/{id}/thumbnail and
      * /books/{id}/thumbnail have only the id path param). A ?height= hint is

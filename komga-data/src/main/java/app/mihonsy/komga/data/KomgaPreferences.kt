@@ -157,6 +157,16 @@ class KomgaPreferences(context: Context) {
         get() = prefs.getString(KEY_READER_MODE, "").orEmpty()
         set(v) = prefs.edit().putString(KEY_READER_MODE, v).apply()
 
+    /**
+     * Reader: show a page thumbnail inside the progress-bar scrub bubble.
+     * Komga remote only — the server pre-generates a 300px thumbnail per page, so
+     * there is no local decode cost. Default on; gated by the source being Komga
+     * and the toggle in Settings ▸ 高级.
+     */
+    var readerProgressBubbleThumbnail: Boolean
+        get() = prefs.getBoolean(KEY_READER_PROGRESS_BUBBLE_THUMBNAIL, true)
+        set(v) = prefs.edit().putBoolean(KEY_READER_PROGRESS_BUBBLE_THUMBNAIL, v).apply()
+
     // ---- 外观 / 皮肤（M5 启用 Mihon 皮肤）----
     // 明暗模式："SYSTEM"（跟随系统，默认）/ "LIGHT" / "DARK"。
     var themeMode: String
@@ -339,6 +349,7 @@ class KomgaPreferences(context: Context) {
         const val KEY_HOME_SECTION_LAYOUT = "home_section_layout"
         const val KEY_READER_DOUBLE_PAGE = "reader_double_page"
         const val KEY_READER_MODE = "reader_mode"
+        const val KEY_READER_PROGRESS_BUBBLE_THUMBNAIL = "reader_progress_bubble_thumbnail"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_APP_THEME = "app_theme"
         const val KEY_THEME_DARK_AMOLED = "theme_dark_amoled"

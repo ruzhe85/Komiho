@@ -225,6 +225,9 @@
 
     <!-- 设置：阅读 -->
     <string name="settings_reading">阅读</string>
+    <string name="settings_advanced">高级</string>
+    <string name="reader_progress_bubble_thumbnail">阅读器进度气泡缩略图</string>
+    <string name="reader_progress_bubble_thumbnail_summary">拖动进度条时显示当前页缩略图（仅 Komga 远程）</string>
     <string name="settings_reader">阅读设置</string>
     <string name="settings_reader_summary">翻页/方向/缩放/增强/导航…</string>
     <string name="settings_reconfigure">重新配置连接</string>
