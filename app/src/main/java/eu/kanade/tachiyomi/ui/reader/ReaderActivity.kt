@@ -895,7 +895,7 @@ class ReaderActivity : BaseActivity() {
             if (isKomga && prefs.readerProgressBubbleThumbnail && bookUrl != null) {
                 val bookId = bookUrl.removePrefix(KomgaSource.BOOK_URL_PREFIX)
                 val client = KomgaApiClient(prefs.connection())
-                { page: Int ->
+                val model: (Int) -> Any? = { page: Int ->
                     MangaCover(
                         mangaId = 0L,
                         sourceId = KomgaSource.ID,
@@ -904,6 +904,7 @@ class ReaderActivity : BaseActivity() {
                         lastModified = 0L,
                     )
                 }
+                model
             } else {
                 null
             }
