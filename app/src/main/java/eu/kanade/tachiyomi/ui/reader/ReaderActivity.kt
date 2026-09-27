@@ -78,6 +78,7 @@ import eu.kanade.presentation.reader.components.ChapterNavigatorType
 import eu.kanade.presentation.reader.settings.ReaderSettingsDialog
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
+import eu.kanade.tachiyomi.data.coil.ReaderPageThumbnailRequest
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.databinding.ReaderActivityBinding
@@ -882,32 +883,59 @@ class ReaderActivity : BaseActivity() {
         val verticalNavigatorOnLeft by readerPreferences.verticalNavigatorOnLeft.collectAsState()
         val verticalNavigatorHeight by readerPreferences.verticalNavigatorHeight.collectAsState()
 
-        // SY --> Komiho: 进度气泡缩略图——仅 Komga 远程且开关开启时提供 MangaCover（走 MangaCoverFetcher 自带 Komga 鉴权），
-        // 否则传 null（ChapterNavigator 据此不显示气泡）。client 在 remember 内只建一次，避免拖动期间反复 new OkHttpClient。
+        // SY --> Komiho: 进度气泡缩略图——Komga 远程走 MangaCover（服务端预生成 300px，零本地解码）；
+        // 本地 / SMB / WebDAV / 远程 HttpSource 复用章节 PageLoader 加载页原图作为缩图（ReaderPageThumbnailFetcher）。
+        // count<=0 时整体关闭（传 null）。client 在 remember 内只建一次，避免拖动期间反复 new OkHttpClient。
         val prefs = remember { KomgaPreferences(applicationContext) }
         val bubbleCount = prefs.readerProgressBubbleCount
         val thumbnailModelForPage: ((Int) -> Any?)? = remember(
             state.currentChapter?.chapter?.url,
             readerSource?.id,
+            state.currentChapter?.pageLoader,
+            state.currentChapter?.pages,
             bubbleCount,
         ) {
-            val isKomga = readerSource?.id == KomgaSource.ID
-            val bookUrl = state.currentChapter?.chapter?.url
-            if (isKomga && bubbleCount > 0 && bookUrl != null) {
-                val bookId = bookUrl.removePrefix(KomgaSource.BOOK_URL_PREFIX)
-                val client = KomgaApiClient(prefs.connection())
-                val model: (Int) -> Any? = { page: Int ->
-                    MangaCover(
-                        mangaId = 0L,
-                        sourceId = KomgaSource.ID,
-                        isMangaFavorite = false,
-                        ogUrl = client.pageThumbnailUrl(bookId, page + 1),
-                        lastModified = 0L,
-                    )
-                }
-                model
-            } else {
+            if (bubbleCount <= 0) {
                 null
+            } else if (readerSource?.id == KomgaSource.ID) {
+                val bookUrl = state.currentChapter?.chapter?.url
+                if (bookUrl != null) {
+                    val bookId = bookUrl.removePrefix(KomgaSource.BOOK_URL_PREFIX)
+                    val client = KomgaApiClient(prefs.connection())
+                    val model: (Int) -> Any? = { page: Int ->
+                        MangaCover(
+                            mangaId = 0L,
+                            sourceId = KomgaSource.ID,
+                            isMangaFavorite = false,
+                            ogUrl = client.pageThumbnailUrl(bookId, page + 1),
+                            lastModified = 0L,
+                        )
+                    }
+                    model
+                } else {
+                    null
+                }
+            } else {
+                // 本地 / SMB / WebDAV / 远程：复用 PageLoader 取页原图
+                val pageLoader = state.currentChapter?.pageLoader
+                val pages = state.currentChapter?.pages
+                if (pageLoader != null && pages != null) {
+                    val chKey = state.currentChapter?.chapter?.url ?: "local"
+                    val model: (Int) -> Any? = { page: Int ->
+                        if (page in pages.indices) {
+                            ReaderPageThumbnailRequest(
+                                key = "$chKey#$page",
+                                pageLoader = pageLoader,
+                                readerPage = pages[page],
+                            )
+                        } else {
+                            null
+                        }
+                    }
+                    model
+                } else {
+                    null
+                }
             }
         }
         val thumbnailCount = if (thumbnailModelForPage != null) bubbleCount else 0

@@ -255,6 +255,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 add(LocalCoverFetcher.Factory(context.applicationContext))
                 // Komiho Phase7: SMB 浏览列表封面（归档首图/单图，filesDir 缓存隔离）
                 add(SmbCoverFetcher.Factory(context.applicationContext))
+                // Komiho: 进度条缩略图（本地 / SMB / WebDAV / 远程 复用 PageLoader 加载页原图）
+                add(ReaderPageThumbnailFetcher.Factory())
                 // SY <--
                 // Keyer
                 add(MangaCoverKeyer())
