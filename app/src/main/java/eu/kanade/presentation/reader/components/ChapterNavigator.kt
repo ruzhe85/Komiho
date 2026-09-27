@@ -115,12 +115,6 @@ fun ChapterNavigator(
             valueRange = 1f..totalPages.coerceAtLeast(1).toFloat(),
         )
     }
-    // SY --> Komiho: 预览展开期间不能把滑块拉回 currentPage——此模式下拖动不跳转，currentPage 保持不变，
-    // 若继续赋值会把滑块反复拽回原点，表现为「拖不动」。收起后恢复跟随 currentPage。
-    if (totalPages > 1 && !previewOpen) {
-        state.value = currentPage.toFloat()
-    }
-    // SY <--
 
     // SY --> Komiho: 拖动时记录当前预览页码；预览模式下**不**调用 onPageIndexChange（不跳转）。
     var previewPage by remember { mutableIntStateOf(-1) }
@@ -143,6 +137,12 @@ fun ChapterNavigator(
         previewPage = -1
         onPageIndexChange(page)
         onPageIndexChangeFinished()
+    }
+    // SY --> Komiho: 滑块位置每帧同步——预览展开时跟随「预览目标」，否则跟随 currentPage。
+    // 这里是推动滑块移动的唯一入口：预览模式下不调用 onPageIndexChange ⇒ currentPage 不变，
+    // 若此时仍跟随 currentPage（或不赋值）都会让滑块停在原地，表现为「拖动不跟随」。
+    if (totalPages > 1) {
+        state.value = (if (previewOpen && previewPage >= 0) previewPage else currentPage).toFloat()
     }
     // SY <--
 

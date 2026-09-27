@@ -228,7 +228,20 @@ assert_in(cn, "val previewSupported = thumbnailModelForPage != null && totalPage
 assert_in(cn, "var previewOpen by remember { mutableStateOf(false) }", "预览默认关闭（不出图）")
 assert_in(cn, "PressInteraction.Press", "按压进度条才展开预览")
 assert_in(cn, "interactionSource.interactions.collect", "订阅按压交互流")
-assert_in(cn, "if (totalPages > 1 && !previewOpen)", "预览期不把滑块拉回 currentPage（否则拖不动）")
+# 滑块必须跟随手指：①预览时跟随 previewPage（预览模式不跳转 ⇒ currentPage 不变，
+# 若跟随 currentPage 或直接不赋值都会导致「拖动不跟随」）②该赋值必须位于 previewPage 声明之后
+assert_in(
+    cn,
+    "state.value = (if (previewOpen && previewPage >= 0) previewPage else currentPage).toFloat()",
+    "滑块位置跟随预览目标（否则拖动不跟随）",
+)
+assert_not_in(cn, "if (totalPages > 1 && !previewOpen)", "旧的「预览期不赋值」写法已移除（会导致滑块不动）")
+i_decl = src_cn.find("var previewPage by remember")
+i_sync = src_cn.find("state.value = (if (previewOpen")
+if i_decl >= 0 and i_sync > i_decl:
+    print("  [OK] ChapterNavigator.kt: 滑块同步语句位于 previewPage 声明之后（无前向引用）")
+else:
+    fails.append(f"[缺失] ChapterNavigator.kt: 滑块同步语句位置错误 (decl={i_decl}, sync={i_sync})")
 assert_not_in(cn, "if (thumbnailModelForPage != null && totalPages > 1 && thumbnailCount > 0)", "旧的常驻显示条件已移除")
 
 # 预览模式下拖动不得跳转：onValueChange 里的 onPageIndexChange 必须整体被 !previewSupported 守卫
