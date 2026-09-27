@@ -1417,9 +1417,11 @@ class ReaderActivity : BaseActivity() {
      */
     fun onPageLoaded(page: ReaderPage) {
         viewModel.maybeAutoWebtoonByAspectRatio(page)
-        // Komiho: 当前章节首图绘制完成 → 收起「渲染中」文字提示（覆盖图像加强解码后的黑屏）。
+        // Komiho: 触发「正在打开」窗口的章节首图绘制完成 → 收起提示。用 openingChapterId 而非
+        // currentChapter 守卫，避免条漫自动追加 / 跨章切换时 currentChapter 切换滞后导致提示残留。
         if (viewModel.chapterOpening.value &&
-            page.chapter.chapter.id == viewModel.state.value.currentChapter?.chapter?.id
+            page.chapter.chapter.id != null &&
+            page.chapter.chapter.id == viewModel.openingChapterId
         ) {
             viewModel.notifyFirstPageRendered()
             hideOpeningHint()

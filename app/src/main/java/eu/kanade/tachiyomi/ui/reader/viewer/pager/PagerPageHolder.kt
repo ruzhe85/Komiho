@@ -648,8 +648,10 @@ class PagerPageHolder(
     private fun setError(error: Throwable?) {
         progressIndicator?.hide()
         showErrorLayout(error)
-        // Komiho: 当前章节首图解码失败 → 收起「渲染中」提示，避免卡在错误页上。
-        if (page.chapter.chapter.id == viewer.activity.viewModel.state.value.currentChapter?.chapter?.id) {
+        // Komiho: 触发「正在打开」窗口的章节首图解码失败 → 收起提示（与 onImageLoaded 同源，避免卡在错误页上）。
+        if (page.chapter.chapter.id != null &&
+            page.chapter.chapter.id == viewer.activity.viewModel.openingChapterId
+        ) {
             viewer.activity.viewModel.notifyFirstPageRendered()
         }
     }

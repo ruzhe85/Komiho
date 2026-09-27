@@ -182,9 +182,16 @@ class ReaderViewModel @JvmOverloads constructor(
     private val _chapterOpening = MutableStateFlow(false)
     val chapterOpening = _chapterOpening.asStateFlow()
 
+    // Komiho: 记录触发「正在打开」窗口的章节 id。首图就绪收起提示时不再依赖 currentChapter 时序
+    // —— 条漫自动追加下一章 / 跨章切换时 currentChapter 切换晚于下一章首页渲染，用 currentChapter
+    // 守卫会漏判导致提示残留（表现为「正在打开」出现在下一章图上很久才消失）。
+    private var _openingChapterId: Long? = null
+    val openingChapterId: Long? get() = _openingChapterId
+
     /** 首图已绘制完成，结束「正在打开」窗口。 */
     fun notifyFirstPageRendered() {
         _chapterOpening.value = false
+        _openingChapterId = null
     }
     // SY <--
 
@@ -522,6 +529,7 @@ class ReaderViewModel @JvmOverloads constructor(
         _chapterCaching.value = false
         // 普通打开窗口开始：首图解码 / 图像增强期间显示纯文字提示，绘制完成后置 false。
         _chapterOpening.value = true
+        _openingChapterId = chapter.chapter.id
         // SY <--
         loader.loadChapter(chapter /* SY --> */, page/* SY <-- */)
         // SY --> Komiho: 整本下载已在 loader.loadChapter 内完成，其后只剩页面解码，不再属于「缓存中」。
