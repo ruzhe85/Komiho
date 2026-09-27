@@ -175,10 +175,11 @@ fun ChapterNavigator(
                 modifier = Modifier,
             )
         }
-        // SY --> Komiho: 拖动进度条时在滑块上方显示相邻页缩略图条（目标页前后共 3 张，各带页码）。
-        if (thumbnailModelForPage != null && previewPage >= 0) {
+        // SY --> Komiho: 进度条上方常驻显示相邻页缩略图条（拖动时跟随预览页，否则居中当前页）。
+        if (thumbnailModelForPage != null && totalPages > 1) {
+            val activePage = if (previewPage >= 0) previewPage else currentPage
             PagePreviewStrip(
-                previewPage = previewPage,
+                centerPage = activePage,
                 totalPages = totalPages,
                 modelForPage = thumbnailModelForPage,
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -188,11 +189,11 @@ fun ChapterNavigator(
     }
 }
 
-// SY --> Komiho: 进度条拖动缩略图条——显示目标页前后共 3 张缩图，每张上方标注页码；
+// SY --> Komiho: 进度条上方常驻缩略图条——显示 centerPage 前后共 3 张缩图，每张上方标注页码；
 // 边缘页自动收敛为 2 张。缩图由服务端预生成 300px，Coil 按需拉取并缓存。
 @Composable
 private fun PagePreviewStrip(
-    previewPage: Int,
+    centerPage: Int,
     totalPages: Int,
     modelForPage: (Int) -> Any?,
     modifier: Modifier = Modifier,
@@ -200,7 +201,7 @@ private fun PagePreviewStrip(
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     val itemSize = (screenWidth * 0.26f).coerceIn(96.dp, 160.dp)
     val pages = buildList {
-        for (p in previewPage - 1..previewPage + 1) {
+        for (p in centerPage - 1..centerPage + 1) {
             if (p in 0 until totalPages) add(p)
         }
     }
