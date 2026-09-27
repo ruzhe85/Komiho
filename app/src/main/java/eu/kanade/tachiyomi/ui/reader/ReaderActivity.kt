@@ -1263,8 +1263,19 @@ class ReaderActivity : BaseActivity() {
         }
         // Komiho: 章节已就绪、但首图仍在解码 / 图像增强 → 显示纯文字提示（无进度环），
         // 避免这段黑屏无反馈；缓存进行中不显示（由进度环承担）。首图绘制完成后由 onPageLoaded 收起。
+        // 实际先显示的页（requestedPage，自动翻章时为 0）若已处于 Ready/Error（预加载已解码、缓存命中，
+        // 或翻到下一章复用已就绪首页），则无黑屏间隙，直接收起标志、不显示提示——否则 onPageLoaded
+        // 因缓存复用不会再次触发，提示会残留在下一章图上很久才消失。
         if (viewModel.chapterOpening.value && !viewModel.chapterCaching.value) {
-            showOpeningHint()
+            val firstPage = viewerChapters.currChapter.pages
+                ?.getOrNull(viewerChapters.currChapter.requestedPage)
+            val firstPageSettled = firstPage?.statusFlow?.value is Page.State.Ready ||
+                firstPage?.statusFlow?.value is Page.State.Error
+            if (firstPageSettled) {
+                viewModel.notifyFirstPageRendered()
+            } else {
+                showOpeningHint()
+            }
         }
         // SY -->
         val state = viewModel.state.value
