@@ -340,9 +340,8 @@ class WebtoonPageHolder(
         progressContainer.isVisible = false
         initErrorLayout(error)
         // Komiho: 触发「正在打开」窗口的章节首图解码失败 → 收起提示（与条漫页同源）。
-        if (page?.chapter?.chapter?.id != null &&
-            page.chapter.chapter.id == viewer.activity.viewModel.openingChapterId
-        ) {
+        val pg = page
+        if (pg != null && pg.chapter.chapter.id == viewer.activity.viewModel.openingChapterId) {
             viewer.activity.viewModel.notifyFirstPageRendered()
         }
     }
