@@ -232,16 +232,45 @@ assert_in(cn, "interactionSource.interactions.collect", "订阅按压交互流")
 # 若跟随 currentPage 或直接不赋值都会导致「拖动不跟随」）②该赋值必须位于 previewPage 声明之后
 assert_in(
     cn,
-    "state.value = (if (previewOpen && previewPage >= 0) previewPage else currentPage).toFloat()",
+    "state.value = (if (previewPage >= 0) previewPage else currentPage).toFloat()",
     "滑块位置跟随预览目标（否则拖动不跟随）",
 )
-assert_not_in(cn, "if (totalPages > 1 && !previewOpen)", "旧的「预览期不赋值」写法已移除（会导致滑块不动）")
+assert_not_in(cn, "state.value = currentPage.toFloat()", "裸跟随 currentPage 的旧写法已移除")
 i_decl = src_cn.find("var previewPage by remember")
-i_sync = src_cn.find("state.value = (if (previewOpen")
+i_sync = src_cn.find("state.value = (if (previewPage")
 if i_decl >= 0 and i_sync > i_decl:
     print("  [OK] ChapterNavigator.kt: 滑块同步语句位于 previewPage 声明之后（无前向引用）")
 else:
     fails.append(f"[缺失] ChapterNavigator.kt: 滑块同步语句位置错误 (decl={i_decl}, sync={i_sync})")
+
+# 「拖动中零加载 / 停下来才跳转」对原生模式同样生效
+m_fin = re.search(r"state\.onValueChangeFinished = \{(.*?)\n    \}\n", src_cn, re.S)
+if m_fin and "commitJump(" in m_fin.group(1) and "!previewSupported" in m_fin.group(1):
+    print("  [OK] ChapterNavigator.kt: 松手才提交跳转（原生模式走 commitJump）")
+else:
+    fails.append("[缺失] ChapterNavigator.kt: onValueChangeFinished 未在原生模式下提交跳转")
+assert_in(cn, "val commitJump: (Int) -> Unit = {", "统一提交入口 commitJump")
+m_jump = re.search(r"val commitJump[^\n]*\n(.*?)\n    \}\n", src_cn, re.S)
+if m_jump:
+    body3 = m_jump.group(1)
+    if "previewPage = -1" in body3 and "onPageIndexChange(page)" in body3 and "if (page == currentPage)" in body3:
+        print("  [OK] ChapterNavigator.kt: commitJump 对「目标=当前页」不跳转加载")
+    else:
+        fails.append("[缺失] ChapterNavigator.kt: commitJump 未处理「目标=当前页」分支")
+else:
+    fails.append("[缺失] ChapterNavigator.kt: 未找到 commitJump 定义")
+i_jumpdecl = src_cn.find("val commitJump")
+i_finished = src_cn.find("state.onValueChangeFinished = {")
+if 0 <= i_jumpdecl < i_finished:
+    print("  [OK] ChapterNavigator.kt: commitJump 声明在 onValueChangeFinished 之前（无前向引用）")
+else:
+    fails.append("[缺失] ChapterNavigator.kt: commitJump 声明位置错误（前向引用）")
+# isScrollingThroughPages 复位必须延后到页面真正到位
+m_effs = re.findall(r"LaunchedEffect\(currentPage\) \{\n(.*?)\n    \}\n", src_cn, re.S)
+if any("onPageIndexChangeFinished()" in b for b in m_effs):
+    print("  [OK] ChapterNavigator.kt: 页面到位后才复位 isScrollingThroughPages（避免菜单被立即收起）")
+else:
+    fails.append(f"[缺失] ChapterNavigator.kt: 收尾 effect 未复位 isScrollingThroughPages（找到 {len(m_effs)} 个 effect）")
 assert_not_in(cn, "if (thumbnailModelForPage != null && totalPages > 1 && thumbnailCount > 0)", "旧的常驻显示条件已移除")
 
 # 预览模式下拖动不得跳转：onValueChange 里的 onPageIndexChange 必须整体被 !previewSupported 守卫
@@ -267,16 +296,12 @@ if n_gate >= 2:
 else:
     fails.append(f"[缺失] ChapterNavigator.kt: 预览条未被 previewOpen 门控（仅 {n_gate} 处）")
 
-# 点击缩略图 → 关闭预览 + 提交跳转
-m2 = re.search(r"val commitPreviewPage[^\n]*\n(.*?)// SY <--", src_cn, re.S)
-if m2:
-    body2 = m2.group(1)
-    if all(k in body2 for k in ("previewOpen = false", "onPageIndexChange(page)", "onPageIndexChangeFinished()")):
-        print("  [OK] ChapterNavigator.kt: 点击缩略图 → 收起预览并提交跳转")
-    else:
-        fails.append("[缺失] ChapterNavigator.kt: commitPreviewPage 未同时收起预览并提交跳转")
+# 点击缩略图 → 关闭预览 + 提交跳转（统一走 commitJump）
+n_click = src_cn.count("onPageClick = commitJump")
+if n_click >= 2:
+    print(f"  [OK] ChapterNavigator.kt: 两处预览条均把点击接到 commitJump (count={n_click})")
 else:
-    fails.append("[缺失] ChapterNavigator.kt: 未找到 commitPreviewPage 定义")
+    fails.append(f"[缺失] ChapterNavigator.kt: 预览条点击未接 commitJump（仅 {n_click} 处）")
 
 # 拖动中不生成缩略图（占位），松手后才加载
 assert_in(cn, "loadImages: Boolean,", "PagePreviewStrip 参数 loadImages")

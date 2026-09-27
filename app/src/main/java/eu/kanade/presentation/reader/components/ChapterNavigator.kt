@@ -116,33 +116,39 @@ fun ChapterNavigator(
         )
     }
 
-    // SY --> Komiho: 拖动时记录当前预览页码；预览模式下**不**调用 onPageIndexChange（不跳转）。
+    // SY --> Komiho: 拖动过程中只记录目标页，**不做任何跳转/加载**——
+    // 此前 onValueChange 每帧都调用 onPageIndexChange，拖动途中会疯狂解码加载每一页；
+    // 现在无论是否开启缩略图，都统一为「停下来才跳转加载」。
     var previewPage by remember { mutableIntStateOf(-1) }
-    state.onValueChange = {
-        val target = (it.roundToInt() - 1).coerceIn(0, (totalPages - 1).coerceAtLeast(0))
-        previewPage = target
-        if (!previewSupported) {
-            onPageIndexChange(target)
+    // SY --> Komiho: 统一的提交跳转入口（松手提交 / 点击缩略图提交都走这里）。
+    // 拖动过程中绝不跳转加载；目标就是当前页时也不需要任何加载。
+    // isScrollingThroughPages 的复位交给下方 LaunchedEffect(currentPage)，等页面真正到位后才结束——
+    // 否则 jump 触发 PagerViewer.onPageSelected 时会立刻把菜单收掉。
+    val commitJump: (Int) -> Unit = { page ->
+        previewOpen = false
+        if (page == currentPage) {
+            previewPage = -1
+        } else {
+            previewPage = page
+            onPageIndexChange(page)
         }
+    }
+    state.onValueChange = {
+        previewPage = (it.roundToInt() - 1).coerceIn(0, (totalPages - 1).coerceAtLeast(0))
     }
     state.onValueChangeFinished = {
-        if (!previewSupported) {
-            onPageIndexChangeFinished()
-            previewPage = -1
+        val target = previewPage
+        // 开启缩略图时处于「预览模式」：松手不跳转，等用户点击目标缩略图再提交。
+        if (target >= 0 && !previewSupported) {
+            commitJump(target)
         }
     }
-    // 点击缩略图才提交跳转：跳转后收起预览条，恢复「默认不出图」。
-    val commitPreviewPage: (Int) -> Unit = { page ->
-        previewOpen = false
-        previewPage = -1
-        onPageIndexChange(page)
-        onPageIndexChangeFinished()
-    }
-    // SY --> Komiho: 滑块位置每帧同步——预览展开时跟随「预览目标」，否则跟随 currentPage。
-    // 这里是推动滑块移动的唯一入口：预览模式下不调用 onPageIndexChange ⇒ currentPage 不变，
-    // 若此时仍跟随 currentPage（或不赋值）都会让滑块停在原地，表现为「拖动不跟随」。
+    // SY <--
+    // SY --> Komiho: 滑块位置每帧同步——有预览/待跳转目标时跟随该目标，否则跟随 currentPage。
+    // 这里是推动滑块移动的唯一入口：拖动期间不再跳转 ⇒ currentPage 不变，若跟随 currentPage 或不赋值，
+    // 滑块都会停在原地不动。
     if (totalPages > 1) {
-        state.value = (if (previewOpen && previewPage >= 0) previewPage else currentPage).toFloat()
+        state.value = (if (previewPage >= 0) previewPage else currentPage).toFloat()
     }
     // SY <--
 
@@ -162,11 +168,15 @@ fun ChapterNavigator(
             }
         }
     }
-    // 页面真正发生变化（提交跳转、或阅读器外部翻页）后收起预览条，恢复「默认不出图」。
+    // SY --> Komiho: 页面真正发生变化后收尾：结束「滚动中」状态、清掉待跳转目标，
+    // 预览条也一并收起（恢复「默认不出图」），滑块随之恢复跟随 currentPage。
     LaunchedEffect(currentPage) {
+        if (previewPage >= 0) {
+            onPageIndexChangeFinished()
+            previewPage = -1
+        }
         if (previewOpen) {
             previewOpen = false
-            previewPage = -1
         }
     }
     // SY <--
@@ -201,7 +211,7 @@ fun ChapterNavigator(
                         modelForPage = thumbnailModelForPage,
                         // 拖动中不生成缩略图（只占位），松手后才加载。
                         loadImages = !sliderDragged,
-                        onPageClick = commitPreviewPage,
+                        onPageClick = commitJump,
                         modifier = Modifier,
                     )
                 }
@@ -251,7 +261,7 @@ fun ChapterNavigator(
                     modelForPage = thumbnailModelForPage,
                     // 拖动中不生成缩略图（只占位），松手后才加载。
                     loadImages = !sliderDragged,
-                    onPageClick = commitPreviewPage,
+                    onPageClick = commitJump,
                     modifier = Modifier.align(Alignment.TopCenter),
                 )
             }
