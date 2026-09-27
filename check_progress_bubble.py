@@ -243,6 +243,21 @@ if i_decl >= 0 and i_sync > i_decl:
 else:
     fails.append(f"[缺失] ChapterNavigator.kt: 滑块同步语句位置错误 (decl={i_decl}, sync={i_sync})")
 
+# 拖动时页码文本必须实时反映目标位置（不跳转 ⇒ currentPageText 本身不会变）
+assert_in(cn, "private fun previewPageLabel(", "按拖动目标生成页码文本的函数")
+assert_in(cn, "val pageLabel = if (previewPage >= 0) previewPageLabel(currentPageText, previewPage) else currentPageText", "拖动时页码跟随目标")
+n_label = src_cn.count("currentPageText = pageLabel")
+if n_label >= 2:
+    print(f"  [OK] ChapterNavigator.kt: 两处页码文本均改用 pageLabel (count={n_label})")
+else:
+    fails.append(f"[缺失] ChapterNavigator.kt: 仍有页码文本直连 currentPageText（仅改 {n_label} 处）")
+i_pl = src_cn.find("val pageLabel")
+if preview_decl := src_cn.find("var previewPage by remember"):
+    if 0 <= preview_decl < i_pl:
+        print("  [OK] ChapterNavigator.kt: pageLabel 声明在 previewPage 之后（无前向引用）")
+    else:
+        fails.append("[缺失] ChapterNavigator.kt: pageLabel 声明位置错误（前向引用）")
+
 # 「拖动中零加载 / 停下来才跳转」对原生模式同样生效
 m_fin = re.search(r"state\.onValueChangeFinished = \{(.*?)\n    \}\n", src_cn, re.S)
 if m_fin and "commitJump(" in m_fin.group(1) and "!previewSupported" in m_fin.group(1):

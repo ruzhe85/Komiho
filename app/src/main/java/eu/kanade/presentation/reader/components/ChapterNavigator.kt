@@ -193,7 +193,11 @@ fun ChapterNavigator(
         disabledContainerColor = backgroundColor,
     )
 
-    // SY --> Komiho: 用 Box 包裹；水平模式把气泡排在进度条上方（不遮挡），垂直模式气泡浮在顶部。
+    // SY --> Komiho: 用 Box 包裹；水平模式把预览条排在进度条上方（不遮挡），垂直模式浮在顶部。
+    // 拖动期间不跳转 ⇒ currentPage / currentPageText 都不会变，页码会「卡住不更新」，
+    // 所以这里按「目标页」实时生成页码文本。
+    val pageLabel = if (previewPage >= 0) previewPageLabel(currentPageText, previewPage) else currentPageText
+    // SY <--
     Box(modifier) {
         if (type.isHorizontal()) {
             Column(
@@ -224,7 +228,7 @@ fun ChapterNavigator(
                     onPreviousChapter = onPreviousChapter,
                     enabledPrevious = enabledPrevious,
                     // SY -->
-                    currentPageText = currentPageText,
+                    currentPageText = pageLabel,
                     // SY <--
                     totalPages = totalPages,
                     interactionSource = interactionSource,
@@ -242,7 +246,7 @@ fun ChapterNavigator(
                 onPreviousChapter = onPreviousChapter,
                 enabledPrevious = enabledPrevious,
                 // SY -->
-                currentPageText = currentPageText,
+                currentPageText = pageLabel,
                 // SY <--
                 totalPages = totalPages,
                 interactionSource = interactionSource,
@@ -335,6 +339,19 @@ private fun PagePreviewStrip(
             }
         }
     }
+}
+// SY <--
+
+// SY --> Komiho: 按「拖动目标页」生成页码文本。拖动期间不跳转，currentPageText 恒定不变，
+// 若直接显示它会表现为「滑动时页数不动」。这里用 0-based 目标下标换算 1-based 页码；
+// 双页模式沿用当前文本的形制（含 RTL 的降序 "n+1-n"），避免拖动时格式来回跳变。
+private fun previewPageLabel(currentPageText: String, targetIndex: Int): String {
+    val n = targetIndex + 1
+    val parts = currentPageText.split("-")
+    if (parts.size != 2) return n.toString()
+    val a = parts[0].trim().toIntOrNull() ?: return n.toString()
+    val b = parts[1].trim().toIntOrNull() ?: return n.toString()
+    return if (a > b) "${n + 1}-$n" else "$n-${n + 1}"
 }
 // SY <--
 
