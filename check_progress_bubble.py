@@ -94,6 +94,14 @@ def assert_in(path, needle, label):
         print(f"  [OK] {os.path.basename(path)}: {label}")
 
 
+def assert_not_in(path, needle, label):
+    src = open(path, encoding="utf-8", errors="replace").read()
+    if needle in src:
+        fails.append(f"[残留] {os.path.basename(path)}: 仍存在 {label} ({needle!r})")
+    else:
+        print(f"  [OK] {os.path.basename(path)}: {label}")
+
+
 # 1) 括号平衡
 print("== 括号平衡 ==")
 for name, path in FILES.items():
@@ -210,6 +218,67 @@ assert_in(rf, "ThumbnailCache[cacheKey]", "fetch 先查 LRU 命中")
 assert_in(rf, "ThumbnailCache.put(cacheKey, bytes)", "生成后回写 LRU")
 assert_in(rf, "val raw = input.use { it.readBytes() }", "整段读入一次避免 SMB/WebDAV 双次拉网")
 assert_in(rf, "DataSource.MEMORY", "标注 MEMORY 避免 Coil 落盘缓存")
+
+# 11) 预览模式新行为：默认不出图 / 按压才展开 / 拖动不跳转 / 点击缩略图提交 / 拖动不生成图
+print("== 预览模式行为（默认不出图、点击出图、拖动不跳转） ==")
+cn = FILES["ChapterNavigator"]
+src_cn = open(cn, encoding="utf-8", errors="replace").read()
+
+assert_in(cn, "val previewSupported = thumbnailModelForPage != null && totalPages > 1 && thumbnailCount > 0", "预览支持标记 previewSupported")
+assert_in(cn, "var previewOpen by remember { mutableStateOf(false) }", "预览默认关闭（不出图）")
+assert_in(cn, "PressInteraction.Press", "按压进度条才展开预览")
+assert_in(cn, "interactionSource.interactions.collect", "订阅按压交互流")
+assert_in(cn, "if (totalPages > 1 && !previewOpen)", "预览期不把滑块拉回 currentPage（否则拖不动）")
+assert_not_in(cn, "if (thumbnailModelForPage != null && totalPages > 1 && thumbnailCount > 0)", "旧的常驻显示条件已移除")
+
+# 预览模式下拖动不得跳转：onValueChange 里的 onPageIndexChange 必须整体被 !previewSupported 守卫
+m = re.search(r"state\.onValueChange = \{(.*?)state\.onValueChangeFinished", src_cn, re.S)
+if m:
+    body = re.sub(
+        r"if \(!previewSupported\) \{[^}]*onPageIndexChange\([^)]*\)[^}]*\}",
+        "",
+        m.group(1),
+        flags=re.S,
+    )
+    if "onPageIndexChange(" not in body:
+        print("  [OK] ChapterNavigator.kt: 预览模式下拖动不跳转（onPageIndexChange 受守卫）")
+    else:
+        fails.append("[缺失] ChapterNavigator.kt: onValueChange 仍无条件调用 onPageIndexChange")
+else:
+    fails.append("[缺失] ChapterNavigator.kt: 未找到 state.onValueChange 赋值块")
+
+# 两处预览条都必须由 previewOpen 门控
+n_gate = src_cn.count("previewSupported && previewOpen")
+if n_gate >= 2:
+    print(f"  [OK] ChapterNavigator.kt: 两处预览条均由 previewOpen 门控 (count={n_gate})")
+else:
+    fails.append(f"[缺失] ChapterNavigator.kt: 预览条未被 previewOpen 门控（仅 {n_gate} 处）")
+
+# 点击缩略图 → 关闭预览 + 提交跳转
+m2 = re.search(r"val commitPreviewPage[^\n]*\n(.*?)// SY <--", src_cn, re.S)
+if m2:
+    body2 = m2.group(1)
+    if all(k in body2 for k in ("previewOpen = false", "onPageIndexChange(page)", "onPageIndexChangeFinished()")):
+        print("  [OK] ChapterNavigator.kt: 点击缩略图 → 收起预览并提交跳转")
+    else:
+        fails.append("[缺失] ChapterNavigator.kt: commitPreviewPage 未同时收起预览并提交跳转")
+else:
+    fails.append("[缺失] ChapterNavigator.kt: 未找到 commitPreviewPage 定义")
+
+# 拖动中不生成缩略图（占位），松手后才加载
+assert_in(cn, "loadImages: Boolean,", "PagePreviewStrip 参数 loadImages")
+assert_in(cn, "onPageClick: (Int) -> Unit,", "PagePreviewStrip 参数 onPageClick")
+n_load = src_cn.count("loadImages = !sliderDragged")
+if n_load >= 2:
+    print(f"  [OK] ChapterNavigator.kt: 两处传入 loadImages = !sliderDragged (count={n_load})")
+else:
+    fails.append(f"[缺失] ChapterNavigator.kt: loadImages 传参不足（{n_load} 处）")
+assert_in(cn, "if (loadImages) {", "拖动中走占位分支（不发起任何 Coil 请求）")
+assert_in(cn, "Box(modifier = Modifier.size(itemSize))", "拖动中的同尺寸占位框")
+assert_in(cn, "Modifier.clickable { onPageClick(p) }", "缩略图可点击")
+assert_in(cn, "import kotlinx.coroutines.flow.collect", "导入 Flow.collect（按压交互流）")
+assert_in(cn, "import androidx.compose.foundation.interaction.PressInteraction", "导入 PressInteraction")
+assert_in(cn, "import androidx.compose.runtime.mutableStateOf", "导入 mutableStateOf")
 
 print()
 if fails:

@@ -1,7 +1,9 @@
 package eu.kanade.presentation.reader.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -34,6 +36,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,6 +58,7 @@ import eu.kanade.presentation.theme.TachiyomiPreviewTheme
 import eu.kanade.presentation.util.isTabletUi
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
+import kotlinx.coroutines.flow.collect
 import kotlin.math.roundToInt
 
 enum class ChapterNavigatorType {
@@ -91,6 +95,13 @@ fun ChapterNavigator(
 ) {
     val haptic = LocalHapticFeedback.current
 
+    // SY --> Komiho: 进度条预览模式——默认不出图，按压进度条才展开缩略图条；
+    // 展开期间拖动只移动预览位置、不跳转章节，点击缩略图才提交跳转。
+    // previewSupported：来源能提供缩略图模型且数量 > 0；不支持则完全保持原生「拖动即时跳转」行为。
+    val previewSupported = thumbnailModelForPage != null && totalPages > 1 && thumbnailCount > 0
+    var previewOpen by remember { mutableStateOf(false) }
+    // SY <--
+
     // Komiho (2026-09-23): guard the slider state against a not-yet-loaded page count.
     // With totalPages < 1 `valueRange` becomes reversed (1f..0f), and SliderState's value
     // setter coerces into it — Float.coerceIn throws when min > max, so the assignment below
@@ -104,18 +115,34 @@ fun ChapterNavigator(
             valueRange = 1f..totalPages.coerceAtLeast(1).toFloat(),
         )
     }
-    if (totalPages > 1) {
+    // SY --> Komiho: 预览展开期间不能把滑块拉回 currentPage——此模式下拖动不跳转，currentPage 保持不变，
+    // 若继续赋值会把滑块反复拽回原点，表现为「拖不动」。收起后恢复跟随 currentPage。
+    if (totalPages > 1 && !previewOpen) {
         state.value = currentPage.toFloat()
     }
-    // SY --> Komiho: 拖动时记录当前预览页码，用于进度气泡缩略图。
+    // SY <--
+
+    // SY --> Komiho: 拖动时记录当前预览页码；预览模式下**不**调用 onPageIndexChange（不跳转）。
     var previewPage by remember { mutableIntStateOf(-1) }
     state.onValueChange = {
-        onPageIndexChange(it.roundToInt() - 1)
-        previewPage = (it.roundToInt() - 1).coerceIn(0, (totalPages - 1).coerceAtLeast(0))
+        val target = (it.roundToInt() - 1).coerceIn(0, (totalPages - 1).coerceAtLeast(0))
+        previewPage = target
+        if (!previewSupported) {
+            onPageIndexChange(target)
+        }
     }
     state.onValueChangeFinished = {
-        onPageIndexChangeFinished()
+        if (!previewSupported) {
+            onPageIndexChangeFinished()
+            previewPage = -1
+        }
+    }
+    // 点击缩略图才提交跳转：跳转后收起预览条，恢复「默认不出图」。
+    val commitPreviewPage: (Int) -> Unit = { page ->
+        previewOpen = false
         previewPage = -1
+        onPageIndexChange(page)
+        onPageIndexChangeFinished()
     }
     // SY <--
 
@@ -126,6 +153,23 @@ fun ChapterNavigator(
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
     }
+
+    // SY --> Komiho: 按压进度条（点击轨道或开始拖动）才展开缩略图条。
+    LaunchedEffect(interactionSource, previewSupported) {
+        interactionSource.interactions.collect { interaction ->
+            if (previewSupported && interaction is PressInteraction.Press) {
+                previewOpen = true
+            }
+        }
+    }
+    // 页面真正发生变化（提交跳转、或阅读器外部翻页）后收起预览条，恢复「默认不出图」。
+    LaunchedEffect(currentPage) {
+        if (previewOpen) {
+            previewOpen = false
+            previewPage = -1
+        }
+    }
+    // SY <--
 
     val isTabletUi = isTabletUi()
     val mainAxisPadding = if (isTabletUi) 24.dp else 8.dp
@@ -147,14 +191,17 @@ fun ChapterNavigator(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // SY --> 气泡在进度条上方（不遮挡进度条）
-                if (thumbnailModelForPage != null && totalPages > 1 && thumbnailCount > 0) {
+                // SY --> 预览条在进度条上方（不遮挡进度条）；默认不显示，按压进度条后才展开。
+                if (thumbnailModelForPage != null && previewSupported && previewOpen) {
                     val activePage = if (previewPage >= 0) previewPage else currentPage
                     PagePreviewStrip(
                         centerPage = activePage,
                         count = thumbnailCount,
                         totalPages = totalPages,
                         modelForPage = thumbnailModelForPage,
+                        // 拖动中不生成缩略图（只占位），松手后才加载。
+                        loadImages = !sliderDragged,
+                        onPageClick = commitPreviewPage,
                         modifier = Modifier,
                     )
                 }
@@ -194,14 +241,17 @@ fun ChapterNavigator(
                 buttonColor = buttonColor,
                 modifier = Modifier,
             )
-            // SY --> 竖向模式气泡浮在顶部居中（不挡侧边竖向滑块）
-            if (thumbnailModelForPage != null && totalPages > 1 && thumbnailCount > 0) {
+            // SY --> 竖向模式预览条浮在顶部居中（不挡侧边竖向滑块）；默认不显示，按压进度条后才展开。
+            if (thumbnailModelForPage != null && previewSupported && previewOpen) {
                 val activePage = if (previewPage >= 0) previewPage else currentPage
                 PagePreviewStrip(
                     centerPage = activePage,
                     count = thumbnailCount,
                     totalPages = totalPages,
                     modelForPage = thumbnailModelForPage,
+                    // 拖动中不生成缩略图（只占位），松手后才加载。
+                    loadImages = !sliderDragged,
+                    onPageClick = commitPreviewPage,
                     modifier = Modifier.align(Alignment.TopCenter),
                 )
             }
@@ -210,14 +260,19 @@ fun ChapterNavigator(
     }
 }
 
-// SY --> Komiho: 进度条上方常驻缩略图条——以 centerPage 为中心显示共 count 张缩图（左右尽量对称），
-// 每张上方标注页码；边缘页自动收敛。缩图由服务端预生成 300px，Coil 按需拉取并缓存。
+// SY --> Komiho: 进度条上方的预览条——以 centerPage 为中心显示共 count 张缩图（左右尽量对称），
+// 每张上方标注页码；边缘页自动收敛。
+// loadImages=false（正在拖动）时只画占位框，完全不发起 Coil 请求：
+// 实现「快速滑动时不生成图，等待滑动停止后再生成」，避免边拖边解码造成的卡顿与整本拉取。
+// 点击某张缩略图 → 提交跳转到该页（onPageClick）。
 @Composable
 private fun PagePreviewStrip(
     centerPage: Int,
     count: Int,
     totalPages: Int,
     modelForPage: (Int) -> Any?,
+    loadImages: Boolean,
+    onPageClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
@@ -237,28 +292,36 @@ private fun PagePreviewStrip(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         for (p in pages) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.clickable { onPageClick(p) },
+            ) {
                 Text(
                     text = (p + 1).toString(),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                SubcomposeAsyncImage(
-                    model = modelForPage(p),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .size(itemSize)
-                        .clip(RoundedCornerShape(6.dp)),
-                    loading = {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    },
-                )
+                if (loadImages) {
+                    SubcomposeAsyncImage(
+                        model = modelForPage(p),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .size(itemSize)
+                            .clip(RoundedCornerShape(6.dp)),
+                        loading = {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        },
+                    )
+                } else {
+                    // 拖动中：同尺寸占位，保持布局稳定且不触发任何解码/网络请求。
+                    Box(modifier = Modifier.size(itemSize))
+                }
             }
         }
     }
