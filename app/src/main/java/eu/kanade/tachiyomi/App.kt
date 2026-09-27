@@ -54,6 +54,9 @@ import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
 import eu.kanade.tachiyomi.data.coil.MangaKeyer
 import eu.kanade.tachiyomi.data.coil.PagePreviewFetcher
 import eu.kanade.tachiyomi.data.coil.PagePreviewKeyer
+// SY --> Komiho: 进度条缩略图——本地/SMB/WebDAV/远程源均复用 reader 的 PageLoader 加载页原图
+import eu.kanade.tachiyomi.data.coil.ReaderPageThumbnailFetcher
+// SY <--
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
