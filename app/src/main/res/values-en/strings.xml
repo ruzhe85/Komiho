@@ -216,7 +216,7 @@
     <string name="settings_reading">Reader</string>
     <string name="settings_advanced">Advanced</string>
     <string name="reader_progress_bubble_thumbnail">Reader progress bubble thumbnail</string>
-    <string name="reader_progress_bubble_thumbnail_summary">Show the current page thumbnail while scrubbing the progress bar (Komga remote only)</string>
+    <string name="reader_progress_bubble_thumbnail_summary">Show thumbnails of nearby pages above the slider while scrubbing (Komga remote only)</string>
     <string name="settings_reader">Reader settings</string>
     <string name="settings_reader_summary">Page turns / direction / zoom / enhance / nav…</string>
     <string name="settings_reconfigure">Reconfigure connection</string>

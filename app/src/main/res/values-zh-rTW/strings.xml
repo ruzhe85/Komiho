@@ -214,7 +214,7 @@
     <string name="settings_reading">閱讀</string>
     <string name="settings_advanced">進階</string>
     <string name="reader_progress_bubble_thumbnail">閱讀器進度氣泡縮圖</string>
-    <string name="reader_progress_bubble_thumbnail_summary">拖動進度條時顯示目前頁面縮圖（僅 Komga 遠端）</string>
+    <string name="reader_progress_bubble_thumbnail_summary">拖動進度條時在滑塊上方顯示相鄰頁面縮圖（僅 Komga 遠端）</string>
     <string name="settings_reader">閱讀設定</string>
     <string name="settings_reader_summary">翻頁/方向/縮放/增強/導覽…</string>
     <string name="settings_reconfigure">重新設定連線</string>

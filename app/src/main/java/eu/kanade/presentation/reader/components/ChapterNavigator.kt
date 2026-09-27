@@ -5,6 +5,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -174,46 +175,68 @@ fun ChapterNavigator(
                 modifier = Modifier,
             )
         }
-        // SY --> Komiho: 拖动进度条时显示当前页缩略图气泡（仅 Komga 远程 + 开关开启）。
+        // SY --> Komiho: 拖动进度条时在滑块上方显示相邻页缩略图条（目标页前后共 3 张，各带页码）。
         if (thumbnailModelForPage != null && previewPage >= 0) {
-            val model = thumbnailModelForPage.invoke(previewPage)
-            if (model != null) {
-                PagePreviewBubble(
-                    model = model,
-                    modifier = if (type.isHorizontal()) {
-                        Modifier.align(Alignment.TopCenter)
-                    } else {
-                        Modifier.align(Alignment.CenterEnd)
-                    },
-                )
-            }
+            PagePreviewStrip(
+                previewPage = previewPage,
+                totalPages = totalPages,
+                modelForPage = thumbnailModelForPage,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
         }
         // SY <--
     }
 }
 
-// SY --> Komiho: 进度气泡缩略图——自适应尺寸小图，拖动时跟随显示当前页。
+// SY --> Komiho: 进度条拖动缩略图条——显示目标页前后共 3 张缩图，每张上方标注页码；
+// 边缘页自动收敛为 2 张。缩图由服务端预生成 300px，Coil 按需拉取并缓存。
 @Composable
-private fun PagePreviewBubble(model: Any?, modifier: Modifier = Modifier) {
+private fun PagePreviewStrip(
+    previewPage: Int,
+    totalPages: Int,
+    modelForPage: (Int) -> Any?,
+    modifier: Modifier = Modifier,
+) {
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-    val size = (screenWidth * 0.42f).coerceAtMost(340.dp).coerceAtLeast(120.dp)
-    Box(
+    val itemSize = (screenWidth * 0.26f).coerceIn(96.dp, 160.dp)
+    val pages = buildList {
+        for (p in previewPage - 1..previewPage + 1) {
+            if (p in 0 until totalPages) add(p)
+        }
+    }
+    Row(
         modifier = modifier
-            .padding(8.dp)
-            .size(size)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f)),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f))
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        SubcomposeAsyncImage(
-            model = model,
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize(),
-            loading = {
-                CircularProgressIndicator(strokeWidth = 2.dp)
-            },
-        )
+        for (p in pages) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = (p + 1).toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                SubcomposeAsyncImage(
+                    model = modelForPage(p),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .size(itemSize)
+                        .clip(RoundedCornerShape(6.dp)),
+                    loading = {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    },
+                )
+            }
+        }
     }
 }
 // SY <--

@@ -3877,6 +3877,9 @@ private fun SettingsTab(
     var showAbout by remember { mutableStateOf(false) }
     var showLocalStorage by remember { mutableStateOf(false) }
     var showBackup by remember { mutableStateOf(false) }
+    // SY --> Komiho: 高级子页（阅读器进度气泡缩略图等开关）
+    var showAdvanced by remember { mutableStateOf(false) }
+    // SY <--
 
     // SY: 「预览图」设置项改为「清除预览图」整行点击弹确认框（取消上限滑块）。
     // 实时统计 komga_covers 磁盘池占用，作为「已使用：XXMB」小字。
@@ -3898,6 +3901,9 @@ private fun SettingsTab(
         showAbout = false
         showLocalStorage = false
         showBackup = false
+        // SY --> Komiho
+        showAdvanced = false
+        // SY <--
         showClearPreview = false
     }
     val settingsRail: (@Composable () -> Unit)? = if (useNavRail) ({
@@ -3950,17 +3956,11 @@ private fun SettingsTab(
             onPreferenceClick = { showBackup = true },
         )
         // SY <--
-        // SY --> Komiho: 高级分组（阅读器进度气泡缩略图等开关）
-        PreferenceGroupHeader(composeStringResource(R.string.settings_advanced))
+        // SY --> Komiho: 高级子页入口（点击进入子页看具体开关，不再平铺）
         TextPreferenceWidget(
-            title = composeStringResource(R.string.reader_progress_bubble_thumbnail),
-            subtitle = composeStringResource(R.string.reader_progress_bubble_thumbnail_summary),
-            widget = {
-                Switch(
-                    checked = prefs.readerProgressBubbleThumbnail,
-                    onCheckedChange = { prefs.readerProgressBubbleThumbnail = it },
-                )
-            },
+            title = composeStringResource(R.string.settings_advanced),
+            icon = Icons.Filled.Tune,
+            onPreferenceClick = { showAdvanced = true },
         )
         // SY <--
         TextPreferenceWidget(
@@ -4037,6 +4037,34 @@ private fun SettingsTab(
             title = stringResource(MR.strings.label_backup),
         ) { padding -> KomgaBackupSettings(Modifier.padding(padding)) }
     }
+    // SY --> Komiho: 高级子页。开关用本地镜像状态——直接读 SharedPreferences 不会触发重组，
+    // 会出现「点击不动、退出重进才刷新」的问题。
+    if (showAdvanced) {
+        SettingsCategoryDialog(
+            rail = settingsRail,
+            railOnRight = railOnRight,
+            onDismiss = { showAdvanced = false },
+            title = composeStringResource(R.string.settings_advanced),
+        ) { padding ->
+            var bubbleThumbnail by remember { mutableStateOf(prefs.readerProgressBubbleThumbnail) }
+            Column(Modifier.padding(padding).fillMaxSize()) {
+                TextPreferenceWidget(
+                    title = composeStringResource(R.string.reader_progress_bubble_thumbnail),
+                    subtitle = composeStringResource(R.string.reader_progress_bubble_thumbnail_summary),
+                    widget = {
+                        Switch(
+                            checked = bubbleThumbnail,
+                            onCheckedChange = {
+                                bubbleThumbnail = it
+                                prefs.readerProgressBubbleThumbnail = it
+                            },
+                        )
+                    },
+                )
+            }
+        }
+    }
+    // SY <--
     // SY: 「清除预览图」确认对话框（komga_covers 磁盘池）。架构与存储设置的远程/封面缓存一致。
     if (showClearPreview) {
         AlertDialog(
