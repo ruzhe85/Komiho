@@ -43,7 +43,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
         return listOf(
             Preference.PreferenceGroup(
                 title = "从已有 WebDAV 载入（可选）",
-                preferenceItems = buildList<Preference> {
+                preferenceItems = buildList<Preference.PreferenceItem<out Any, out Any>> {
                     add(
                         Preference.PreferenceItem.TextPreference(
                             title = "手动新建 / 清空已载入",
