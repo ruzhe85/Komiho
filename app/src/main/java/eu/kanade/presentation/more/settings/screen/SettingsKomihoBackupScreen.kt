@@ -188,7 +188,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                 onClick = { importLauncher.launch("*/*") },
             ),
             Preference.PreferenceGroup(
-                title = "同步中心（独立 WebDAV）",
+                title = "同步",
                 preferenceItems = listOf(
                     Preference.PreferenceItem.EditTextPreference(
                         preference = syncUrlPref,
@@ -248,6 +248,44 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                                 } catch (e: Exception) {
                                     logcat(LogPriority.ERROR, e)
                                     withUIContext { context.toast("推送失败：${e.message}") }
+                                }
+                            }
+                        },
+                    ),
+                    Preference.PreferenceItem.TextPreference(
+                        title = "从同步中心恢复",
+                        subtitle = "拉取最新备份并合并恢复（按较新胜）",
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val url = runBlocking { syncUrlPref.get() }.trimEnd('/')
+                                    val user = runBlocking { syncUserPref.get() }
+                                    val serverPass = runBlocking { syncServerPassPref.get() }
+                                    val dir = runBlocking { syncDirPref.get() }.ifBlank { "komiho" }
+                                    val backupPwd = runBlocking { syncPwdPref.get() }.ifBlank { null }
+                                    if (url.isBlank()) {
+                                        withUIContext { context.toast("请先填写同步中心服务器地址") }
+                                        return@launch
+                                    }
+                                    val conn = WebDavConnection(
+                                        id = "sync", name = "同步中心", baseUrl = url,
+                                        user = user, passEnc = WebDavCredentialCrypto.encrypt(serverPass),
+                                    )
+                                    val bytes = KomihoBackup.pullLatestFromWebDav(conn, dir)
+                                    if (bytes == null) {
+                                        withUIContext { context.toast("同步中心无可用备份") }
+                                        return@launch
+                                    }
+                                    val json = KomihoBackup.readBackupBytes(bytes, backupPwd)
+                                    if (json == null) {
+                                        withUIContext { context.toast("备份解密失败（密码错误？）") }
+                                        return@launch
+                                    }
+                                    KomihoBackup.importBackup(context, json, backupPwd)
+                                    withUIContext { context.toast("已从同步中心恢复") }
+                                } catch (e: Exception) {
+                                    logcat(LogPriority.ERROR, e)
+                                    withUIContext { context.toast("恢复失败：${e.message}") }
                                 }
                             }
                         },
