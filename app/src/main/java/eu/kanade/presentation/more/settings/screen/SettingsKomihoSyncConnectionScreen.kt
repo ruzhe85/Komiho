@@ -6,8 +6,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.more.settings.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.i18n.MR
@@ -27,10 +25,14 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
     @Composable
     override fun getPreferences(): List<Preference> = buildSyncConnectionPreferences()
 
+    /**
+     * 同步连接编辑页的偏好列表。
+     * @param onBack 非空时在列表顶部插入「返回」项（父页就地切换成子屏时使用）；
+     *               为空表示由页面栈自己提供返回（voyager 场景）。
+     */
     @Composable
-    private fun buildSyncConnectionPreferences(): List<Preference> {
+    fun buildSyncConnectionPreferences(onBack: (() -> Unit)? = null): List<Preference> {
         val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow
         val prefs = remember { Injekt.get<PreferenceStore>() }
         val syncUrlPref = remember { prefs.getString(KOMIHO_SYNC_URL, "") }
         val syncUserPref = remember { prefs.getString(KOMIHO_SYNC_USER, "") }
@@ -40,7 +42,14 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
 
         val davs = remember { WebDavConnectionStore.all() }
 
-        return listOf(
+        return listOfNotNull<Preference>(
+            onBack?.let { back ->
+                Preference.PreferenceItem.TextPreference(
+                    title = "返回",
+                    subtitle = "回到备份与同步设置",
+                    onClick = back,
+                )
+            },
             Preference.PreferenceGroup(
                 title = "从已有 WebDAV 载入（可选）",
                 preferenceItems = buildList<Preference.PreferenceItem<out Any, out Any>> {
@@ -120,7 +129,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
                             prefs.getString(KOMIHO_SYNC_DIR, "komiho").set("komiho")
                             prefs.getString(KOMIHO_SYNC_PASSWORD, "").set("")
                             context.toast("已删除同步连接")
-                            navigator.pop()
+                            onBack?.invoke()
                         },
                     ),
                 ),

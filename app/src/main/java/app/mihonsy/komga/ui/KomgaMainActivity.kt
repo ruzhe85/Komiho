@@ -284,7 +284,7 @@ import tachiyomi.domain.release.interactor.GetApplicationRelease
 // SY --> Komiho P0: 本地浏览（文件管理器语义，非 Mihon 图源）
 import eu.kanade.presentation.more.settings.screen.SettingsDataScreen
 import eu.kanade.presentation.more.settings.screen.SettingsKomihoBackupScreen
-import eu.kanade.presentation.more.settings.Preference
+import eu.kanade.presentation.more.settings.PreferenceScreen
 import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.source.local.io.Archive
 import tachiyomi.source.local.io.LocalSourceFileSystem
@@ -4216,43 +4216,14 @@ internal fun launchManageAllFilesAccess(context: android.content.Context) {
 // —— 注意备份入口必须挂在本文件的设置页，Mihon 遗留的 SettingsMainScreen 在 Komiho 中不可达。
 @Composable
 private fun KomgaBackupSettings(modifier: Modifier = Modifier) {
-    val items = SettingsKomihoBackupScreen.getPreferences()
-    LazyColumn(modifier = modifier.fillMaxSize()) {
-        items.forEach { pref ->
-            when (pref) {
-                is Preference.PreferenceGroup -> {
-                    if (pref.title.isNotBlank()) {
-                        item(key = pref.title) { PreferenceGroupHeader(pref.title) }
-                    }
-                    items(pref.preferenceItems) { item ->
-                        if (item is Preference.PreferenceItem.TextPreference) {
-                            TextPreferenceWidget(
-                                title = item.title,
-                                subtitle = item.subtitle,
-                                icon = item.icon,
-                                widget = item.widget,
-                                onPreferenceClick = item.onClick,
-                            )
-                        }
-                    }
-                }
-                // 不用分组时条目直接平铺在顶层（见 SettingsKomihoBackupScreen.getPreferences）。
-                is Preference.PreferenceItem.TextPreference -> {
-                    item {
-                        TextPreferenceWidget(
-                            title = pref.title,
-                            subtitle = pref.subtitle,
-                            icon = pref.icon,
-                            widget = pref.widget,
-                            onPreferenceClick = pref.onClick,
-                        )
-                    }
-                }
-                else -> Unit
-            }
-        }
-    }
+    // 用通用 PreferenceScreen 渲染：支持分组头 + Text/EditText/Switch 等全部偏好类型。
+    // 之前只手写渲染 TextPreference，导致同步开关、同步连接的输入框全部不显示。
+    PreferenceScreen(
+        items = SettingsKomihoBackupScreen.getPreferences(),
+        modifier = modifier.fillMaxSize(),
+    )
 }
+
 // SY <--
 
 /** 存储设置：所有文件访问权限（MANAGE_EXTERNAL_STORAGE）授权入口。

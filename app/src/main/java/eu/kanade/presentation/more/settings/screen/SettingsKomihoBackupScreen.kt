@@ -2,6 +2,7 @@ package eu.kanade.presentation.more.settings.screen
 
 // SY --> Komiho：本地备份与恢复（自写轻量 JSON，覆盖来源列表/个性化/本地阅读历史/书签/收藏分类）
 // 作为「设置」顶级入口，不再嵌套在「数据/存储」内。
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
@@ -20,8 +21,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import app.mihonsy.komga.data.backup.KomihoBackup
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.more.settings.Preference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -52,7 +51,6 @@ object SettingsKomihoBackupScreen : SearchableSettings {
     @Composable
     private fun buildBackupPreferences(): List<Preference> {
         val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow
         val scope = rememberCoroutineScope()
 
         val prefs = remember { Injekt.get<PreferenceStore>() }
@@ -67,6 +65,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
         var showExportPwd by remember { mutableStateOf(false) }
         var showImportPwd by remember { mutableStateOf(false) }
         var pendingImportBytes by remember { mutableStateOf<ByteArray?>(null) }
+        var showSyncConn by remember { mutableStateOf(false) }
 
         val exportLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("application/zip"),
@@ -179,6 +178,17 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             )
         }
 
+        // 系统返回键：处在同步连接子屏时先退回备份页。
+        BackHandler(enabled = showSyncConn) { showSyncConn = false }
+
+        // 同步连接子屏：本页由 Komga 设置页直接渲染（没有 voyager Navigator 可用），
+        // 所以不 push 页面，而是就地切换成子屏的偏好列表，靠返回项/返回键退回。
+        if (showSyncConn) {
+            return SettingsKomihoSyncConnectionScreen.buildSyncConnectionPreferences(
+                onBack = { showSyncConn = false },
+            )
+        }
+
         // 不用分组：直接平铺「导出 / 导入」两条，省掉多余的分组标题行。
         return listOf(
             Preference.PreferenceItem.TextPreference(
@@ -195,7 +205,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                     Preference.PreferenceItem.TextPreference(
                         title = "同步连接",
                         subtitle = if (syncUrlPref.get().isBlank()) "未配置：点击设置服务器/账号/目录" else syncUrlPref.get(),
-                        onClick = { navigator.push(SettingsKomihoSyncConnectionScreen) },
+                        onClick = { showSyncConn = true },
                     ),
                     Preference.PreferenceItem.SwitchPreference(
                         preference = syncPushPref,
