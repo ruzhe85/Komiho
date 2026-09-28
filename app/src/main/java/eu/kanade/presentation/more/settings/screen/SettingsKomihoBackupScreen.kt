@@ -5,7 +5,11 @@ package eu.kanade.presentation.more.settings.screen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -16,10 +20,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import app.mihonsy.komga.data.backup.KomihoBackup
 import app.mihonsy.komga.data.webdav.WebDavConnection
+import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import eu.kanade.presentation.more.settings.Preference
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +71,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
         var showExportPwd by remember { mutableStateOf(false) }
         var showImportPwd by remember { mutableStateOf(false) }
         var pendingImportBytes by remember { mutableStateOf<ByteArray?>(null) }
+        var showSyncConn by remember { mutableStateOf(false) }
 
         val exportLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("application/zip"),
@@ -177,6 +184,10 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             )
         }
 
+        if (showSyncConn) {
+            SyncConnectionDialog(onDismiss = { showSyncConn = false })
+        }
+
         // 不用分组：直接平铺「导出 / 导入」两条，省掉多余的分组标题行。
         return listOf(
             Preference.PreferenceItem.TextPreference(
@@ -190,25 +201,10 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             Preference.PreferenceGroup(
                 title = "同步",
                 preferenceItems = listOf(
-                    Preference.PreferenceItem.EditTextPreference(
-                        preference = syncUrlPref,
-                        title = "同步中心服务器地址",
-                        subtitle = "WebDAV 根地址，如 https://dav.example.com:10007/QNAP2",
-                    ),
-                    Preference.PreferenceItem.EditTextPreference(
-                        preference = syncUserPref,
-                        title = "用户名",
-                        subtitle = "留空=匿名",
-                    ),
-                    Preference.PreferenceItem.EditTextPreference(
-                        preference = syncServerPassPref,
-                        title = "服务器密码",
-                        subtitle = "留空=匿名",
-                    ),
-                    Preference.PreferenceItem.EditTextPreference(
-                        preference = syncDirPref,
-                        title = "同步目录名",
-                        subtitle = "备份存于 <服务器根>/%s/backup",
+                    Preference.PreferenceItem.TextPreference(
+                        title = "同步连接",
+                        subtitle = if (syncUrlPref.get().isBlank()) "未配置：点击设置服务器/账号/目录" else syncUrlPref.get(),
+                        onClick = { showSyncConn = true },
                     ),
                     Preference.PreferenceItem.EditTextPreference(
                         preference = syncPwdPref,
@@ -328,6 +324,86 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             },
             confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text(text = confirmLabel) } },
             dismissButton = { TextButton(onClick = onDismiss) { Text(text = stringResource(MR.strings.action_cancel)) } },
+        )
+    }
+
+    @Composable
+    private fun SyncConnectionDialog(onDismiss: () -> Unit) {
+        val prefs = remember { Injekt.get<PreferenceStore>() }
+        var url by remember { mutableStateOf(prefs.getString(KOMIHO_SYNC_URL, "").get()) }
+        var user by remember { mutableStateOf(prefs.getString(KOMIHO_SYNC_USER, "").get()) }
+        var pass by remember { mutableStateOf(prefs.getString(KOMIHO_SYNC_SERVER_PASS, "").get()) }
+        var dir by remember { mutableStateOf(prefs.getString(KOMIHO_SYNC_DIR, "komiho").get()) }
+        val davs = remember { WebDavConnectionStore.all() }
+        var showDavList by remember { mutableStateOf(false) }
+        var selectedDav by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(text = "同步连接") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    TextButton(onClick = { showDavList = !showDavList }) {
+                        Text(text = if (selectedDav == null) "选择已有 WebDAV（可选）" else "已选：$selectedDav")
+                    }
+                    if (showDavList) {
+                        Column {
+                            TextButton(onClick = {
+                                selectedDav = null
+                                showDavList = false
+                            }) { Text(text = "手动新建") }
+                            davs.forEach { conn ->
+                                TextButton(onClick = {
+                                    url = conn.baseUrl
+                                    user = conn.user
+                                    pass = WebDavCredentialCrypto.decryptStored(conn.passEnc)
+                                    selectedDav = conn.displayName()
+                                    showDavList = false
+                                }) { Text(text = conn.displayName()) }
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = url,
+                        onValueChange = { url = it },
+                        label = { Text(text = "服务器地址（WebDAV 根）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = user,
+                        onValueChange = { user = it },
+                        label = { Text(text = "用户名（留空=匿名）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = pass,
+                        onValueChange = { pass = it },
+                        label = { Text(text = "密码（留空=匿名）") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = dir,
+                        onValueChange = { dir = it },
+                        label = { Text(text = "同步目录名") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    prefs.getString(KOMIHO_SYNC_URL, "").set(url.trim())
+                    prefs.getString(KOMIHO_SYNC_USER, "").set(user.trim())
+                    prefs.getString(KOMIHO_SYNC_SERVER_PASS, "").set(pass)
+                    prefs.getString(KOMIHO_SYNC_DIR, "komiho").set(dir.ifBlank { "komiho" })
+                    onDismiss()
+                }) { Text(text = "确定启用") }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(text = "取消") } },
         )
     }
 }
