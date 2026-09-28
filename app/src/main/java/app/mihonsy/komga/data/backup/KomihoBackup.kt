@@ -49,10 +49,10 @@ import javax.crypto.spec.SecretKeySpec
  *  - 来源列表：Komga 连接 + SMB/WebDAV 连接（含凭据）
  *  - 来源显隐 / 排序、聚合页每来源条数
  *  - Komga 个性化设置（整个 komga_connection SharedPreferences）
- *  - 非 Komga 来源（本地 / SMB / WebDAV，source != KomgaSource.ID）的
- *    书 / 章节 / 阅读历史 / 按页书签 / 收藏与分类
+ *  - 仅 SMB / WebDAV 来源（排除本地、排除 Komga）的书 / 章节 / 阅读历史 / 按页书签 / 收藏与分类
+ *    （注：本地 / WebDAV / SMB 三者共用 LocalSource.ID，靠章节/书 URL 前缀 smb://、webdav://、webdav: 区分）
  *
- * 不含：Komga 服务端记录（服务器本身即真相源）、cache、下载清单。
+ * 不含：本地来源数据、Komga 服务端记录（服务器本身即真相源）、cache、下载清单。
  *
  * 凭据处理（设备内均静态加密，仅备份文件负责「出设备」那一层的保护）：
  *  - Komga 连接凭据（apiKey/username/password）设备内已由 [KomgaCredentialCrypto]
@@ -198,9 +198,13 @@ object KomihoBackup {
         val bookmarkRepo = Injekt.get<BookmarkRepository>()
         val categoryRepo = Injekt.get<CategoryRepository>()
         val komgaId = KomgaSource.ID
-        val localMangas = mangaRepo.getAll().filter { it.source != komgaId }
-
-        val chaptersByManga = localMangas.associateWith { m -> chapterRepo.getChapterByMangaId(m.id) }
+        // SY --> Komiho: 本地/WebDAV/SMB 三者共用 LocalSource.ID，只能靠 URL 前缀区分。
+        // 先取非 Komga 全集、构建章节映射，再收窄为仅 SMB/WebDAV（排除本地）。
+        val allNonKomga = mangaRepo.getAll().filter { it.source != komgaId }
+        val chaptersByManga = allNonKomga.associateWith { m -> chapterRepo.getChapterByMangaId(m.id) }
+        val localMangas = allNonKomga.filter { m ->
+            isRemoteSourceUrl(m.url) || chaptersByManga[m].orEmpty().any { isRemoteSourceUrl(it.url) }
+        }
         // chapter_id -> (mangaUrl, chapterUrl) 用于历史/书签重新关联
         val chapterRefById = mutableMapOf<Long, Pair<String, String>>()
         chaptersByManga.forEach { (m, chs) ->
@@ -228,9 +232,10 @@ object KomihoBackup {
             }
         }
 
-        val localBookmarks = bookmarkRepo.getBookmarksBySource(LocalSource.ID).map { b ->
-            BkBookmark(b.mangaUrl, b.chapterUrl, b.page.toLong(), b.createdAt)
-        }
+        // SY --> Komiho: 书签跨本地/WebDAV/SMB 共用 LocalSource.ID，按章节 URL 前缀排除本地
+        val localBookmarks = bookmarkRepo.getBookmarksBySource(LocalSource.ID)
+            .filter { isRemoteSourceUrl(it.chapterUrl) }
+            .map { b -> BkBookmark(b.mangaUrl, b.chapterUrl, b.page.toLong(), b.createdAt) }
 
         val categories = categoryRepo.getAll()
             .filter { it.id > 0 }
@@ -268,6 +273,10 @@ object KomihoBackup {
             categoryLinks = categoryLinks,
         )
     }
+
+    /** 章节/书 URL 是否为 SMB 或 WebDAV（非本地）。本地/WebDAV/SMB 共用 LocalSource.ID，只能靠前缀区分。 */
+    private fun isRemoteSourceUrl(url: String): Boolean =
+        url.startsWith("smb://") || url.startsWith("webdav://") || url.startsWith("webdav:")
 
     private fun readRawPrefs(context: Context, name: String): List<PrefEntry> {
         val all = context.getSharedPreferences(name, Context.MODE_PRIVATE).all

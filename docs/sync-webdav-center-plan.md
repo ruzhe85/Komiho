@@ -156,12 +156,14 @@ WebDAV / SMB 书打开 / 翻页
 - B：GET 该文件 → `isEncrypted()` 判断 → 若加密且本地无缓存密码则弹框 → `readBackupBytes()` + `importBackup()` 自动恢复。
 - 「首次同步密码框」的密码直接喂给 `KomihoBackup` 的 `password` 参数——方案①②统一入口**已天然支持**。
 
-### 范围收窄（相对 KomihoBackup 现状）
+### 范围收窄（相对 KomihoBackup 现状，已落地 2026-09-28）
 - 备份的漫画数据（书/章节/历史/书签/分类/收藏）来源集合改为 `{SMB, WebDAV}`，**排除本地、排除 Komga 数据**。
 - 来源连接备份：**保留 Komga 连接配置** + **保留 SMB/WebDAV 连接**（即你要恢复的来源）。
-- 实现点：`KomihoBackup.buildPayload` 现状 `localMangas = mangaRepo.getAll().filter { it.source != komgaId }`
-  改为 `filter { it.source in SMB_WEBDAV_IDS }`（`SmbSource.ID` / `WebDavSource.ID` 常量名待落细确认）；
-  `restoreLocalData` 的 URL 匹配逻辑无需改。
+- ⚠️ **关键事实（探查纠正）**：本地 / WebDAV / SMB **三者共用 `LocalSource.ID`**（见 `KomgaMainActivity.sourceIdForChapterUrl` 注释，
+  "本地/WebDAV/SMB 三者共用 LocalSource.ID，只有 url 前缀能区分"）。**不存在 `SmbSource.ID` / `WebDavSource.ID` 常量**，
+  不能靠 source id 过滤，只能靠**章节/书 URL 前缀**区分：`smb://`、`webdav://`、`webdav:`。
+- 已实现：`buildPayload` 先取非 Komga 全集、建章节映射，再用 `isRemoteSourceUrl(url)`（前缀判断）收窄为仅 SMB/WebDAV；
+  `localBookmarks` 同样按 `chapterUrl` 前缀过滤；`restoreLocalData` 的 URL 匹配逻辑无需改（恢复的本来就是带前缀的 SMB/WebDAV 书）。
 
 ### 改动清单（基于现有代码扩展）
 | # | 文件 | 改动 |
