@@ -1169,4 +1169,5 @@
     <!-- Komiho: 书架图标无障碍描述 -->
     <string name="desc_download">Download</string>
     <string name="desc_downloaded">Downloaded</string>
+    <string name="komiho_sync_connection">同步连接</string>
 </resources>
