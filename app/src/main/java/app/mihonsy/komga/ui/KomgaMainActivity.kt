@@ -227,6 +227,12 @@ import app.mihonsy.komga.data.smb.SmbSessionManager
 import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
+import app.mihonsy.komga.data.backup.KomihoBackup
+import androidx.lifecycle.lifecycleScope
+import android.util.Log
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
+import tachiyomi.core.common.preference.PreferenceStore
 // SY --> Komiho Phase7: 散图扩展名表（internal，data 层共用）。
 import app.mihonsy.komga.data.webdav.WEBDAV_IMAGE_EXTS
 // SY <--
@@ -283,8 +289,6 @@ import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.source.local.io.Archive
 import tachiyomi.source.local.io.LocalSourceFileSystem
 import tachiyomi.core.common.util.system.ImageUtil
-import tachiyomi.core.common.util.system.logcat
-import logcat.LogPriority
 import tachiyomi.source.local.LocalSource
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaUpdate
@@ -352,6 +356,23 @@ class KomgaMainActivity : KomgaBaseActivity() {
         if (!t.isNullOrBlank() && !v.isNullOrBlank()) filterSignal.value = t to v
         intent?.getIntExtra(EXTRA_TAB, -1)?.takeIf { it >= 0 }?.let { tabSignal.value = it }
         setContent { KomihoTheme { KomgaMainScreen(refreshSignal, filterSignal, tabSignal) } }
+
+        // SY --> Komiho: 同步中心自动恢复（启动时拉取最新备份，按较新胜合并，不覆盖本地更新）
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val prefs = Injekt.get<PreferenceStore>()
+                if (!prefs.getBoolean("komiho_sync_center_autorestore", false).get()) return@launch
+                val connId = prefs.getString("komiho_sync_center_conn", "").get()
+                val conn = WebDavConnectionStore.all().firstOrNull { it.id == connId } ?: return@launch
+                val dir = prefs.getString("komiho_sync_center_dir", "komiho").get().ifBlank { "komiho" }
+                val bytes = KomihoBackup.pullLatestFromWebDav(conn, dir) ?: return@launch
+                val pwd = prefs.getString("komiho_sync_center_password", "").get().ifBlank { null }
+                val json = KomihoBackup.readBackupBytes(bytes, pwd)
+                KomihoBackup.importBackup(applicationContext, json, pwd)
+            } catch (e: Exception) {
+                android.util.Log.e("SyncCenter", "[SyncCenter] 自动恢复失败", e)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

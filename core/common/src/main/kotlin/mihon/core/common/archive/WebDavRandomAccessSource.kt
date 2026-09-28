@@ -13,6 +13,8 @@ import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
+import java.io.FileNotFoundException
 import tachiyomi.core.common.util.system.logcat
 
 // SY --> Komiho Phase3
@@ -420,7 +422,97 @@ class WebDavRandomAccessSource(
             val rebuilt = "${cleaned.substring(0, schemeEnd)}://$authority$encodedPath"
             return rebuilt.toHttpUrlOrNull()?.toString()
                 ?: throw IllegalArgumentException("非法 WebDAV URL: $cleaned")
+            }
+
+            // ---- 写入能力（同步中心 / 备份推送用）：复用 sharedHttpClient + Basic Auth ----
+
+            /** 构造 Basic Auth 头（user/pass 皆空返回 null，即匿名）。 */
+            fun basicAuth(user: String?, pass: String?): String? {
+                if (user.isNullOrEmpty() && pass.isNullOrEmpty()) return null
+                val raw = "${user.orEmpty()}:${pass.orEmpty()}"
+                return "Basic " + Base64.getEncoder().encodeToString(raw.toByteArray(Charsets.UTF_8))
+            }
+
+            /** 建单个目录（MKCOL）。已存在（405）视为成功。返回是否成功。 */
+            fun mkcol(url: String, auth: String?): Boolean {
+                val req = Request.Builder().url(normalizeUrl(url)).apply {
+                    auth?.let { header("Authorization", it) }
+                    method("MKCOL", null)
+                }.build()
+                sharedClient.newCall(req).execute().use { resp ->
+                    return resp.isSuccessful || resp.code == 405
+                }
+            }
+
+            /** 逐级确保目录存在：对 relPath 的每一段依次 MKCOL（已存在则忽略）。 */
+            fun ensureDir(baseUrl: String, relPath: String, auth: String?) {
+                val segments = relPath.trim('/').split('/').filter { it.isNotEmpty() }
+                var cur = baseUrl.trimEnd('/')
+                for (seg in segments) {
+                    cur = "$cur/$seg"
+                    mkcol(cur, auth)
+                }
+            }
+
+            /** 写文件（PUT），覆盖同名。 */
+            fun putFile(url: String, auth: String?, content: ByteArray) {
+                val body = RequestBody.create(null, content)
+                val req = Request.Builder().url(normalizeUrl(url)).apply {
+                    auth?.let { header("Authorization", it) }
+                    put(body)
+                }.build()
+                sharedClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) throw IOException("WebDAV PUT 失败 HTTP ${resp.code}: $url")
+                }
+            }
+
+            /** 读文件（GET）。404 抛 FileNotFoundException。 */
+            fun getFile(url: String, auth: String?): ByteArray {
+                val req = Request.Builder().url(normalizeUrl(url)).apply {
+                    auth?.let { header("Authorization", it) }
+                }.build()
+                sharedClient.newCall(req).execute().use { resp ->
+                    if (resp.code == 404) throw FileNotFoundException("WebDAV 文件不存在: $url")
+                    if (!resp.isSuccessful) throw IOException("WebDAV GET 失败 HTTP ${resp.code}: $url")
+                    return resp.body?.bytes() ?: throw IOException("WebDAV 空响应: $url")
+                }
+            }
+
+            /** 列目录（PROPFIND Depth 1），返回该目录下条目的完整 href。 */
+            fun propfind(url: String, auth: String?): List<String> {
+                val body = RequestBody.create(
+                    null,
+                    "<D:propfind xmlns:D=\"DAV:\"><D:prop><D:resourcetype/></D:prop></D:propfind>",
+                )
+                val req = Request.Builder().url(normalizeUrl(url)).apply {
+                    auth?.let { header("Authorization", it) }
+                    header("Depth", "1")
+                    method("PROPFIND", body)
+                }.build()
+                sharedClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) throw IOException("WebDAV PROPFIND 失败 HTTP ${resp.code}: $url")
+                    val xml = resp.body?.string() ?: return emptyList()
+                    return parseHrefs(xml)
+                }
+            }
+
+            /** 删文件（DELETE）。404 视为成功。 */
+            fun deleteFile(url: String, auth: String?) {
+                val req = Request.Builder().url(normalizeUrl(url)).apply {
+                    auth?.let { header("Authorization", it) }
+                    delete()
+                }.build()
+                sharedClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful && resp.code != 404) {
+                        throw IOException("WebDAV DELETE 失败 HTTP ${resp.code}: $url")
+                    }
+                }
+            }
+
+            /** 从 PROPFIND 多状态 XML 里抽所有 href（兼容 `href` 与 `D:href` 等带前缀写法）。 */
+            private fun parseHrefs(xml: String): List<String> {
+                val regex = Regex("<([\\w]+:)?href[^>]*>([\\s\\S]*?)</([\\w]+:)?href>", RegexOption.IGNORE_CASE)
+                return regex.findAll(xml).map { it.groupValues[2].trim() }.toList()
         }
     }
 }
-// SY <--

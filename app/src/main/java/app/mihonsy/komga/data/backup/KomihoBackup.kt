@@ -8,8 +8,10 @@ import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaCredentialCrypto
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.SourceVisibilityStore
+import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.source.KomgaSource
+import mihon.core.common.archive.WebDavRandomAccessSource
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -117,6 +119,45 @@ object KomihoBackup {
         } else {
             os.write(ENC_MAGIC + BackupCrypto.encryptRaw(zipBytes, password))
         }
+    }
+
+    /**
+     * 推送备份到指定 WebDAV 连接（同步中心）：先按现有加密逻辑生成备份字节，
+     * 再在该连接 baseUrl 下 `<dirName>/backup/` 目录写 `komiho-<时间戳>.zip|.kmh`。
+     * 复用现有 [WebDavConnectionStore] 连接机制，只多了「写入」这一步。
+     */
+    suspend fun pushToWebDav(
+        context: Context,
+        conn: WebDavConnection,
+        dirName: String,
+        password: String?,
+    ) {
+        val os = ByteArrayOutputStream()
+        writeBackupFile(context, password, os)
+        val bytes = os.toByteArray()
+        val auth = WebDavRandomAccessSource.basicAuth(conn.user, WebDavCredentialCrypto.decryptStored(conn.passEnc))
+        val base = conn.baseUrl.trimEnd('/')
+        val dir = dirName.ifBlank { "komiho" }.trim('/')
+        WebDavRandomAccessSource.ensureDir(base, "$dir/backup", auth)
+        val ext = if (password.isNullOrBlank()) "zip" else "kmh"
+        val fileName = "komiho-${System.currentTimeMillis()}.$ext"
+        WebDavRandomAccessSource.putFile("$base/$dir/backup/$fileName", auth, bytes)
+    }
+
+    /**
+     * 从指定 WebDAV 连接拉取最新备份字节（同步中心自动恢复用）。
+     * 列 `<dirName>/backup/` 下所有 .zip/.kmh，按文件名（含时间戳）取最新一份。
+     * 内部做同步网络 IO，调用方应置于 Dispatchers.IO。
+     */
+    fun pullLatestFromWebDav(conn: WebDavConnection, dirName: String): ByteArray? {
+        val auth = WebDavRandomAccessSource.basicAuth(conn.user, WebDavCredentialCrypto.decryptStored(conn.passEnc))
+        val base = conn.baseUrl.trimEnd('/')
+        val dir = dirName.ifBlank { "komiho" }.trim('/')
+        val hrefs = runCatching { WebDavRandomAccessSource.propfind("$base/$dir/backup", auth) }.getOrNull() ?: return null
+        val latest = hrefs.map { it.trimEnd('/') }
+            .filter { it.endsWith(".zip", true) || it.endsWith(".kmh", true) }
+            .maxOrNull() ?: return null
+        return runCatching { WebDavRandomAccessSource.getFile(latest, auth) }.getOrNull()
     }
 
     /** 该备份文件是否为加密容器（决定导入时是否要弹密码框）。 */
