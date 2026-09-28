@@ -18,6 +18,7 @@ import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.data.Database
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.repository.BookmarkRepository
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.category.repository.CategoryRepository
@@ -216,13 +217,14 @@ object KomihoBackup {
                 chapterNumber = c.chapterNumber, sourceOrder = c.sourceOrder,
                 dateFetch = c.dateFetch, dateUpload = c.dateUpload,
                 version = c.version, memo = c.memo.toString(),
+                updatedAt = c.lastModifiedAt, // SY --> Komiho: 进度最后更新时间，较新胜比较基准
             )
         }
 
         val localHistory = localMangas.flatMap { m ->
             historyRepo.getHistoryByMangaId(m.id).mapNotNull { h ->
                 val key = chapterRefById[h.chapterId] ?: return@mapNotNull null
-                BkHistory(key.first, key.second, h.readAt?.time, h.readDuration)
+                BkHistory(key.first, key.second, h.readAt?.time, h.readDuration, h.readAt?.time ?: 0L) // SY 较新胜基准
             }
         }
 
@@ -451,9 +453,23 @@ object KomihoBackup {
         for (b in payload.localChapters) {
             val mangaId = mangaIdByUrl[b.mangaUrl] ?: continue
             val existing = chapterRepo.getChapterByUrlAndMangaId(b.url, mangaId)
-            val ch = existing ?: run {
+            // SY --> Komiho: 较新胜——备份进度更新时间晚于本地最后修改才覆盖进度字段
+            val ch = if (existing == null) {
                 chapterRepo.addAll(listOf(buildChapter(mangaId, b)))
                 chapterRepo.getChapterByUrlAndMangaId(b.url, mangaId)
+            } else {
+                if (b.updatedAt > existing.lastModifiedAt) {
+                    chapterRepo.update(
+                        ChapterUpdate(
+                            id = existing.id,
+                            read = b.read,
+                            bookmark = b.bookmark,
+                            lastPageRead = b.lastPageRead,
+                            bookmarkPage = b.bookmarkPage,
+                        ),
+                    )
+                }
+                existing
             } ?: continue
             chapterIdByKey[b.mangaUrl to b.url] = ch.id
         }
@@ -463,8 +479,17 @@ object KomihoBackup {
         db.transaction {
             for (h in payload.localHistory) {
                 val chId = chapterIdByKey[h.mangaUrl to h.chapterUrl] ?: continue
-                db.historyQueries.upsert(chId, Date(h.lastRead ?: 0L), h.timeRead)
-                historyCount++
+                // SY --> Komiho: 较新胜——仅当备份阅读时间不早于本地时才覆盖
+                val backupLast = h.lastRead ?: 0L
+                val local = db.historyQueries.getHistoryByChapterId(chId).executeAsOneOrNull()
+                if (local == null) {
+                    db.historyQueries.upsert(chId, Date(backupLast), h.timeRead)
+                    historyCount++
+                } else if (backupLast >= (local.last_read?.time ?: 0L)) {
+                    // 覆盖 last_read；time_read 传 0 避免与本地累计时长重复累加
+                    db.historyQueries.upsert(chId, Date(backupLast), 0L)
+                    historyCount++
+                }
             }
             for (bk in payload.localBookmarks) {
                 val chId = chapterIdByKey[bk.mangaUrl to bk.chapterUrl] ?: continue
@@ -676,12 +701,16 @@ object KomihoBackup {
         val bookmarkPage: Long = 0, val chapterNumber: Double = 0.0,
         val sourceOrder: Long = 0, val dateFetch: Long = 0, val dateUpload: Long = 0,
         val version: Long = 1, val memo: String = "{}",
+        // SY --> Komiho: 进度最后更新时间（来自 chapters.last_modified_at），导入较新胜比较基准
+        val updatedAt: Long = 0,
     )
 
     @Serializable
     data class BkHistory(
         val mangaUrl: String, val chapterUrl: String,
         val lastRead: Long? = null, val timeRead: Long = 0,
+        // SY --> Komiho: 较新胜比较基准（同 lastRead，避免 null 比较），导入时取较晚者
+        val updatedAt: Long = 0,
     )
 
     @Serializable

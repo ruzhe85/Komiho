@@ -34,6 +34,12 @@ JOIN chapters C
 ON H.chapter_id = C._id
 WHERE C.manga_id = :mangaId AND C.url = :chapterUrl AND C._id = H.chapter_id;
 
+-- SY --> Komiho: 备份恢复较新胜——按 chapter_id 直接取本地阅读记录
+getHistoryByChapterId:
+SELECT _id, chapter_id, last_read, time_read
+FROM history
+WHERE chapter_id = :chapterId;
+
 resetHistoryById:
 UPDATE history
 SET last_read = 0
