@@ -362,9 +362,15 @@ class KomgaMainActivity : KomgaBaseActivity() {
             try {
                 val prefs = Injekt.get<PreferenceStore>()
                 if (!prefs.getBoolean("komiho_sync_center_autorestore", false).get()) return@launch
-                val connId = prefs.getString("komiho_sync_center_conn", "").get()
-                val conn = WebDavConnectionStore.all().firstOrNull { it.id == connId } ?: return@launch
+                val url = prefs.getString("komiho_sync_center_url", "").get().trimEnd('/')
+                if (url.isBlank()) return@launch
+                val user = prefs.getString("komiho_sync_center_user", "").get()
+                val serverPass = prefs.getString("komiho_sync_center_server_pass", "").get()
                 val dir = prefs.getString("komiho_sync_center_dir", "komiho").get().ifBlank { "komiho" }
+                val conn = WebDavConnection(
+                    id = "sync", name = "同步中心", baseUrl = url,
+                    user = user, passEnc = WebDavCredentialCrypto.encrypt(serverPass),
+                )
                 val bytes = KomihoBackup.pullLatestFromWebDav(conn, dir) ?: return@launch
                 val pwd = prefs.getString("komiho_sync_center_password", "").get().ifBlank { null }
                 val json = KomihoBackup.readBackupBytes(bytes, pwd)
