@@ -101,7 +101,8 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // 这类图 < 2×视图，inSampleSize 无损失。
         // 开启「大图强制 AI 增强」（aiBypassFitGate）后放宽到统一 2048 上限——大源图 AI 也能
         // 吃到 2048 内的真实细节；MP 输出门（enhance() 里）始终兜底防 OOM。
-        // AI 2x 结果交 SSIV 缩放显示（软件层降采样已移除）。
+        // AI 2x 结果默认直接交 SSIV 缩放显示；aiAreaDownscale 开启时在增强后按视图尺寸
+        // 面积回缩（见下方 areaDownscaleToDisplay 调用）。
         val preferences = Injekt.get<ReaderPreferences>()
         val (targetW, targetH) = if (options.enhanced) {
             if (isTallStrip) {
@@ -135,8 +136,8 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // 本来就够，AI 2x 再缩回视图是白做往返（真机实测 2890×4096 源图净画质不升反降），
         // 直接跳过，原图交 SSIV 缩小显示（双线性无锐化负瓣，不会锐化摩尔纹）。
         // 长条页 r 只看宽度（dstWidth/图宽）—— 高度是滚动维度，不参与 fit；判据仍是
-        // 「解码宽度已 ≥ 视图宽度就跳过」。r > 1 才喂 AI：图 < 2×视图宽，2x 输出后再由
-        // MihonSyEnhancer 用 Mitchell 降采样回视图（比例 ∈ [0.5,1)，温和）。
+        // 「解码宽度已 ≥ 视图宽度就跳过」。r > 1 才喂 AI：图 < 2×视图宽，2x 输出默认
+        // 直接交 SSIV；aiAreaDownscale 开启时按视图尺寸面积回缩（防摩尔纹）。
         // ⚠️ 必须在预缩块之前算 —— 预缩会动 bitmap 尺寸，污染 r 的语义。
         val fitRatio = if (isTallStrip) {
             dstWidth / bitmap.width.toFloat()
@@ -203,7 +204,7 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                         // 在同线程用局部变量收集回调值，避免并发页互相串号。
                         var enhanceOk = false
                         var gpuWaitMs = 0L
-                        val enhanced = MihonSyEnhancer.enhance(
+                        var enhanced = MihonSyEnhancer.enhance(
                             bitmap,
                             preferences,
                             onComplete = { ok, _, wait ->
@@ -214,6 +215,30 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                             // Komiho: 页号透传给增强器 —— 角标按页登记引擎，别让并发页互相覆盖。
                             pageIndex = options.pageIndex,
                         )
+                        // Komiho (2026-09-30): AI 面积回缩（防摩尔纹）。SSIV 对 bitmap 源是
+                        // 整图双线性缩小、无低通，AI 2x 的高频网点与屏幕像素网格拍频出摩尔纹；
+                        // 相对显示区缩比 < 0.85 时用面积核压回显示带通。放在
+                        // EnhanceTimings.put 之前 —— 回缩是真实计算耗时，角标要计入。
+                        // 只对 mode 5 生效（含引擎失败回落 Lanczos 的页）；webtoon 原始尺寸
+                        // 模式 1:1 显示无缩小、回缩只会丢细节，跳过。
+                        if (
+                            enhanced != null &&
+                            enhanced !== bitmap &&
+                            preferences.enhancementMode.get() == 5 &&
+                            preferences.aiAreaDownscale.get() &&
+                            !options.originalSizeDisplay
+                        ) {
+                            val downscaled = MihonSyEnhancer.areaDownscaleToDisplay(
+                                enhanced,
+                                viewWidth = dstWidth,
+                                viewHeight = dstHeight,
+                                isTallStrip = isTallStrip,
+                            )
+                            if (downscaled !== enhanced) {
+                                enhanced.recycle()
+                                enhanced = downscaled
+                            }
+                        }
                         if (enhanceOk) {
                             EnhanceTimings.put(
                                 options.pageIndex,

@@ -53,6 +53,23 @@ inline float mitchellKernel(float x) {
           (8.0f * B + 24.0f * C)) / 6.0f;
 }
 
+// Komiho: 面积平均核（软边 box，支撑窗 ±(0.5+ε)，边缘线性过渡）— AI 2x 输出回缩到
+// 显示尺寸专用。配合 ResamplePlan 的支撑窗随缩比放大，等效逐输出像素的精确面积
+// 覆盖加权：精确 2:1 时两个边缘 tap 权重对称（各 0.5），归一化后仍是精确面积平均；
+// 非整数缩比时边缘 tap 拿到 ≈ 覆盖面积的分数权重。无负瓣，对网点/高频纹理不会
+// 振铃，也几乎不残留拍频（摩尔纹）。
+// ⚠️ 边缘必须软过渡：KernelLUT::at() 把 |x| ≥ radius 钳到 LUT 端点，端点值必须为 0 ——
+// 纯 box 在 ±0.5 处取 1 会让支撑窗外所有 tap 都拿到权重。
+constexpr float AREA_KERNEL_EDGE = 1.0f / 256.0f;
+
+inline float areaKernel(float x) {
+  x = std::fabs(x);
+  const float edge = 0.5f + AREA_KERNEL_EDGE;
+  if (x >= edge) return 0.0f;
+  if (x <= 0.5f - AREA_KERNEL_EDGE) return 1.0f;
+  return (edge - x) / (2.0f * AREA_KERNEL_EDGE);
+}
+
 // MihonSY: Spline36 disabled — kept for reference but no longer compiled into a
 // code path. Comments out the kernel and its resizeWithKernel case below.
 // inline float spline36Kernel(float x) {
@@ -77,7 +94,8 @@ struct KernelLUT {
   float invStep;
   float radius;
 
-  KernelLUT(KernelFn fn, int radius) : radius(static_cast<float>(radius)) {
+  // Komiho: radius 为 float —— 面积核（kernel id 4）用 0.5+ε 的半径。
+  KernelLUT(KernelFn fn, float radius) : radius(radius) {
     tbl.resize(KERNEL_LUT_N);
     invStep = static_cast<float>(KERNEL_LUT_N - 1) / (2.0f * radius);
     const int scale = KQ_ONE;
@@ -126,7 +144,7 @@ struct ResamplePlan {
 
   ResamplePlan() = default;
 
-  ResamplePlan(int srcSize, int dstSize_, int radius, const KernelLUT &lut)
+  ResamplePlan(int srcSize, int dstSize_, float radius, const KernelLUT &lut)
       : dstSize(dstSize_) {
     const float scale = srcSize / static_cast<float>(dstSize_);
 
@@ -134,7 +152,7 @@ struct ResamplePlan {
     // 否则固定 ±radius 源像素窗在 2:1 缩小时会跳过一半源像素 → 混叠/摩尔纹，
     // 效果反而不如双线性。放大时维持原窗口不变。
     const bool downscaling = scale > 1.0f;
-    const float support = downscaling ? radius * scale : static_cast<float>(radius);
+    const float support = downscaling ? radius * scale : radius;
     const float kscale = downscaling ? scale : 1.0f;
 
     taps = 2 * static_cast<int>(std::ceil(support)) + 2;
@@ -343,7 +361,7 @@ void resizeAlpha(const unsigned char *src, int sw, int sh, unsigned char *dst, i
 }
 
 void resizeGeneric(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw,
-                   int dh, KernelFn kernel, int radius, bool opaque) {
+                   int dh, KernelFn kernel, float radius, bool opaque) {
   // Kernel generation remains outside the pixel loops. The important additional
   // optimization here is that all per-destination coordinate math, clamping and
   // LUT interpolation are also moved into these two plans.
@@ -380,7 +398,13 @@ void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *d
     // Komiho: Mitchell-Netravali (kernel id 3) — GPU/AI 路线的降采样用。
     case 3: {
       const bool opaque = isFullyOpaque(src, sw, sh);
-      resizeGeneric(src, sw, sh, dst, dw, dh, mitchellKernel, 2, opaque);
+      resizeGeneric(src, sw, sh, dst, dw, dh, mitchellKernel, 2.0f, opaque);
+      break;
+    }
+    // Komiho: 面积平均（kernel id 4）— AI 2x 输出回缩到显示尺寸（防摩尔纹）。
+    case 4: {
+      const bool opaque = isFullyOpaque(src, sw, sh);
+      resizeGeneric(src, sw, sh, dst, dw, dh, areaKernel, 0.5f + AREA_KERNEL_EDGE, opaque);
       break;
     }
     // MihonSY: Spline36 (kernel id 2) disabled — spline36Kernel is commented out above.
@@ -391,7 +415,7 @@ void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *d
     // }
     default: {
       const bool opaque = isFullyOpaque(src, sw, sh);
-      resizeGeneric(src, sw, sh, dst, dw, dh, lanczosKernel, LANCZOS_A, opaque);
+      resizeGeneric(src, sw, sh, dst, dw, dh, lanczosKernel, static_cast<float>(LANCZOS_A), opaque);
       break;
     }
   }
@@ -400,6 +424,7 @@ void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *d
 }  // namespace
 
 static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel);
+static jobject resampleBitmapTo(JNIEnv *env, jobject bitmap, jint dw, jint dh, jint kernel);
 
 extern "C" JNIEXPORT jobject JNICALL
 Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeLanczosProcess(
@@ -411,6 +436,28 @@ extern "C" JNIEXPORT jobject JNICALL
 Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeResample(
     JNIEnv *env, jobject thiz, jobject bitmap, jfloat scale, jint kernel) {
   return nativeResampleImpl(env, bitmap, scale, kernel);
+}
+
+// Komiho: 面积平均降采样到显式目标尺寸（kernel id 4）。目标大于源时钳回源尺寸
+// （绝不放大）；与 nativeResample 的统一倍率不同，宽高比可各自独立。失败返回入参。
+extern "C" JNIEXPORT jobject JNICALL
+Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeAreaDownscaleTo(
+    JNIEnv *env, jobject thiz, jobject bitmap, jint dstWidth, jint dstHeight) {
+  AndroidBitmapInfo info;
+  if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
+    LOGE("AndroidBitmap_getInfo failed");
+    return bitmap;
+  }
+  if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
+    LOGE("Unsupported bitmap format %d", info.format);
+    return bitmap;
+  }
+  const int sw = static_cast<int>(info.width);
+  const int sh = static_cast<int>(info.height);
+  const int dw = std::max(1, std::min(sw, dstWidth));
+  const int dh = std::max(1, std::min(sh, dstHeight));
+  if (dw == sw && dh == sh) return bitmap;
+  return resampleBitmapTo(env, bitmap, dw, dh, 4);
 }
 
 static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel) {
@@ -427,10 +474,26 @@ static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jin
     return bitmap;
   }
 
+  return resampleBitmapTo(
+      env, bitmap,
+      static_cast<int>(info.width * scale),
+      static_cast<int>(info.height * scale),
+      kernel);
+}
+
+static jobject resampleBitmapTo(JNIEnv *env, jobject bitmap, jint dw, jint dh, jint kernel) {
+  AndroidBitmapInfo info;
+  if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
+    LOGE("AndroidBitmap_getInfo failed");
+    return bitmap;
+  }
+  if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
+    LOGE("Unsupported bitmap format %d", info.format);
+    return bitmap;
+  }
+
   const int sw = static_cast<int>(info.width);
   const int sh = static_cast<int>(info.height);
-  const int dw = static_cast<int>(info.width * scale);
-  const int dh = static_cast<int>(info.height * scale);
   if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0 || dw > 16384 || dh > 65536) {
     LOGE("Output size %dx%d out of bounds", dw, dh);
     return bitmap;

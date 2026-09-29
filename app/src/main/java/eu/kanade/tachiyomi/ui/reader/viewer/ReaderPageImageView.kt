@@ -453,6 +453,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .diskCachePolicy(CachePolicy.DISABLED)
                     .enhanced(enhancementOn && !this@ReaderPageImageView.skipEnhance)
                     .customDecoder(true)
+                    // Komiho: webtoon 原始尺寸模式（1:1 显示）不下调 AI 面积回缩 ——
+                    // 没有缩小就没有摩尔纹，回缩只会丢细节。
+                    .originalSizeDisplay(config.minimumScaleType == SubsamplingScaleImageView.SCALE_TYPE_ORIGINAL_SIZE)
                     // Komiho 诊断：带上页号（prewarm 保持默认 false → 日志里显示 holder#N）。
                     .pageIndex(this@ReaderPageImageView.pageIndex)
                     .target(

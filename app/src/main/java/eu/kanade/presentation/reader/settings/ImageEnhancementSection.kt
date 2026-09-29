@@ -232,6 +232,12 @@ fun ImageEnhancementSection(
                 checked = bypass,
                 onClick = { preferences.aiBypassFitGate.set(!bypass) },
             )
+            // Komiho: AI 面积回缩（防摩尔纹）—— AI 2x 输出按显示尺寸用面积核压回
+            // 显示带通再交 SSIV（SSIV 整图双线性缩小无低通，高频网点会拍频）。
+            CheckboxItem(
+                label = stringResource(MR.strings.ai_area_downscale),
+                pref = preferences.aiAreaDownscale,
+            )
         }
         }  // Komiho: if (mode != 0) —— 关闭时隐藏增强分组、模型选择、角标开关与强制增强
     }

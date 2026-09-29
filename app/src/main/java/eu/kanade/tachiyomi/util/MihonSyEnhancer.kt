@@ -46,6 +46,13 @@ object MihonSyEnhancer {
      */
     private const val AI_UPSCALE_FACTOR = 2f
 
+    /**
+     * Komiho: AI 面积回缩触发门。AI 2x 结果相对显示区的缩比 ≥ 此值时不动它 —— 轻度缩小
+     * 交给 SSIV 双线性即可（无可感知拍频）；小于此值才用面积核回缩（双线性在 >1.2x 左右
+     * 的缩小上开始欠采样，留余量取 0.85）。见 [areaDownscaleToDisplay]。
+     */
+    private const val AREA_DOWNSCALE_TRIGGER = 0.85f
+
     init {
         System.loadLibrary("mihonsy-enhance")
     }
@@ -72,6 +79,13 @@ object MihonSyEnhancer {
     // private external fun nativeProcessAnime4K(bitmap: Bitmap): Bitmap
     private external fun nativeLanczosProcess(bitmap: Bitmap, scale: Float): Bitmap
     private external fun nativeResample(bitmap: Bitmap, scale: Float, kernel: Int): Bitmap
+
+    /**
+     * Komiho: 面积平均降采样到显式目标尺寸（native kernel id 4，软边 box、支撑窗随缩比
+     * 放大 ≈ 精确面积覆盖加权）。目标大于源时 native 侧钳回源尺寸（绝不放大）；任何失败
+     * 返回入参本身。为 AI 面积回缩（[areaDownscaleToDisplay]）服务。
+     */
+    private external fun nativeAreaDownscaleTo(bitmap: Bitmap, dstWidth: Int, dstHeight: Int): Bitmap
 
     /**
      * Komiho: CPU Guided Filter 漫画降噪（亮度引导强度缩放：只平滑亮度、三通道同乘一因子，
@@ -481,8 +495,10 @@ object MihonSyEnhancer {
                 tag = sourceTag,
                 timing = timing,
             )?.let { upscaled ->
-                // Komiho (2026-09-26): AI 2x 结果直接交 SSIV 缩放显示，软件层不做降采样
-                // （真机 A/B 后用户定稿：Mitchell 降采样方案放弃，只保留 SSIV 一条缩放路径）。
+                // Komiho (2026-09-30): AI 2x 结果默认直接交 SSIV 缩放显示（2026-09-26 定稿）。
+                // 可选开关 [ReaderPreferences.aiAreaDownscale] 开启后，由解码器按视图尺寸
+                // 走 [areaDownscaleToDisplay] 面积回缩 —— SSIV 对 bitmap 源是整图双线性缩小、
+                // 无低通，AI 2x 的高频网点会拍频出摩尔纹（回缩在解码器做，因为它持有视图尺寸）。
                 return upscaled
             }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
@@ -499,6 +515,67 @@ object MihonSyEnhancer {
         if (scale <= 1f) return null
         val argb = ensureArgb(input) ?: return null
         return nativeLanczosProcess(argb, scale).takeUnless { it === argb }
+    }
+
+    /**
+     * Komiho: AI 面积回缩 —— AI 2x 输出相对显示尺寸的缩比 < [AREA_DOWNSCALE_TRIGGER] 时，
+     * 用面积平均（软边 box、支撑窗随缩比放大 ≈ 精确面积覆盖加权）压回显示带通再交 SSIV。
+     *
+     * 摩尔纹根因：SSIV 对 bitmap 源走非瓦片路径，`FilterBitmap` 双线性整图缩小没有低通
+     * （每屏幕像素仅 2×2 tap），AI 2x 的高频网点与屏幕像素网格拍频。面积核等效超采样
+     * 抗锯齿，把超分信息正确压回显示带通；相比被放弃的 Mitchell 方案（固定 4-tap，
+     * 0.5 缩比下仍欠采样），支撑窗随缩比走才是真正消除拍频的关键。
+     *
+     * 契约：不回收入参；返回新位图或入参本身。长条（[isTallStrip]）只按宽度算 fit
+     * （与解码侧 fitRatio 同口径，高度是滚动维度）；视图尺寸未知（<=0 / 未布局 /
+     * Int.MAX_VALUE）时原样返回。任何失败都原样返回，绝不阻断出图。
+     */
+    fun areaDownscaleToDisplay(
+        bitmap: Bitmap,
+        viewWidth: Int,
+        viewHeight: Int,
+        isTallStrip: Boolean,
+    ): Bitmap {
+        if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return bitmap
+        if (viewWidth <= 0 || viewWidth == Int.MAX_VALUE) return bitmap
+        if (!isTallStrip && (viewHeight <= 0 || viewHeight == Int.MAX_VALUE)) return bitmap
+
+        val fit = if (isTallStrip) {
+            viewWidth / bitmap.width.toFloat()
+        } else {
+            min(
+                viewWidth / bitmap.width.toFloat(),
+                viewHeight / bitmap.height.toFloat(),
+            )
+        }
+        if (fit <= 0f || fit >= AREA_DOWNSCALE_TRIGGER) return bitmap
+
+        val targetW = maxOf(1, (bitmap.width * fit).roundToInt()).coerceAtMost(bitmap.width)
+        val targetH = maxOf(1, (bitmap.height * fit).roundToInt()).coerceAtMost(bitmap.height)
+        if (targetW == bitmap.width && targetH == bitmap.height) return bitmap
+
+        // native 只读输入像素（输出是它自建的位图），无需 mutable —— 与 [ensureArgb] 的
+        // 可变要求不同，避免为一次降采样做整图拷贝。AI/重采样输出恒为 ARGB_8888，
+        // copy 路径纯防御。
+        val argb = if (bitmap.config == Bitmap.Config.ARGB_8888) {
+            bitmap
+        } else {
+            try {
+                bitmap.copy(Bitmap.Config.ARGB_8888, false)
+            } catch (t: Throwable) {
+                null
+            }
+        } ?: return bitmap
+
+        val out: Bitmap? = try {
+            nativeAreaDownscaleTo(argb, targetW, targetH).takeIf { it !== argb }
+        } catch (t: Throwable) {
+            logcat(LogPriority.WARN, t) { "Area downscale failed; keeping full size" }
+            null
+        }
+        // 中间副本（若有）无消费者即回收；入参所有权归调用方。
+        if (argb !== bitmap) argb.recycle()
+        return out ?: bitmap
     }
 
     /** Returns [input] if it is already a mutable ARGB_8888 bitmap, otherwise a copy. */

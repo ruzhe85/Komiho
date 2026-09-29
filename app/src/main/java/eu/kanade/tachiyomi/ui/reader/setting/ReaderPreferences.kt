@@ -277,6 +277,15 @@ class ReaderPreferences(
     val aiBypassFitGate: Preference<Boolean> = preferenceStore.getBoolean("pref_ai_bypass_fit_gate", false)
 
     /**
+     * Komiho (2026-09-30): AI 面积回缩（防摩尔纹）。**默认关 —— 真机 A/B 后再定默认。**
+     * AI 2x 输出相对显示区缩比 < 0.85 时，用面积平均核（软边 box、支撑窗随缩比走）
+     * 压回显示带通再交 SSIV。根因：SSIV 对 bitmap 源是非瓦片整图双线性缩小、无低通，
+     * AI 2x 的高频网点与屏幕像素网格拍频出摩尔纹。只对 mode 5 生效（含引擎失败回落
+     * Lanczos 的页）；webtoon 原始尺寸模式（1:1 显示）不触发。变更进 [enhancementCacheKey]。
+     */
+    val aiAreaDownscale: Preference<Boolean> = preferenceStore.getBoolean("pref_ai_area_downscale", false)
+
+    /**
      * Komiho: 上一次的非关闭增强档位——「开启」chip 用它恢复（不改变像素，不进指纹）。
      */
     val enhancementLastMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_last_mode", 2)
@@ -304,6 +313,7 @@ class ReaderPreferences(
         append('|').append(aiTileSize.get())
         append('|').append(denoiseLevel.get())
         append('|').append(if (aiBypassFitGate.get()) 1 else 0)
+        append('|').append(if (aiAreaDownscale.get()) 1 else 0)
         append('|').append(cropBorders.get())
         append('|').append(cropBordersWebtoon.get())
     }
