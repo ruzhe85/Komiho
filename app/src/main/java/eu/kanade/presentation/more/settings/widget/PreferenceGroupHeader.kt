@@ -22,13 +22,15 @@ fun PreferenceGroupHeader(title: String, description: String? = null) {
             modifier = Modifier.padding(horizontal = PrefsHorizontalPadding),
             style = MaterialTheme.typography.bodyMedium,
         )
-        // Komiho: 分组说明行（可选）——如「同步」分组下说明同步内容范围。
+        // Komiho: 分组说明行（可选）——如「同步」分组下说明同步内容范围；
+        // 与标题之间留出间距，视觉上与标题断开。
         if (description != null) {
             Text(
                 text = description,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(top = 2.dp)
                     .padding(horizontal = PrefsHorizontalPadding),
                 style = MaterialTheme.typography.bodySmall,
             )
