@@ -777,8 +777,11 @@ private fun KomgaMainScreen(
         }
     }
     // Komiho: 二级页面 rail 点 tab 跳过来的目标 tab（不可见则忽略），消费后清空。
-    LaunchedEffect(tabSignal, visibleTabs) {
-        val target = tabSignal.value ?: return@LaunchedEffect
+    // 注意必须 collectAsState：StateFlow.value 的写入不会触发组合，直接读 .value 会让
+    // 「主界面存活时从二级页 rail 跳 tab」永远失效（只有冷启动先赋值才碰巧可用）。
+    val tabTarget by tabSignal.collectAsState()
+    LaunchedEffect(tabTarget, visibleTabs) {
+        val target = tabTarget ?: return@LaunchedEffect
         if (visibleTabs.any { it.ordinal == target }) {
             currentTab = target
             tabSignal.value = null
