@@ -184,6 +184,8 @@ sealed class Preference {
 
     data class PreferenceGroup(
         override val title: String,
+        /** 分组标题下的可选说明行（小字），如「同步」分组说明同步内容范围。 */
+        val description: String? = null,
         override val enabled: Boolean = true,
 
         val preferenceItems: List<PreferenceItem<out Any, out Any>>,

@@ -152,10 +152,12 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             )
         }
 
+        val needConfigText = stringResource(MR.strings.komiho_sync_need_config)
+
         fun manualSync(push: Boolean) {
             if (syncInFlight || KomihoSync.busy) return
             if (!KomihoSync.configured(prefs)) {
-                context.toast("请先配置 WebDAV 同步")
+                context.toast(needConfigText)
                 showSyncConn = true
                 return
             }
@@ -181,48 +183,59 @@ object SettingsKomihoBackupScreen : SearchableSettings {
         }
 
         val configured = KomihoSync.configured(prefs)
-        val statusSubtitle = KomihoSync.statusSummary(prefs) ?: "未配置 · 点击设置"
+        val statusSubtitle = KomihoSync.statusSummary(context, prefs)
+            ?: stringResource(MR.strings.komiho_sync_status_unconfigured)
 
-        // 本地备份两条归入「备份与还原」分组，与「同步」分组并列。
+        // 本地备份归入「备份与还原」分组，与「同步」分组并列。
         return listOf(
             Preference.PreferenceGroup(
-                title = "备份与还原",
+                title = stringResource(MR.strings.komiho_backup_group),
                 preferenceItems = listOf(
                     Preference.PreferenceItem.TextPreference(
-                        title = "创建备份",
+                        title = stringResource(MR.strings.komiho_backup_create),
                         onClick = { showExportPwd = true },
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "还原备份",
+                        title = stringResource(MR.strings.komiho_backup_restore),
                         onClick = { importLauncher.launch("*/*") },
                     ),
                 ),
             ),
             Preference.PreferenceGroup(
-                title = "同步",
+                title = stringResource(MR.strings.komiho_sync_group),
+                description = stringResource(MR.strings.komiho_sync_desc),
                 preferenceItems = listOf(
                     Preference.PreferenceItem.TextPreference(
-                        title = "WebDAV 同步",
+                        title = stringResource(MR.strings.komiho_sync_connection),
                         subtitle = statusSubtitle,
                         onClick = { showSyncConn = true },
                     ),
                     Preference.PreferenceItem.MultiSelectListPreference(
                         preference = triggersPref,
-                        entries = KomihoSync.ALL_TRIGGERS.toMap(),
-                        title = "触发条件",
+                        entries = mapOf(
+                            KomihoSync.TRIGGER_CHAPTER_READ to
+                                stringResource(MR.strings.komiho_sync_trigger_chapter_read),
+                            KomihoSync.TRIGGER_CHAPTER_OPEN to
+                                stringResource(MR.strings.komiho_sync_trigger_chapter_open),
+                            KomihoSync.TRIGGER_APP_START to
+                                stringResource(MR.strings.komiho_sync_trigger_app_start),
+                            KomihoSync.TRIGGER_FOREGROUND to
+                                stringResource(MR.strings.komiho_sync_trigger_foreground),
+                        ),
+                        title = stringResource(MR.strings.komiho_sync_triggers),
                         // 设计约定：条目下方不显示已选项（状态/取值以外不放小字）。
                         subtitle = null,
                         subtitleProvider = { _, _ -> null },
                         enabled = configured,
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "立即推送",
+                        title = stringResource(MR.strings.komiho_sync_push_now),
                         // 完整同步：拉→合→推。
                         enabled = configured && !syncInFlight,
                         onClick = { manualSync(push = true) },
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "立即恢复",
+                        title = stringResource(MR.strings.komiho_sync_pull_now),
                         // 只拉合，不推送。
                         enabled = configured && !syncInFlight,
                         onClick = { manualSync(push = false) },

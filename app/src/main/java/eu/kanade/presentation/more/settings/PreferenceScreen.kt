@@ -54,7 +54,7 @@ fun PreferenceScreen(
 
                     item {
                         Column {
-                            PreferenceGroupHeader(title = preference.title)
+                            PreferenceGroupHeader(title = preference.title, description = preference.description)
                         }
                     }
                     items(preference.preferenceItems) { item ->

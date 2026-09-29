@@ -15,9 +15,11 @@ import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.core.common.archive.WebDavRandomAccessSource
 import okhttp3.OkHttpClient
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
@@ -25,12 +27,13 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
-// SY --> Komiho: WebDAV 同步引擎（设置 → 备份与还原 → 同步）。
+// SY --> Komiho: WebDAV 同步引擎（设置 → 备份与同步 → 同步）。
 // 统一同步模型：任何一次同步（手动 + 触发条件）= 拉远端最新 → 较新胜合并进本地 → 需要时导出推送。
 // 推送前必须先合并：本机旧快照不得直接覆盖远端，防止多机场景回退他机新进度。
 // 凭据（连接密码/备份密码）统一 enc1: 加密落盘；decryptStored 兼容历史明文，保存时即升级。
 // 结果只走 app 内反馈（本应用不申请通知权限）：自动同步成功静默（仅写 last_* 供主屏状态行），
 // 失败才 toast；手动推送/恢复完成后 toast 确认。
+// last_result 持久化为语言中立键（`ok[:detail]` / `fail:<原因原文>`），展示时才本地化。
 object KomihoSync {
 
     const val KEY_URL = "komiho_sync_center_url"
@@ -53,12 +56,12 @@ object KomihoSync {
     const val TRIGGER_APP_START = "app_start"
     const val TRIGGER_FOREGROUND = "foreground"
 
-    /** 触发条件全集（多选）。 */
+    /** 触发条件全集（键；展示文案由 UI 侧本地化）。 */
     val ALL_TRIGGERS = listOf(
-        TRIGGER_CHAPTER_READ to "章节阅读后同步",
-        TRIGGER_CHAPTER_OPEN to "章节打开时同步",
-        TRIGGER_APP_START to "应用启动时同步",
-        TRIGGER_FOREGROUND to "应用后台转到前台时同步",
+        TRIGGER_CHAPTER_READ,
+        TRIGGER_CHAPTER_OPEN,
+        TRIGGER_APP_START,
+        TRIGGER_FOREGROUND,
     )
 
     private val inFlight = AtomicBoolean(false)
@@ -113,7 +116,7 @@ object KomihoSync {
      */
     suspend fun sync(context: Context, push: Boolean): Outcome {
         if (!inFlight.compareAndSet(false, true)) {
-            return Outcome(false, "已有同步在进行")
+            return Outcome(false, context.stringResource(MR.strings.komiho_sync_busy))
         }
         try {
             return doSync(context, push)
@@ -126,7 +129,7 @@ object KomihoSync {
         val prefs = Injekt.get<PreferenceStore>()
         val action = if (push) ACTION_PUSH else ACTION_PULL
         val cfg = readConfig(prefs)
-            ?: return fail(prefs, action, "未配置 WebDAV 同步")
+            ?: return fail(context, prefs, action, context.stringResource(MR.strings.komiho_sync_not_configured))
         val client = clientFor(cfg.insecureTls)
 
         // 1. 拉远端最新并合并。远端无备份（首次）跳过；
@@ -135,7 +138,7 @@ object KomihoSync {
             KomihoBackup.pullLatestFromWebDav(cfg.conn, cfg.dir, client)
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "WebDAV 同步拉取失败" }
-            return fail(prefs, action, e.message ?: "网络错误")
+            return fail(context, prefs, action, e.message ?: e.javaClass.simpleName)
         }
         if (bytes != null) {
             try {
@@ -143,7 +146,7 @@ object KomihoSync {
                 KomihoBackup.importBackup(context, json, cfg.backupPass)
             } catch (e: Exception) {
                 logcat(LogPriority.WARN, e) { "WebDAV 同步合并失败" }
-                return fail(prefs, action, "合并失败：${e.message}")
+                return fail(context, prefs, action, context.stringResource(MR.strings.komiho_sync_merge_fail, e.message ?: ""))
             }
         }
 
@@ -153,23 +156,26 @@ object KomihoSync {
                 KomihoBackup.pushToWebDav(context, cfg.conn, cfg.dir, cfg.backupPass, client)
             } catch (e: Exception) {
                 logcat(LogPriority.WARN, e) { "WebDAV 同步推送失败" }
-                return fail(prefs, ACTION_PUSH, e.message ?: "推送失败")
+                return fail(context, prefs, ACTION_PUSH, e.message ?: e.javaClass.simpleName)
             }
         }
 
-        record(prefs, action, "成功")
-        return Outcome(true, if (push) "已同步到 WebDAV" else "已从 WebDAV 恢复")
+        record(prefs, action, ok = true, detail = "")
+        return Outcome(
+            true,
+            context.stringResource(if (push) MR.strings.komiho_sync_push_ok else MR.strings.komiho_sync_pull_ok),
+        )
     }
 
-    private fun record(prefs: PreferenceStore, action: String, result: String) {
+    private fun record(prefs: PreferenceStore, action: String, ok: Boolean, detail: String) {
         prefs.getString(KEY_LAST_ACTION, "").set(action)
         prefs.getLong(KEY_LAST_TIME, 0L).set(System.currentTimeMillis())
-        prefs.getString(KEY_LAST_RESULT, "").set(result)
+        prefs.getString(KEY_LAST_RESULT, "").set(if (ok) "ok:$detail" else "fail:$detail")
     }
 
-    private fun fail(prefs: PreferenceStore, action: String, reason: String): Outcome {
-        record(prefs, action, "失败（$reason）")
-        return Outcome(false, "同步失败：$reason")
+    private fun fail(context: Context, prefs: PreferenceStore, action: String, reason: String): Outcome {
+        record(prefs, action, ok = false, detail = reason)
+        return Outcome(false, context.stringResource(MR.strings.komiho_sync_fail_prefix, reason))
     }
 
     /** 自动触发（触发条件命中时调用）：未启用/未配置直接忽略；成功静默，失败 toast。 */
@@ -205,10 +211,11 @@ object KomihoSync {
     }
 
     /**
-     * 测试连接：对给定配置发 PROPFIND，返回「通过 · 耗时ms」或失败原因。
+     * 测试连接：对给定配置发 PROPFIND。返回 (是否通过, 详情)——
+     * 通过时详情为耗时毫秒数，失败时为原始错误文案（异常信息未本地化，原样透出）。
      * 用表单当前值即可测（不必先保存）。
      */
-    fun testConnection(cfg: SyncConfig): String {
+    fun testConnection(cfg: SyncConfig): Pair<Boolean, String> {
         val auth = WebDavRandomAccessSource.basicAuth(
             cfg.conn.user,
             WebDavCredentialCrypto.decryptStored(cfg.conn.passEnc),
@@ -216,32 +223,42 @@ object KomihoSync {
         return try {
             val t0 = System.currentTimeMillis()
             WebDavRandomAccessSource.propfind(cfg.conn.baseUrl, auth, clientFor(cfg.insecureTls))
-            "通过 · ${System.currentTimeMillis() - t0}ms"
+            true to (System.currentTimeMillis() - t0).toString()
         } catch (e: Exception) {
-            e.message ?: "连接失败"
+            false to (e.message ?: e.javaClass.simpleName)
         }
     }
 
     /** 记录一次测试结果（主屏状态行联动）。 */
-    fun recordTestResult(prefs: PreferenceStore, testText: String) {
-        val ok = testText.startsWith("通过")
-        record(prefs, ACTION_TEST, if (ok) testText else "失败（$testText）")
+    fun recordTestResult(prefs: PreferenceStore, ok: Boolean, detail: String) {
+        record(prefs, ACTION_TEST, ok = ok, detail = detail)
     }
 
-    /** 主屏状态行摘要；未配置返回 null。 */
-    fun statusSummary(prefs: PreferenceStore): String? {
+    /** 主屏状态行摘要（本地化）；未配置返回 null。 */
+    fun statusSummary(context: Context, prefs: PreferenceStore): String? {
         readConfig(prefs) ?: return null
         val time = prefs.getLong(KEY_LAST_TIME, 0L).get()
         val action = prefs.getString(KEY_LAST_ACTION, "").get()
-        val result = prefs.getString(KEY_LAST_RESULT, "").get()
-        if (time == 0L || action.isBlank()) return "尚未同步"
-        val label = when (action) {
-            ACTION_PUSH -> "推送"
-            ACTION_PULL -> "恢复"
-            else -> "测试"
+        val raw = prefs.getString(KEY_LAST_RESULT, "").get()
+        if (time == 0L || action.isBlank()) {
+            return context.stringResource(MR.strings.komiho_sync_status_none)
+        }
+        val label = context.stringResource(
+            when (action) {
+                ACTION_PUSH -> MR.strings.komiho_sync_action_push
+                ACTION_PULL -> MR.strings.komiho_sync_action_pull
+                else -> MR.strings.komiho_sync_action_test
+            },
+        )
+        val ok = !raw.startsWith("fail:")
+        val detail = if (ok) raw.removePrefix("ok:") else raw.removePrefix("fail:")
+        val resultText = when {
+            ok && action == ACTION_TEST -> context.stringResource(MR.strings.komiho_sync_result_test_ok, detail)
+            ok -> context.stringResource(MR.strings.komiho_sync_result_ok)
+            else -> context.stringResource(MR.strings.komiho_sync_result_fail, detail)
         }
         val timeText = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(time))
-        return "上次$label $timeText · $result"
+        return context.stringResource(MR.strings.komiho_sync_status_line, label, timeText, resultText)
     }
 }
 // SY <--

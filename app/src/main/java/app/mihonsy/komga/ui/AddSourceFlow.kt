@@ -992,7 +992,7 @@ private fun WebDavFormPage(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "忽略 HTTPS 证书校验",
+                composeStringResource(R.string.komiho_sync_field_insecure),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )

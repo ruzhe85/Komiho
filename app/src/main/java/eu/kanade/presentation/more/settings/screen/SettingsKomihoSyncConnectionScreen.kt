@@ -1,8 +1,10 @@
 package eu.kanade.presentation.more.settings.screen
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -13,27 +15,30 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.backup.KomihoSync
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
+import dev.icerock.moko.resources.StringResource
 import eu.kanade.presentation.more.settings.Preference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.i18n.MR
-import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.i18n.stringResource as composeStringResource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.util.system.toast
 
-// SY --> Komiho：WebDAV 同步连接编辑子屏（从「备份与还原」页点「WebDAV 同步」进入）。
+// SY --> Komiho：WebDAV 同步连接编辑子屏（从「备份与同步」页点「WebDAV 同步」进入）。
 // 与来源连接列表（WebDavConnectionStore）解耦：同步配置独立存放，
 // 仅「从已有 WebDAV 选择」时把来源凭据复制进表单（待保存态），清空只清同步配置、不动来源。
 // 表单模型：字段编辑只改内存，「保存连接」才落盘（密码 enc1: 加密存储）。
@@ -57,12 +62,12 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
         val insecureTls: Boolean = false,
     )
 
-    private enum class Field(val title: String, val masked: Boolean = false) {
-        URL("服务器地址"),
-        USER("用户名"),
-        SERVER_PASS("连接密码", masked = true),
-        DIR("同步目录名"),
-        BACKUP_PASS("备份密码", masked = true),
+    private enum class Field(val titleRes: StringResource, val masked: Boolean = false) {
+        URL(MR.strings.komiho_sync_field_url),
+        USER(MR.strings.komiho_sync_field_user),
+        SERVER_PASS(MR.strings.komiho_sync_field_pass, masked = true),
+        DIR(MR.strings.komiho_sync_field_dir),
+        BACKUP_PASS(MR.strings.komiho_sync_field_backup_pass, masked = true),
     }
 
     private fun PreferenceStore.loadForm(): SyncForm = SyncForm(
@@ -76,6 +81,13 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
 
     private fun decryptStoredPass(stored: String): String =
         if (stored.isBlank()) "" else WebDavCredentialCrypto.decryptStored(stored)
+
+    private fun hostOf(url: String): String =
+        try {
+            java.net.URI(url).host ?: url
+        } catch (_: Exception) {
+            url
+        }
 
     /**
      * WebDAV 同步子屏的偏好列表。
@@ -116,7 +128,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
             prefs.getBoolean(KomihoSync.KEY_INSECURE_TLS, false).set(normalized.insecureTls)
             saved = normalized
             form = normalized
-            context.toast("已保存")
+            context.toast(context.stringResource(MR.strings.komiho_sync_saved))
         }
 
         fun clearAll() {
@@ -128,7 +140,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
             prefs.getBoolean(KomihoSync.KEY_INSECURE_TLS, false).set(false)
             saved = SyncForm()
             form = saved
-            context.toast("已清空 WebDAV 同步配置")
+            context.toast(context.stringResource(MR.strings.komiho_sync_cleared))
         }
 
         fun testConnection() {
@@ -147,11 +159,16 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
                 insecureTls = form.insecureTls,
             )
             scope.launch(Dispatchers.IO) {
-                val result = KomihoSync.testConnection(cfg)
-                KomihoSync.recordTestResult(prefs, result)
+                val (ok, detail) = KomihoSync.testConnection(cfg)
+                KomihoSync.recordTestResult(prefs, ok, detail)
                 withUIContext {
                     testing = false
-                    context.toast("测试连接：$result")
+                    val resultText = if (ok) {
+                        context.stringResource(MR.strings.komiho_sync_result_test_ok, detail)
+                    } else {
+                        context.stringResource(MR.strings.komiho_sync_result_fail, detail)
+                    }
+                    context.toast(context.stringResource(MR.strings.komiho_sync_test_result, resultText))
                 }
             }
         }
@@ -185,11 +202,11 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
         if (showPick) {
             AlertDialog(
                 onDismissRequest = { showPick = false },
-                title = { Text(text = "从已有 WebDAV 载入") },
+                title = { Text(text = composeStringResource(MR.strings.komiho_sync_pick_title)) },
                 text = {
                     Column {
                         if (davs.isEmpty()) {
-                            Text(text = "暂无已保存的 WebDAV 来源")
+                            Text(text = composeStringResource(MR.strings.komiho_sync_pick_empty))
                         }
                         davs.forEach { conn ->
                             Column(
@@ -208,7 +225,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
                                 Text(text = conn.displayName())
                                 Text(
                                     text = conn.baseUrl,
-                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                    style = MaterialTheme.typography.bodySmall,
                                 )
                             }
                         }
@@ -216,7 +233,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
                 },
                 confirmButton = {},
                 dismissButton = {
-                    TextButton(onClick = { showPick = false }) { Text(text = "取消") }
+                    TextButton(onClick = { showPick = false }) { Text(text = composeStringResource(MR.strings.action_cancel)) }
                 },
             )
         }
@@ -225,22 +242,21 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
         if (showClearConfirm) {
             AlertDialog(
                 onDismissRequest = { showClearConfirm = false },
-                title = { Text(text = "清除此 WebDAV 同步配置？") },
+                title = { Text(text = composeStringResource(MR.strings.komiho_sync_clear_title)) },
                 text = {
-                    Text(
-                        text = "将清空地址、账号、密码与备份密码，回到「未配置」。" +
-                            "不会删除任何 WebDAV 来源连接，也不会删除已上传到服务器的备份文件。",
-                    )
+                    Text(text = composeStringResource(MR.strings.komiho_sync_clear_msg))
                 },
                 confirmButton = {
                     TextButton(onClick = {
                         showClearConfirm = false
                         clearAll()
                         onBack?.invoke()
-                    }) { Text(text = "清空配置") }
+                    }) { Text(text = composeStringResource(MR.strings.komiho_sync_clear_btn)) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showClearConfirm = false }) { Text(text = stringResource(MR.strings.action_cancel)) }
+                    TextButton(onClick = { showClearConfirm = false }) {
+                        Text(text = composeStringResource(MR.strings.action_cancel))
+                    }
                 },
             )
         }
@@ -248,87 +264,101 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
         // ---------- 状态行 ----------
         val statusItem = when {
             dirty -> Preference.PreferenceItem.TextPreference(
-                title = "待保存",
-                subtitle = "修改尚未保存",
+                title = composeStringResource(MR.strings.komiho_sync_state_pending),
+                subtitle = composeStringResource(MR.strings.komiho_sync_state_pending_desc),
             )
             saved.url.isBlank() -> Preference.PreferenceItem.TextPreference(
-                title = "未配置",
+                title = composeStringResource(MR.strings.komiho_sync_state_unconfigured),
             )
             else -> Preference.PreferenceItem.TextPreference(
-                title = "已配置 · ${hostOf(saved.url)}",
-                subtitle = lastRecordLine(prefs),
+                title = composeStringResource(
+                    MR.strings.komiho_sync_state_connected,
+                    hostOf(saved.url),
+                ),
+                subtitle = KomihoSync.statusSummary(context, prefs),
             )
         }
 
         return listOfNotNull<Preference>(
             onBack?.let { back ->
                 Preference.PreferenceItem.TextPreference(
-                    title = "返回",
+                    title = composeStringResource(MR.strings.komiho_sync_back),
                     onClick = back,
                 )
             },
             Preference.PreferenceGroup(
-                title = "状态",
+                title = composeStringResource(MR.strings.komiho_sync_group_status),
                 preferenceItems = listOf(statusItem),
             ),
             Preference.PreferenceGroup(
-                title = "连接信息",
+                title = composeStringResource(MR.strings.komiho_sync_group_conn),
                 preferenceItems = listOf(
                     Preference.PreferenceItem.TextPreference(
-                        title = "服务器地址 *",
-                        subtitle = form.url.ifBlank { "未设置" },
+                        title = composeStringResource(MR.strings.komiho_sync_field_url),
+                        subtitle = form.url.ifBlank { composeStringResource(MR.strings.komiho_sync_value_unset) },
                         onClick = { editingField = Field.URL },
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "用户名",
-                        subtitle = form.user.ifBlank { "未设置" },
+                        title = composeStringResource(MR.strings.komiho_sync_field_user),
+                        subtitle = form.user.ifBlank { composeStringResource(MR.strings.komiho_sync_value_unset) },
                         onClick = { editingField = Field.USER },
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "连接密码",
-                        subtitle = if (form.serverPass.isBlank()) "未设置" else "已设置",
+                        title = composeStringResource(MR.strings.komiho_sync_field_pass),
+                        subtitle = if (form.serverPass.isBlank()) {
+                            composeStringResource(MR.strings.komiho_sync_value_unset)
+                        } else {
+                            composeStringResource(MR.strings.komiho_sync_value_set)
+                        },
                         onClick = { editingField = Field.SERVER_PASS },
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "同步目录名",
+                        title = composeStringResource(MR.strings.komiho_sync_field_dir),
                         subtitle = form.dir,
                         onClick = { editingField = Field.DIR },
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "备份密码",
-                        subtitle = if (form.backupPass.isBlank()) "留空不加密" else "已设置",
+                        title = composeStringResource(MR.strings.komiho_sync_field_backup_pass),
+                        subtitle = if (form.backupPass.isBlank()) {
+                            composeStringResource(MR.strings.komiho_sync_value_no_pass)
+                        } else {
+                            composeStringResource(MR.strings.komiho_sync_value_set)
+                        },
                         onClick = { editingField = Field.BACKUP_PASS },
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "忽略 HTTPS 证书校验",
-                        // 服务器为自签名/缺中间证书/证书过期时开启；仅作用于同步中心请求。
-                        subtitle = if (form.insecureTls) "已开启" else "已关闭",
+                        title = composeStringResource(MR.strings.komiho_sync_field_insecure),
+                        subtitle = if (form.insecureTls) {
+                            composeStringResource(MR.strings.komiho_sync_value_set)
+                        } else {
+                            composeStringResource(MR.strings.komiho_sync_value_unset)
+                        },
                         onClick = { form = form.copy(insecureTls = !form.insecureTls) },
                     ),
                 ),
             ),
             Preference.PreferenceGroup(
-                title = "快捷载入",
+                title = composeStringResource(MR.strings.komiho_sync_group_pick),
                 preferenceItems = listOf(
                     Preference.PreferenceItem.TextPreference(
-                        title = "从已有 WebDAV 选择",
+                        title = composeStringResource(MR.strings.komiho_sync_pick),
                         onClick = { showPick = true },
                     ),
                 ),
             ),
             Preference.PreferenceGroup(
-                title = "操作",
+                title = composeStringResource(MR.strings.komiho_sync_group_ops),
                 preferenceItems = buildList {
                     add(
                         Preference.PreferenceItem.TextPreference(
-                            title = "保存连接",
+                            title = composeStringResource(MR.strings.komiho_sync_save),
                             enabled = dirty,
                             onClick = { save() },
                         ),
                     )
                     add(
                         Preference.PreferenceItem.TextPreference(
-                            title = "测试连接",
+                            title = composeStringResource(MR.strings.komiho_sync_test),
                             enabled = !testing && form.url.isNotBlank(),
                             onClick = { testConnection() },
                         ),
@@ -336,7 +366,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
                     if (saved.url.isNotBlank()) {
                         add(
                             Preference.PreferenceItem.TextPreference(
-                                title = "清空此连接",
+                                title = composeStringResource(MR.strings.komiho_sync_clear),
                                 onClick = { showClearConfirm = true },
                             ),
                         )
@@ -344,29 +374,6 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
                 },
             ),
         )
-    }
-
-    private fun hostOf(url: String): String =
-        try {
-            java.net.URI(url).host ?: url
-        } catch (_: Exception) {
-            url
-        }
-
-    /** 上次动作记录行（推送/恢复/测试共用 last_* prefs）。 */
-    private fun lastRecordLine(prefs: PreferenceStore): String? {
-        val time = prefs.getLong(KomihoSync.KEY_LAST_TIME, 0L).get()
-        val action = prefs.getString(KomihoSync.KEY_LAST_ACTION, "").get()
-        val result = prefs.getString(KomihoSync.KEY_LAST_RESULT, "").get()
-        if (time == 0L || action.isBlank()) return null
-        val label = when (action) {
-            KomihoSync.ACTION_PUSH -> "推送"
-            KomihoSync.ACTION_PULL -> "恢复"
-            else -> "测试"
-        }
-        val timeText = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
-            .format(java.util.Date(time))
-        return "上次$label $timeText · $result"
     }
 
     @Composable
@@ -379,7 +386,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
         var text by remember(field) { mutableStateOf(initial) }
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(text = field.title) },
+            title = { Text(text = composeStringResource(field.titleRes)) },
             text = {
                 TextField(
                     value = text,
@@ -388,24 +395,28 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
                     visualTransformation = if (field.masked) {
                         PasswordVisualTransformation()
                     } else {
-                        androidx.compose.ui.text.input.VisualTransformation.None
+                        VisualTransformation.None
                     },
                     placeholder = {
                         when (field) {
                             Field.URL -> Text(text = "https://dav.example.com:10007/QNAP2")
-                            Field.USER -> Text(text = "留空 = 匿名")
-                            Field.SERVER_PASS -> Text(text = "留空 = 匿名")
+                            Field.USER -> Text(text = composeStringResource(MR.strings.komiho_sync_hint_anon))
+                            Field.SERVER_PASS -> Text(text = composeStringResource(MR.strings.komiho_sync_hint_anon))
                             Field.DIR -> Text(text = "komiho")
-                            Field.BACKUP_PASS -> Text(text = "留空不加密")
+                            Field.BACKUP_PASS -> Text(text = composeStringResource(MR.strings.komiho_sync_value_no_pass))
                         }
                     },
                 )
             },
             confirmButton = {
-                TextButton(onClick = { onConfirm(text) }) { Text(text = "确定") }
+                TextButton(onClick = { onConfirm(text) }) {
+                    Text(text = composeStringResource(MR.strings.action_ok))
+                }
             },
             dismissButton = {
-                TextButton(onClick = onDismiss) { Text(text = stringResource(MR.strings.action_cancel)) }
+                TextButton(onClick = onDismiss) {
+                    Text(text = composeStringResource(MR.strings.action_cancel))
+                }
             },
         )
     }
