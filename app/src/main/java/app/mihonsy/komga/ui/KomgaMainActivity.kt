@@ -4080,7 +4080,6 @@ private fun SettingsTab(
                 // SY --> Komiho: 导出诊断日志——把本次冷启动后全部 logcat 导出为 txt 供分析
                 TextPreferenceWidget(
                     title = composeStringResource(R.string.settings_export_diagnostic_logs),
-                    subtitle = composeStringResource(R.string.settings_export_diagnostic_logs_summary),
                     icon = Icons.Filled.Description,
                     onPreferenceClick = {
                         scope.launch(Dispatchers.IO) {
