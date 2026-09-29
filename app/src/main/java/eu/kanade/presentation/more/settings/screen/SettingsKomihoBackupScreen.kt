@@ -112,7 +112,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             PasswordDialog(
                 title = stringResource(MR.strings.backup_set_password),
                 placeholder = stringResource(MR.strings.backup_password_optional),
-                confirmLabel = stringResource(MR.strings.backup_export),
+                confirmLabel = "创建备份",
                 onConfirm = { pwd ->
                     showExportPwd = false
                     pendingExportPassword = pwd
@@ -131,7 +131,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             PasswordDialog(
                 title = stringResource(MR.strings.backup_enter_password),
                 placeholder = stringResource(MR.strings.backup_encrypted_hint),
-                confirmLabel = stringResource(MR.strings.backup_import),
+                confirmLabel = "还原备份",
                 onConfirm = { pwd ->
                     showImportPwd = false
                     val bytes = pendingImportBytes
@@ -183,15 +183,20 @@ object SettingsKomihoBackupScreen : SearchableSettings {
         val configured = KomihoSync.configured(prefs)
         val statusSubtitle = KomihoSync.statusSummary(prefs) ?: "未配置 · 点击设置"
 
-        // 不用分组：直接平铺「导出 / 导入」两条，省掉多余的分组标题行。
+        // 本地备份两条归入「备份与还原」分组，与「同步」分组并列。
         return listOf(
-            Preference.PreferenceItem.TextPreference(
-                title = stringResource(MR.strings.backup_export),
-                onClick = { showExportPwd = true },
-            ),
-            Preference.PreferenceItem.TextPreference(
-                title = stringResource(MR.strings.backup_import),
-                onClick = { importLauncher.launch("*/*") },
+            Preference.PreferenceGroup(
+                title = "备份与还原",
+                preferenceItems = listOf(
+                    Preference.PreferenceItem.TextPreference(
+                        title = "创建备份",
+                        onClick = { showExportPwd = true },
+                    ),
+                    Preference.PreferenceItem.TextPreference(
+                        title = "还原备份",
+                        onClick = { importLauncher.launch("*/*") },
+                    ),
+                ),
             ),
             Preference.PreferenceGroup(
                 title = "同步",

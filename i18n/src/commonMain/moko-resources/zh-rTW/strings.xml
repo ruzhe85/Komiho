@@ -9,7 +9,7 @@
     <string name="label_library">書櫃</string>
     <string name="label_recent_manga">記錄</string>
     <string name="label_recent_updates">更新</string>
-    <string name="label_backup">備份與還原</string>
+    <string name="label_backup">備份與同步</string>
     <string name="action_continue_reading">繼續閱讀</string>
     <string name="action_start_reading">開始閱讀</string>
     <string name="backup_export">匯出備份</string>
