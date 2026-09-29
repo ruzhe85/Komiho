@@ -991,14 +991,11 @@ private fun WebDavFormPage(
                 .padding(top = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("忽略 HTTPS 证书校验", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "自签名证书/证书过期时开启；风险自付",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                "忽略 HTTPS 证书校验",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
             Switch(checked = insecureTls, onCheckedChange = { insecureTls = it })
         }
 

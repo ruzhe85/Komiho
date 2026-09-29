@@ -33,6 +33,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.OutputStream
 import java.security.SecureRandom
 import java.util.Date
@@ -162,8 +163,9 @@ object KomihoBackup {
     /**
      * 从指定 WebDAV 连接拉取最新备份字节（同步引擎用）。
      * 列 `<dirName>/backup/` 下所有 .zip/.kmh，按文件名（含时间戳）取最新一份。
-     * 语义：远端无备份返回 null；**网络失败直接抛出**——同步引擎必须区分「无备份可合并」
-     * 与「拉取失败」，后者中止同步，防止不带合并的推送用旧快照回退他机进度。
+     * 语义：远端无备份（目录不存在 404 / 目录为空）返回 null；**其余网络失败直接抛出**——
+     * 同步引擎必须区分「无备份可合并」与「拉取失败」，后者中止同步，
+     * 防止不带合并的推送用旧快照回退他机进度。
      * 内部做同步网络 IO，调用方应置于 Dispatchers.IO。
      */
     fun pullLatestFromWebDav(
@@ -174,7 +176,14 @@ object KomihoBackup {
         val auth = WebDavRandomAccessSource.basicAuth(conn.user, WebDavCredentialCrypto.decryptStored(conn.passEnc))
         val base = conn.baseUrl.trimEnd('/')
         val dir = dirName.ifBlank { "komiho" }.trim('/')
-        val hrefs = WebDavRandomAccessSource.propfind("$base/$dir/backup", auth, client)
+        val hrefs = try {
+            WebDavRandomAccessSource.propfind("$base/$dir/backup", auth, client)
+        } catch (e: IOException) {
+            // 首次推送时 <dir>/backup 目录尚不存在，PROPFIND 404 = 远端无备份，
+            // 返回 null 交由推送侧 ensureDir 建目录；其余错误照常抛出中止同步。
+            if (e.message?.contains("HTTP 404") == true) return null
+            throw e
+        }
         val latest = hrefs.map { it.trimEnd('/') }
             .filter { it.endsWith(".zip", true) || it.endsWith(".kmh", true) }
             .maxOrNull() ?: return null
