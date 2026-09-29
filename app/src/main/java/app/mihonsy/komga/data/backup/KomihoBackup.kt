@@ -147,17 +147,18 @@ object KomihoBackup {
         val backupDirUrl = "$base/$dir/backup"
         WebDavRandomAccessSource.putFile("$backupDirUrl/$fileName", auth, bytes, client)
         // 只保留最新一份备份，避免时间戳文件无限堆积。清理失败忽略，下次推送再清。
+        // 按 href 里的文件名重建 URL（服务器 href 方言各异，直接用会对不上路径）。
         runCatching {
             WebDavRandomAccessSource.propfind(backupDirUrl, auth, client)
                 .asSequence()
-                .map { absoluteHref(base, backupDirUrl, it) }
-                .filter { it.substringAfterLast('/').startsWith("komiho-") }
+                .map { hrefName(it) }
+                .filter { it != null && it.startsWith("komiho-") }
+                .mapNotNull { it }
                 .sortedByDescending {
-                    it.substringAfterLast('/').removePrefix("komiho-")
-                        .substringBefore('.').toLongOrNull() ?: 0L
+                    it.removePrefix("komiho-").substringBefore('.').toLongOrNull() ?: 0L
                 }
                 .drop(1)
-                .forEach { runCatching { WebDavRandomAccessSource.deleteFile(it, auth, client) } }
+                .forEach { runCatching { WebDavRandomAccessSource.deleteFile("$backupDirUrl/$it", auth, client) } }
         }
     }
 
@@ -186,27 +187,29 @@ object KomihoBackup {
             if (e.message?.contains("HTTP 404") == true) return null
             throw e
         }
-        val latest = hrefs.map { absoluteHref(base, dirUrl, it) }
+        // 只取 href 的文件名重建 URL：服务器 href 方言各异（绝对路径/裸名/完整 URL、
+        // 可能带编码），直接拼接会 GET 到错误路径 →「WebDAV 文件不存在」。
+        val latest = hrefs.asSequence()
+            .mapNotNull { hrefName(it) }
             .filter { it.endsWith(".zip", true) || it.endsWith(".kmh", true) }
             .maxOrNull() ?: return null
-        return WebDavRandomAccessSource.getFile(latest, auth, client)
+        return WebDavRandomAccessSource.getFile("$dirUrl/$latest", auth, client)
     }
 
     /** 该备份文件是否为加密容器（决定导入时是否要弹密码框）。 */
     fun isEncrypted(bytes: ByteArray): Boolean = startsWith(bytes, ENC_MAGIC)
 
     /**
-     * PROPFIND 返回的 href 可能是绝对路径（`/dir/file`）、裸文件名或完整 URL（不同服务器方言），
-     * 统一拼回绝对 URL 再交给 getFile/deleteFile，否则 normalizeUrl 会报「非法 WebDAV URL」。
+     * 从 PROPFIND href 提取文件名：href 可能是绝对路径（`/dir/file`）、裸文件名或完整 URL，
+     * 且可能带 URL 编码——取末段并解码，URL 一律由调用方用已知的目录地址自行重建。
      */
-    private fun absoluteHref(base: String, dirUrl: String, href: String): String {
-        val trimmed = href.trimEnd('/')
-        return when {
-            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
-            trimmed.startsWith('/') -> base + trimmed
-            else -> "$dirUrl/$trimmed"
-        }
-    }
+    private fun hrefName(href: String): String? =
+        runCatching {
+            java.net.URLDecoder.decode(
+                href.trimEnd('/').substringAfterLast('/'),
+                "UTF-8",
+            )
+        }.getOrNull()
 
     /**
      * 读取备份文本，按文件头自动分流：
