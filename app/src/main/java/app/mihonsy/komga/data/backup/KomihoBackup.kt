@@ -142,22 +142,37 @@ object KomihoBackup {
         val ext = if (password.isNullOrBlank()) "zip" else "kmh"
         val fileName = "komiho-${System.currentTimeMillis()}.$ext"
         WebDavRandomAccessSource.putFile("$base/$dir/backup/$fileName", auth, bytes)
+        // 只保留最新一份备份，避免时间戳文件无限堆积。清理失败忽略，下次推送再清。
+        runCatching {
+            WebDavRandomAccessSource.propfind("$base/$dir/backup", auth)
+                .asSequence()
+                .map { it.trimEnd('/') }
+                .filter { it.substringAfterLast('/').startsWith("komiho-") }
+                .sortedByDescending {
+                    it.substringAfterLast('/').removePrefix("komiho-")
+                        .substringBefore('.').toLongOrNull() ?: 0L
+                }
+                .drop(1)
+                .forEach { runCatching { WebDavRandomAccessSource.deleteFile(it, auth) } }
+        }
     }
 
     /**
-     * 从指定 WebDAV 连接拉取最新备份字节（同步中心自动恢复用）。
+     * 从指定 WebDAV 连接拉取最新备份字节（同步引擎用）。
      * 列 `<dirName>/backup/` 下所有 .zip/.kmh，按文件名（含时间戳）取最新一份。
+     * 语义：远端无备份返回 null；**网络失败直接抛出**——同步引擎必须区分「无备份可合并」
+     * 与「拉取失败」，后者中止同步，防止不带合并的推送用旧快照回退他机进度。
      * 内部做同步网络 IO，调用方应置于 Dispatchers.IO。
      */
     fun pullLatestFromWebDav(conn: WebDavConnection, dirName: String): ByteArray? {
         val auth = WebDavRandomAccessSource.basicAuth(conn.user, WebDavCredentialCrypto.decryptStored(conn.passEnc))
         val base = conn.baseUrl.trimEnd('/')
         val dir = dirName.ifBlank { "komiho" }.trim('/')
-        val hrefs = runCatching { WebDavRandomAccessSource.propfind("$base/$dir/backup", auth) }.getOrNull() ?: return null
+        val hrefs = WebDavRandomAccessSource.propfind("$base/$dir/backup", auth)
         val latest = hrefs.map { it.trimEnd('/') }
             .filter { it.endsWith(".zip", true) || it.endsWith(".kmh", true) }
             .maxOrNull() ?: return null
-        return runCatching { WebDavRandomAccessSource.getFile(latest, auth) }.getOrNull()
+        return WebDavRandomAccessSource.getFile(latest, auth)
     }
 
     /** 该备份文件是否为加密容器（决定导入时是否要弹密码框）。 */

@@ -2,6 +2,8 @@ package eu.kanade.presentation.more.settings.screen
 
 // SY --> Komiho：本地备份与恢复（自写轻量 JSON，覆盖来源列表/个性化/本地阅读历史/书签/收藏分类）
 // 作为「设置」顶级入口，不再嵌套在「数据/存储」内。
+// 「同步」分组为 WebDAV 同步：状态行 + 触发条件（多选）+ 立即推送/立即恢复；
+// 连接配置在子屏（就地切换），统一同步模型见 [app.mihonsy.komga.data.backup.KomihoSync]。
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,19 +21,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import app.mihonsy.komga.data.backup.KomihoBackup
-import app.mihonsy.komga.data.webdav.WebDavConnection
-import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
+import app.mihonsy.komga.data.backup.KomihoSync
 import eu.kanade.presentation.more.settings.Preference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import logcat.LogPriority
+import tachiyomi.core.common.i18n.stringResource as ctxStringRes
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
-import tachiyomi.core.common.i18n.stringResource as ctxStringRes
 import eu.kanade.tachiyomi.util.system.toast
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -52,20 +52,15 @@ object SettingsKomihoBackupScreen : SearchableSettings {
     private fun buildBackupPreferences(): List<Preference> {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-
         val prefs = remember { Injekt.get<PreferenceStore>() }
-        val syncUrlPref = remember { prefs.getString(KOMIHO_SYNC_URL, "") }
-        val syncUserPref = remember { prefs.getString(KOMIHO_SYNC_USER, "") }
-        val syncServerPassPref = remember { prefs.getString(KOMIHO_SYNC_SERVER_PASS, "") }
-        val syncDirPref = remember { prefs.getString(KOMIHO_SYNC_DIR, "komiho") }
-        val syncPushPref = remember { prefs.getBoolean(KOMIHO_SYNC_PUSH, false) }
-        val syncAutoPref = remember { prefs.getBoolean(KOMIHO_SYNC_AUTORESTORE, false) }
-        val syncPwdPref = remember { prefs.getString(KOMIHO_SYNC_PASSWORD, "") }
+
+        val triggersPref = remember { prefs.getStringSet(KomihoSync.KEY_TRIGGERS, emptySet()) }
 
         var showExportPwd by remember { mutableStateOf(false) }
         var showImportPwd by remember { mutableStateOf(false) }
         var pendingImportBytes by remember { mutableStateOf<ByteArray?>(null) }
         var showSyncConn by remember { mutableStateOf(false) }
+        var syncInFlight by remember { mutableStateOf(false) }
 
         val exportLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("application/zip"),
@@ -77,27 +72,6 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                 try {
                     context.contentResolver.openOutputStream(uri)?.use { os ->
                         KomihoBackup.writeBackupFile(context, password, os)
-                    }
-                    if (prefs.getBoolean(KOMIHO_SYNC_PUSH, false).get()) {
-                        runCatching {
-                            val url = prefs.getString(KOMIHO_SYNC_URL, "").get().trimEnd('/')
-                            val user = prefs.getString(KOMIHO_SYNC_USER, "").get()
-                            val serverPass = prefs.getString(KOMIHO_SYNC_SERVER_PASS, "").get()
-                            val dir = prefs.getString(KOMIHO_SYNC_DIR, "komiho").get().ifBlank { "komiho" }
-                            val backupPwd = prefs.getString(KOMIHO_SYNC_PASSWORD, "").get().ifBlank { null }
-                            if (url.isNotBlank()) {
-                                val conn = WebDavConnection(
-                                    id = "sync", name = "同步中心", baseUrl = url,
-                                    user = user, passEnc = WebDavCredentialCrypto.encrypt(serverPass),
-                                )
-                                KomihoBackup.pushToWebDav(context, conn, dir, backupPwd)
-                                withUIContext { context.toast("已推送到同步中心") }
-                            } else {
-                                withUIContext { context.toast("请先填写同步中心服务器地址") }
-                            }
-                        }.onFailure { e ->
-                            logcat(LogPriority.ERROR, e) { "同步中心推送失败" }
-                        }
                     }
                     withUIContext { context.toast(context.ctxStringRes(MR.strings.backup_exported)) }
                 } catch (e: Exception) {
@@ -178,16 +152,36 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             )
         }
 
-        // 系统返回键：处在同步连接子屏时先退回备份页。
+        fun manualSync(push: Boolean) {
+            if (syncInFlight || KomihoSync.busy) return
+            if (!KomihoSync.configured(prefs)) {
+                context.toast("请先配置 WebDAV 同步")
+                showSyncConn = true
+                return
+            }
+            syncInFlight = true
+            scope.launch(Dispatchers.IO) {
+                val outcome = KomihoSync.sync(context.applicationContext, push)
+                withUIContext {
+                    syncInFlight = false
+                    context.toast(outcome.message)
+                }
+            }
+        }
+
+        // 系统返回键：处在 WebDAV 同步子屏时先退回备份页。
         BackHandler(enabled = showSyncConn) { showSyncConn = false }
 
-        // 同步连接子屏：本页由 Komga 设置页直接渲染（没有 voyager Navigator 可用），
+        // WebDAV 同步子屏：本页由 Komga 设置页直接渲染（没有 voyager Navigator 可用），
         // 所以不 push 页面，而是就地切换成子屏的偏好列表，靠返回项/返回键退回。
         if (showSyncConn) {
             return SettingsKomihoSyncConnectionScreen.buildSyncConnectionPreferences(
                 onBack = { showSyncConn = false },
             )
         }
+
+        val configured = KomihoSync.configured(prefs)
+        val statusSubtitle = KomihoSync.statusSummary(prefs) ?: "未配置 · 点击设置"
 
         // 不用分组：直接平铺「导出 / 导入」两条，省掉多余的分组标题行。
         return listOf(
@@ -203,97 +197,35 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                 title = "同步",
                 preferenceItems = listOf(
                     Preference.PreferenceItem.TextPreference(
-                        title = "同步连接",
-                        subtitle = if (syncUrlPref.get().isBlank()) "未配置：点击设置服务器/账号/目录" else syncUrlPref.get(),
+                        title = "WebDAV 同步",
+                        subtitle = statusSubtitle,
                         onClick = { showSyncConn = true },
                     ),
-                    Preference.PreferenceItem.SwitchPreference(
-                        preference = syncPushPref,
-                        title = "导出后推送到同步中心",
-                    ),
-                    Preference.PreferenceItem.SwitchPreference(
-                        preference = syncAutoPref,
-                        title = "启动时自动恢复",
-                        subtitle = "拉取最新备份，按较新胜合并",
-                    ),
-                    Preference.PreferenceItem.TextPreference(
-                        title = "立即同步到 WebDAV",
-                        subtitle = "把当前备份推送到同步中心",
-                        onClick = {
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    val url = runBlocking { syncUrlPref.get() }.trimEnd('/')
-                                    val user = runBlocking { syncUserPref.get() }
-                                    val serverPass = runBlocking { syncServerPassPref.get() }
-                                    val dir = runBlocking { syncDirPref.get() }.ifBlank { "komiho" }
-                                    val backupPwd = runBlocking { syncPwdPref.get() }.ifBlank { null }
-                                    if (url.isBlank()) {
-                                        withUIContext { context.toast("请先填写同步中心服务器地址") }
-                                        return@launch
-                                    }
-                                    val conn = WebDavConnection(
-                                        id = "sync", name = "同步中心", baseUrl = url,
-                                        user = user, passEnc = WebDavCredentialCrypto.encrypt(serverPass),
-                                    )
-                                    KomihoBackup.pushToWebDav(context, conn, dir, backupPwd)
-                                    withUIContext { context.toast("已推送到同步中心") }
-                                } catch (e: Exception) {
-                                    logcat(LogPriority.ERROR, e)
-                                    withUIContext { context.toast("推送失败：${e.message}") }
-                                }
-                            }
-                        },
+                    Preference.PreferenceItem.MultiSelectListPreference(
+                        preference = triggersPref,
+                        entries = KomihoSync.ALL_TRIGGERS.toMap(),
+                        title = "触发条件",
+                        // 设计约定：条目下方不显示已选项（状态/取值以外不放小字）。
+                        subtitle = null,
+                        subtitleProvider = { _, _ -> null },
+                        enabled = configured,
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "从同步中心恢复",
-                        subtitle = "拉取最新备份并合并恢复（按较新胜）",
-                        onClick = {
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    val url = runBlocking { syncUrlPref.get() }.trimEnd('/')
-                                    val user = runBlocking { syncUserPref.get() }
-                                    val serverPass = runBlocking { syncServerPassPref.get() }
-                                    val dir = runBlocking { syncDirPref.get() }.ifBlank { "komiho" }
-                                    val backupPwd = runBlocking { syncPwdPref.get() }.ifBlank { null }
-                                    if (url.isBlank()) {
-                                        withUIContext { context.toast("请先填写同步中心服务器地址") }
-                                        return@launch
-                                    }
-                                    val conn = WebDavConnection(
-                                        id = "sync", name = "同步中心", baseUrl = url,
-                                        user = user, passEnc = WebDavCredentialCrypto.encrypt(serverPass),
-                                    )
-                                    val bytes = KomihoBackup.pullLatestFromWebDav(conn, dir)
-                                    if (bytes == null) {
-                                        withUIContext { context.toast("同步中心无可用备份") }
-                                        return@launch
-                                    }
-                                    val json = KomihoBackup.readBackupBytes(bytes, backupPwd)
-                                    if (json == null) {
-                                        withUIContext { context.toast("备份解密失败（密码错误？）") }
-                                        return@launch
-                                    }
-                                    KomihoBackup.importBackup(context, json, backupPwd)
-                                    withUIContext { context.toast("已从同步中心恢复") }
-                                } catch (e: Exception) {
-                                    logcat(LogPriority.ERROR, e)
-                                    withUIContext { context.toast("恢复失败：${e.message}") }
-                                }
-                            }
-                        },
+                        title = "立即推送",
+                        // 完整同步：拉→合→推。
+                        enabled = configured && !syncInFlight,
+                        onClick = { manualSync(push = true) },
+                    ),
+                    Preference.PreferenceItem.TextPreference(
+                        title = "立即恢复",
+                        // 只拉合，不推送。
+                        enabled = configured && !syncInFlight,
+                        onClick = { manualSync(push = false) },
                     ),
                 ),
             ),
         )
     }
-
-    private const val KOMIHO_SYNC_URL = "komiho_sync_center_url"
-    private const val KOMIHO_SYNC_USER = "komiho_sync_center_user"
-    private const val KOMIHO_SYNC_SERVER_PASS = "komiho_sync_center_server_pass"
-    private const val KOMIHO_SYNC_DIR = "komiho_sync_center_dir"
-    private const val KOMIHO_SYNC_PUSH = "komiho_sync_center_push"
-    private const val KOMIHO_SYNC_AUTORESTORE = "komiho_sync_center_autorestore"
-    private const val KOMIHO_SYNC_PASSWORD = "komiho_sync_center_password"
 
     private var pendingExportPassword: String? = null
 

@@ -228,6 +228,7 @@ import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.backup.KomihoBackup
+import app.mihonsy.komga.data.backup.KomihoSync
 import androidx.lifecycle.lifecycleScope
 import android.util.Log
 import logcat.LogPriority
@@ -357,28 +358,9 @@ class KomgaMainActivity : KomgaBaseActivity() {
         intent?.getIntExtra(EXTRA_TAB, -1)?.takeIf { it >= 0 }?.let { tabSignal.value = it }
         setContent { KomihoTheme { KomgaMainScreen(refreshSignal, filterSignal, tabSignal) } }
 
-        // SY --> Komiho: 同步中心自动恢复（启动时拉取最新备份，按较新胜合并，不覆盖本地更新）
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val prefs = Injekt.get<PreferenceStore>()
-                if (!prefs.getBoolean("komiho_sync_center_autorestore", false).get()) return@launch
-                val url = prefs.getString("komiho_sync_center_url", "").get().trimEnd('/')
-                if (url.isBlank()) return@launch
-                val user = prefs.getString("komiho_sync_center_user", "").get()
-                val serverPass = prefs.getString("komiho_sync_center_server_pass", "").get()
-                val dir = prefs.getString("komiho_sync_center_dir", "komiho").get().ifBlank { "komiho" }
-                val conn = WebDavConnection(
-                    id = "sync", name = "同步中心", baseUrl = url,
-                    user = user, passEnc = WebDavCredentialCrypto.encrypt(serverPass),
-                )
-                val bytes = KomihoBackup.pullLatestFromWebDav(conn, dir) ?: return@launch
-                val pwd = prefs.getString("komiho_sync_center_password", "").get().ifBlank { null }
-                val json = KomihoBackup.readBackupBytes(bytes, pwd)
-                KomihoBackup.importBackup(applicationContext, json, pwd)
-            } catch (e: Exception) {
-                android.util.Log.e("SyncCenter", "[SyncCenter] 自动恢复失败", e)
-            }
-        }
+        // SY --> Komiho: WebDAV 同步触发条件——「应用启动时」；并注册「回到前台」触发（含息屏亮屏解锁）。
+        KomihoSync.autoSync(applicationContext, KomihoSync.TRIGGER_APP_START)
+        KomihoSync.registerForegroundTrigger(applicationContext)
     }
 
     override fun onNewIntent(intent: Intent) {

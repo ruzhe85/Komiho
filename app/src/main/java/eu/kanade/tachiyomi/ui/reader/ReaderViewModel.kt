@@ -10,6 +10,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.mihonsy.komga.data.KomgaApiClient
+import app.mihonsy.komga.data.backup.KomihoSync
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.webdav.ChapterPageCountMemo
 import app.mihonsy.komga.source.KomgaSource
@@ -380,6 +381,11 @@ class ReaderViewModel @JvmOverloads constructor(
         }
         // SY --> Komiho: 关闭阅读器清空 PDF 密码（session 级记忆）
         PdfPasswordHolder.current = null
+        // Komiho: 触发条件「章节阅读后」（退出阅读器）——仅 WebDAV/SMB 来源（其进度才进同步备份）。
+        val readUrl = currentChapters?.currChapter?.chapter?.url
+        if (readUrl != null && (readUrl.startsWith("webdav://") || readUrl.startsWith("smb://"))) {
+            runCatching { KomihoSync.autoSync(Injekt.get<Application>(), KomihoSync.TRIGGER_CHAPTER_READ) }
+        }
     }
 
     /**
@@ -556,6 +562,12 @@ class ReaderViewModel @JvmOverloads constructor(
                 )
             }
         }
+        // SY --> Komiho: 触发条件「章节打开时」——仅 WebDAV/SMB 来源（其进度才进同步备份）。
+        val openUrl = chapter.chapter.url
+        if (openUrl.startsWith("webdav://") || openUrl.startsWith("smb://")) {
+            runCatching { KomihoSync.autoSync(Injekt.get<Application>(), KomihoSync.TRIGGER_CHAPTER_OPEN) }
+        }
+        // SY <--
         return newChapters
     }
 
