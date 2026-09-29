@@ -20,7 +20,6 @@ import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -231,23 +230,18 @@ object KomihoSync {
 
     /** 主屏状态行摘要；未配置返回 null。 */
     fun statusSummary(prefs: PreferenceStore): String? {
-        val cfg = readConfig(prefs) ?: return null
-        val host = try {
-            URI(cfg.conn.baseUrl).host ?: cfg.conn.baseUrl
-        } catch (_: Exception) {
-            cfg.conn.baseUrl
-        }
+        readConfig(prefs) ?: return null
         val time = prefs.getLong(KEY_LAST_TIME, 0L).get()
         val action = prefs.getString(KEY_LAST_ACTION, "").get()
         val result = prefs.getString(KEY_LAST_RESULT, "").get()
-        if (time == 0L || action.isBlank()) return "$host · 尚未同步"
+        if (time == 0L || action.isBlank()) return "尚未同步"
         val label = when (action) {
             ACTION_PUSH -> "推送"
             ACTION_PULL -> "恢复"
             else -> "测试"
         }
         val timeText = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(time))
-        return "$host · 上次$label $timeText · $result"
+        return "上次$label $timeText · $result"
     }
 }
 // SY <--
