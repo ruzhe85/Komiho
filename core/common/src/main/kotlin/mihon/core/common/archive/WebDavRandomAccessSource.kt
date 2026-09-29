@@ -15,6 +15,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import java.io.FileNotFoundException
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 import tachiyomi.core.common.util.system.logcat
 
 // SY --> Komiho Phase3
@@ -44,6 +48,8 @@ class WebDavRandomAccessSource(
     url: String,
     username: String? = null,
     password: String? = null,
+    /** 忽略 HTTPS 证书校验（自签名/缺中间证书的服务器）；按连接开关显式传入，默认关闭。 */
+    insecureTls: Boolean = false,
     private val fallbackCacheDir: File? = null,
     /** 整本缓存磁盘上限（字节）：超限按 lastModified LRU 淘汰；0/负数 = 不限。设置-存储可调。 */
     private val cacheMaxBytes: Long = Long.MAX_VALUE,
@@ -93,7 +99,8 @@ class WebDavRandomAccessSource(
 
     // 全局共享客户端（companion 懒加载）：连接池 / 线程池跨章节复用，
     // 避免每个 source 各建一套造成握手风暴（115 风控对高频新建连接更敏感）。
-    private val client = sharedClient
+    // 开启「忽略证书校验」的连接换用信任所有证书的客户端，其余行为（连接池/超时）不变。
+    private val client = if (insecureTls) insecureHttpClient() else sharedClient
 
     private val lock = Any()
 
@@ -366,11 +373,34 @@ class WebDavRandomAccessSource(
                 .build()
         }
 
+        /**
+         * 忽略 HTTPS 证书校验的共享 OkHttpClient（自签名/缺中间证书的服务器用）。
+         * 仅在连接/同步显式开启开关时使用；连接池独立于 [sharedClient]，避免污染其状态。
+         */
+        val insecureClient: OkHttpClient by lazy {
+            val trustAll = object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+                override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+            }
+            val ctx = SSLContext.getInstance("TLS")
+            ctx.init(null, arrayOf<javax.net.ssl.TrustManager>(trustAll), SecureRandom())
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .sslSocketFactory(ctx.socketFactory, trustAll)
+                .hostnameVerifier { _, _ -> true }
+                .build()
+        }
+
         /** Range 块大小：1MB。比 libarchive 单次回调（256KB）大，摊薄请求数（防风控核心手段）。 */
         private const val READ_CHUNK = 1024 * 1024
 
         /** 共享 OkHttpClient 访问器：app 层 PROPFIND 目录浏览等复用同一连接池（Phase4-②）。 */
         fun sharedHttpClient(): OkHttpClient = sharedClient
+
+        /** 忽略证书校验客户端访问器（app 层封面/浏览等直接调用点用）。 */
+        fun insecureHttpClient(): OkHttpClient = insecureClient
 
         /** 块缓存字节上限（LRU）：约 16MB，覆盖多页并发解码的活跃窗口。 */
         private const val MAX_CACHE_BYTES = 16L * 1024 * 1024
@@ -434,44 +464,44 @@ class WebDavRandomAccessSource(
             }
 
             /** 建单个目录（MKCOL）。已存在（405）视为成功。返回是否成功。 */
-            fun mkcol(url: String, auth: String?): Boolean {
+            fun mkcol(url: String, auth: String?, client: OkHttpClient = sharedClient): Boolean {
                 val req = Request.Builder().url(normalizeUrl(url)).apply {
                     auth?.let { header("Authorization", it) }
                     method("MKCOL", null)
                 }.build()
-                sharedClient.newCall(req).execute().use { resp ->
+                client.newCall(req).execute().use { resp ->
                     return resp.isSuccessful || resp.code == 405
                 }
             }
 
             /** 逐级确保目录存在：对 relPath 的每一段依次 MKCOL（已存在则忽略）。 */
-            fun ensureDir(baseUrl: String, relPath: String, auth: String?) {
+            fun ensureDir(baseUrl: String, relPath: String, auth: String?, client: OkHttpClient = sharedClient) {
                 val segments = relPath.trim('/').split('/').filter { it.isNotEmpty() }
                 var cur = baseUrl.trimEnd('/')
                 for (seg in segments) {
                     cur = "$cur/$seg"
-                    mkcol(cur, auth)
+                    mkcol(cur, auth, client)
                 }
             }
 
             /** 写文件（PUT），覆盖同名。 */
-            fun putFile(url: String, auth: String?, content: ByteArray) {
+            fun putFile(url: String, auth: String?, content: ByteArray, client: OkHttpClient = sharedClient) {
                 val body = RequestBody.create(null, content)
                 val req = Request.Builder().url(normalizeUrl(url)).apply {
                     auth?.let { header("Authorization", it) }
                     put(body)
                 }.build()
-                sharedClient.newCall(req).execute().use { resp ->
+                client.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) throw IOException("WebDAV PUT 失败 HTTP ${resp.code}: $url")
                 }
             }
 
             /** 读文件（GET）。404 抛 FileNotFoundException。 */
-            fun getFile(url: String, auth: String?): ByteArray {
+            fun getFile(url: String, auth: String?, client: OkHttpClient = sharedClient): ByteArray {
                 val req = Request.Builder().url(normalizeUrl(url)).apply {
                     auth?.let { header("Authorization", it) }
                 }.build()
-                sharedClient.newCall(req).execute().use { resp ->
+                client.newCall(req).execute().use { resp ->
                     if (resp.code == 404) throw FileNotFoundException("WebDAV 文件不存在: $url")
                     if (!resp.isSuccessful) throw IOException("WebDAV GET 失败 HTTP ${resp.code}: $url")
                     return resp.body?.bytes() ?: throw IOException("WebDAV 空响应: $url")
@@ -479,7 +509,7 @@ class WebDavRandomAccessSource(
             }
 
             /** 列目录（PROPFIND Depth 1），返回该目录下条目的完整 href。 */
-            fun propfind(url: String, auth: String?): List<String> {
+            fun propfind(url: String, auth: String?, client: OkHttpClient = sharedClient): List<String> {
                 val body = RequestBody.create(
                     null,
                     "<D:propfind xmlns:D=\"DAV:\"><D:prop><D:resourcetype/></D:prop></D:propfind>",
@@ -489,7 +519,7 @@ class WebDavRandomAccessSource(
                     header("Depth", "1")
                     method("PROPFIND", body)
                 }.build()
-                sharedClient.newCall(req).execute().use { resp ->
+                client.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) throw IOException("WebDAV PROPFIND 失败 HTTP ${resp.code}: $url")
                     val xml = resp.body?.string() ?: return emptyList()
                     return parseHrefs(xml)
@@ -497,12 +527,12 @@ class WebDavRandomAccessSource(
             }
 
             /** 删文件（DELETE）。404 视为成功。 */
-            fun deleteFile(url: String, auth: String?) {
+            fun deleteFile(url: String, auth: String?, client: OkHttpClient = sharedClient) {
                 val req = Request.Builder().url(normalizeUrl(url)).apply {
                     auth?.let { header("Authorization", it) }
                     delete()
                 }.build()
-                sharedClient.newCall(req).execute().use { resp ->
+                client.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful && resp.code != 404) {
                         throw IOException("WebDAV DELETE 失败 HTTP ${resp.code}: $url")
                     }

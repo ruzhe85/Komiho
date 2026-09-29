@@ -14,6 +14,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.core.common.archive.WebDavRandomAccessSource
+import okhttp3.OkHttpClient
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
@@ -38,6 +39,7 @@ object KomihoSync {
     const val KEY_SERVER_PASS = "komiho_sync_center_server_pass"
     const val KEY_DIR = "komiho_sync_center_dir"
     const val KEY_BACKUP_PASS = "komiho_sync_center_password"
+    const val KEY_INSECURE_TLS = "komiho_sync_center_insecure_tls"
     const val KEY_TRIGGERS = "komiho_sync_triggers"
     const val KEY_LAST_ACTION = "komiho_sync_last_action"
     const val KEY_LAST_TIME = "komiho_sync_last_time"
@@ -72,7 +74,12 @@ object KomihoSync {
         val conn: WebDavConnection,
         val dir: String,
         val backupPass: String?,
+        val insecureTls: Boolean = false,
     )
+
+    /** 按开关选择客户端：默认走全局共享客户端；开启「忽略证书校验」走信任所有证书的客户端。 */
+    private fun clientFor(insecure: Boolean): OkHttpClient =
+        if (insecure) WebDavRandomAccessSource.insecureHttpClient() else WebDavRandomAccessSource.sharedHttpClient()
 
     /** 读取同步中心配置；未配置返回 null。明文历史密码在此处解出。 */
     fun readConfig(prefs: PreferenceStore): SyncConfig? {
@@ -90,7 +97,8 @@ object KomihoSync {
         val backupPass = WebDavCredentialCrypto
             .decryptStored(prefs.getString(KEY_BACKUP_PASS, "").get())
             .ifBlank { null }
-        return SyncConfig(conn, dir, backupPass)
+        val insecureTls = prefs.getBoolean(KEY_INSECURE_TLS, false).get()
+        return SyncConfig(conn, dir, backupPass, insecureTls)
     }
 
     fun configured(prefs: PreferenceStore): Boolean = readConfig(prefs) != null
@@ -120,11 +128,12 @@ object KomihoSync {
         val action = if (push) ACTION_PUSH else ACTION_PULL
         val cfg = readConfig(prefs)
             ?: return fail(prefs, action, "未配置 WebDAV 同步")
+        val client = clientFor(cfg.insecureTls)
 
         // 1. 拉远端最新并合并。远端无备份（首次）跳过；
         //    网络失败必须中止——不带合并直接推送等于盲传旧快照，会回退他机进度。
         val bytes = try {
-            KomihoBackup.pullLatestFromWebDav(cfg.conn, cfg.dir)
+            KomihoBackup.pullLatestFromWebDav(cfg.conn, cfg.dir, client)
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "WebDAV 同步拉取失败" }
             return fail(prefs, action, e.message ?: "网络错误")
@@ -142,7 +151,7 @@ object KomihoSync {
         // 2. 需要时从合并后的本地库导出推送。
         if (push) {
             try {
-                KomihoBackup.pushToWebDav(context, cfg.conn, cfg.dir, cfg.backupPass)
+                KomihoBackup.pushToWebDav(context, cfg.conn, cfg.dir, cfg.backupPass, client)
             } catch (e: Exception) {
                 logcat(LogPriority.WARN, e) { "WebDAV 同步推送失败" }
                 return fail(prefs, ACTION_PUSH, e.message ?: "推送失败")
@@ -207,7 +216,7 @@ object KomihoSync {
         )
         return try {
             val t0 = System.currentTimeMillis()
-            WebDavRandomAccessSource.propfind(cfg.conn.baseUrl, auth)
+            WebDavRandomAccessSource.propfind(cfg.conn.baseUrl, auth, clientFor(cfg.insecureTls))
             "通过 · ${System.currentTimeMillis() - t0}ms"
         } catch (e: Exception) {
             e.message ?: "连接失败"

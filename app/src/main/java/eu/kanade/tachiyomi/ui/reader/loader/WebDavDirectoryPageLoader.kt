@@ -49,7 +49,12 @@ internal class WebDavDirectoryPageLoader(
         if (conn.user.isNotBlank()) {
             builder.header("Authorization", okhttp3.Credentials.basic(conn.user, pass))
         }
-        val bytes = WebDavRandomAccessSource.sharedHttpClient().newCall(builder.build())
+        val client = if (conn.insecureTls) {
+            WebDavRandomAccessSource.insecureHttpClient()
+        } else {
+            WebDavRandomAccessSource.sharedHttpClient()
+        }
+        val bytes = client.newCall(builder.build())
             .execute().use { resp ->
                 if (!resp.isSuccessful) throw IOException("图片下载失败 HTTP ${resp.code}: $url")
                 resp.body?.bytes() ?: ByteArray(0)

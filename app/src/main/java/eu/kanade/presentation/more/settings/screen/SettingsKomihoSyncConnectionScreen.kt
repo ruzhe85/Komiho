@@ -54,6 +54,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
         val serverPass: String = "",
         val dir: String = "komiho",
         val backupPass: String = "",
+        val insecureTls: Boolean = false,
     )
 
     private enum class Field(val title: String, val masked: Boolean = false) {
@@ -70,6 +71,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
         serverPass = decryptStoredPass(getString(KomihoSync.KEY_SERVER_PASS, "").get()),
         dir = getString(KomihoSync.KEY_DIR, "komiho").get().ifBlank { "komiho" },
         backupPass = decryptStoredPass(getString(KomihoSync.KEY_BACKUP_PASS, "").get()),
+        insecureTls = getBoolean(KomihoSync.KEY_INSECURE_TLS, false).get(),
     )
 
     private fun decryptStoredPass(stored: String): String =
@@ -111,6 +113,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
             prefs.getString(KomihoSync.KEY_BACKUP_PASS, "").set(
                 if (normalized.backupPass.isBlank()) "" else WebDavCredentialCrypto.encrypt(normalized.backupPass),
             )
+            prefs.getBoolean(KomihoSync.KEY_INSECURE_TLS, false).set(normalized.insecureTls)
             saved = normalized
             form = normalized
             context.toast("已保存")
@@ -122,6 +125,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
             prefs.getString(KomihoSync.KEY_SERVER_PASS, "").set("")
             prefs.getString(KomihoSync.KEY_DIR, "").set("komiho")
             prefs.getString(KomihoSync.KEY_BACKUP_PASS, "").set("")
+            prefs.getBoolean(KomihoSync.KEY_INSECURE_TLS, false).set(false)
             saved = SyncForm()
             form = saved
             context.toast("已清空 WebDAV 同步配置")
@@ -140,6 +144,7 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
                 ),
                 dir = form.dir.ifBlank { "komiho" },
                 backupPass = form.backupPass.ifBlank { null },
+                insecureTls = form.insecureTls,
             )
             scope.launch(Dispatchers.IO) {
                 val result = KomihoSync.testConnection(cfg)
@@ -293,6 +298,12 @@ object SettingsKomihoSyncConnectionScreen : SearchableSettings {
                         title = "备份密码",
                         subtitle = if (form.backupPass.isBlank()) "留空不加密" else "已设置",
                         onClick = { editingField = Field.BACKUP_PASS },
+                    ),
+                    Preference.PreferenceItem.TextPreference(
+                        title = "忽略 HTTPS 证书校验",
+                        // 服务器为自签名/缺中间证书/证书过期时开启；仅作用于同步中心请求。
+                        subtitle = if (form.insecureTls) "已开启" else "已关闭",
+                        onClick = { form = form.copy(insecureTls = !form.insecureTls) },
                     ),
                 ),
             ),

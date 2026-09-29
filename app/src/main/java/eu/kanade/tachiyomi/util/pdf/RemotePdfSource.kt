@@ -31,6 +31,8 @@ internal fun remotePdfSource(remoteUrl: String, context: Context): RandomAccessS
             url = WebDavConnectionStore.extractFullUrl(remoteUrl),
             username = credentials?.first?.ifBlank { null },
             password = credentials?.second?.ifBlank { null },
+            // 连接级「忽略 HTTPS 证书校验」。
+            insecureTls = WebDavConnectionStore.insecureTlsFor(remoteUrl),
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
             cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
         )

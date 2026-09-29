@@ -77,7 +77,13 @@ object WebDavPropfind {
                 builder.header("Authorization", Credentials.basic(conn.user, pass))
             }
             val selfPath = decodedPath(dir)
-            val xml = WebDavRandomAccessSource.sharedHttpClient().newCall(builder.build())
+            // 连接级「忽略 HTTPS 证书校验」（自签名证书服务器，用户显式开启）。
+            val client = if (conn.insecureTls) {
+                WebDavRandomAccessSource.insecureHttpClient()
+            } else {
+                WebDavRandomAccessSource.sharedHttpClient()
+            }
+            val xml = client.newCall(builder.build())
                 // SY: 用 Call.await() 替代阻塞 execute()——协程被取消时（如 WebDavBrowsePane 的
                 // dirUrl 因 navRequest 触发重切）能 invokeOnCancellation 调 call.cancel()，
                 // OkHttp 直接中断请求；否则 execute() 阻塞 IO 线程不响应协程取消，请求跑完再

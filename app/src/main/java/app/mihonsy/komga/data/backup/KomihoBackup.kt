@@ -12,6 +12,7 @@ import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.source.KomgaSource
 import mihon.core.common.archive.WebDavRandomAccessSource
+import okhttp3.OkHttpClient
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -131,6 +132,7 @@ object KomihoBackup {
         conn: WebDavConnection,
         dirName: String,
         password: String?,
+        client: OkHttpClient = WebDavRandomAccessSource.sharedHttpClient(),
     ) {
         val os = ByteArrayOutputStream()
         writeBackupFile(context, password, os)
@@ -138,13 +140,13 @@ object KomihoBackup {
         val auth = WebDavRandomAccessSource.basicAuth(conn.user, WebDavCredentialCrypto.decryptStored(conn.passEnc))
         val base = conn.baseUrl.trimEnd('/')
         val dir = dirName.ifBlank { "komiho" }.trim('/')
-        WebDavRandomAccessSource.ensureDir(base, "$dir/backup", auth)
+        WebDavRandomAccessSource.ensureDir(base, "$dir/backup", auth, client)
         val ext = if (password.isNullOrBlank()) "zip" else "kmh"
         val fileName = "komiho-${System.currentTimeMillis()}.$ext"
-        WebDavRandomAccessSource.putFile("$base/$dir/backup/$fileName", auth, bytes)
+        WebDavRandomAccessSource.putFile("$base/$dir/backup/$fileName", auth, bytes, client)
         // 只保留最新一份备份，避免时间戳文件无限堆积。清理失败忽略，下次推送再清。
         runCatching {
-            WebDavRandomAccessSource.propfind("$base/$dir/backup", auth)
+            WebDavRandomAccessSource.propfind("$base/$dir/backup", auth, client)
                 .asSequence()
                 .map { it.trimEnd('/') }
                 .filter { it.substringAfterLast('/').startsWith("komiho-") }
@@ -153,7 +155,7 @@ object KomihoBackup {
                         .substringBefore('.').toLongOrNull() ?: 0L
                 }
                 .drop(1)
-                .forEach { runCatching { WebDavRandomAccessSource.deleteFile(it, auth) } }
+                .forEach { runCatching { WebDavRandomAccessSource.deleteFile(it, auth, client) } }
         }
     }
 
@@ -164,15 +166,19 @@ object KomihoBackup {
      * 与「拉取失败」，后者中止同步，防止不带合并的推送用旧快照回退他机进度。
      * 内部做同步网络 IO，调用方应置于 Dispatchers.IO。
      */
-    fun pullLatestFromWebDav(conn: WebDavConnection, dirName: String): ByteArray? {
+    fun pullLatestFromWebDav(
+        conn: WebDavConnection,
+        dirName: String,
+        client: OkHttpClient = WebDavRandomAccessSource.sharedHttpClient(),
+    ): ByteArray? {
         val auth = WebDavRandomAccessSource.basicAuth(conn.user, WebDavCredentialCrypto.decryptStored(conn.passEnc))
         val base = conn.baseUrl.trimEnd('/')
         val dir = dirName.ifBlank { "komiho" }.trim('/')
-        val hrefs = WebDavRandomAccessSource.propfind("$base/$dir/backup", auth)
+        val hrefs = WebDavRandomAccessSource.propfind("$base/$dir/backup", auth, client)
         val latest = hrefs.map { it.trimEnd('/') }
             .filter { it.endsWith(".zip", true) || it.endsWith(".kmh", true) }
             .maxOrNull() ?: return null
-        return WebDavRandomAccessSource.getFile(latest, auth)
+        return WebDavRandomAccessSource.getFile(latest, auth, client)
     }
 
     /** 该备份文件是否为加密容器（决定导入时是否要弹密码框）。 */

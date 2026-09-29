@@ -19,6 +19,8 @@ data class WebDavConnection(
     val user: String,
     /** Basic Auth 密码，[WebDavCredentialCrypto] 加密后的落盘形态（enc1: 前缀）；空串 = 匿名。 */
     val passEnc: String,
+    /** 忽略 HTTPS 证书校验（自签名/缺中间证书的服务器）；用户显式开启，风险自付。 */
+    val insecureTls: Boolean = false,
 ) {
     fun displayName(): String = if (name.isBlank()) baseUrl else name
 }

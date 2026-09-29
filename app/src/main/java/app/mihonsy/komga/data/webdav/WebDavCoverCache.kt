@@ -98,8 +98,9 @@ object WebDavCoverCache {
         val credentials = WebDavConnectionStore.credentialsFor(chapterUrl)
         // SY: PDF 章节封面 = 整本落本地临时文件，系统 PdfRenderer 渲第 0 页（与 LocalCoverFetcher 同口径）。
         val fullUrl = WebDavConnectionStore.extractFullUrl(chapterUrl)
+        val insecureTls = WebDavConnectionStore.insecureTlsFor(chapterUrl)
         if (fullUrl.endsWith(".pdf", ignoreCase = true)) {
-            generateFromPdf(context, fullUrl, credentials, target)
+            generateFromPdf(context, fullUrl, credentials, target, insecureTls)
             return
         }
         // 独立连接（不复用阅读器的 ArchivePageLoader 句柄，避免生命周期竞争）；
@@ -108,6 +109,8 @@ object WebDavCoverCache {
             url = WebDavConnectionStore.extractFullUrl(chapterUrl),
             username = credentials?.first?.ifBlank { null },
             password = credentials?.second?.ifBlank { null },
+            // 连接级「忽略 HTTPS 证书校验」。
+            insecureTls = insecureTls,
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
             cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
         )
@@ -163,6 +166,7 @@ object WebDavCoverCache {
         fullUrl: String,
         credentials: Pair<String, String>?,
         target: File,
+        insecureTls: Boolean,
     ) {
         val dir = File(context.cacheDir, "komiho_webdav_pdf_cover").apply { mkdirs() }
         val tmp = File(dir, sha256(fullUrl) + ".pdf")
@@ -172,6 +176,7 @@ object WebDavCoverCache {
                     url = fullUrl,
                     username = credentials?.first?.ifBlank { null },
                     password = credentials?.second?.ifBlank { null },
+                    insecureTls = insecureTls,
                     fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
                     cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
                 )
@@ -222,7 +227,12 @@ object WebDavCoverCache {
         if (conn.user.isNotBlank()) {
             builder.header("Authorization", okhttp3.Credentials.basic(conn.user, pass))
         }
-        val bytes = WebDavRandomAccessSource.sharedHttpClient().newCall(builder.build())
+        val client = if (conn.insecureTls) {
+            WebDavRandomAccessSource.insecureHttpClient()
+        } else {
+            WebDavRandomAccessSource.sharedHttpClient()
+        }
+        val bytes = client.newCall(builder.build())
             .execute().use { resp ->
                 if (!resp.isSuccessful) throw IllegalStateException("封面图片下载失败 HTTP ${resp.code}: $url")
                 resp.body?.bytes() ?: ByteArray(0)

@@ -34,6 +34,8 @@ object WebDavConnectionStore {
         val baseUrl: String,
         val user: String,
         val passEnc: String,
+        // 忽略 HTTPS 证书校验（自签名/缺中间证书）；缺字段的历史 JSON 反序列化为 false。
+        val insecureTls: Boolean = false,
     )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -66,7 +68,13 @@ object WebDavConnectionStore {
         loadLocked().map { it.toPublic() }
     }
 
-    fun add(name: String, baseUrl: String, user: String, pass: String): WebDavConnection =
+    fun add(
+        name: String,
+        baseUrl: String,
+        user: String,
+        pass: String,
+        insecureTls: Boolean = false,
+    ): WebDavConnection =
         synchronized(lock) {
             val conn = StoredConnection(
                 id = UUID.randomUUID().toString().replace("-", "").take(8),
@@ -74,6 +82,7 @@ object WebDavConnectionStore {
                 baseUrl = normalizeBase(baseUrl),
                 user = user.trim(),
                 passEnc = WebDavCredentialCrypto.encrypt(pass),
+                insecureTls = insecureTls,
             )
             val list = loadLocked()
             list.add(conn)
@@ -87,6 +96,7 @@ object WebDavConnectionStore {
         baseUrl: String,
         user: String,
         pass: String,
+        insecureTls: Boolean = false,
     ): Unit = synchronized(lock) {
         val list = loadLocked()
         val idx = list.indexOfFirst { it.id == id }
@@ -98,6 +108,7 @@ object WebDavConnectionStore {
             user = user.trim(),
             // 密码留空 = 不修改旧密码（编辑框避免每次回显解密密码）
             passEnc = if (pass.isBlank()) old.passEnc else WebDavCredentialCrypto.encrypt(pass),
+            insecureTls = insecureTls,
         )
         saveLocked(list)
     }
@@ -129,10 +140,22 @@ object WebDavConnectionStore {
      * @return (user, 明文密码) —— 密码仅内存传递，禁止落日志
      */
     fun credentialsFor(chapterUrl: String): Pair<String, String>? = synchronized(lock) {
+        resolveConnLocked(chapterUrl)?.let {
+            it.user to WebDavCredentialCrypto.decryptStored(it.passEnc)
+        }
+    }
+
+    /** 按章节 URL 匹配连接的「忽略 HTTPS 证书校验」开关；无匹配连接 = false。 */
+    fun insecureTlsFor(chapterUrl: String): Boolean = synchronized(lock) {
+        resolveConnLocked(chapterUrl)?.insecureTls ?: false
+    }
+
+    /** 按「新格式 connId 精确 / 旧格式 baseUrl 最长前缀」解析连接；无任何连接返回 null。 */
+    private fun resolveConnLocked(chapterUrl: String): StoredConnection? {
         migrateLegacyIfNeededLocked()
         val list = loadLocked()
         if (list.isEmpty()) return null
-        val conn: StoredConnection = if (chapterUrl.startsWith(CONN_URL_PREFIX)) {
+        return if (chapterUrl.startsWith(CONN_URL_PREFIX)) {
             val connId = chapterUrl.removePrefix(CONN_URL_PREFIX).substringBefore('/')
             list.firstOrNull { it.id == connId } ?: list.first()
         } else {
@@ -142,7 +165,6 @@ object WebDavConnectionStore {
                 .maxByOrNull { it.baseUrl.length }
                 ?: list.first()
         }
-        conn.user to WebDavCredentialCrypto.decryptStored(conn.passEnc)
     }
 
     /** 把手输的文件路径解析成完整 URL：绝对 http(s) 原样；`/` 开头或裸路径拼到 base 后。 */
@@ -195,6 +217,7 @@ object WebDavConnectionStore {
         baseUrl = mihon.core.common.archive.WebDavRandomAccessSource.stripRootDot(baseUrl),
         user = user,
         passEnc = passEnc,
+        insecureTls = insecureTls,
     )
 }
 // SY <--

@@ -259,6 +259,8 @@ class ChapterLoader(
             url = WebDavConnectionStore.extractFullUrl(remoteUrl),
             username = credentials?.first?.ifBlank { null },
             password = credentials?.second?.ifBlank { null },
+            // 连接级「忽略 HTTPS 证书校验」（自签名证书服务器，用户显式开启）。
+            insecureTls = WebDavConnectionStore.insecureTlsFor(remoteUrl),
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
             cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
             // SY --> Komiho: 把整本下载（rar/7z 强制回退 / 非 Range 回退）进度回传上层进度通道。

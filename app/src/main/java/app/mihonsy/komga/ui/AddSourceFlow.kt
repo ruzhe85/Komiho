@@ -94,6 +94,7 @@ import app.mihonsy.komga.data.KomgaAuthType
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaPreferences
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import app.mihonsy.komga.data.DashboardPreferences
 import kotlin.math.roundToInt
 import androidx.compose.runtime.mutableFloatStateOf
@@ -860,6 +861,8 @@ private fun WebDavFormPage(
     var user by remember(existing) { mutableStateOf(existing?.user.orEmpty()) }
     var pass by remember(existing) { mutableStateOf("") }
     var showPass by remember { mutableStateOf(false) }
+    // 忽略 HTTPS 证书校验（自签名/缺中间证书的服务器）；用户显式开启，风险自付。
+    var insecureTls by remember(existing) { mutableStateOf(existing?.insecureTls ?: false) }
     var testing by remember { mutableStateOf(false) }
     var testMsg by remember { mutableStateOf<String?>(null) }
 
@@ -982,6 +985,23 @@ private fun WebDavFormPage(
             modifier = Modifier.padding(top = 6.dp),
         )
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("忽略 HTTPS 证书校验", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "自签名证书/证书过期时开启；风险自付",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = insecureTls, onCheckedChange = { insecureTls = it })
+        }
+
         Spacer(Modifier.height(16.dp))
         // 测试结果文案在组合期取好（stringResource 是 @Composable，不能在 onClick lambda 里调）。
         val okMsg = composeStringResource(R.string.addsrc_test_ok)
@@ -995,6 +1015,7 @@ private fun WebDavFormPage(
                     user = user,
                     // 编辑留空 = 沿用旧密码：直接带旧密文，decryptStored 兼容明文/密文两种形态。
                     passEnc = pass.ifBlank { existing?.passEnc.orEmpty() },
+                    insecureTls = insecureTls,
                 )
                 testing = true
                 testMsg = null
@@ -1041,9 +1062,9 @@ private fun WebDavFormPage(
                 onClick = {
                     val baseUrl = buildBaseUrl()
                     if (connId == null) {
-                        WebDavConnectionStore.add(name, baseUrl, user, pass)
+                        WebDavConnectionStore.add(name, baseUrl, user, pass, insecureTls)
                     } else {
-                        WebDavConnectionStore.update(connId, name, baseUrl, user, pass)
+                        WebDavConnectionStore.update(connId, name, baseUrl, user, pass, insecureTls)
                     }
                     onSaved()
                 },
