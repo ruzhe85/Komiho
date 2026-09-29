@@ -3,6 +3,7 @@ package app.mihonsy.komga.data.backup
 import android.content.Context
 import android.content.SharedPreferences
 import app.cash.sqldelight.async.coroutines.awaitAsOne
+import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import app.mihonsy.komga.data.DashboardPreferences
 import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaCredentialCrypto
@@ -579,7 +580,8 @@ object KomihoBackup {
                 val chId = chapterIdByKey[h.mangaUrl to h.chapterUrl] ?: continue
                 // SY --> Komiho: 较新胜——仅当备份阅读时间不早于本地时才覆盖
                 val backupLast = h.lastRead ?: 0L
-                val local = db.historyQueries.getHistoryByChapterId(chId).executeAsOneOrNull()
+                // 异步驱动（generateAsync）必须用 await 扩展，同步 executeAs* 会直接抛错
+                val local = db.historyQueries.getHistoryByChapterId(chId).awaitAsOneOrNull()
                 if (local == null) {
                     db.historyQueries.upsert(chId, Date(backupLast), h.timeRead)
                     historyCount++

@@ -1175,7 +1175,7 @@
     <string name="komiho_backup_create">Create backup</string>
     <string name="komiho_backup_restore">Restore backup</string>
     <string name="komiho_sync_group">Sync</string>
-    <string name="komiho_sync_desc">Source config, WebDAV/SMB reading history and bookmarks (local and Komga excluded)</string>
+    <string name="komiho_sync_desc">Source config, \nWebDAV/SMB reading history and bookmarks (local and Komga excluded)</string>
     <string name="komiho_sync_triggers">Sync triggers</string>
     <string name="komiho_sync_trigger_chapter_read">After finishing a chapter</string>
     <string name="komiho_sync_trigger_chapter_open">When opening a chapter</string>
