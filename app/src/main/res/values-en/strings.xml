@@ -215,6 +215,9 @@
     <!-- Settings: reader -->
     <string name="settings_reading">Reader</string>
     <string name="settings_advanced">Advanced</string>
+    <string name="settings_export_diagnostic_logs">Export diagnostic logs</string>
+    <string name="settings_export_diagnostic_logs_summary">Export all logs since the last cold start to a txt file for analysis (e.g. reader crashes)</string>
+    <string name="settings_export_diagnostic_logs_failed">Failed to export diagnostic logs</string>
     <string name="reader_progress_bubble">Progress bar thumbnails</string>
     <string name="settings_reader">Reader settings</string>
     <string name="settings_reader_summary">Page turns / direction / zoom / enhance / nav…</string>

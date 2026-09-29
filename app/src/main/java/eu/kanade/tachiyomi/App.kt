@@ -78,6 +78,7 @@ import eu.kanade.tachiyomi.util.system.notify
 import exh.log.CrashlyticsPrinter
 import exh.log.EHLogLevel
 import exh.log.EnhancedFilePrinter
+import exh.log.DiagnosticLogBuffer
 import exh.log.XLogLogcatLogger
 import exh.log.xLogD
 import exh.syDebugVersion
@@ -148,6 +149,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         setupExhLogging() // EXH logging
         LogcatLogger.install()
         LogcatLogger.loggers += XLogLogcatLogger() // SY Redirect Logcat to XLog
+        DiagnosticLogBuffer.install() // SY Buffer all logcat since cold start for "导出诊断日志"
 
         setupNotificationChannels()
 

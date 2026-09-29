@@ -259,6 +259,12 @@ import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.domain.ui.model.AppTheme
+// SY --> Komiho: 导出诊断日志
+import exh.log.DiagnosticLogBuffer
+import eu.kanade.tachiyomi.util.system.createFileInCacheDir
+import eu.kanade.tachiyomi.util.storage.getUriCompat
+import eu.kanade.tachiyomi.util.system.toShareIntent
+// SY <--
 import eu.kanade.presentation.util.LocalBackPress
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.annotation.StringRes
@@ -4059,6 +4065,7 @@ private fun SettingsTab(
             onDismiss = { showAdvanced = false },
             title = composeStringResource(R.string.settings_advanced),
         ) { padding ->
+            val scope = rememberCoroutineScope()
             var bubbleEnabled by remember { mutableStateOf(prefs.readerProgressBubbleEnabled) }
             Column(Modifier.padding(padding).fillMaxSize()) {
                 SwitchPreferenceWidget(
@@ -4070,6 +4077,46 @@ private fun SettingsTab(
                         prefs.readerProgressBubbleEnabled = it
                     },
                 )
+                // SY --> Komiho: 导出诊断日志——把本次冷启动后全部 logcat 导出为 txt 供分析
+                TextPreferenceWidget(
+                    title = composeStringResource(R.string.settings_export_diagnostic_logs),
+                    subtitle = composeStringResource(R.string.settings_export_diagnostic_logs_summary),
+                    icon = Icons.Filled.Description,
+                    onPreferenceClick = {
+                        scope.launch(Dispatchers.IO) {
+                            val uri = runCatching {
+                                val logs = DiagnosticLogBuffer.getLogs()
+                                val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                                    .format(java.util.Date())
+                                val file = context.createFileInCacheDir("komiho_debug_$stamp.txt")
+                                val header = buildString {
+                                    append("Komiho diagnostic log\n")
+                                    append("Exported at: ${java.util.Date()}\n")
+                                    append("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE}, ${BuildConfig.VERSION_CODE})\n")
+                                    append("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})\n")
+                                    append("Device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
+                                    append("Logs since cold start: ${logs.lineSequence().count()} lines\n\n")
+                                }
+                                file.writeText(header + logs)
+                                file.getUriCompat(context)
+                            }.onFailure { e ->
+                                android.util.Log.e("DiagnosticLog", "导出诊断日志失败", e)
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(
+                                        context.applicationContext,
+                                        context.getString(R.string.settings_export_diagnostic_logs_failed),
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                                return@launch
+                            }.getOrThrow()
+                            withContext(Dispatchers.Main) {
+                                context.startActivity(uri.toShareIntent(context, "text/plain"))
+                            }
+                        }
+                    },
+                )
+                // SY <--
             }
         }
     }
