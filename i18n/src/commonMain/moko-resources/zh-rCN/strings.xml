@@ -1041,7 +1041,7 @@
     <string name="komiho_backup_create">创建备份</string>
     <string name="komiho_backup_restore">还原备份</string>
     <string name="komiho_sync_group">同步</string>
-    <string name="komiho_sync_desc">来源配置信息，\nWebDAV/SMB 阅读历史及书签（不含本地/Komga）</string>
+    <string name="komiho_sync_desc">来源配置，\nWebDAV/SMB 阅读历史及书签（不含本地/Komga）</string>
     <string name="komiho_sync_connection">WebDAV 同步</string>
     <string name="komiho_sync_triggers">触发条件</string>
     <string name="komiho_sync_trigger_chapter_read">章节阅读后同步</string>
