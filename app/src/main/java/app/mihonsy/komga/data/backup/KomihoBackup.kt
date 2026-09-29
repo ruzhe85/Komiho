@@ -144,12 +144,13 @@ object KomihoBackup {
         WebDavRandomAccessSource.ensureDir(base, "$dir/backup", auth, client)
         val ext = if (password.isNullOrBlank()) "zip" else "kmh"
         val fileName = "komiho-${System.currentTimeMillis()}.$ext"
-        WebDavRandomAccessSource.putFile("$base/$dir/backup/$fileName", auth, bytes, client)
+        val backupDirUrl = "$base/$dir/backup"
+        WebDavRandomAccessSource.putFile("$backupDirUrl/$fileName", auth, bytes, client)
         // 只保留最新一份备份，避免时间戳文件无限堆积。清理失败忽略，下次推送再清。
         runCatching {
-            WebDavRandomAccessSource.propfind("$base/$dir/backup", auth, client)
+            WebDavRandomAccessSource.propfind(backupDirUrl, auth, client)
                 .asSequence()
-                .map { it.trimEnd('/') }
+                .map { absoluteHref(base, backupDirUrl, it) }
                 .filter { it.substringAfterLast('/').startsWith("komiho-") }
                 .sortedByDescending {
                     it.substringAfterLast('/').removePrefix("komiho-")
@@ -176,15 +177,16 @@ object KomihoBackup {
         val auth = WebDavRandomAccessSource.basicAuth(conn.user, WebDavCredentialCrypto.decryptStored(conn.passEnc))
         val base = conn.baseUrl.trimEnd('/')
         val dir = dirName.ifBlank { "komiho" }.trim('/')
+        val dirUrl = "$base/$dir/backup"
         val hrefs = try {
-            WebDavRandomAccessSource.propfind("$base/$dir/backup", auth, client)
+            WebDavRandomAccessSource.propfind(dirUrl, auth, client)
         } catch (e: IOException) {
             // 首次推送时 <dir>/backup 目录尚不存在，PROPFIND 404 = 远端无备份，
             // 返回 null 交由推送侧 ensureDir 建目录；其余错误照常抛出中止同步。
             if (e.message?.contains("HTTP 404") == true) return null
             throw e
         }
-        val latest = hrefs.map { it.trimEnd('/') }
+        val latest = hrefs.map { absoluteHref(base, dirUrl, it) }
             .filter { it.endsWith(".zip", true) || it.endsWith(".kmh", true) }
             .maxOrNull() ?: return null
         return WebDavRandomAccessSource.getFile(latest, auth, client)
@@ -192,6 +194,19 @@ object KomihoBackup {
 
     /** 该备份文件是否为加密容器（决定导入时是否要弹密码框）。 */
     fun isEncrypted(bytes: ByteArray): Boolean = startsWith(bytes, ENC_MAGIC)
+
+    /**
+     * PROPFIND 返回的 href 可能是绝对路径（`/dir/file`）、裸文件名或完整 URL（不同服务器方言），
+     * 统一拼回绝对 URL 再交给 getFile/deleteFile，否则 normalizeUrl 会报「非法 WebDAV URL」。
+     */
+    private fun absoluteHref(base: String, dirUrl: String, href: String): String {
+        val trimmed = href.trimEnd('/')
+        return when {
+            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+            trimmed.startsWith('/') -> base + trimmed
+            else -> "$dirUrl/$trimmed"
+        }
+    }
 
     /**
      * 读取备份文本，按文件头自动分流：
