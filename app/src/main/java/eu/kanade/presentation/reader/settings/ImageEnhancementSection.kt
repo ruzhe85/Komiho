@@ -232,12 +232,29 @@ fun ImageEnhancementSection(
                 checked = bypass,
                 onClick = { preferences.aiBypassFitGate.set(!bypass) },
             )
-            // Komiho: AI 面积回缩（防摩尔纹）—— AI 2x 输出按显示尺寸用面积核压回
+            // Komiho: AI 面积回缩（防摩尔纹）—— AI 2x 输出按显示尺寸用高斯核压回
             // 显示带通再交 SSIV（SSIV 整图双线性缩小无低通，高频网点会拍频）。
+            val areaDownscale by preferences.aiAreaDownscale.collectAsState()
             CheckboxItem(
                 label = stringResource(MR.strings.ai_area_downscale),
-                pref = preferences.aiAreaDownscale,
+                checked = areaDownscale,
+                onClick = { preferences.aiAreaDownscale.set(!areaDownscale) },
             )
+            if (areaDownscale) {
+                // Komiho: 回缩强度 —— σ 随档位走，盖住网点晶格周期才积得成均匀灰；
+                // 强档灰度均匀但线稿更软，按网点粗细取舍。
+                val strength by preferences.aiAreaDownscaleStrength.collectAsState()
+                EnhancementParamLabel(MR.strings.ai_area_downscale_strength)
+                SettingsChipRow {
+                    ReaderPreferences.AiAreaDownscaleStrengthOptions.forEach { (value, labelRes) ->
+                        FilterChip(
+                            selected = strength == value,
+                            onClick = { preferences.aiAreaDownscaleStrength.set(value) },
+                            label = { Text(stringResource(labelRes)) },
+                        )
+                    }
+                }
+            }
         }
         }  // Komiho: if (mode != 0) —— 关闭时隐藏增强分组、模型选择、角标开关与强制增强
     }

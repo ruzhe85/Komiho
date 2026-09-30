@@ -233,6 +233,7 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                                 viewWidth = dstWidth,
                                 viewHeight = dstHeight,
                                 isTallStrip = isTallStrip,
+                                strength = preferences.aiAreaDownscaleStrength.get() / 100f,
                             )
                             if (downscaled !== enhanced) {
                                 enhanced.recycle()

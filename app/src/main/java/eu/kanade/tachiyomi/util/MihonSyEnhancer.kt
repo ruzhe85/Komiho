@@ -81,11 +81,12 @@ object MihonSyEnhancer {
     private external fun nativeResample(bitmap: Bitmap, scale: Float, kernel: Int): Bitmap
 
     /**
-     * Komiho: 面积平均降采样到显式目标尺寸（native kernel id 4，软边 box、支撑窗随缩比
-     * 放大 ≈ 精确面积覆盖加权）。目标大于源时 native 侧钳回源尺寸（绝不放大）；任何失败
-     * 返回入参本身。为 AI 面积回缩（[areaDownscaleToDisplay]）服务。
+     * Komiho: AI 2x 回缩到显式目标尺寸（native kernel id 5 高斯，σ = 0.5×[strength]，
+     * 支撑窗 3σ —— 缩比 r 下实际积分窗 ≈ 3σ/r 源像素，覆盖网点晶格周期才能积成均匀灰；
+     * 上一版软边 box 的 ~1.5px 窗口在 0.655 缩比下只留云纹，已弃）。目标大于源时 native
+     * 侧钳回源尺寸（绝不放大）；任何失败返回入参本身。
      */
-    private external fun nativeAreaDownscaleTo(bitmap: Bitmap, dstWidth: Int, dstHeight: Int): Bitmap
+    private external fun nativeAreaDownscaleTo(bitmap: Bitmap, dstWidth: Int, dstHeight: Int, strength: Float): Bitmap
 
     /**
      * Komiho: CPU Guided Filter 漫画降噪（亮度引导强度缩放：只平滑亮度、三通道同乘一因子，
@@ -519,12 +520,13 @@ object MihonSyEnhancer {
 
     /**
      * Komiho: AI 面积回缩 —— AI 2x 输出相对显示尺寸的缩比 < [AREA_DOWNSCALE_TRIGGER] 时，
-     * 用面积平均（软边 box、支撑窗随缩比放大 ≈ 精确面积覆盖加权）压回显示带通再交 SSIV。
+     * 用高斯核（σ = 0.5×[strength]，支撑窗 3σ 随缩比放大）压回显示带通再交 SSIV。
      *
      * 摩尔纹根因：SSIV 对 bitmap 源走非瓦片路径，`FilterBitmap` 双线性整图缩小没有低通
-     * （每屏幕像素仅 2×2 tap），AI 2x 的高频网点与屏幕像素网格拍频。面积核等效超采样
-     * 抗锯齿，把超分信息正确压回显示带通；相比被放弃的 Mitchell 方案（固定 4-tap，
-     * 0.5 缩比下仍欠采样），支撑窗随缩比走才是真正消除拍频的关键。
+     * （每屏幕像素仅 2×2 tap），AI 2x 的高频网点与屏幕像素网格拍频。第一版软边 box 的
+     * 积分窗只有 ~1/缩比 个源像素，盖不住 AI 2x 后 6~16px 的网点晶格周期，0.655 缩比
+     * 实测残留低频云纹 —— 高斯的窗口随 [strength] 放大才能把晶格积成均匀灰（轻/中/强
+     * ≈ 4.6/7/9px 窗口）；滚降平滑无振铃，线稿由 AI 2x 预先锐化、适度模糊可接受。
      *
      * 契约：不回收入参；返回新位图或入参本身。长条（[isTallStrip]）只按宽度算 fit
      * （与解码侧 fitRatio 同口径，高度是滚动维度）；视图尺寸未知（<=0 / 未布局 /
@@ -535,6 +537,7 @@ object MihonSyEnhancer {
         viewWidth: Int,
         viewHeight: Int,
         isTallStrip: Boolean,
+        strength: Float = 1f,
     ): Bitmap {
         if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return bitmap
         if (viewWidth <= 0 || viewWidth == Int.MAX_VALUE) return bitmap
@@ -568,7 +571,7 @@ object MihonSyEnhancer {
         } ?: return bitmap
 
         val out: Bitmap? = try {
-            nativeAreaDownscaleTo(argb, targetW, targetH).takeIf { it !== argb }
+            nativeAreaDownscaleTo(argb, targetW, targetH, strength.coerceIn(0.5f, 3f)).takeIf { it !== argb }
         } catch (t: Throwable) {
             logcat(LogPriority.WARN, t) { "Area downscale failed; keeping full size" }
             null

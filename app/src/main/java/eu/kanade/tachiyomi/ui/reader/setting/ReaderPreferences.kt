@@ -286,6 +286,14 @@ class ReaderPreferences(
     val aiAreaDownscale: Preference<Boolean> = preferenceStore.getBoolean("pref_ai_area_downscale", false)
 
     /**
+     * Komiho (2026-10-01): 回缩强度档（%）：100=轻（σ=0.5，积分窗 ~4.6 源像素 @0.655 缩比）、
+     * 150=中（~7px）、200=强（~9px）。第一版软边 box 窗口仅 ~1.5px，盖不住 AI 2x 后
+     * 6~16px 的网点晶格周期、残留低频云纹（真机 0.655 缩比实测）——换高斯核（σ 随此档
+     * 走）后由用户按网点粗细调档：强档灰度均匀但线稿更软。变更进 [enhancementCacheKey]。
+     */
+    val aiAreaDownscaleStrength: Preference<Int> = preferenceStore.getInt("pref_ai_area_downscale_strength", 100)
+
+    /**
      * Komiho: 上一次的非关闭增强档位——「开启」chip 用它恢复（不改变像素，不进指纹）。
      */
     val enhancementLastMode: Preference<Int> = preferenceStore.getInt("pref_enhancement_last_mode", 2)
@@ -314,6 +322,7 @@ class ReaderPreferences(
         append('|').append(denoiseLevel.get())
         append('|').append(if (aiBypassFitGate.get()) 1 else 0)
         append('|').append(if (aiAreaDownscale.get()) 1 else 0)
+        append('|').append(aiAreaDownscaleStrength.get())
         append('|').append(cropBorders.get())
         append('|').append(cropBordersWebtoon.get())
     }
@@ -467,6 +476,13 @@ class ReaderPreferences(
             200 to MR.strings.lanczos_scale_2x,
             250 to MR.strings.lanczos_scale_2_5x,
             300 to MR.strings.lanczos_scale_3x,
+        )
+
+        /** Komiho: AI 回缩强度档（%），σ = 0.5×档位 —— 见 [aiAreaDownscaleStrength]。 */
+        val AiAreaDownscaleStrengthOptions = listOf(
+            100 to MR.strings.ai_area_strength_light,
+            150 to MR.strings.ai_area_strength_medium,
+            200 to MR.strings.ai_area_strength_strong,
         )
 
         /**

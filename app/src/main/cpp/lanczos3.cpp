@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <array>
 #include <thread>
 #include <vector>
@@ -53,13 +54,10 @@ inline float mitchellKernel(float x) {
           (8.0f * B + 24.0f * C)) / 6.0f;
 }
 
-// Komiho: 面积平均核（软边 box，支撑窗 ±(0.5+ε)，边缘线性过渡）— AI 2x 输出回缩到
-// 显示尺寸专用。配合 ResamplePlan 的支撑窗随缩比放大，等效逐输出像素的精确面积
-// 覆盖加权：精确 2:1 时两个边缘 tap 权重对称（各 0.5），归一化后仍是精确面积平均；
-// 非整数缩比时边缘 tap 拿到 ≈ 覆盖面积的分数权重。无负瓣，对网点/高频纹理不会
-// 振铃，也几乎不残留拍频（摩尔纹）。
-// ⚠️ 边缘必须软过渡：KernelLUT::at() 把 |x| ≥ radius 钳到 LUT 端点，端点值必须为 0 ——
-// 纯 box 在 ±0.5 处取 1 会让支撑窗外所有 tap 都拿到权重。
+// Komiho: 面积平均核（软边 box，支撑窗 ±(0.5+ε)，边缘线性过渡）。窗口随缩比放大后
+// 也只是 ~1/缩比 个源像素宽 —— 对 AI 2x 后周期 6~16px 的网点晶格积分不足，非整数
+// 缩比下残留低频云纹（实测 0.655 缩比明显）。高斯核（kernel id 5，σ 随强度走）
+// 才能把晶格积成均匀灰：见 resizeWithKernel case 5。
 constexpr float AREA_KERNEL_EDGE = 1.0f / 256.0f;
 
 inline float areaKernel(float x) {
@@ -87,7 +85,8 @@ inline float areaKernel(float x) {
 //          (26.0f / 209.0f) * v;
 // }
 
-using KernelFn = float (*)(float);
+// Komiho: 核函数放宽到 std::function —— 高斯核的 σ 由调用方参数决定（强度可调）。
+using KernelFn = std::function<float(float)>;
 
 struct KernelLUT {
   std::vector<int16_t> tbl;
@@ -388,7 +387,7 @@ bool isFullyOpaque(const unsigned char *src, int width, int height) {
 }
 
 void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *dst, int dw,
-                      int dh, int kernel) {
+                      int dh, int kernel, float kparam) {
   switch (kernel) {
     case 1: {
       const bool opaque = isFullyOpaque(src, sw, sh);
@@ -401,10 +400,23 @@ void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *d
       resizeGeneric(src, sw, sh, dst, dw, dh, mitchellKernel, 2.0f, opaque);
       break;
     }
-    // Komiho: 面积平均（kernel id 4）— AI 2x 输出回缩到显示尺寸（防摩尔纹）。
+    // Komiho: 面积平均（kernel id 4）— 已被高斯核（id 5）取代，保留备用。
     case 4: {
       const bool opaque = isFullyOpaque(src, sw, sh);
       resizeGeneric(src, sw, sh, dst, dw, dh, areaKernel, 0.5f + AREA_KERNEL_EDGE, opaque);
+      break;
+    }
+    // Komiho: 高斯核（kernel id 5）— AI 2x 回缩的主用核。σ = kparam（0.5×强度档），
+    // 支撑窗 3σ：缩比 r 下实际积分窗 ≈ 3σ/r 源像素，强度 1.0 时 ~4.6px、1.5 时 ~7px、
+    // 2.0 时 ~9px —— 覆盖网点晶格周期才能积成均匀灰（box 的 ~1.5px 只会留云纹）。
+    // 高斯滚降平滑，无振铃；线稿边缘由 AI 2x 预先锐化，适度模糊可接受。
+    case 5: {
+      const float sigma = std::max(0.1f, kparam);
+      const bool opaque = isFullyOpaque(src, sw, sh);
+      resizeGeneric(
+          src, sw, sh, dst, dw, dh,
+          [sigma](float x) { return std::exp(-(x * x) / (2.0f * sigma * sigma)); },
+          3.0f * sigma, opaque);
       break;
     }
     // MihonSY: Spline36 (kernel id 2) disabled — spline36Kernel is commented out above.
@@ -424,7 +436,8 @@ void resizeWithKernel(const unsigned char *src, int sw, int sh, unsigned char *d
 }  // namespace
 
 static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel);
-static jobject resampleBitmapTo(JNIEnv *env, jobject bitmap, jint dw, jint dh, jint kernel);
+static jobject resampleBitmapTo(JNIEnv *env, jobject bitmap, jint dw, jint dh, jint kernel,
+                                jfloat kparam);
 
 extern "C" JNIEXPORT jobject JNICALL
 Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeLanczosProcess(
@@ -438,11 +451,12 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeResample(
   return nativeResampleImpl(env, bitmap, scale, kernel);
 }
 
-// Komiho: 面积平均降采样到显式目标尺寸（kernel id 4）。目标大于源时钳回源尺寸
-// （绝不放大）；与 nativeResample 的统一倍率不同，宽高比可各自独立。失败返回入参。
+// Komiho: AI 2x 回缩到显式目标尺寸（kernel id 5 高斯，σ = 0.5×strength；strength 1.0/1.5/2.0
+// 对应轻/中/强）。目标大于源时钳回源尺寸（绝不放大）；与 nativeResample 的统一倍率不同，
+// 宽高比可各自独立。失败返回入参。
 extern "C" JNIEXPORT jobject JNICALL
 Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeAreaDownscaleTo(
-    JNIEnv *env, jobject thiz, jobject bitmap, jint dstWidth, jint dstHeight) {
+    JNIEnv *env, jobject thiz, jobject bitmap, jint dstWidth, jint dstHeight, jfloat strength) {
   AndroidBitmapInfo info;
   if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
     LOGE("AndroidBitmap_getInfo failed");
@@ -457,7 +471,7 @@ Java_eu_kanade_tachiyomi_util_MihonSyEnhancer_nativeAreaDownscaleTo(
   const int dw = std::max(1, std::min(sw, dstWidth));
   const int dh = std::max(1, std::min(sh, dstHeight));
   if (dw == sw && dh == sh) return bitmap;
-  return resampleBitmapTo(env, bitmap, dw, dh, 4);
+  return resampleBitmapTo(env, bitmap, dw, dh, 5, 0.5f * std::max(0.5f, std::min(3.0f, strength)));
 }
 
 static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jint kernel) {
@@ -478,10 +492,11 @@ static jobject nativeResampleImpl(JNIEnv *env, jobject bitmap, jfloat scale, jin
       env, bitmap,
       static_cast<int>(info.width * scale),
       static_cast<int>(info.height * scale),
-      kernel);
+      kernel, 0.0f);
 }
 
-static jobject resampleBitmapTo(JNIEnv *env, jobject bitmap, jint dw, jint dh, jint kernel) {
+static jobject resampleBitmapTo(JNIEnv *env, jobject bitmap, jint dw, jint dh, jint kernel,
+                                jfloat kparam) {
   AndroidBitmapInfo info;
   if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
     LOGE("AndroidBitmap_getInfo failed");
@@ -569,7 +584,7 @@ static jobject resampleBitmapTo(JNIEnv *env, jobject bitmap, jint dw, jint dh, j
     resampleDst = packedDst.data();
   }
 
-  resizeWithKernel(srcPixels, sw, sh, resampleDst, dw, dh, kernel);
+  resizeWithKernel(srcPixels, sw, sh, resampleDst, dw, dh, kernel, kparam);
 
   // Defensive blank-output check — run against the REAL render target
   // (resampleDst). When dstStride != dw*4 Android gave a padded output bitmap,
