@@ -55,6 +55,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
         val prefs = remember { Injekt.get<PreferenceStore>() }
 
         val triggersPref = remember { prefs.getStringSet(KomihoSync.KEY_TRIGGERS, emptySet()) }
+        val contentPref = remember { prefs.getStringSet(KomihoSync.KEY_CONTENT, KomihoSync.DEFAULT_CONTENT) }
 
         var showExportPwd by remember { mutableStateOf(false) }
         var showImportPwd by remember { mutableStateOf(false) }
@@ -203,12 +204,26 @@ object SettingsKomihoBackupScreen : SearchableSettings {
             ),
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.komiho_sync_group),
-                description = stringResource(MR.strings.komiho_sync_desc),
                 preferenceItems = listOf(
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.komiho_sync_connection),
                         subtitle = statusSubtitle,
                         onClick = { showSyncConn = true },
+                    ),
+                    Preference.PreferenceItem.MultiSelectListPreference(
+                        preference = contentPref,
+                        entries = mapOf(
+                            KomihoSync.CONTENT_SOURCE_CONFIG to
+                                stringResource(MR.strings.komiho_sync_content_source),
+                            KomihoSync.CONTENT_WEBDAV_HISTORY to
+                                stringResource(MR.strings.komiho_sync_content_webdav),
+                            KomihoSync.CONTENT_SMB_HISTORY to
+                                stringResource(MR.strings.komiho_sync_content_smb),
+                        ),
+                        title = stringResource(MR.strings.komiho_sync_content),
+                        subtitle = null,
+                        subtitleProvider = { _, _ -> null },
+                        enabled = configured,
                     ),
                     Preference.PreferenceItem.MultiSelectListPreference(
                         preference = triggersPref,

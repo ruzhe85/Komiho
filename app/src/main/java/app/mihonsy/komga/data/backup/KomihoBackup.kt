@@ -256,28 +256,52 @@ object KomihoBackup {
     private suspend fun buildPayload(context: Context): BackupPayload {
         val prefStore = Injekt.get<PreferenceStore>()
 
+        // Komiho: 同步内容选择（设置 → 同步 → 内容选择），三项默认全开。
+        val includeSourceConfig = KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_SOURCE_CONFIG)
+        val includeWebdavHistory = KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_WEBDAV_HISTORY)
+        val includeSmbHistory = KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_SMB_HISTORY)
+        fun wantChapterUrl(url: String): Boolean =
+            (includeWebdavHistory && url.startsWith("webdav:")) ||
+                (includeSmbHistory && url.startsWith("smb://"))
+
         // 1) Komga 个性化设置（整个 komga_connection SharedPreferences）
         //    先触发旧版明文凭据迁移（确保 connections 键存在且为加密形态），
         //    再取出并解密其中的敏感字段，使 payload 内为明文（由备份密码统一保护）。
         KomgaPreferences(context).connections()
-        val komgaPrefs = withKomgaCredsDecrypted(readRawPrefs(context, "komga_connection"))
+        val komgaPrefs = if (includeSourceConfig) {
+            withKomgaCredsDecrypted(readRawPrefs(context, "komga_connection"))
+        } else {
+            emptyList()
+        }
 
         // 2) SMB / WebDAV 连接（含凭据解密）
-        val smbConns = readSmbConnections().map { s ->
-            SmbConn(s.id, s.name, s.host, s.port, s.share, s.path, s.domain, s.user,
-                password = WebDavCredentialCrypto.decryptStored(s.passEnc))
+        val smbConns = if (includeSourceConfig) {
+            readSmbConnections().map { s ->
+                SmbConn(s.id, s.name, s.host, s.port, s.share, s.path, s.domain, s.user,
+                    password = WebDavCredentialCrypto.decryptStored(s.passEnc))
+            }
+        } else {
+            emptyList()
         }
-        val webDavConns = readWebDavConnections().map { w ->
-            WebDavConn(w.id, w.name, w.baseUrl, w.user,
-                password = WebDavCredentialCrypto.decryptStored(w.passEnc),
-                insecureTls = w.insecureTls)
+        val webDavConns = if (includeSourceConfig) {
+            readWebDavConnections().map { w ->
+                WebDavConn(w.id, w.name, w.baseUrl, w.user,
+                    password = WebDavCredentialCrypto.decryptStored(w.passEnc),
+                    insecureTls = w.insecureTls)
+            }
+        } else {
+            emptyList()
         }
 
-        // 3) 来源显隐 / 排序
-        val sourceVisibility = SourceVisibilityBackup(
-            hidden = SourceVisibilityStore.hiddenIds().toList(),
-            order = SourceVisibilityStore.sourceOrder(),
-        )
+        // 3) 来源显隐 / 排序（属来源配置，跟随同一开关）
+        val sourceVisibility = if (includeSourceConfig) {
+            SourceVisibilityBackup(
+                hidden = SourceVisibilityStore.hiddenIds().toList(),
+                order = SourceVisibilityStore.sourceOrder(),
+            )
+        } else {
+            null
+        }
 
         // 4) 聚合页每来源条数
         val dashboard = readDashboard(prefStore)
@@ -294,7 +318,8 @@ object KomihoBackup {
         val allNonKomga = mangaRepo.getAll().filter { it.source != komgaId }
         val chaptersByManga = allNonKomga.associateWith { m -> chapterRepo.getChapterByMangaId(m.id) }
         val localMangas = allNonKomga.filter { m ->
-            isRemoteSourceUrl(m.url) || chaptersByManga[m].orEmpty().any { isRemoteSourceUrl(it.url) }
+            chaptersByManga[m].orEmpty().any { isRemoteSourceUrl(it.url) && wantChapterUrl(it.url) } ||
+                (isRemoteSourceUrl(m.url) && wantChapterUrl(m.url))
         }
         // chapter_id -> (mangaUrl, chapterUrl) 用于历史/书签重新关联
         val chapterRefById = mutableMapOf<Long, Pair<String, String>>()
@@ -304,6 +329,7 @@ object KomihoBackup {
 
         val localChapters = chaptersByManga.values.flatten().mapNotNull { c ->
             val ref = chapterRefById[c.id] ?: return@mapNotNull null
+            if (!wantChapterUrl(c.url)) return@mapNotNull null
             BkChapter(
                 mangaUrl = ref.first,
                 url = c.url, name = c.name, scanlator = c.scanlator,
@@ -319,13 +345,14 @@ object KomihoBackup {
         val localHistory = localMangas.flatMap { m ->
             historyRepo.getHistoryByMangaId(m.id).mapNotNull { h ->
                 val key = chapterRefById[h.chapterId] ?: return@mapNotNull null
+                if (!wantChapterUrl(key.second)) return@mapNotNull null
                 BkHistory(key.first, key.second, h.readAt?.time, h.readDuration, h.readAt?.time ?: 0L) // SY 较新胜基准
             }
         }
 
         // SY --> Komiho: 书签跨本地/WebDAV/SMB 共用 LocalSource.ID，按章节 URL 前缀排除本地
         val localBookmarks = bookmarkRepo.getBookmarksBySource(LocalSource.ID)
-            .filter { isRemoteSourceUrl(it.chapterUrl) }
+            .filter { isRemoteSourceUrl(it.chapterUrl) && wantChapterUrl(it.chapterUrl) }
             .map { b -> BkBookmark(b.mangaUrl, b.chapterUrl, b.page.toLong(), b.createdAt) }
 
         val categories = categoryRepo.getAll()

@@ -43,6 +43,7 @@ object KomihoSync {
     const val KEY_BACKUP_PASS = "komiho_sync_center_password"
     const val KEY_INSECURE_TLS = "komiho_sync_center_insecure_tls"
     const val KEY_TRIGGERS = "komiho_sync_triggers"
+    const val KEY_CONTENT = "komiho_sync_content"
     const val KEY_LAST_ACTION = "komiho_sync_last_action"
     const val KEY_LAST_TIME = "komiho_sync_last_time"
     const val KEY_LAST_RESULT = "komiho_sync_last_result"
@@ -63,6 +64,15 @@ object KomihoSync {
         TRIGGER_APP_START,
         TRIGGER_FOREGROUND,
     )
+
+    /** 同步内容选择（多选）：键集合，缺省全开。 */
+    const val CONTENT_SOURCE_CONFIG = "source_config"
+    const val CONTENT_WEBDAV_HISTORY = "webdav_history"
+    const val CONTENT_SMB_HISTORY = "smb_history"
+    val DEFAULT_CONTENT = setOf(CONTENT_SOURCE_CONFIG, CONTENT_WEBDAV_HISTORY, CONTENT_SMB_HISTORY)
+
+    fun contentEnabled(prefs: PreferenceStore, key: String): Boolean =
+        prefs.getStringSet(KEY_CONTENT, DEFAULT_CONTENT).get().contains(key)
 
     private val inFlight = AtomicBoolean(false)
     private val autoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

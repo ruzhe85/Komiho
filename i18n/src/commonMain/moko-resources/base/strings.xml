@@ -1179,7 +1179,6 @@
     <string name="komiho_backup_create">Create backup</string>
     <string name="komiho_backup_restore">Restore backup</string>
     <string name="komiho_sync_group">Sync</string>
-    <string name="komiho_sync_desc">Source config, WebDAV/SMB reading history and bookmarks (local and Komga excluded)</string>
     <string name="komiho_sync_triggers">Sync triggers</string>
     <string name="komiho_sync_trigger_chapter_read">After finishing a chapter</string>
     <string name="komiho_sync_trigger_chapter_open">When opening a chapter</string>
@@ -1234,4 +1233,8 @@
     <string name="komiho_sync_saved">Saved</string>
     <string name="komiho_sync_cleared">WebDAV sync config cleared</string>
     <string name="komiho_sync_back">Back</string>
+    <string name="komiho_sync_content">Sync content</string>
+    <string name="komiho_sync_content_source">Source config</string>
+    <string name="komiho_sync_content_webdav">WebDAV reading history/bookmarks</string>
+    <string name="komiho_sync_content_smb">SMB reading history/bookmarks</string>
 </resources>
