@@ -262,6 +262,7 @@ import eu.kanade.domain.ui.model.AppTheme
 // SY --> Komiho: 导出诊断日志
 import exh.log.DiagnosticLogBuffer
 import eu.kanade.tachiyomi.util.system.createFileInCacheDir
+import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import eu.kanade.tachiyomi.util.storage.getUriCompat
 import eu.kanade.tachiyomi.util.system.toShareIntent
 // SY <--
@@ -7862,6 +7863,20 @@ private suspend fun countChapterPages(context: Context, url: String, file: UniFi
                         reader.useEntries { entries ->
                             entries.count { it.isFile && ImageUtil.isImage(it.name) }
                         }
+                    }
+                }
+                // Komiho (2026-10-01): PDF 一直落在这里返回 0（历史行显示「未知」）——
+                // 用系统 PdfRenderer 取页数；SAF 模式无真实路径，contentResolver 直开描述符。
+                file.name?.endsWith("pdf", ignoreCase = true) == true -> {
+                    val path = file.filePath
+                    if (path != null) {
+                        PdfRenderFallback.getPageCount(path)
+                    } else {
+                        runCatching {
+                            context.contentResolver.openFileDescriptor(file.uri, "r")?.use {
+                                PdfRenderFallback.getPageCount(it)
+                            } ?: 0
+                        }.getOrDefault(0)
                     }
                 }
                 else -> 0

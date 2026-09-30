@@ -78,13 +78,24 @@ object PdfRenderFallback {
      */
     fun getPageCount(path: String, password: String? = null): Int {
         return try {
-            val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+            ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                getPageCount(pfd, password)
+            }
+        } catch (e: Exception) {
+            if (password != null) throw e
+            android.util.Log.w(TAG, "getPageCount failed: ${e.message}")
+            0
+        }
+    }
+
+    /** Komiho (2026-10-01): PFD 重载 —— SAF 模式拿不到真实路径时由 contentResolver 直开。 */
+    fun getPageCount(pfd: ParcelFileDescriptor, password: String? = null): Int {
+        return try {
             val renderer = openRenderer(pfd, password)
             try {
                 renderer.pageCount
             } finally {
                 renderer.close()
-                pfd.close()
             }
         } catch (e: Exception) {
             if (password != null) throw e
