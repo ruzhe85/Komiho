@@ -154,19 +154,21 @@ class LocalCoverFetcher(
             file.name?.endsWith("epub", ignoreCase = true) == true -> null
             // SY --> Komiho: PDF 封面 = 系统 PdfRenderer 渲第 0 页（彩色扫描漫画常见，DCT 直通
             // 保留网点；此处只取缩略，落到与归档一致的 450px JPEG 缓存）。
-            // Komiho (2026-10-01): SAF 模式下 UniFile.filePath 为 null（content:// 句柄没有
-            // 真实路径），原先直接返回 null → PDF 无封面；改为 contentResolver 直开描述符渲染。
-            file.name?.endsWith("pdf", ignoreCase = true) == true -> {
-                val path = file.filePath
-                when {
-                    path != null -> PdfRenderFallback.renderPageBitmap(path, 0, MAX_PX)
-                    else -> runCatching {
-                        context.contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
-                            PdfRenderFallback.renderPageBitmap(pfd, 0, MAX_PX)
-                        }
-                    }.getOrNull()
+            // Komiho (2026-10-01): SAF 模式不能拿 filePath 判定 —— content:// 的 filePath 可能
+            // 解码出真实路径但直开 EACCES（与 archiveReader 同一坑）。按 uri scheme 走：
+            // file:// 才用路径，content:// 一律 contentResolver 直开描述符；整段 runCatching，
+            // 任何失败都按「无封面」处理而不是让 fetch 抛错。
+            file.name?.endsWith("pdf", ignoreCase = true) == true -> runCatching {
+                val pfd = if (file.uri?.scheme == "file" && file.filePath != null) {
+                    android.os.ParcelFileDescriptor.open(
+                        java.io.File(file.filePath!!),
+                        android.os.ParcelFileDescriptor.MODE_READ_ONLY,
+                    )
+                } else {
+                    context.contentResolver.openFileDescriptor(file.uri, "r") ?: return@runCatching null
                 }
-            }
+                pfd.use { PdfRenderFallback.renderPageBitmap(it, 0, MAX_PX) }
+            }.getOrNull()
             // SY <--
             ImageUtil.isImage(file.name) -> decodeSampled({ file.openInputStream() }, MAX_PX)
             else -> null

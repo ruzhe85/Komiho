@@ -5731,9 +5731,12 @@ private fun LocalFileBrowser(
 
     // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转：navRequest 为文件的相对路径，
     // 定位到其所在目录（父目录栈）；目录不存在时 fold 兜底回落根目录。消费后置空。
+    // Komiho (2026-10-01): 按段计算父目录 —— 文件直接位于浏览根时（navRequest 无 '/'),
+    // 旧写法 substringBeforeLast('/') 会返回文件名本身，把文件当目录导航进去（空目录，
+    // 还要多退一次）；dropLast(1) 对所有形态（多级/单段/尾部斜杠）都正确。
     LaunchedEffect(navRequest) {
         if (navRequest != null) {
-            navigateTo(navRequest.substringBeforeLast('/').split('/').filter { it.isNotBlank() })
+            navigateTo(navRequest.trimEnd('/').split('/').filter { it.isNotBlank() }.dropLast(1))
             onNavConsumed()
         }
     }
@@ -7866,11 +7869,11 @@ private suspend fun countChapterPages(context: Context, url: String, file: UniFi
                     }
                 }
                 // Komiho (2026-10-01): PDF 一直落在这里返回 0（历史行显示「未知」）——
-                // 用系统 PdfRenderer 取页数；SAF 模式无真实路径，contentResolver 直开描述符。
+                // 用系统 PdfRenderer 取页数。SAF 不能拿 filePath 判定（content:// 可能解码出
+                // 真实路径但直开 EACCES），按 uri scheme：file:// 才走路径，否则描述符直开。
                 file.name?.endsWith("pdf", ignoreCase = true) == true -> {
-                    val path = file.filePath
-                    if (path != null) {
-                        PdfRenderFallback.getPageCount(path)
+                    if (file.uri?.scheme == "file" && file.filePath != null) {
+                        PdfRenderFallback.getPageCount(file.filePath!!)
                     } else {
                         runCatching {
                             context.contentResolver.openFileDescriptor(file.uri, "r")?.use {

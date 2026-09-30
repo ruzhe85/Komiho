@@ -536,11 +536,10 @@ fun DomainSource.isLocal(): Boolean = id == LocalSource.ID
 // SY --> Komiho: 用系统 PdfRenderer 渲 PDF 第 0 页作封面字节流（source-local 看不到 app 模块的
 // PdfRenderFallback，此处自持一份最小渲染逻辑；封面只需缩略，长边限 1600 防 OOM）。
 private fun pdfCoverStream(context: Context, file: UniFile): InputStream? {
-    // Komiho (2026-10-01): SAF 模式下 UniFile.filePath 为 null（content:// 句柄没有真实
-    // 路径），原先直接返回 null → 本地源书架 PDF 无封面。有真实路径走 File 直开（最快），
-    // 否则 contentResolver 直开描述符（不落临时文件）。与阅读器 PdfPageLoader 的
-    // 「路径优先、SAF 回落」同口径。
-    val pfd = if (file.filePath != null) {
+    // Komiho (2026-10-01): SAF 模式不能拿 filePath 判定 —— content:// 的 filePath 可能解码出
+    // 真实路径但直开 EACCES（与 archiveReader 同一坑）。按 uri scheme 走：file:// 才用路径，
+    // content:// 一律 contentResolver 直开描述符（不落临时文件）。与阅读器 PdfPageLoader 同口径。
+    val pfd = if (file.uri?.scheme == "file" && file.filePath != null) {
         ParcelFileDescriptor.open(File(file.filePath!!), ParcelFileDescriptor.MODE_READ_ONLY)
     } else {
         context.contentResolver.openFileDescriptor(file.uri, "r") ?: return null
