@@ -42,6 +42,20 @@
       "scale": 2,
       "padding": 10,
       "label": "W2xEX Omni Turbo"
+    },
+    {
+      "id": "qnn-waifu2x-upconv7-anime-noise2-x2",
+      "stem": "waifu2x-upconv7-anime-noise2-x2",
+      "scale": 2,
+      "padding": 7,
+      "label": "Waifu2x Anime Noise2"
+    },
+    {
+      "id": "qnn-waifu2x-upconv7-anime-noise3-x2",
+      "stem": "waifu2x-upconv7-anime-noise3-x2",
+      "scale": 2,
+      "padding": 7,
+      "label": "Waifu2x Anime Noise3"
     }
   ]
 }
