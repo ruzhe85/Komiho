@@ -70,6 +70,20 @@
       "scale": 2,
       "padding": 18,
       "label": "Real-CUGAN SE Denoise3x"
+    },
+    {
+      "id": "qnn-waifu2x-cunet-anime-noise2-x2-int8",
+      "stem": "waifu2x-cunet-anime-noise2-x2-int8",
+      "scale": 2,
+      "padding": 18,
+      "label": "Waifu2x Cunet Noise2 (int8)"
+    },
+    {
+      "id": "qnn-waifu2x-cunet-anime-noise3-x2-int8",
+      "stem": "waifu2x-cunet-anime-noise3-x2-int8",
+      "scale": 2,
+      "padding": 18,
+      "label": "Waifu2x Cunet Noise3 (int8)"
     }
   ]
 }
