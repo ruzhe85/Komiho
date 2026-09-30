@@ -56,6 +56,20 @@
       "scale": 2,
       "padding": 18,
       "label": "Waifu2x Cunet Noise3"
+    },
+    {
+      "id": "qnn-realcugan-pro-x2-denoise3x-int8",
+      "stem": "realcugan-pro-x2-denoise3x-int8",
+      "scale": 2,
+      "padding": 18,
+      "label": "Real-CUGAN Pro Denoise3x"
+    },
+    {
+      "id": "qnn-realcugan-se-x2-denoise3x-int8",
+      "stem": "realcugan-se-x2-denoise3x-int8",
+      "scale": 2,
+      "padding": 18,
+      "label": "Real-CUGAN SE Denoise3x"
     }
   ]
 }
