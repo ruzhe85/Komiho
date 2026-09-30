@@ -564,12 +564,11 @@
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <!-- 2026-09-19 模型插件化: NPU 模型不再内置，UI 在 NPU 分组显示此空态提示（点击跳 GitHub 下载模型包）。 -->
     <string name="ai_model_plugin_hint">Model package download</string>
-    <string name="ai_bypass_fit">Force AI on large images</string>
-    <string name="ai_area_downscale">Shrink AI output to screen size (anti-moiré)</string>
-    <string name="ai_area_downscale_strength">Downscale strength</string>
-    <string name="ai_area_strength_light">Light</string>
-    <string name="ai_area_strength_medium">Medium</string>
-    <string name="ai_area_strength_strong">Strong</string>
+    <string name="ai_bypass_fit">Force enhancement on high-resolution images</string>
+    <string name="ai_area_downscale">Reduce moiré</string>
+    <string name="ai_area_downscale_strength">Filter strength</string>
+    <string name="ai_area_strength_light">Medium</string>
+    <string name="ai_area_strength_medium">Strong</string>
     <string name="enhancement_group_title">Enhancement</string>
     <string name="pref_ai_tile_size">Tile size</string>
     <string name="ai_tile_size_96">96</string>
