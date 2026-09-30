@@ -33,7 +33,21 @@ object PdfRenderFallback {
         maxLongSide: Int = TARGET_LONG_SIDE,
         password: String? = null,
     ): Bitmap? {
-        val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+        return ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+            renderPageBitmap(pfd, pageIndex, maxLongSide, password)
+        }
+    }
+
+    /**
+     * Komiho (2026-10-01): PFD 重载 —— SAF 模式的本地 PDF 拿不到真实文件路径
+     * （`UniFile.filePath` 为 null），封面/页渲染改用 contentResolver 直开的描述符。
+     */
+    fun renderPageBitmap(
+        pfd: ParcelFileDescriptor,
+        pageIndex: Int,
+        maxLongSide: Int = TARGET_LONG_SIDE,
+        password: String? = null,
+    ): Bitmap? {
         val renderer = openRenderer(pfd, password)
         try {
             if (pageIndex < 0 || pageIndex >= renderer.pageCount) return null
@@ -46,7 +60,6 @@ object PdfRenderFallback {
             return bmp
         } finally {
             renderer.close()
-            pfd.close()
         }
     }
 

@@ -839,6 +839,49 @@ private fun KomgaMainScreen(
     }
     // SY <--
 
+    // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转（按条目所属来源路由）：
+    // 本地条目 → 切到本地来源 + 浏览 tab 定位所在目录；
+    // WebDAV 条目 → 切到对应连接来源 + 浏览 tab 定位所在目录（此前 WebDAV 来源下点任何
+    // 条目都只会落在当前 WebDAV 浏览页，等于跳根目录）；
+    // SMB 条目 → 同 WebDAV，定位目标为共享内相对路径。
+    // Komiho (2026-10-01)：历史 tab 续读 / 仪表盘续读 / 启动续读也复用此路由 —— 进阅读器前
+    // 先把浏览位置定到书所在目录，退出阅读器后落在书籍目录而不是根/上次目录。
+    // 注意声明位置在启动续读 effect 之前（local fun 不可前向引用）。
+    fun openLocationInApp(chapterUrl: String) {
+        if (chapterUrl.startsWith("webdav:")) {
+            val conn = if (chapterUrl.startsWith("webdav://")) {
+                // 新格式 webdav://<connId>/<URL>：connId 精确匹配
+                val connId = chapterUrl.removePrefix("webdav://").substringBefore('/')
+                WebDavConnectionStore.all().firstOrNull { it.id == connId }
+            } else {
+                // 旧格式 webdav:<URL>：baseUrl 最长前缀匹配
+                val fullUrl = WebDavConnectionStore.extractFullUrl(chapterUrl)
+                WebDavConnectionStore.all()
+                    .filter { fullUrl.startsWith(it.baseUrl) }
+                    .maxByOrNull { it.baseUrl.length }
+            } ?: return
+            // 定位目标 = 文件所在目录的完整 URL，由 WebDavBrowsePane 从 baseUrl 逐段重建路径栈。
+            webdavBrowseNavRequest = WebDavConnectionStore.extractFullUrl(chapterUrl).substringBeforeLast('/')
+            selectSource(SourceEntry(SOURCE_ID_WEBDAV_PREFIX + conn.id, SourceKind.WebDav, conn.displayName()))
+        } else if (chapterUrl.startsWith("smb://")) {
+            // SY --> Komiho Phase7: SMB 条目 → 对应连接浏览 tab 定位所在目录。
+            // 章节 url = smb://<connId>/<relPath>；定位目标 = 文件所在目录的共享内相对路径。
+            val connId = SmbConnectionStore.extractConnId(chapterUrl)
+            val conn = SmbConnectionStore.all().firstOrNull { it.id == connId } ?: return
+            smbBrowseNavRequest = SmbConnectionStore.extractRelPath(chapterUrl).substringBeforeLast('/')
+            selectSource(SourceEntry(SOURCE_ID_SMB_PREFIX + conn.id, SourceKind.Smb, conn.displayName()))
+            // SY <--
+        } else {
+            // chapterUrl 已是真实绝对路径；LocalFileBrowser 的 navRequest 按「相对当前根的路径」消费，
+            // 这里转成相对段（不在当前根下时退化为原值，落到根目录）。
+            localBrowseNavRequest = localSourceFs.relativeFromBase(chapterUrl) ?: chapterUrl
+            selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName))
+        }
+        // selectSource 已把 tab 重置为该来源首个可见 tab（文件型即浏览）；同源早退时兜底直切。
+        currentTab = MainTab.Browse.ordinal
+    }
+    // SY <--
+
     /**
      * Komiho: 由章节 url 反推所属来源 id（「继续阅读」启动模式用）。
      * 用 chapterUrl 前缀判断、而非 manga.source —— 本地 / WebDAV / SMB 三者共用 LocalSource.ID，
@@ -927,51 +970,21 @@ private fun KomgaMainScreen(
             "opening source=${entry.id} manga=${last.mangaId} chapter=${last.chapterId} " +
                 "page=${last.lastPageRead}",
         )
-        openSourceFromDashboard(entry)
+        // Komiho (2026-10-01): 文件型来源顺手把浏览位置定到书所在目录 —— 退出阅读器后
+        // 落在书籍目录而不是根/上次目录（与历史 tab「打开文件位置」同一路由）。
+        if (entry.kind == SourceKind.Komga) {
+            openSourceFromDashboard(entry)
+        } else {
+            openLocationInApp(last.chapterUrl)
+        }
         context.startActivity(
             ReaderActivity.newIntent(context, last.mangaId, last.chapterId, last.lastPageRead.toInt()),
         )
     }
 
-    // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转（按条目所属来源路由）：
-    // 本地条目 → 切到本地来源 + 浏览 tab 定位所在目录；
-    // WebDAV 条目 → 切到对应连接来源 + 浏览 tab 定位所在目录（此前 WebDAV 来源下点任何
-    // 条目都只会落在当前 WebDAV 浏览页，等于跳根目录）；
-    // SMB 条目 → 同 WebDAV，定位目标为共享内相对路径。
-    fun openLocationInApp(chapterUrl: String) {
-        if (chapterUrl.startsWith("webdav:")) {
-            val conn = if (chapterUrl.startsWith("webdav://")) {
-                // 新格式 webdav://<connId>/<URL>：connId 精确匹配
-                val connId = chapterUrl.removePrefix("webdav://").substringBefore('/')
-                WebDavConnectionStore.all().firstOrNull { it.id == connId }
-            } else {
-                // 旧格式 webdav:<URL>：baseUrl 最长前缀匹配
-                val fullUrl = WebDavConnectionStore.extractFullUrl(chapterUrl)
-                WebDavConnectionStore.all()
-                    .filter { fullUrl.startsWith(it.baseUrl) }
-                    .maxByOrNull { it.baseUrl.length }
-            } ?: return
-            // 定位目标 = 文件所在目录的完整 URL，由 WebDavBrowsePane 从 baseUrl 逐段重建路径栈。
-            webdavBrowseNavRequest = WebDavConnectionStore.extractFullUrl(chapterUrl).substringBeforeLast('/')
-            selectSource(SourceEntry(SOURCE_ID_WEBDAV_PREFIX + conn.id, SourceKind.WebDav, conn.displayName()))
-        } else if (chapterUrl.startsWith("smb://")) {
-            // SY --> Komiho Phase7: SMB 条目 → 对应连接浏览 tab 定位所在目录。
-            // 章节 url = smb://<connId>/<relPath>；定位目标 = 文件所在目录的共享内相对路径。
-            val connId = SmbConnectionStore.extractConnId(chapterUrl)
-            val conn = SmbConnectionStore.all().firstOrNull { it.id == connId } ?: return
-            smbBrowseNavRequest = SmbConnectionStore.extractRelPath(chapterUrl).substringBeforeLast('/')
-            selectSource(SourceEntry(SOURCE_ID_SMB_PREFIX + conn.id, SourceKind.Smb, conn.displayName()))
-            // SY <--
-        } else {
-            // chapterUrl 已是真实绝对路径；LocalFileBrowser 的 navRequest 按「相对当前根的路径」消费，
-            // 这里转成相对段（不在当前根下时退化为原值，落到根目录）。
-            localBrowseNavRequest = localSourceFs.relativeFromBase(chapterUrl) ?: chapterUrl
-            selectSource(SourceEntry(SOURCE_ID_LOCAL, SourceKind.Local, localName))
-        }
-        // selectSource 已把 tab 重置为该来源首个可见 tab（文件型即浏览）；同源早退时兜底直切。
-        currentTab = MainTab.Browse.ordinal
-    }
-    // SY <--
+    // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转（按条目所属来源路由）——
+    // 实现已上移至 openSourceFromDashboard 之后（启动续读 effect 需要前向复用）。
+
     // 「来源管理」全屏流程（AddSourceFlow：类型选择 → 各类型表单页）。
     var showAddSource by remember { mutableStateOf(false) }
     // SY <--
@@ -1353,9 +1366,14 @@ private fun KomgaMainScreen(
                         entries = dashboardEntries,
                         refreshTick = refreshTick,
                         onOpenSource = ::openSourceFromDashboard,
-                        onResumeReading = { entry, mangaId, chapterId, page ->
-                            // 先切源（退出阅读器后落回该来源），再与历史 tab 同口径带上次页码进阅读器（page 为 0-based）。
-                            openSourceFromDashboard(entry)
+                        onResumeReading = { entry, mangaId, chapterId, page, chapterUrl ->
+                            // Komiho (2026-10-01): 文件型来源先把浏览位置定到书所在目录（退出
+                            // 阅读器后落在书籍目录）；Komga 保持切源落内容首页。
+                            if (entry.kind == SourceKind.Komga) {
+                                openSourceFromDashboard(entry)
+                            } else {
+                                openLocationInApp(chapterUrl)
+                            }
                             context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, page))
                         },
                     )
@@ -8076,6 +8094,8 @@ private data class DashboardRecent(
     val historyId: Long = 0L,
     /** 封面请求体（本地 LocalCoverData / 远程封面缓存文件 / Komga thumbnailUrl），null=占位图标。 */
     val coverModel: Any? = null,
+    /** Komiho (2026-10-01): 章节 url —— 续读时路由「打开文件位置」，退出阅读器落在书籍目录。 */
+    val chapterUrl: String = "",
 )
 
 private data class SourceCardSummary(
@@ -8089,8 +8109,8 @@ private fun SourceDashboardPane(
     entries: List<SourceEntry>,
     refreshTick: Int,
     onOpenSource: (SourceEntry) -> Unit,
-    /** 续读：先把来源切过去（退出阅读器后落在该来源，避免「来源不对」），再带页码进阅读器。 */
-    onResumeReading: (entry: SourceEntry, mangaId: Long, chapterId: Long, page: Int) -> Unit,
+    /** 续读：先把来源/浏览位置切过去（退出阅读器后落在书籍目录），再带页码进阅读器。 */
+    onResumeReading: (entry: SourceEntry, mangaId: Long, chapterId: Long, page: Int, chapterUrl: String) -> Unit,
 ) {
     val context = LocalContext.current
     // SY: 每个来源显示几条最近阅读 —— 已改为按来源独立配置（来源管理眼睛弹窗，0=隐藏），
@@ -8227,6 +8247,7 @@ private fun SourceDashboardPane(
                         readAt = item.readAt?.time ?: 0L,
                         historyId = item.id,
                         coverModel = coverOf(item),
+                        chapterUrl = item.chapterUrl,
                     )
                 }
             }
@@ -8436,8 +8457,8 @@ private fun SourceDashboardPane(
                         DashboardRecentRow(
                             context = context,
                             item = item,
-                            onClick = { onResumeReading(entry, item.mangaId, item.chapterId, item.page) },
-                            onReadFromStart = { onResumeReading(entry, item.mangaId, item.chapterId, 0) },
+                            onClick = { onResumeReading(entry, item.mangaId, item.chapterId, item.page, item.chapterUrl) },
+                            onReadFromStart = { onResumeReading(entry, item.mangaId, item.chapterId, 0, item.chapterUrl) },
                             onDelete = {
                                 scope.launch {
                                     withContext(Dispatchers.IO) {
@@ -8704,6 +8725,9 @@ private fun HistoryTabLocal(
                     // 直接续读：把历史记录的阅读页码作为 page 传入，绕过 ChapterLoader/ReaderViewModel
                     // 里「已读章节跳过 last_page_read 恢复」的 !read 守卫（图片文件夹整本=1 章，看完即 read=true，
                     // 否则会固定跳回第一页）。page 为 0-based，与 rep.lastPageRead 一致。
+                    // Komiho (2026-10-01): 顺手把浏览位置定到书所在目录 —— 退出阅读器后落在
+                    // 书籍目录而不是根/上次目录。
+                    onOpenLocation(rep.chapterUrl)
                     context.startActivity(ReaderActivity.newIntent(context, rep.mangaId, rep.chapterId, rep.lastPageRead.toInt()))
                 },
                 moreMenu = { dismiss ->
@@ -8713,6 +8737,8 @@ private fun HistoryTabLocal(
                             dismiss()
                             // page=0：ChapterLoader 里 requestedPage = page ?: last_page_read，
                             // 传 0 会强制从第 1 页开始，且不删除历史记录。
+                            // Komiho (2026-10-01): 与续读同口径，先定位书籍目录。
+                            onOpenLocation(rep.chapterUrl)
                             context.startActivity(
                                 ReaderActivity.newIntent(context, rep.mangaId, rep.chapterId, 0),
                             )
