@@ -53,6 +53,12 @@ object MihonSyEnhancer {
      */
     private const val AREA_DOWNSCALE_TRIGGER = 0.85f
 
+    /**
+     * Komiho: 灰度掩膜的通道发散度阈值（/255）。≤ 此值视为灰度像素（容忍 JPEG 色噪
+     * ±2-3）；> 此值视为彩色像素，原样通过模型并保留输出色度。
+     */
+    private const val GRAY_CHROMA_THRESHOLD = 8
+
     init {
         System.loadLibrary("mihonsy-enhance")
     }
@@ -271,6 +277,17 @@ object MihonSyEnhancer {
             src = denoiseForAi(src, denoiseLevel, sourceTag)
         }
 
+        // Komiho (2026-10-01): AI 灰度掩膜 —— 电子漫画网点经模型各通道独立卷积后通道发散，
+        // 表现为网点边缘的彩色色块。推理前把「近灰度像素」钳位为中性（R=G=B=亮度），
+        // 推理后把这些像素的输出色度中和掉；彩色像素（含彩色漫画整页、页内彩色插图）
+        // 原样通过，零影响。掩膜随结果在 [neutralizeChroma] 消费。
+        var grayMask: Pair<ByteArray, Int>? = null
+        if (mode == 5) {
+            val clamped = clampGrayForAi(src)
+            src = clamped.first
+            grayMask = clamped.second
+        }
+
         val result = when (mode) {
             // Komiho: 降噪独立档——mode 0 只做降噪不增强（降噪已在上方完成，src 即结果）。
             0 -> src
@@ -330,6 +347,10 @@ object MihonSyEnhancer {
         }
         // 降噪产物只被本次增强消费（下游返回的都是新位图，见 enhanceWithGpu / 重采样），
         // 及时回收，避免大图滞留到 GC。仅当 src 是新位图（≠ input）且不是最终返回对象时回收。
+        // 掩膜在 src 回收前消费：输出色度中和按 src 尺寸缩放掩膜坐标。
+        if (grayMask != null && result != null && result !== src) {
+            neutralizeChroma(result, grayMask.first, grayMask.second)
+        }
         if (src !== input && (result == null || result !== src)) src.recycle()
         // 只在结果确实是新对象时才缩（避免误 recycle 调用方仍在用的 input）。
         val capped = if (result != null && result !== input) capOutputSize(result) else result
@@ -579,6 +600,101 @@ object MihonSyEnhancer {
         // 中间副本（若有）无消费者即回收；入参所有权归调用方。
         if (argb !== bitmap) argb.recycle()
         return out ?: bitmap
+    }
+
+    /**
+     * Komiho (2026-10-01): AI 灰度掩膜（治电子漫画网点色块）。扫描 [src]，把通道发散度
+     * ≤ [GRAY_CHROMA_THRESHOLD] 的像素钳位为中性（R=G=B=亮度），并返回灰度掩膜
+     * (ByteArray, srcWidth) 供 [neutralizeChroma] 在推理输出上消费。彩色像素原样保留、
+     * 掩膜记 0 —— 彩色漫画整页掩膜近似空集，行为与无掩膜完全一致。
+     *
+     * 原理：色块来自模型对各通道的独立卷积在灰度输入上产生通道发散；输入钳位 + 输出
+     * 中和后灰度像素的色度被钳死在中性，色块从根上不可能产生。
+     * 返回 (位图, (掩膜, 宽))：位图可能是入参本身（已可变 ARGB）也可能是副本；
+     * 失败/无需处理返回入参本身且第二元为 null 掩膜（调用方按 null 跳过中和）。
+     */
+    private fun clampGrayForAi(src: Bitmap): Pair<Bitmap, Pair<ByteArray, Int>?> {
+        if (src.isRecycled || src.width <= 0 || src.height <= 0) return src to null
+        val argb = if (src.config == Bitmap.Config.ARGB_8888 && src.isMutable) {
+            src
+        } else {
+            try {
+                src.copy(Bitmap.Config.ARGB_8888, true) ?: return src to null
+            } catch (t: Throwable) {
+                return src to null
+            }
+        }
+        val w = argb.width
+        val h = argb.height
+        val pixels = IntArray(w * h)
+        argb.getPixels(pixels, 0, w, 0, 0, w, h)
+        val mask = ByteArray(w * h)
+        var grayCount = 0
+        for (i in pixels.indices) {
+            val p = pixels[i]
+            val r = (p shr 16) and 0xFF
+            val g = (p shr 8) and 0xFF
+            val b = p and 0xFF
+            val divergence = maxOf(
+                kotlin.math.abs(r - g),
+                kotlin.math.abs(g - b),
+                kotlin.math.abs(r - b),
+            )
+            if (divergence <= GRAY_CHROMA_THRESHOLD) {
+                val y = (r * 299 + g * 587 + b * 114) / 1000
+                pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
+                mask[i] = 1
+                grayCount++
+            }
+        }
+        if (grayCount == 0) {
+            // 整页彩色：钳位无效果，掩膜也不必建。
+            if (argb !== src) {
+                src.recycle()
+            }
+            return src to null
+        }
+        argb.setPixels(pixels, 0, w, 0, 0, w, h)
+        logcat(LogPriority.DEBUG) {
+            "Gray mask: ${grayCount * 100 / (w * h)}% gray (${w}x$h)"
+        }
+        return argb to (mask to w)
+    }
+
+    /**
+     * Komiho: 推理输出中和 —— 掩膜标记的灰度像素（按 [srcWidth] 缩放到输出坐标）把
+     * 输出色度中和为输出亮度。任何失败静默跳过（绝不阻断出图）。
+     */
+    private fun neutralizeChroma(result: Bitmap, mask: ByteArray, srcWidth: Int) {
+        if (result.isRecycled || result.config != Bitmap.Config.ARGB_8888 || !result.isMutable) {
+            return
+        }
+        val scale = result.width / srcWidth
+        if (scale <= 0) return
+        try {
+            val w = result.width
+            val h = result.height
+            val pixels = IntArray(w * h)
+            result.getPixels(pixels, 0, w, 0, 0, w, h)
+            for (y in 0 until h) {
+                val srcRow = (y / scale) * srcWidth
+                var idx = y * w
+                for (x in 0 until w) {
+                    if (mask[srcRow + x / scale].toInt() == 1) {
+                        val p = pixels[idx]
+                        val r = (p shr 16) and 0xFF
+                        val g = (p shr 8) and 0xFF
+                        val b = p and 0xFF
+                        val y8 = (r * 299 + g * 587 + b * 114) / 1000
+                        pixels[idx] = (p and 0xFF000000.toInt()) or (y8 shl 16) or (y8 shl 8) or y8
+                    }
+                    idx++
+                }
+            }
+            result.setPixels(pixels, 0, w, 0, 0, w, h)
+        } catch (t: Throwable) {
+            logcat(LogPriority.WARN, t) { "Chroma neutralize failed; keeping output" }
+        }
     }
 
     /** Returns [input] if it is already a mutable ARGB_8888 bitmap, otherwise a copy. */
