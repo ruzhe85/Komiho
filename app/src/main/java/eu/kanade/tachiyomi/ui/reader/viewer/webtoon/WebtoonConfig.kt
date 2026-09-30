@@ -106,6 +106,12 @@ class WebtoonConfig(
             .register({ }, { imagePropertyChangedListener?.invoke() })
         readerPreferences.aiBypassFitGate
             .register({ }, { imagePropertyChangedListener?.invoke() })
+        // Komiho (2026-10-01): AI 面积回缩开关/强度同样进 imageFingerprint（经
+        // enhancementCacheKey），不注册的话已绑定 holder 不会重渲染。
+        readerPreferences.aiAreaDownscale
+            .register({ }, { imagePropertyChangedListener?.invoke() })
+        readerPreferences.aiAreaDownscaleStrength
+            .register({ }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.webtoonSidePadding
             .register({ sidePadding = it }, { imagePropertyChangedListener?.invoke() })
