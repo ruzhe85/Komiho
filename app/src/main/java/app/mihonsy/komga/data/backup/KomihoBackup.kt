@@ -269,7 +269,8 @@ object KomihoBackup {
         }
         val webDavConns = readWebDavConnections().map { w ->
             WebDavConn(w.id, w.name, w.baseUrl, w.user,
-                password = WebDavCredentialCrypto.decryptStored(w.passEnc))
+                password = WebDavCredentialCrypto.decryptStored(w.passEnc),
+                insecureTls = w.insecureTls)
         }
 
         // 3) 来源显隐 / 排序
@@ -487,29 +488,62 @@ object KomihoBackup {
         editor.apply()
     }
 
+    /**
+     * 恢复 SMB 连接：**合并而非整表覆盖**。
+     * - 本地多出来的来源保留（多机各自新增的来源互不丢失）；
+     * - host+port+share+path 相同视为同一台服务器，以备份版本为准——
+     *   恢复的进度/历史 URL 带备份侧连接 id，保留备份条目才能对得上；
+     * - 同 id 的本地条目让位给备份版本（备份即权威快照）。
+     */
     private suspend fun restoreSmbConnections(conns: List<SmbConn>, payloadIsEncrypted: Boolean) {
-        val list = conns.map { c ->
+        val backupList = conns.map { c ->
             SmbStored(
                 id = c.id, name = c.name, host = c.host, port = c.port,
                 share = c.share, path = c.path, domain = c.domain, user = c.user,
                 passEnc = if (payloadIsEncrypted) WebDavCredentialCrypto.encrypt(c.password) else c.password,
             )
         }
+        fun keyOf(s: SmbStored): String =
+            listOf(s.host.lowercase(), s.port.toString(), s.share.lowercase(), s.path.lowercase())
+                .joinToString("|")
+
+        val merged = LinkedHashMap<String, SmbStored>()
+        readSmbConnections().forEach { merged[keyOf(it)] = it }
+        backupList.forEach { b ->
+            merged.entries.removeAll { it.value.id == b.id && it.key != keyOf(b) }
+            merged[keyOf(b)] = b
+        }
         val prefStore = Injekt.get<PreferenceStore>()
         prefStore.getString(Preference.appStateKey("smb_connections_v1"), "[]")
-            .set(json.encodeToString(list))
+            .set(json.encodeToString(merged.values.toList()))
     }
 
+    /**
+     * 恢复 WebDAV 连接：合并策略同 [restoreSmbConnections]（按 baseUrl 去重），
+     * 并保留各连接的「忽略 HTTPS 证书校验」开关。
+     */
     private suspend fun restoreWebDavConnections(conns: List<WebDavConn>, payloadIsEncrypted: Boolean) {
-        val list = conns.map { c ->
+        val backupList = conns.map { c ->
             WebDavStored(
                 id = c.id, name = c.name, baseUrl = c.baseUrl, user = c.user,
                 passEnc = if (payloadIsEncrypted) WebDavCredentialCrypto.encrypt(c.password) else c.password,
+                insecureTls = c.insecureTls,
             )
+        }
+        fun keyOf(w: WebDavStored): String =
+            mihon.core.common.archive.WebDavRandomAccessSource
+                .stripRootDot(w.baseUrl.trim().trimEnd('/'))
+                .lowercase()
+
+        val merged = LinkedHashMap<String, WebDavStored>()
+        readWebDavConnections().forEach { merged[keyOf(it)] = it }
+        backupList.forEach { b ->
+            merged.entries.removeAll { it.value.id == b.id && it.key != keyOf(b) }
+            merged[keyOf(b)] = b
         }
         val prefStore = Injekt.get<PreferenceStore>()
         prefStore.getString(Preference.appStateKey("webdav_connections_v1"), "[]")
-            .set(json.encodeToString(list))
+            .set(json.encodeToString(merged.values.toList()))
     }
 
     private fun restoreSourceVisibility(vis: SourceVisibilityBackup?) {
@@ -762,6 +796,7 @@ object KomihoBackup {
     @Serializable
     data class WebDavConn(
         val id: String, val name: String, val baseUrl: String, val user: String, val password: String,
+        val insecureTls: Boolean = false,
     )
 
     @Serializable
@@ -773,6 +808,7 @@ object KomihoBackup {
     @Serializable
     private data class WebDavStored(
         val id: String, val name: String, val baseUrl: String, val user: String, val passEnc: String,
+        val insecureTls: Boolean = false,
     )
 
     @Serializable
