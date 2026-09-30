@@ -8,10 +8,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +58,8 @@ object SettingsKomihoBackupScreen : SearchableSettings {
 
         val triggersPref = remember { prefs.getStringSet(KomihoSync.KEY_TRIGGERS, emptySet()) }
         val contentPref = remember { prefs.getStringSet(KomihoSync.KEY_CONTENT, KomihoSync.DEFAULT_CONTENT) }
+        val enabledPref = remember { prefs.getBoolean(KomihoSync.KEY_ENABLED, true) }
+        val syncOn by enabledPref.collectAsState()
 
         var showExportPwd by remember { mutableStateOf(false) }
         var showImportPwd by remember { mutableStateOf(false) }
@@ -157,6 +161,10 @@ object SettingsKomihoBackupScreen : SearchableSettings {
 
         fun manualSync(push: Boolean) {
             if (syncInFlight || KomihoSync.busy) return
+            if (!KomihoSync.syncEnabled(prefs)) {
+                context.toast(needConfigText)
+                return
+            }
             if (!KomihoSync.configured(prefs)) {
                 context.toast(needConfigText)
                 showSyncConn = true
@@ -209,6 +217,13 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                         title = stringResource(MR.strings.komiho_sync_connection),
                         subtitle = statusSubtitle,
                         onClick = { showSyncConn = true },
+                        // 行尾同步总开关：关闭后触发条件与手动同步停用，配置保留；点行仍进子屏。
+                        widget = {
+                            Switch(
+                                checked = syncOn,
+                                onCheckedChange = { v -> scope.launch { enabledPref.set(v) } },
+                            )
+                        },
                     ),
                     Preference.PreferenceItem.MultiSelectListPreference(
                         preference = contentPref,
@@ -223,7 +238,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                         title = stringResource(MR.strings.komiho_sync_content),
                         subtitle = null,
                         subtitleProvider = { _, _ -> null },
-                        enabled = configured,
+                        enabled = configured && syncOn,
                     ),
                     Preference.PreferenceItem.MultiSelectListPreference(
                         preference = triggersPref,
@@ -241,18 +256,18 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                         // 设计约定：条目下方不显示已选项（状态/取值以外不放小字）。
                         subtitle = null,
                         subtitleProvider = { _, _ -> null },
-                        enabled = configured,
+                        enabled = configured && syncOn,
                     ),
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.komiho_sync_push_now),
                         // 完整同步：拉→合→推。
-                        enabled = configured && !syncInFlight,
+                        enabled = configured && syncOn && !syncInFlight,
                         onClick = { manualSync(push = true) },
                     ),
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.komiho_sync_pull_now),
                         // 只拉合，不推送。
-                        enabled = configured && !syncInFlight,
+                        enabled = configured && syncOn && !syncInFlight,
                         onClick = { manualSync(push = false) },
                     ),
                 ),

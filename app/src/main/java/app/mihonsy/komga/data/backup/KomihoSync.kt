@@ -44,6 +44,7 @@ object KomihoSync {
     const val KEY_INSECURE_TLS = "komiho_sync_center_insecure_tls"
     const val KEY_TRIGGERS = "komiho_sync_triggers"
     const val KEY_CONTENT = "komiho_sync_content"
+    const val KEY_ENABLED = "komiho_sync_enabled"
     const val KEY_LAST_ACTION = "komiho_sync_last_action"
     const val KEY_LAST_TIME = "komiho_sync_last_time"
     const val KEY_LAST_RESULT = "komiho_sync_last_result"
@@ -73,6 +74,10 @@ object KomihoSync {
 
     fun contentEnabled(prefs: PreferenceStore, key: String): Boolean =
         prefs.getStringSet(KEY_CONTENT, DEFAULT_CONTENT).get().contains(key)
+
+    /** 同步总开关（WebDAV 同步行行尾开关）：关闭后触发条件与手动同步全部停用，配置保留。 */
+    fun syncEnabled(prefs: PreferenceStore): Boolean =
+        prefs.getBoolean(KEY_ENABLED, true).get()
 
     private val inFlight = AtomicBoolean(false)
     private val autoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -188,9 +193,10 @@ object KomihoSync {
         return Outcome(false, context.stringResource(MR.strings.komiho_sync_fail_prefix, reason))
     }
 
-    /** 自动触发（触发条件命中时调用）：未启用/未配置直接忽略；成功静默，失败 toast。 */
+    /** 自动触发（触发条件命中时调用）：总开关关闭/未启用/未配置直接忽略；成功静默，失败 toast。 */
     fun autoSync(context: Context, trigger: String) {
         val prefs = Injekt.get<PreferenceStore>()
+        if (!syncEnabled(prefs)) return
         if (!triggerEnabled(prefs, trigger)) return
         if (!configured(prefs)) return
         val app = context.applicationContext
