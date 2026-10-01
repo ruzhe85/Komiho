@@ -151,7 +151,9 @@ Waifu2x::Waifu2x(int gpuid, bool _tta_mode, int _num_threads,
   tta_mode = _tta_mode;
   noise = 0;
   scale = 2;
-  tilesize = 128;  // Balanced speed and memory
+  // Komiho: 兜底值，与 Kotlin 侧默认（ReaderPreferences.aiTileSize / Waifu2x.DEFAULT_TILE_SIZE
+  // = 192）保持一致；正常路径在首次推理前就会由 nativeUpdatePerformanceConfig 覆盖。
+  tilesize = 192;
   prepadding = 18; // Slightly reduced padding for speed, safe for 256 tile size
   progress_ptr = nullptr;
 }

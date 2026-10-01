@@ -235,16 +235,28 @@ class ReaderPreferences(
     val lanczosScale: Preference<Int> = preferenceStore.getInt("pref_lanczos_scale", 200) // 150/200/300 = 1.5x/2x/3x
 
     /**
-     * Komiho: tile edge (px) for the AI upscaler — forwarded to the native `tilesize`
-     * (`waifu2x.cpp:150`, default 128) via `nativeUpdatePerformanceConfig`.
+     * Komiho: tile edge (px) for the AI upscaler — forwarded to the native `tilesize` via
+     * `nativeUpdatePerformanceConfig`. Only affects AI upscale (mode 5).
      *
-     * Only affects AI upscale (mode 5). Larger tiles cut the number of tile
-     * dispatches (and the per-tile fixed overhead) at the cost of a higher peak
-     * GPU working set — each tile allocates `(tilesize + 2*prepadding)` input and
-     * `tilesize * scale` output, so the working set scales with the square of this value.
-     * The engine ships with `prepadding = 18`, annotated as safe up to tile size 256.
+     * 默认 192（2026-10-01 由 128 上调）。**实测成本模型**：单页耗时正比于
+     * `ceil(w/t) * ceil(h/t) * (t + 2*prepadding)^2`，也就是「加了 padding 的总像素数」；
+     * 每像素成本几乎与 t 无关（0.79~0.98 ns/px，t 越大反而越省）。所以最优 t 完全取决于
+     * **图片尺寸除以 t 的余数**，没有任何档位普遍最优。四个内置档在两类真实页面上的总像素：
+     *
+     * | t   | 1099x1600 | 1445x2048 |
+     * |-----|-----------|-----------|
+     * | 96  | 2.74M     | 4.74M     |
+     * | 128 | 2.56M     | 4.21M     |  ← 原默认：两列都是最差
+     * | 192 | **2.43M** | 3.96M     |
+     * | 256 | 2.67M     | **3.66M** |
+     *
+     * 192 在两类页面上都接近最优（1099x1600 命中；1445x2048 只比 256 差 8%），峰值显存也比
+     * 256 低，故取作默认。要更准只能按 `w/h` 自动选 t（闭式、零成本），留给后续。
+     *
+     * 代价：tile 越大，单片中间量按平方涨（`(t + 2*prepadding)` 输入、`t*scale` 输出），
+     * 峰值显存随之上升；`MAX_TILE_SIZE = 256` 的上限维持不变。
      */
-    val aiTileSize: Preference<Int> = preferenceStore.getInt("pref_ai_tile_size", 128)
+    val aiTileSize: Preference<Int> = preferenceStore.getInt("pref_ai_tile_size", 192)
 
     /**
      * Komiho: which AI model the upscaler runs (a built-in [AiUpscaleModel] or a model
@@ -489,8 +501,9 @@ class ReaderPreferences(
         )
 
         /**
-         * Komiho: AI tile edge options. 128 is the native default (`waifu2x.cpp:150`);
-         * 256 is the largest value the bundled `prepadding = 18` is documented safe for.
+         * Komiho: AI tile edge options. 默认 192 —— 实测依据（总 padded 像素最小的折中）
+         * 见 [ReaderPreferences.aiTileSize] 的 KDoc。256 是内置 `prepadding = 18` 文档标注的
+         * 安全上限，故维持为最高档。
          */
         val AiTileSizeOptions = listOf(
             96 to MR.strings.ai_tile_size_96,

@@ -135,11 +135,14 @@ object Waifu2x {
     }
 
     /**
-     * Komiho: AI tile edge (px) — the native default is 128 (`waifu2x.cpp:150`).
+     * Komiho: AI tile edge (px) 兜底值，与「阅读设置 → AI tile」偏好的默认保持一致
+     * （2026-10-01 由 128 上调到 192；依据与实测数据见 ReaderPreferences.aiTileSize 的 KDoc：
+     * 单页耗时正比于加了 padding 的总像素数，128 在实测的两类页面上都是最差档）。
+     *
      * Each tile allocates `(tilesize + 2*prepadding)` input and `tilesize * scale` output,
      * so the GPU working set grows with the square of this value.
      */
-    private const val DEFAULT_TILE_SIZE = 128
+    private const val DEFAULT_TILE_SIZE = 192
 
     /**
      * 256 is the ceiling the bundled `prepadding = 18` is documented safe for
