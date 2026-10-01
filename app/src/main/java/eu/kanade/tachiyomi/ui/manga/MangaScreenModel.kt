@@ -1468,6 +1468,8 @@ class MangaScreenModel(
             selectedPositions[1] = -1
             successState.copy(chapters = newChapters)
         }
+    }
+
     sealed interface Dialog {
         data class ChangeCategory(
             val manga: Manga,
