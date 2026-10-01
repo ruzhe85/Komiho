@@ -1480,6 +1480,8 @@ class MangaScreenModel(
 
         data class SetFetchInterval(val manga: Manga) : Dialog
 
+        data object SettingsSheet : Dialog
+
         // SY -->
         data class EditMangaInfo(val manga: Manga) : Dialog
         data class EditMergedSettings(val mergedData: MergedMangaData) : Dialog
@@ -1548,6 +1550,7 @@ class MangaScreenModel(
             val availableScanlators: Set<String>,
             val excludedScanlators: Set<String>,
             val dialog: MangaScreenModel.Dialog? = null,
+            val isRefreshingData: Boolean = false,
             val hasPromptedToAddBefore: Boolean = false,
             // SY -->
             val meta: RaisedSearchMetadata?,

@@ -260,9 +260,7 @@ class LibraryScreenModel(
             }
             .launchIn(screenModelScope)
 
-        combine(
-            getLibraryItemPreferencesFlow(),
-        ) { prefs ->
+        getLibraryItemPreferencesFlow().map { prefs ->
             listOf(
                 prefs.filterDownloaded,
                 prefs.filterUnread,
