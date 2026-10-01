@@ -26,3 +26,6 @@ app/.cxx/
 
 # Local AI code-memory notes (never commit; keep as local-only reference)
 *_代码记忆.md
+# Komiho: 本地文档与设计稿不入库
+docs/
+sync_*_design.html
