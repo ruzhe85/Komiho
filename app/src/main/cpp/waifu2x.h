@@ -56,6 +56,14 @@ public:
   // （见 nativeUpdatePerformanceConfig / load）。
   mutable int batch_target_hint = 0;
 
+  // Komiho (2026-10-01): 实测判为「太贵」的片数（0 = 未知）；批次增长不再越过它。
+  //
+  // 为什么必须记住：单次提交的代价在这台设备上**超线性** —— 1099x1600/192 tile 实测
+  // 1 片 36ms/片、2 片 29ms/片、**3 片 130ms/片**；1445x2048/256 tile 是 1 片 ~40ms/片、
+  // **2 片 170ms/片**。（机制未查清，非功耗就是显存带宽，但跨两个 tile 尺寸都稳定复现。）
+  // 只收缩不记忆的后果：每一页都会重新探到那个坏尺寸、再付一次 3~4 倍代价。
+  mutable int batch_target_ceiling = 0;
+
 private:
   ncnn::VulkanDevice *vkdev;
   ncnn::Net net;

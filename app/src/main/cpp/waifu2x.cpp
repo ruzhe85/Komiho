@@ -180,8 +180,9 @@ Waifu2x::~Waifu2x() {
 }
 
 int Waifu2x::load(const std::string &parampath, const std::string &modelpath) {
-  // Komiho: 换模型 = 换 tile 几何与权重，上一个模型收敛出的批次大小不再适用。
+  // Komiho: 换模型 = 换 tile 几何与权重，上一个模型收敛出的批次结论（大小与上限）不再适用。
   batch_target_hint = 0;
+  batch_target_ceiling = 0;
 
   net.opt.use_vulkan_compute = vkdev ? true : false;
   net.opt.use_fp16_packed = false;
@@ -418,14 +419,18 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
   constexpr int64_t kBatchWindowHighUs = 130000;
   constexpr int64_t kBatchWindowLowUs = 70000;
 
-  // 跨页保留收敛值（waifu2x.h 的 batch_target_hint）：批次只跟 (模型, tile 尺寸) 有关、
-  // 与页无关，保留它才不必每页重新 ramp。tile 尺寸/模型变更时由 JNI / load 清零。
+  // 跨页保留的批次结论（waifu2x.h 的 batch_target_hint / batch_target_ceiling）：
+  // 批次只跟 (模型, tile 尺寸) 有关、与页无关，保留它才不必每页重新 ramp，
+  // 也才不会每页重新探一次已知偏贵的片数。tile 尺寸/模型变更时由 JNI / load 清零。
+  const int initial_cap =
+      batch_target_ceiling > 0 ? std::max(1, batch_target_ceiling - 1)
+                               : batch_capacity;
   int batch_target =
-      batch_target_hint > 0 ? std::min(batch_target_hint, batch_capacity) : 1;
+      batch_target_hint > 0 ? std::min(batch_target_hint, initial_cap) : 1;
   LOGD("Fused Vulkan scheduling: heap_budget=%uMB batch_capacity=%d "
-       "initial_batch=%d tiles=%d window_target=%lldus",
+       "initial_batch=%d tiles=%d window_target=%lldus ceiling=%d",
        heap_budget_mb, batch_capacity, batch_target, tile_count,
-       static_cast<long long>(kBatchWindowTargetUs));
+       static_cast<long long>(kBatchWindowTargetUs), batch_target_ceiling);
 
   const int input_tile_w = tilesize + prepadding * 2;
   const int input_tile_h = tilesize + prepadding * 2;
@@ -626,23 +631,34 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
           extractor_slots[i] = empty_extractor;
         batch_size = 0;
 
-        // Komiho: 按「实测窗口」闭环收敛（判据见调度处说明）。首个批次含整图上传，
-        // 窗口会天然偏大一点，但 upload ≈ 20ms 不足以把 2 片推过 130ms，不会误伤。
+        // Komiho: 按「实测窗口」闭环收敛（判据见调度处说明）。
+        // 收缩时把「这个片数偏贵」记进 batch_target_ceiling，之后增长不再越过去 —— 否则
+        // 每一页都会重新探到那个坏尺寸、再付一次超线性代价（详见 waifu2x.h 的说明）。
+        // 只用**非末批**的观测更新 ceiling：末批含着整图回读，窗口天然偏大，会误判。
+        const int growth_cap =
+            batch_target_ceiling > 0 ? batch_target_ceiling - 1 : batch_capacity;
         const int previous_batch_target = batch_target;
         if (ui_busy_ptr && ui_busy_ptr->load()) {
           batch_target = 1;
         } else if (submit_us >= kBatchWindowHighUs && batch_target > 1) {
+          if (!is_last_tile) {
+            batch_target_ceiling =
+                batch_target_ceiling > 0
+                    ? std::min(batch_target_ceiling, batch_target)
+                    : batch_target;
+          }
           batch_target = std::max(1, batch_target / 2);
-        } else if (submit_us <= kBatchWindowLowUs && batch_target < batch_capacity) {
+        } else if (submit_us <= kBatchWindowLowUs && batch_target < growth_cap) {
           batch_target++;
         }
         batch_target_hint = batch_target;
         if (batch_target != previous_batch_target) {
           LOGD("Fused Vulkan adaptive batch: %d -> %d after %lldus submit "
-               "(window_target=%lldus capacity=%d)",
+               "(window_target=%lldus capacity=%d ceiling=%d)",
                previous_batch_target, batch_target,
                static_cast<long long>(submit_us),
-               static_cast<long long>(kBatchWindowTargetUs), batch_capacity);
+               static_cast<long long>(kBatchWindowTargetUs), batch_capacity,
+               batch_target_ceiling);
         }
 
         if (should_abort_ptr && should_abort_ptr->load())

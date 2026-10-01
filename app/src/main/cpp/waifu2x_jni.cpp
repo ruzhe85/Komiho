@@ -849,8 +849,11 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeUpdatePerformanceConfig(
     JNIEnv *env, jobject thiz, jint sleep_ms, jint tile_size) {
   std::lock_guard<std::mutex> lock(g_lock);
   if (g_waifu2x) {
-    // Komiho: tile 尺寸变了 ⇒ 上一个尺寸收敛出的批次大小不再适用（见 batch_target_hint）。
-    if (g_waifu2x->tilesize != tile_size) g_waifu2x->batch_target_hint = 0;
+    // Komiho: tile 尺寸变了 ⇒ 上一个尺寸收敛出的批次结论（大小与上限）不再适用。
+    if (g_waifu2x->tilesize != tile_size) {
+      g_waifu2x->batch_target_hint = 0;
+      g_waifu2x->batch_target_ceiling = 0;
+    }
     g_waifu2x->tile_sleep_ms = sleep_ms;
     g_waifu2x->tilesize = tile_size;
     LOGD("Updated performance config: sleep=%dms, tilesize=%d", sleep_ms,
