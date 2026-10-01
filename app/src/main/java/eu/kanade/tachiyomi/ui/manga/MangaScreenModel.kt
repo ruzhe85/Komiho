@@ -230,8 +230,8 @@ class MangaScreenModel(
                             null
                         }
                     },
-                ) { state, mergedData ->
-                    state.copy(mergedData = mergedData)
+                ) { pair, mergedData ->
+                    Triple(pair.first, pair.second, mergedData)
                 }
                 .combine(downloadCache.changes) { state, _ -> state }
                 .combine(downloadManager.queueState) { state, _ -> state }
