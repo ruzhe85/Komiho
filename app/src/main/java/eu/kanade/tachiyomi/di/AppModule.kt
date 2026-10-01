@@ -11,7 +11,6 @@ import com.eygraber.sqldelight.androidx.driver.AndroidxSqliteConfiguration
 import com.eygraber.sqldelight.androidx.driver.AndroidxSqliteDatabaseType
 import com.eygraber.sqldelight.androidx.driver.AndroidxSqliteDriver
 import com.eygraber.sqldelight.androidx.driver.FileProvider
-import eu.kanade.domain.track.store.DelayedTrackingStore
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.core.security.SecurityPreferences
 import eu.kanade.tachiyomi.data.cache.ChapterCache
@@ -22,8 +21,8 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.sync.service.GoogleDriveService
-import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
+import exh.md.utils.MangaDexAuthPreferences
 import eu.kanade.tachiyomi.network.JavaScriptEngine
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.source.AndroidSourceManager
@@ -164,9 +163,6 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory { DownloadManager(app) }
         addSingletonFactory { DownloadCache(app) }
 
-        addSingletonFactory { TrackerManager() }
-        addSingletonFactory { DelayedTrackingStore(app) }
-
         addSingletonFactory { ImageSaver(app) }
 
         addSingletonFactory { AndroidStorageFolderProvider(app) }
@@ -179,6 +175,9 @@ class AppModule(val app: Application) : InjektModule {
 
         // SY -->
         addSingletonFactory { EHentaiUpdateHelper(app) }
+
+        // SY --> Komiho: MangaDex 登录 token 偏好
+        addSingletonFactory { MangaDexAuthPreferences(get()) }
 
         addSingletonFactory { PagePreviewCache(app) }
 

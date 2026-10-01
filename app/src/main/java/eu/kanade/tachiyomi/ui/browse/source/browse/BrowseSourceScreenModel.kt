@@ -19,7 +19,6 @@ import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.domain.source.interactor.GetExhSavedSearch
 import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.source.service.SourcePreferences
-import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.util.ioCoroutineScope
 import eu.kanade.tachiyomi.data.cache.CoverCache
@@ -95,7 +94,6 @@ open class BrowseSourceScreenModel(
     private val setMangaDefaultChapterFlags: SetMangaDefaultChapterFlags = Injekt.get(),
     private val getManga: GetManga = Injekt.get(),
     private val updateManga: UpdateManga = Injekt.get(),
-    private val addTracks: AddTracks = Injekt.get(),
     getIncognitoState: GetIncognitoState = Injekt.get(),
 
     // SY -->
@@ -319,7 +317,6 @@ open class BrowseSourceScreenModel(
                 new = new.removeCovers(coverCache)
             } else {
                 setMangaDefaultChapterFlags.await(manga)
-                addTracks.bindEnhancedTrackers(manga, source)
             }
 
             updateManga.await(new.toMangaUpdate())
@@ -435,7 +432,6 @@ open class BrowseSourceScreenModel(
             val manga: Manga,
             val initialSelection: List<CheckboxState.State<Category>>,
         ) : Dialog
-        data class Migrate(val target: Manga, val current: Manga) : Dialog
 
         // SY -->
         data class DeleteSavedSearch(val idToDelete: Long, val name: String) : Dialog

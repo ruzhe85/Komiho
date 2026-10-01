@@ -3,7 +3,6 @@ package mihon.core.migration.migrations
 import android.app.Application
 import androidx.core.content.edit
 import androidx.preference.PreferenceManager
-import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.util.system.workManager
 import mihon.core.migration.Migration
 import mihon.core.migration.MigrationContext
@@ -19,7 +18,6 @@ class RemoveUpdateCheckerJobsMigration : Migration {
         val context = migrationContext.get<Application>() ?: return@withIOContext false
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
         val preferenceStore = migrationContext.get<PreferenceStore>() ?: return@withIOContext false
-        val trackerManager = migrationContext.get<TrackerManager>() ?: return@withIOContext false
         // Removed background jobs
         context.workManager.cancelAllWorkByTag("UpdateChecker")
         context.workManager.cancelAllWorkByTag("ExtensionUpdate")
@@ -33,7 +31,7 @@ class RemoveUpdateCheckerJobsMigration : Migration {
             "pref_filter_library_bookmarked",
             "pref_filter_library_completed",
             "pref_filter_library_lewd",
-        ) + trackerManager.trackers.map { "pref_filter_library_tracked_${it.id}" }
+        )
 
         prefKeys.forEach { key ->
             val pref = prefs.getInt(key, 0)

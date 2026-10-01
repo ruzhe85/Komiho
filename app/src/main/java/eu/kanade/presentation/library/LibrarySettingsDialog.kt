@@ -156,33 +156,6 @@ private fun ColumnScope.FilterPage(
         onClick = { screenModel.toggleFilter(LibraryPreferences::filterLewd) },
     )
     // SY <--
-
-    val trackers by screenModel.trackersFlow.collectAsState()
-    when (trackers.size) {
-        0 -> {
-            // No trackers
-        }
-        1 -> {
-            val service = trackers[0]
-            val filterTracker by screenModel.libraryPreferences.filterTracking(service.id.toInt()).collectAsState()
-            TriStateItem(
-                label = stringResource(MR.strings.action_filter_tracked),
-                state = filterTracker,
-                onClick = { screenModel.toggleTracker(service.id.toInt()) },
-            )
-        }
-        else -> {
-            HeadingItem(MR.strings.action_filter_tracked)
-            trackers.map { service ->
-                val filterTracker by screenModel.libraryPreferences.filterTracking(service.id.toInt()).collectAsState()
-                TriStateItem(
-                    label = service.name,
-                    state = filterTracker,
-                    onClick = { screenModel.toggleTracker(service.id.toInt()) },
-                )
-            }
-        }
-    }
 }
 
 @Composable
@@ -190,7 +163,6 @@ private fun ColumnScope.SortPage(
     category: Category?,
     screenModel: LibrarySettingsScreenModel,
 ) {
-    val trackers by screenModel.trackersFlow.collectAsState()
     // SY -->
     val globalSortMode by screenModel.libraryPreferences.sortingMode.collectAsState()
     val sortingMode = if (screenModel.grouping == LibraryGroup.BY_DEFAULT) {
@@ -209,12 +181,7 @@ private fun ColumnScope.SortPage(
     }.collectAsState(initial = screenModel.libraryPreferences.sortTagsForLibrary.get().isNotEmpty())
     // SY <--
 
-    val options = remember(trackers.isEmpty()/* SY --> */, hasSortTags/* SY <-- */) {
-        val trackerMeanPair = if (trackers.isNotEmpty()) {
-            MR.strings.action_sort_tracker_score to LibrarySort.Type.TrackerMean
-        } else {
-            null
-        }
+    val options = remember(hasSortTags/* SY <-- */) {
         // SY -->
         val tagSortPair = if (hasSortTags) {
             SYMR.strings.tag_sorting to LibrarySort.Type.TagList
@@ -231,7 +198,6 @@ private fun ColumnScope.SortPage(
             MR.strings.action_sort_latest_chapter to LibrarySort.Type.LatestChapter,
             MR.strings.action_sort_chapter_fetch_date to LibrarySort.Type.ChapterFetchDate,
             MR.strings.action_sort_date_added to LibrarySort.Type.DateAdded,
-            trackerMeanPair,
             // SY -->
             tagSortPair,
             // SY <--
@@ -376,15 +342,11 @@ private fun ColumnScope.GroupPage(
     screenModel: LibrarySettingsScreenModel,
     hasCategories: Boolean,
 ) {
-    val trackers by screenModel.trackersFlow.collectAsState()
-    val groups = remember(hasCategories, trackers) {
+    val groups = remember(hasCategories) {
         buildList {
             add(LibraryGroup.BY_DEFAULT)
             add(LibraryGroup.BY_SOURCE)
             add(LibraryGroup.BY_STATUS)
-            if (trackers.isNotEmpty()) {
-                add(LibraryGroup.BY_TRACK_STATUS)
-            }
             if (hasCategories) {
                 add(LibraryGroup.UNGROUPED)
             }

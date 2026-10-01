@@ -6,7 +6,6 @@ import cafe.adriel.voyager.core.model.StateScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import eu.kanade.core.util.insertSeparators
 import eu.kanade.domain.manga.interactor.UpdateManga
-import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.presentation.history.HistoryUiModel
 import eu.kanade.tachiyomi.util.lang.toLocalDate
 import kotlinx.coroutines.Dispatchers
@@ -44,7 +43,6 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 class HistoryScreenModel(
-    private val addTracks: AddTracks = Injekt.get(),
     private val getCategories: GetCategories = Injekt.get(),
     private val getDuplicateLibraryManga: GetDuplicateLibraryManga = Injekt.get(),
     private val getHistory: GetHistory = Injekt.get(),
@@ -208,17 +206,9 @@ class HistoryScreenModel(
                 // Choose a category
                 else -> showChangeCategoryDialog(manga)
             }
-
-            // Sync with tracking services if applicable
-            addTracks.bindEnhancedTrackers(manga, sourceManager.getOrStub(manga.source))
         }
     }
 
-    fun showMigrateDialog(target: Manga, current: Manga) {
-        mutableState.update { currentState ->
-            currentState.copy(dialog = Dialog.Migrate(target = target, current = current))
-        }
-    }
 
     fun showChangeCategoryDialog(manga: Manga) {
         screenModelScope.launch {
@@ -250,7 +240,6 @@ class HistoryScreenModel(
             val manga: Manga,
             val initialSelection: List<CheckboxState<Category>>,
         ) : Dialog
-        data class Migrate(val target: Manga, val current: Manga) : Dialog
     }
 
     sealed interface Event {

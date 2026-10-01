@@ -24,7 +24,6 @@ import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.SectionCard
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
-import java.util.Locale
 import kotlin.time.DurationUnit
 import kotlin.time.toDuration
 
@@ -45,9 +44,6 @@ fun StatsScreenContent(
         }
         item {
             ChapterStats(state.chapters)
-        }
-        item {
-            TrackerStats(state.trackers)
         }
     }
 }
@@ -130,33 +126,3 @@ private fun LazyItemScope.ChapterStats(
     }
 }
 
-@Composable
-private fun LazyItemScope.TrackerStats(
-    data: StatsData.Trackers,
-) {
-    val notApplicable = stringResource(MR.strings.not_applicable)
-    val meanScoreStr = remember(data.trackedTitleCount, data.meanScore) {
-        if (data.trackedTitleCount > 0 && !data.meanScore.isNaN()) {
-            // All other numbers are localized in English
-            "%.2f ★".format(Locale.ENGLISH, data.meanScore)
-        } else {
-            notApplicable
-        }
-    }
-    SectionCard(MR.strings.label_tracker_section) {
-        Row {
-            StatsItem(
-                data.trackedTitleCount.toString(),
-                stringResource(MR.strings.label_tracked_titles),
-            )
-            StatsItem(
-                meanScoreStr,
-                stringResource(MR.strings.label_mean_score),
-            )
-            StatsItem(
-                data.trackerCount.toString(),
-                stringResource(MR.strings.label_used),
-            )
-        }
-    }
-}

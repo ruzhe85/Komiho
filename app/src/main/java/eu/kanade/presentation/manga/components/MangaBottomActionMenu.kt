@@ -238,7 +238,6 @@ fun LibraryBottomActionMenu(
     onMarkAsUnreadClicked: () -> Unit,
     onDownloadClicked: ((DownloadAction) -> Unit)?,
     onDeleteClicked: () -> Unit,
-    onMigrateClicked: (() -> Unit)?,
     // SY -->
     onClickCleanTitles: (() -> Unit)?,
     onClickCollectRecommendations: (() -> Unit)?,
@@ -274,8 +273,7 @@ fun LibraryBottomActionMenu(
             val showOverflow = onClickCleanTitles != null ||
                 onClickAddToMangaDex != null ||
                 onClickResetInfo != null ||
-                onClickCollectRecommendations != null ||
-                onMigrateClicked != null
+                onClickCollectRecommendations != null
             val configuration = LocalConfiguration.current
             val moveMarkPrev = remember { !configuration.isTabletUi() }
             var overFlowOpen by remember { mutableStateOf(false) }
@@ -358,12 +356,6 @@ fun LibraryBottomActionMenu(
                             DropdownMenuItem(
                                 text = { Text(stringResource(SYMR.strings.action_clean_titles)) },
                                 onClick = onClickCleanTitles,
-                            )
-                        }
-                        if (onMigrateClicked != null) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(MR.strings.migrate)) },
-                                onClick = onMigrateClicked,
                             )
                         }
                         if (onClickCollectRecommendations != null) {

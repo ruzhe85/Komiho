@@ -22,8 +22,6 @@ import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsScreenModel
 import eu.kanade.tachiyomi.ui.browse.extension.extensionsTab
-import eu.kanade.tachiyomi.ui.browse.feed.feedTab
-import eu.kanade.tachiyomi.ui.browse.migration.sources.migrateSourceTab
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.browse.source.sourcesTab
 import eu.kanade.tachiyomi.ui.main.MainActivity
@@ -63,38 +61,17 @@ data object BrowseTab : Tab {
     @Composable
     override fun Content() {
         val context = LocalContext.current
-        val scope = rememberCoroutineScope()
         // SY -->
-        val hideFeedTab by remember { Injekt.get<UiPreferences>().hideFeedTab.asState(scope) }
-        val feedTabInFront by remember { Injekt.get<UiPreferences>().feedTabInFront.asState(scope) }
-        // SY <--
 
         // Hoisted for extensions tab's search bar
         val extensionsScreenModel = rememberScreenModel { ExtensionsScreenModel() }
         val extensionsState by extensionsScreenModel.state.collectAsState()
 
         // SY -->
-        val tabs = if (hideFeedTab) {
-            listOf(
-                sourcesTab(),
-                extensionsTab(extensionsScreenModel),
-                migrateSourceTab(),
-            )
-        } else if (feedTabInFront) {
-            listOf(
-                feedTab(),
-                sourcesTab(),
-                extensionsTab(extensionsScreenModel),
-                migrateSourceTab(),
-            )
-        } else {
-            listOf(
-                sourcesTab(),
-                feedTab(),
-                extensionsTab(extensionsScreenModel),
-                migrateSourceTab(),
-            )
-        }
+        val tabs = listOf(
+            sourcesTab(),
+            extensionsTab(extensionsScreenModel),
+        )
         // SY <--
 
         val state = rememberPagerState { tabs.size }

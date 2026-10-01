@@ -54,12 +54,10 @@ import exh.recs.RecommendsScreen
 import exh.recs.batch.RecommendationSearchBottomSheetDialog
 import exh.recs.batch.RecommendationSearchProgressDialog
 import exh.recs.batch.SearchStatus
-import exh.source.MERGED_SOURCE_ID
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-import mihon.feature.migration.config.MigrationConfigScreen
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.domain.category.model.Category
@@ -186,22 +184,6 @@ data object LibraryTab : Tab {
                     onDownloadClicked = screenModel::performDownloadAction
                         .takeIf { state.selectedManga.fastAll { !it.isLocal() } },
                     onDeleteClicked = screenModel::openDeleteMangaDialog,
-                    onMigrateClicked = {
-                        val selection = state.selectedManga
-                            // SY -->
-                            .filterNot { it.source == MERGED_SOURCE_ID }
-                            .map { it.id }
-                        // <-- SY
-                        screenModel.clearSelection()
-                        /* SY --> */if (selection.isNotEmpty()) {
-                            /* <-- SY */
-                            navigator.push(MigrationConfigScreen(selection))
-                            // SY ->>
-                        } else {
-                            context.toast(SYMR.strings.no_valid_entry)
-                        }
-                        // <-- SY
-                    },
                     // SY -->
                     onClickCleanTitles = screenModel::cleanTitles.takeIf { state.showCleanTitles },
                     onClickCollectRecommendations = screenModel::showRecommendationSearchDialog.takeIf { state.selection.size > 1 },

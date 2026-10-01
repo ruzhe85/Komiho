@@ -1,7 +1,6 @@
 package exh.recs.sources
 
 import dev.icerock.moko.resources.StringResource
-import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -17,7 +16,6 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.source.BaseSourcePagingSource
 import tachiyomi.data.source.NoResultsException
 import tachiyomi.domain.manga.model.Manga
-import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.i18n.sy.SYMR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -67,40 +65,21 @@ abstract class RecommendationPagingSource(
 }
 
 /**
- * General class for recommendation sources backed by trackers.
+ * General class for recommendation sources backed by third-party services.
  */
 abstract class TrackerRecommendationPagingSource(
     protected val endpoint: String,
     manga: Manga,
 ) : RecommendationPagingSource(manga) {
-    private val getTracks: GetTracks by injectLazy()
-
-    protected val trackerManager: TrackerManager by injectLazy()
     protected val client by lazy { Injekt.get<NetworkHelper>().client }
     protected val json by injectLazy<Json>()
-
-    /**
-     * Tracker id associated with the recommendation source.
-     *
-     * If not null and the tracker is attached to the source manga,
-     * the remote id will be used to directly identify the manga on the tracker.
-     * Otherwise, a search will be performed using the manga title.
-     */
-    abstract val associatedTrackerId: Long?
 
     abstract suspend fun getRecsBySearch(search: String): List<SManga>
     abstract suspend fun getRecsById(id: String): List<SManga>
 
     override suspend fun requestNextPage(currentPage: Int): MangasPage {
-        val tracks = getTracks.await(manga.id)
-
         val recs = try {
-            val id = tracks.find { it.trackerId == associatedTrackerId }?.remoteId
-            val results = if (id != null) {
-                getRecsById(id.toString())
-            } else {
-                getRecsBySearch(manga.ogTitle)
-            }
+            val results = getRecsBySearch(manga.ogTitle)
             logcat { name + " > Results: " + results.size }
 
             results.ifEmpty { throw NoResultsException() }

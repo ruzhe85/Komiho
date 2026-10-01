@@ -25,7 +25,6 @@ import eu.kanade.presentation.more.settings.widget.PrefsVerticalPadding
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TitleFontSize
-import eu.kanade.presentation.more.settings.widget.TrackingPreferenceWidget
 import kotlinx.coroutines.launch
 import tachiyomi.presentation.core.components.BaseSliderItem
 import tachiyomi.presentation.core.util.collectAsState
@@ -166,16 +165,6 @@ internal fun PreferenceItem(
                         if (accepted) item.preference.set(it)
                         accepted
                     },
-                )
-            }
-            is Preference.PreferenceItem.TrackerPreference -> {
-                val isLoggedIn by item.tracker.let { tracker ->
-                    tracker.isLoggedInFlow.collectAsState(tracker.isLoggedIn)
-                }
-                TrackingPreferenceWidget(
-                    tracker = item.tracker,
-                    isLoggedIn = isLoggedIn,
-                    onClick = { if (isLoggedIn) item.logout() else item.login() },
                 )
             }
             is Preference.PreferenceItem.InfoPreference -> {

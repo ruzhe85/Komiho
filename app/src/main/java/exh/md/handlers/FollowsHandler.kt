@@ -1,7 +1,6 @@
 package exh.md.handlers
 
 import eu.kanade.tachiyomi.data.database.models.Track
-import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.source.model.MetadataMangasPage
 import eu.kanade.tachiyomi.source.model.SManga
 import exh.md.dto.MangaDataDto
@@ -21,6 +20,11 @@ class FollowsHandler(
     private val lang: String,
     private val service: MangaDexAuthService,
 ) {
+
+    private companion object {
+        /** MdList 的 tracker id，仅用于 [Track] 记录归属。 */
+        const val MDLIST_TRACKER_ID = 60L
+    }
 
     /**
      * fetch follows page
@@ -153,7 +157,7 @@ class FollowsHandler(
                 service.mangasRating(mangaId).ratings.asMdMap<PersonalRatingDto>()[mangaId]
             }
             val (followStatus, rating) = followStatusDef.await() to ratingDef.await()
-            Track.create(TrackerManager.MDLIST).apply {
+            Track.create(MDLIST_TRACKER_ID).apply {
                 title = ""
                 status = followStatus.long
                 tracking_url = url

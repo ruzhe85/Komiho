@@ -3,11 +3,8 @@ package eu.kanade.tachiyomi.source.online.all
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
-import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.database.models.Track
-import eu.kanade.tachiyomi.data.track.TrackerManager
-import eu.kanade.tachiyomi.data.track.mdlist.MdList
 import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -35,11 +32,13 @@ import exh.md.handlers.MangaPlusHandler
 import exh.md.handlers.NamicomiHandler
 import exh.md.handlers.PageHandler
 import exh.md.handlers.SimilarHandler
+import exh.md.network.MangaDexAuthInterceptor
 import exh.md.network.MangaDexLoginHelper
 import exh.md.service.MangaDexAuthService
 import exh.md.service.MangaDexService
 import exh.md.service.SimilarService
 import exh.md.utils.FollowStatus
+import exh.md.utils.MangaDexAuthPreferences
 import exh.md.utils.MdApi
 import exh.md.utils.MdLang
 import exh.md.utils.MdUtil
@@ -50,8 +49,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Response
 import rx.Observable
 import tachiyomi.core.common.util.lang.runAsObservable
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import kotlin.reflect.KClass
 
@@ -72,14 +69,14 @@ class MangaDex(delegate: HttpSource, val context: Context) :
 
     override val matchingHosts: List<String> = listOf("mangadex.org", "www.mangadex.org")
 
-    val trackPreferences: TrackPreferences by injectLazy()
-    val mdList: MdList by lazy { Injekt.get<TrackerManager>().mdList }
+    val authPreferences: MangaDexAuthPreferences by injectLazy()
+    val authInterceptor: MangaDexAuthInterceptor by lazy { MangaDexAuthInterceptor(authPreferences) }
 
     private val sourcePreferences: SharedPreferences by lazy {
         context.getSharedPreferences("source_$id", 0x0000)
     }
 
-    private val loginHelper = MangaDexLoginHelper(network.client, trackPreferences, mdList, mdList.interceptor)
+    private val loginHelper = MangaDexLoginHelper(network.client, authPreferences, authInterceptor)
 
     override val headers: Headers = delegate.headers.newBuilder()
         .removeAll("User-Agent")
@@ -87,7 +84,7 @@ class MangaDex(delegate: HttpSource, val context: Context) :
         .build()
 
     override val baseHttpClient: OkHttpClient = delegate.client.newBuilder()
-        .addInterceptor(mdList.interceptor)
+        .addInterceptor(authInterceptor)
         .build()
 
     private fun dataSaver() = sourcePreferences.getBoolean(getDataSaverPreferenceKey(mdLang.lang), false)
@@ -148,8 +145,6 @@ class MangaDex(delegate: HttpSource, val context: Context) :
             azukHandler,
             mangaHotHandler,
             namicomiHandler,
-            trackPreferences,
-            mdList,
         )
     }
 
@@ -272,15 +267,15 @@ class MangaDex(delegate: HttpSource, val context: Context) :
     override val twoFactorAuth = LoginSource.AuthSupport.NOT_SUPPORTED
 
     override fun isLogged(): Boolean {
-        return mdList.isLoggedIn
+        return authPreferences.trackToken.get().isNotBlank()
     }
 
     override fun getUsername(): String {
-        return mdList.getUsername()
+        return ""
     }
 
     override fun getPassword(): String {
-        return mdList.getPassword()
+        return ""
     }
 
     override suspend fun login(authCode: String): Boolean {

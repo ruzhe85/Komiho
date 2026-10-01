@@ -16,7 +16,6 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.browse.ExtensionScreen
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.TabContent
-import eu.kanade.presentation.more.settings.screen.browse.ExtensionStoresScreen
 import eu.kanade.tachiyomi.extension.model.Extension
 import eu.kanade.tachiyomi.ui.browse.extension.details.ExtensionDetailsScreen
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen
@@ -42,10 +41,6 @@ fun extensionsTab(
             AppBar.OverflowAction(
                 title = stringResource(MR.strings.action_filter),
                 onClick = { navigator.push(ExtensionFilterScreen()) },
-            ),
-            AppBar.OverflowAction(
-                title = stringResource(MR.strings.extensionStores),
-                onClick = { navigator.push(ExtensionStoresScreen()) },
             ),
         ),
         content = { contentPadding, _ ->

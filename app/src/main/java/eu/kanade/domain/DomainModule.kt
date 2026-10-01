@@ -15,16 +15,10 @@ import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.domain.source.interactor.GetEnabledSources
 import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.source.interactor.GetLanguagesWithSources
-import eu.kanade.domain.source.interactor.GetSourcesWithFavoriteCount
-import eu.kanade.domain.source.interactor.SetMigrateSorting
 import eu.kanade.domain.source.interactor.ToggleIncognito
 import eu.kanade.domain.source.interactor.ToggleLanguage
 import eu.kanade.domain.source.interactor.ToggleSource
 import eu.kanade.domain.source.interactor.ToggleSourcePin
-import eu.kanade.domain.track.interactor.AddTracks
-import eu.kanade.domain.track.interactor.RefreshTracks
-import eu.kanade.domain.track.interactor.SyncChapterProgressWithTrack
-import eu.kanade.domain.track.interactor.TrackChapter
 import eu.kanade.tachiyomi.di.InjektModule
 import eu.kanade.tachiyomi.di.addFactory
 import eu.kanade.tachiyomi.di.addSingletonFactory
@@ -37,7 +31,6 @@ import mihon.domain.extension.interactor.GetExtensionStores
 import mihon.domain.extension.interactor.RemoveExtensionStore
 import mihon.domain.extension.interactor.UpdateExtensionStores
 import mihon.domain.extension.repository.ExtensionStoreRepository
-import mihon.domain.migration.usecases.MigrateMangaUseCase
 import mihon.domain.source.interactor.UpdateMangaFromRemote
 import mihon.domain.upcoming.interactor.GetUpcomingManga
 import tachiyomi.data.category.CategoryRepositoryImpl
@@ -48,7 +41,6 @@ import tachiyomi.data.manga.MangaRepositoryImpl
 import tachiyomi.data.release.ReleaseServiceImpl
 import tachiyomi.data.source.SourceRepositoryImpl
 import tachiyomi.data.source.StubSourceRepositoryImpl
-import tachiyomi.data.track.TrackRepositoryImpl
 import tachiyomi.data.updates.UpdatesRepositoryImpl
 import tachiyomi.domain.category.interactor.CreateCategoryWithName
 import tachiyomi.domain.category.interactor.DeleteCategory
@@ -94,11 +86,6 @@ import tachiyomi.domain.source.interactor.GetRemoteManga
 import tachiyomi.domain.source.interactor.GetSourcesWithNonLibraryManga
 import tachiyomi.domain.source.repository.SourceRepository
 import tachiyomi.domain.source.repository.StubSourceRepository
-import tachiyomi.domain.track.interactor.DeleteTrack
-import tachiyomi.domain.track.interactor.GetTracks
-import tachiyomi.domain.track.interactor.GetTracksPerManga
-import tachiyomi.domain.track.interactor.InsertTrack
-import tachiyomi.domain.track.repository.TrackRepository
 import tachiyomi.domain.updates.interactor.GetUpdates
 import tachiyomi.domain.updates.repository.UpdatesRepository
 import uy.kohesive.injekt.api.InjektRegistrar
@@ -137,24 +124,9 @@ class DomainModule : InjektModule {
         addFactory { SetMangaCategories(get()) }
         addFactory { GetExcludedScanlators(get()) }
         addFactory { SetExcludedScanlators(get()) }
-        addFactory {
-            MigrateMangaUseCase(
-                get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(),
-            )
-        }
 
         addSingletonFactory<ReleaseService> { ReleaseServiceImpl(get(), get()) }
         addFactory { GetApplicationRelease(get(), get()) }
-
-        addSingletonFactory<TrackRepository> { TrackRepositoryImpl(get()) }
-        addFactory { TrackChapter(get(), get(), get(), get()) }
-        addFactory { AddTracks(get(), get(), get(), get()) }
-        addFactory { RefreshTracks(get(), get(), get(), get()) }
-        addFactory { DeleteTrack(get()) }
-        addFactory { GetTracksPerManga(get(), get()) }
-        addFactory { GetTracks(get()) }
-        addFactory { InsertTrack(get()) }
-        addFactory { SyncChapterProgressWithTrack(get(), get(), get()) }
 
         addSingletonFactory<ChapterRepository> { ChapterRepositoryImpl(get()) }
         // SY --> Komiho: 按页书签仓库
@@ -191,9 +163,7 @@ class DomainModule : InjektModule {
         addFactory { GetEnabledSources(get(), get()) }
         addFactory { GetLanguagesWithSources(get(), get()) }
         addFactory { GetRemoteManga(get()) }
-        addFactory { GetSourcesWithFavoriteCount(get(), get()) }
         addFactory { GetSourcesWithNonLibraryManga(get()) }
-        addFactory { SetMigrateSorting(get()) }
         addFactory { ToggleLanguage(get()) }
         addFactory { ToggleSource(get()) }
         addFactory { ToggleSourcePin(get()) }

@@ -23,7 +23,6 @@ import tachiyomi.data.manga.CustomMangaRepositoryImpl
 import tachiyomi.data.manga.FavoritesEntryRepositoryImpl
 import tachiyomi.data.manga.MangaMergeRepositoryImpl
 import tachiyomi.data.manga.MangaMetadataRepositoryImpl
-import tachiyomi.data.source.FeedSavedSearchRepositoryImpl
 import tachiyomi.data.source.SavedSearchRepositoryImpl
 import tachiyomi.domain.chapter.interactor.DeleteChapters
 import tachiyomi.domain.chapter.interactor.GetChapterByUrl
@@ -58,21 +57,11 @@ import tachiyomi.domain.manga.repository.CustomMangaRepository
 import tachiyomi.domain.manga.repository.FavoritesEntryRepository
 import tachiyomi.domain.manga.repository.MangaMergeRepository
 import tachiyomi.domain.manga.repository.MangaMetadataRepository
-import tachiyomi.domain.source.interactor.CountFeedSavedSearchBySourceId
-import tachiyomi.domain.source.interactor.CountFeedSavedSearchGlobal
-import tachiyomi.domain.source.interactor.DeleteFeedSavedSearchById
 import tachiyomi.domain.source.interactor.DeleteSavedSearchById
-import tachiyomi.domain.source.interactor.GetFeedSavedSearchBySourceId
-import tachiyomi.domain.source.interactor.GetFeedSavedSearchGlobal
 import tachiyomi.domain.source.interactor.GetSavedSearchById
 import tachiyomi.domain.source.interactor.GetSavedSearchBySourceId
-import tachiyomi.domain.source.interactor.GetSavedSearchBySourceIdFeed
-import tachiyomi.domain.source.interactor.GetSavedSearchGlobalFeed
-import tachiyomi.domain.source.interactor.InsertFeedSavedSearch
 import tachiyomi.domain.source.interactor.InsertSavedSearch
-import tachiyomi.domain.source.repository.FeedSavedSearchRepository
 import tachiyomi.domain.source.repository.SavedSearchRepository
-import tachiyomi.domain.track.interactor.IsTrackUnfollowed
 import uy.kohesive.injekt.api.InjektRegistrar
 import xyz.nulldev.ts.api.http.serializer.FilterSerializer
 
@@ -98,7 +87,6 @@ class SYDomainModule : InjektModule {
         addFactory { ReorderSortTag(get(), get()) }
         addFactory { GetPagePreviews(get(), get()) }
         addFactory { SearchEngine() }
-        addFactory { IsTrackUnfollowed() }
         addFactory { GetReadMangaNotInLibraryView(get()) }
 
         // Required for [MetadataSource]
@@ -139,15 +127,6 @@ class SYDomainModule : InjektModule {
         addFactory { InsertSavedSearch(get()) }
         addFactory { GetExhSavedSearch(get(), get(), get()) }
 
-        addSingletonFactory<FeedSavedSearchRepository> { FeedSavedSearchRepositoryImpl(get()) }
-        addFactory { InsertFeedSavedSearch(get()) }
-        addFactory { DeleteFeedSavedSearchById(get()) }
-        addFactory { GetFeedSavedSearchGlobal(get()) }
-        addFactory { GetFeedSavedSearchBySourceId(get()) }
-        addFactory { CountFeedSavedSearchGlobal(get()) }
-        addFactory { CountFeedSavedSearchBySourceId(get()) }
-        addFactory { GetSavedSearchGlobalFeed(get()) }
-        addFactory { GetSavedSearchBySourceIdFeed(get()) }
 
         addSingletonFactory<CustomMangaRepository> { CustomMangaRepositoryImpl(get<Application>()) }
         addFactory { GetCustomMangaInfo(get()) }

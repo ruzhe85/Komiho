@@ -194,12 +194,6 @@ abstract class SearchScreenModel(
         updateItems(state.value.items + (source to result))
     }
 
-    fun setMigrateDialog(currentId: Long, target: Manga) {
-        screenModelScope.launchIO {
-            val current = getManga.await(currentId) ?: return@launchIO
-            mutableState.update { it.copy(dialog = Dialog.Migrate(target, current)) }
-        }
-    }
 
     fun clearDialog() {
         mutableState.update { it.copy(dialog = null) }
@@ -220,7 +214,6 @@ abstract class SearchScreenModel(
     }
 
     sealed interface Dialog {
-        data class Migrate(val target: Manga, val current: Manga) : Dialog
     }
 }
 

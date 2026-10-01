@@ -2,9 +2,6 @@ package exh.md.utils
 
 import android.app.Application
 import eu.kanade.domain.source.service.SourcePreferences
-import eu.kanade.domain.track.service.TrackPreferences
-import eu.kanade.tachiyomi.data.track.mdlist.MdList
-import eu.kanade.tachiyomi.data.track.myanimelist.dto.MALOAuth
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.all.MangaDex
@@ -147,17 +144,17 @@ class MdUtil {
             return "$cdnUrl/covers/$dexId/$fileName"
         }
 
-        fun saveOAuth(preferences: TrackPreferences, mdList: MdList, oAuth: MALOAuth?) {
+        fun saveOAuth(preferences: MangaDexAuthPreferences, oAuth: MALOAuth?) {
             if (oAuth == null) {
-                preferences.trackToken(mdList).delete()
+                preferences.trackToken.delete()
             } else {
-                preferences.trackToken(mdList).set(jsonParser.encodeToString(oAuth))
+                preferences.trackToken.set(jsonParser.encodeToString(oAuth))
             }
         }
 
-        fun loadOAuth(preferences: TrackPreferences, mdList: MdList): MALOAuth? {
+        fun loadOAuth(preferences: MangaDexAuthPreferences): MALOAuth? {
             return try {
-                jsonParser.decodeFromString<MALOAuth>(preferences.trackToken(mdList).get())
+                jsonParser.decodeFromString<MALOAuth>(preferences.trackToken.get())
             } catch (_: Exception) {
                 null
             }

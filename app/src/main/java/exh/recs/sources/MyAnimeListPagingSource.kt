@@ -25,8 +25,6 @@ class MyAnimeListPagingSource(manga: Manga) : TrackerRecommendationPagingSource(
     override val category: StringResource
         get() = SYMR.strings.community_recommendations
 
-    override val associatedTrackerId: Long
-        get() = trackerManager.myAnimeList.id
 
     override suspend fun getRecsById(id: String): List<SManga> {
         val apiUrl = endpoint.toHttpUrl()

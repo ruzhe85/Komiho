@@ -83,7 +83,6 @@ fun DuplicateMangaDialog(
     onDismissRequest: () -> Unit,
     onConfirm: () -> Unit,
     onOpenManga: (manga: Manga) -> Unit,
-    onMigrate: (manga: Manga) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val sourceManager = remember { Injekt.get<SourceManager>() }
@@ -128,7 +127,6 @@ fun DuplicateMangaDialog(
                     DuplicateMangaListItem(
                         duplicate = it,
                         getSource = { sourceManager.getOrStub(it.manga.source) },
-                        onMigrate = { onMigrate(it.manga) },
                         onDismissRequest = onDismissRequest,
                         onOpenManga = { onOpenManga(it.manga) },
                     )
@@ -174,7 +172,6 @@ private fun DuplicateMangaListItem(
     getSource: () -> Source,
     onDismissRequest: () -> Unit,
     onOpenManga: () -> Unit,
-    onMigrate: () -> Unit,
 ) {
     val source = getSource()
     val manga = duplicate.manga
@@ -187,7 +184,7 @@ private fun DuplicateMangaListItem(
                 onLongClick = { onOpenManga() },
                 onClick = {
                     onDismissRequest()
-                    onMigrate()
+                    onOpenManga()
                 },
             )
             .padding(MaterialTheme.padding.small),

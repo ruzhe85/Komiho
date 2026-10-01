@@ -1,14 +1,13 @@
 package exh.md.network
 
-import eu.kanade.domain.track.service.TrackPreferences
-import eu.kanade.tachiyomi.data.track.mdlist.MdList
-import eu.kanade.tachiyomi.data.track.myanimelist.dto.MALOAuth
-import eu.kanade.tachiyomi.network.POST
-import eu.kanade.tachiyomi.network.awaitSuccess
-import eu.kanade.tachiyomi.network.parseAs
+import exh.md.utils.MALOAuth
+import exh.md.utils.MangaDexAuthPreferences
 import exh.md.utils.MdApi
 import exh.md.utils.MdConstants
 import exh.md.utils.MdUtil
+import eu.kanade.tachiyomi.network.POST
+import eu.kanade.tachiyomi.network.awaitSuccess
+import eu.kanade.tachiyomi.network.parseAs
 import logcat.LogPriority
 import okhttp3.FormBody
 import okhttp3.Headers
@@ -17,8 +16,7 @@ import tachiyomi.core.common.util.system.logcat
 
 class MangaDexLoginHelper(
     private val client: OkHttpClient,
-    private val preferences: TrackPreferences,
-    private val mdList: MdList,
+    private val authPreferences: MangaDexAuthPreferences,
     private val mangaDexAuthInterceptor: MangaDexAuthInterceptor,
 ) {
 
@@ -47,18 +45,18 @@ class MangaDexLoginHelper(
             true -> true
             false -> {
                 logcat(LogPriority.ERROR, error) { "Error logging in" }
-                mdList.logout()
+                mangaDexAuthInterceptor.logout()
                 false
             }
         }
     }
 
     suspend fun logout(): Boolean {
-        val oauth = MdUtil.loadOAuth(preferences, mdList)
+        val oauth = MdUtil.loadOAuth(authPreferences)
         val sessionToken = oauth?.accessToken
         val refreshToken = oauth?.refreshToken
         if (refreshToken.isNullOrEmpty() || sessionToken.isNullOrEmpty()) {
-            mdList.logout()
+            mangaDexAuthInterceptor.logout()
             return true
         }
 
@@ -77,7 +75,7 @@ class MangaDexLoginHelper(
                     body = formBody,
                 ),
             ).awaitSuccess()
-            mdList.logout()
+            mangaDexAuthInterceptor.logout()
         }.exceptionOrNull()
 
         return when (error == null) {

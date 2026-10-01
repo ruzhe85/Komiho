@@ -19,7 +19,6 @@ import eu.kanade.presentation.components.TabContent
 import eu.kanade.tachiyomi.ui.browse.source.SourcesScreen.SmartSearchConfig
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreenModel.Listing
-import eu.kanade.tachiyomi.ui.browse.source.feed.SourceFeedScreen
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import exh.ui.smartsearch.SmartSearchScreen
 import kotlinx.coroutines.flow.collectLatest
@@ -71,7 +70,7 @@ fun Screen.sourcesTab(
                     // SY -->
                     val screen = when {
                         smartSearchConfig != null -> SmartSearchScreen(source.id, smartSearchConfig)
-                        listing == Listing.Popular && screenModel.useNewSourceNavigation -> SourceFeedScreen(source.id)
+                        listing == Listing.Popular && screenModel.useNewSourceNavigation -> BrowseSourceScreen(source.id, listing.query)
                         else -> BrowseSourceScreen(source.id, listing.query)
                     }
                     navigator.push(screen)

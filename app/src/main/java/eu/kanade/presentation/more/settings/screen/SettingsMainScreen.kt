@@ -18,7 +18,6 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -205,12 +204,6 @@ object SettingsMainScreen : Screen() {
             screen = SettingsDownloadScreen,
         ),
         Item(
-            titleRes = MR.strings.pref_category_tracking,
-            subtitleRes = MR.strings.pref_tracking_summary,
-            icon = Icons.Outlined.Sync,
-            screen = SettingsTrackingScreen,
-        ),
-        Item(
             titleRes = MR.strings.browse,
             subtitleRes = MR.strings.pref_browse_summary,
             icon = Icons.Outlined.Explore,
@@ -243,12 +236,6 @@ object SettingsMainScreen : Screen() {
             subtitleRes = SYMR.strings.pref_ehentai_summary,
             icon = EhAssets.EhLogo,
             screen = SettingsEhScreen,
-        ),
-        Item(
-            titleRes = SYMR.strings.pref_category_mangadex,
-            subtitleRes = SYMR.strings.pref_mangadex_summary,
-            icon = EhAssets.MangadexLogo,
-            screen = SettingsMangadexScreen,
         ),
         // SY <--
         Item(

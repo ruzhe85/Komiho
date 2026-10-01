@@ -8,7 +8,6 @@ data class BackupOptions(
     val libraryEntries: Boolean = true,
     val categories: Boolean = true,
     val chapters: Boolean = true,
-    val tracking: Boolean = true,
     val history: Boolean = true,
     val readEntries: Boolean = true,
     val appSettings: Boolean = true,
@@ -25,7 +24,6 @@ data class BackupOptions(
         libraryEntries,
         categories,
         chapters,
-        tracking,
         history,
         readEntries,
         appSettings,
@@ -52,12 +50,6 @@ data class BackupOptions(
                 label = MR.strings.chapters,
                 getter = BackupOptions::chapters,
                 setter = { options, enabled -> options.copy(chapters = enabled) },
-                enabled = { it.libraryEntries },
-            ),
-            Entry(
-                label = MR.strings.track,
-                getter = BackupOptions::tracking,
-                setter = { options, enabled -> options.copy(tracking = enabled) },
                 enabled = { it.libraryEntries },
             ),
             Entry(
@@ -120,16 +112,15 @@ data class BackupOptions(
             libraryEntries = array[0],
             categories = array[1],
             chapters = array[2],
-            tracking = array[3],
-            history = array[4],
-            readEntries = array[5],
-            appSettings = array[6],
-            extensionStores = array[7],
-            sourceSettings = array[8],
-            privateSettings = array[9],
+            history = array[3],
+            readEntries = array[4],
+            appSettings = array[5],
+            extensionStores = array[6],
+            sourceSettings = array[7],
+            privateSettings = array[8],
             // SY -->
-            customInfo = array[10],
-            savedSearches = array[11],
+            customInfo = array[9],
+            savedSearches = array[10],
             // SY <--
         )
     }

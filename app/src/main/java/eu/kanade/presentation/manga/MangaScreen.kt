@@ -123,7 +123,6 @@ fun MangaScreen(
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
-    onTrackingClicked: () -> Unit,
 
     // For tags menu
     onTagSearch: (String) -> Unit,
@@ -141,7 +140,6 @@ fun MangaScreen(
     onDownloadActionClicked: ((DownloadAction) -> Unit)?,
     onEditCategoryClicked: (() -> Unit)?,
     onEditFetchIntervalClicked: (() -> Unit)?,
-    onMigrateClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
     // SY -->
     onMetadataViewerClicked: () -> Unit,
@@ -189,7 +187,6 @@ fun MangaScreen(
             onAddToLibraryClicked = onAddToLibraryClicked,
             onWebViewClicked = onWebViewClicked,
             onWebViewLongClicked = onWebViewLongClicked,
-            onTrackingClicked = onTrackingClicked,
             onTagSearch = onTagSearch,
             onCopyTagToClipboard = onCopyTagToClipboard,
             onFilterClicked = onFilterButtonClicked,
@@ -201,7 +198,6 @@ fun MangaScreen(
             onDownloadActionClicked = onDownloadActionClicked,
             onEditCategoryClicked = onEditCategoryClicked,
             onEditIntervalClicked = onEditFetchIntervalClicked,
-            onMigrateClicked = onMigrateClicked,
             onEditNotesClicked = onEditNotesClicked,
             // SY -->
             onMetadataViewerClicked = onMetadataViewerClicked,
@@ -236,7 +232,6 @@ fun MangaScreen(
             onAddToLibraryClicked = onAddToLibraryClicked,
             onWebViewClicked = onWebViewClicked,
             onWebViewLongClicked = onWebViewLongClicked,
-            onTrackingClicked = onTrackingClicked,
             onTagSearch = onTagSearch,
             onCopyTagToClipboard = onCopyTagToClipboard,
             onFilterButtonClicked = onFilterButtonClicked,
@@ -248,7 +243,6 @@ fun MangaScreen(
             onDownloadActionClicked = onDownloadActionClicked,
             onEditCategoryClicked = onEditCategoryClicked,
             onEditIntervalClicked = onEditFetchIntervalClicked,
-            onMigrateClicked = onMigrateClicked,
             onEditNotesClicked = onEditNotesClicked,
             // SY -->
             onMetadataViewerClicked = onMetadataViewerClicked,
@@ -286,7 +280,6 @@ private fun MangaScreenSmallImpl(
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
-    onTrackingClicked: () -> Unit,
 
     // For tags menu
     onTagSearch: (String) -> Unit,
@@ -305,7 +298,6 @@ private fun MangaScreenSmallImpl(
     onDownloadActionClicked: ((DownloadAction) -> Unit)?,
     onEditCategoryClicked: (() -> Unit)?,
     onEditIntervalClicked: (() -> Unit)?,
-    onMigrateClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
     // SY -->
     onMetadataViewerClicked: () -> Unit,
@@ -381,7 +373,6 @@ private fun MangaScreenSmallImpl(
                 onClickDownload = onDownloadActionClicked,
                 onClickEditCategory = onEditCategoryClicked,
                 onClickRefresh = onRefresh,
-                onClickMigrate = onMigrateClicked,
                 onClickEditNotes = onEditNotesClicked,
                 // SY -->
                 onClickEditInfo = onEditInfoClicked.takeIf { state.manga.favorite },
@@ -479,13 +470,11 @@ private fun MangaScreenSmallImpl(
                     ) {
                         MangaActionRow(
                             favorite = state.manga.favorite,
-                            trackingCount = state.trackingCount,
                             nextUpdate = nextUpdate,
                             isUserIntervalMode = state.manga.fetchInterval < 0,
                             onAddToLibraryClicked = onAddToLibraryClicked,
                             onWebViewClicked = onWebViewClicked,
                             onWebViewLongClicked = onWebViewLongClicked,
-                            onTrackingClicked = onTrackingClicked,
                             onEditIntervalClicked = onEditIntervalClicked,
                             onEditCategory = onEditCategoryClicked,
                             // SY -->
@@ -607,7 +596,6 @@ fun MangaScreenLargeImpl(
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
-    onTrackingClicked: () -> Unit,
 
     // For tags menu
     onTagSearch: (String) -> Unit,
@@ -626,7 +614,6 @@ fun MangaScreenLargeImpl(
     onDownloadActionClicked: ((DownloadAction) -> Unit)?,
     onEditCategoryClicked: (() -> Unit)?,
     onEditIntervalClicked: (() -> Unit)?,
-    onMigrateClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
     // SY -->
     onMetadataViewerClicked: () -> Unit,
@@ -693,7 +680,6 @@ fun MangaScreenLargeImpl(
                 onClickDownload = onDownloadActionClicked,
                 onClickEditCategory = onEditCategoryClicked,
                 onClickRefresh = onRefresh,
-                onClickMigrate = onMigrateClicked,
                 onClickEditNotes = onEditNotesClicked,
                 // SY -->
                 onClickEditInfo = onEditInfoClicked.takeIf { state.manga.favorite },
@@ -786,13 +772,11 @@ fun MangaScreenLargeImpl(
                         )
                         MangaActionRow(
                             favorite = state.manga.favorite,
-                            trackingCount = state.trackingCount,
                             nextUpdate = nextUpdate,
                             isUserIntervalMode = state.manga.fetchInterval < 0,
                             onAddToLibraryClicked = onAddToLibraryClicked,
                             onWebViewClicked = onWebViewClicked,
                             onWebViewLongClicked = onWebViewLongClicked,
-                            onTrackingClicked = onTrackingClicked,
                             onEditIntervalClicked = onEditIntervalClicked,
                             onEditCategory = onEditCategoryClicked,
                             // SY -->

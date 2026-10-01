@@ -30,8 +30,6 @@ class AniListPagingSource(manga: Manga) : TrackerRecommendationPagingSource(
     override val category: StringResource
         get() = SYMR.strings.community_recommendations
 
-    override val associatedTrackerId: Long
-        get() = trackerManager.aniList.id
 
     private fun countOccurrence(arr: JsonArray, search: String): Int {
         return arr.count {

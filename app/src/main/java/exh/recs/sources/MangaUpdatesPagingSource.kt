@@ -29,8 +29,6 @@ abstract class MangaUpdatesPagingSource(manga: Manga) : TrackerRecommendationPag
     override val name: String
         get() = "MangaUpdates"
 
-    override val associatedTrackerId: Long
-        get() = trackerManager.mangaUpdates.id
 
     protected abstract val recommendationJsonObjectName: String
 

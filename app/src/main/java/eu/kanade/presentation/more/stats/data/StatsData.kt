@@ -19,10 +19,4 @@ sealed interface StatsData {
         val readChapterCount: Int,
         val downloadCount: Int,
     ) : StatsData
-
-    data class Trackers(
-        val trackedTitleCount: Int,
-        val meanScore: Double,
-        val trackerCount: Int,
-    ) : StatsData
 }

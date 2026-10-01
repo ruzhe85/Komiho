@@ -9,7 +9,6 @@ import eu.kanade.tachiyomi.data.backup.models.BackupHistory
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.backupChapterMapper
 import eu.kanade.tachiyomi.data.backup.models.backupMergedMangaReferenceMapper
-import eu.kanade.tachiyomi.data.backup.models.backupTrackMapper
 import eu.kanade.tachiyomi.source.online.MetadataSource
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import exh.source.MERGED_SOURCE_ID
@@ -91,15 +90,6 @@ class MangaBackupCreator(
             val categoriesForManga = getCategories.await(manga.id)
             if (categoriesForManga.isNotEmpty()) {
                 mangaObject.categories = categoriesForManga.map { it.order }
-            }
-        }
-
-        if (options.tracking) {
-            val tracks = database.manga_syncQueries
-                .getTracksByMangaId(manga.id, backupTrackMapper)
-                .awaitAsList()
-            if (tracks.isNotEmpty()) {
-                mangaObject.tracking = tracks
             }
         }
 

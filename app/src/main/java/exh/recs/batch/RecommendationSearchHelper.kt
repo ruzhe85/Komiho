@@ -10,7 +10,6 @@ import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.source.model.SManga
 import exh.log.xLog
 import exh.recs.sources.RecommendationPagingSource
-import exh.recs.sources.TrackerRecommendationPagingSource
 import exh.smartsearch.SmartLibrarySearchEngine
 import exh.util.ThrottleManager
 import exh.util.createPartialWakeLock
@@ -33,8 +32,6 @@ import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
-import tachiyomi.domain.track.interactor.GetTracks
-import tachiyomi.domain.track.model.Track
 import uy.kohesive.injekt.injectLazy
 import java.io.Serializable
 import java.util.Collections
@@ -43,7 +40,6 @@ import kotlin.time.Duration.Companion.seconds
 
 class RecommendationSearchHelper(val context: Context) {
     private val getLibraryManga: GetLibraryManga by injectLazy()
-    private val getTracks: GetTracks by injectLazy()
     private val networkToLocalManga: NetworkToLocalManga by injectLazy()
     private val sourceManager: SourceManager by injectLazy()
     private val preferences: SourcePreferences by injectLazy()
@@ -71,16 +67,12 @@ class RecommendationSearchHelper(val context: Context) {
     private suspend fun beginSearch(mangaList: List<Manga>) {
         val flags = preferences.recommendationSearchFlags.get()
         val libraryManga = getLibraryManga.await()
-        val tracks = getTracks.await()
-
-        // Trackers such as MAL need to be throttled more strictly
-        val stricterThrottling = SearchFlags.hasIncludeTrackers(flags)
 
         val throttleManager =
             ThrottleManager(
                 max = 3.seconds,
                 inc = 50.milliseconds,
-                initial = if (stricterThrottling) 2.seconds else 0.seconds,
+                initial = 0.seconds,
             )
 
         try {
@@ -104,10 +96,6 @@ class RecommendationSearchHelper(val context: Context) {
                     sourceManager.getOrStub(sourceManga.source),
                 ).mapNotNull { source ->
                     // Apply source filters
-                    if (source is TrackerRecommendationPagingSource && !SearchFlags.hasIncludeTrackers(flags)) {
-                        return@mapNotNull null
-                    }
-
                     if (source.associatedSourceId != null && !SearchFlags.hasIncludeSources(flags)) {
                         return@mapNotNull null
                     }
@@ -121,7 +109,7 @@ class RecommendationSearchHelper(val context: Context) {
 
                             // Try to filter out mangas that are already in the library
                             val mangas = page.mangas
-                                .filterLibraryItemsIfEnabled(source, libraryManga, tracks)
+                                .filterLibraryItemsIfEnabled(source, libraryManga)
 
                             // Add or update the result collection for the current source
                             resultsMap.getOrPut(recSourceId) {
@@ -189,7 +177,6 @@ class RecommendationSearchHelper(val context: Context) {
     private suspend fun List<SManga>.filterLibraryItemsIfEnabled(
         recSource: RecommendationPagingSource,
         libraryManga: List<LibraryManga>,
-        tracks: List<Track>,
     ): List<SManga> {
         val flags = preferences.recommendationSearchFlags.get()
 
@@ -202,15 +189,6 @@ class RecommendationSearchHelper(val context: Context) {
             recSource.associatedSourceId?.let { srcId ->
                 return@filterNot networkToLocalManga(manga.toDomainManga(srcId))
                     .let { local -> libraryManga.any { it.id == local.id } }
-            }
-
-            // Tracker recommendations can be resolved by checking if the tracker is attached to the recommendation
-            if (recSource is TrackerRecommendationPagingSource) {
-                recSource.associatedTrackerId?.let { trackerId ->
-                    return@filterNot tracks.any {
-                        it.trackerId == trackerId && it.remoteUrl.toUri().path == manga.url.toUri().path
-                    }
-                }
             }
 
             // Fallback to smart search otherwise

@@ -22,8 +22,6 @@ import eu.kanade.domain.manga.model.readerOrientation
 import eu.kanade.domain.manga.model.readingMode
 import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.sync.SyncPreferences
-import eu.kanade.domain.track.interactor.TrackChapter
-import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.data.database.models.toDomainChapter
 import eu.kanade.tachiyomi.data.download.DownloadManager
@@ -142,8 +140,6 @@ class ReaderViewModel @JvmOverloads constructor(
     val readerPreferences: ReaderPreferences = Injekt.get(),
     private val basePreferences: BasePreferences = Injekt.get(),
     private val downloadPreferences: DownloadPreferences = Injekt.get(),
-    private val trackPreferences: TrackPreferences = Injekt.get(),
-    private val trackChapter: TrackChapter = Injekt.get(),
     private val getManga: GetManga = Injekt.get(),
     private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get(),
     private val getNextChapters: GetNextChapters = Injekt.get(),
@@ -1136,10 +1132,6 @@ class ReaderViewModel @JvmOverloads constructor(
             // MihonSY: while reading, sync partial page progress to Komga (throttled).
             // Komga records "read to page N" per book, so mid-chapter progress is kept in
             // sync even before the chapter is completed.
-            syncKomgaPageProgress(readerChapter, pageIndex)
-
-            // Komiho V2 (R-3): direct book-level progress sync to Komga — the
-            // working sync path for pure Komga books (no Track entry required).
             syncKomgaBookProgress(readerChapter, pageIndex)
 
             // SY -->
@@ -1191,7 +1183,6 @@ class ReaderViewModel @JvmOverloads constructor(
         }
         // SY <--
 
-        updateTrackChapterRead(readerChapter)
         deleteChapterIfNeeded(readerChapter)
 
         val markDuplicateAsRead = libraryPreferences.markDuplicateReadChapterAsRead.get()
@@ -1861,33 +1852,6 @@ class ReaderViewModel @JvmOverloads constructor(
         class Error(val error: Throwable) : SaveImageResult
     }
 
-    /** Timestamp of the last throttled Komga page-progress sync (ms since epoch). */
-    @Volatile
-    private var lastKomgaPageSyncTimestamp = 0L
-
-    /**
-     * MihonSY: syncs the current page position of an unfinished chapter to Komga, so Komga
-     * records "read to page N" even before the chapter is completed. Throttled to avoid
-     * spamming the server on every page turn; the completion path handles the final update.
-     */
-    private fun syncKomgaPageProgress(readerChapter: ReaderChapter, pageIndex: Int) {
-        if (!trackPreferences.autoUpdateTrack.get()) return
-        val manga = manga ?: return
-        val pages = readerChapter.pages ?: return
-        if (pageIndex >= pages.lastIndex) return // completion path (updateTrackChapterRead) handles it
-        val now = System.currentTimeMillis()
-        if (now - lastKomgaPageSyncTimestamp < KOMGA_PAGE_SYNC_INTERVAL_MS) return
-        lastKomgaPageSyncTimestamp = now
-
-        viewModelScope.launchNonCancellable {
-            trackChapter.updateKomgaPageProgress(
-                manga.id,
-                readerChapter.chapter.chapter_number.toDouble(),
-                pageIndex + 1,
-            )
-        }
-    }
-
     // Komiho V2 (R-3) -->
     /**
      * bookUrl -> (上次上报时间戳, 上次上报页码)。节流按章节分别计时——共用单一时间戳时，
@@ -1938,21 +1902,6 @@ class ReaderViewModel @JvmOverloads constructor(
         syncKomgaBookProgress(chapter, pageIndex, force = true)
     }
     // Komiho V2 (R-3) <--
-
-    /**
-     * Starts the service that updates the last chapter read in sync services. This operation
-     * will run in a background thread and errors are ignored.
-     */
-    private fun updateTrackChapterRead(readerChapter: ReaderChapter) {        if (incognitoMode) return
-        if (!trackPreferences.autoUpdateTrack.get()) return
-
-        val manga = manga ?: return
-        val context = Injekt.get<Application>()
-
-        viewModelScope.launchNonCancellable {
-            trackChapter.await(context, manga.id, readerChapter.chapter.chapter_number.toDouble())
-        }
-    }
 
     /**
      * Enqueues this [chapter] to be deleted when [deletePendingChapters] is called. The download

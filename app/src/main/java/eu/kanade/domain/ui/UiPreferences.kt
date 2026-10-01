@@ -49,9 +49,7 @@ class UiPreferences(
 
     val expandFilters: Preference<Boolean> = preferenceStore.getBoolean("eh_expand_filters", false)
 
-    val hideFeedTab: Preference<Boolean> = preferenceStore.getBoolean("hide_latest_tab", false)
 
-    val feedTabInFront: Preference<Boolean> = preferenceStore.getBoolean("latest_tab_position", false)
 
     val recommendsInOverflow: Preference<Boolean> = preferenceStore.getBoolean("recommends_in_overflow", false)
 
