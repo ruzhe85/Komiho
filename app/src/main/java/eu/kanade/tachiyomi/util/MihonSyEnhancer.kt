@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelRegistry
+import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelSpec
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -277,12 +278,14 @@ object MihonSyEnhancer {
             src = denoiseForAi(src, denoiseLevel, sourceTag)
         }
 
-        // Komiho (2026-10-01): AI 灰度掩膜 —— 电子漫画网点经模型各通道独立卷积后通道发散，
-        // 表现为网点边缘的彩色色块。推理前把「近灰度像素」钳位为中性（R=G=B=亮度），
-        // 推理后把这些像素的输出色度中和掉；彩色像素（含彩色漫画整页、页内彩色插图）
-        // 原样通过，零影响。掩膜随结果在 [neutralizeChroma] 消费。
+        // Komiho (2026-10-01): AI 灰度掩膜 —— 电子漫画网点经 HTP 管线后通道发散，表现为网点
+        // 边缘的彩色色块。推理前把「近灰度像素」钳位为中性（R=G=B=亮度），推理后把这些像素
+        // 的输出色度中和掉；彩色像素（含彩色漫画整页、页内彩色插图）原样通过，零影响。
+        // 掩膜随结果在 [neutralizeChroma] 消费。
+        // ⚠️ 只对 QNN/HTP 建 —— Vulkan 从未出现色块，且原生 postproc 已整页强制中性，
+        // 在 Vulkan 上这一步是纯开销（判据与依据见 [needsGrayMask]）。
         var grayMask: Pair<ByteArray, Int>? = null
-        if (mode == 5) {
+        if (mode == 5 && needsGrayMask(preferences)) {
             val clamped = clampGrayForAi(src)
             src = clamped.first
             grayMask = clamped.second
@@ -482,6 +485,39 @@ object MihonSyEnhancer {
     }
 
     /**
+     * Komiho (2026-10-01): 本次 AI 增强实际会使用的模型（含插件模型解析）。
+     *
+     * 单独抽出来是因为 [enhance] 在**推理之前**就要知道引擎类型 —— 灰度掩膜建不建取决于这
+     * 一页会跑 Vulkan 还是 QNN（见 [needsGrayMask]），而这件事不能等 [Waifu2x.lastEngine]，
+     * 那个值要推理结束才写。「一次扫描」的语义仍由 [UpscaleModelRegistry.ensureScanned] 保证。
+     */
+    private fun resolveAiModel(preferences: ReaderPreferences): UpscaleModelSpec {
+        val app = Injekt.get<Application>()
+        UpscaleModelRegistry.ensureScanned(app)
+        return UpscaleModelRegistry.findById(preferences.aiModelId.get())
+    }
+
+    /**
+     * Komiho (2026-10-01): 本次 AI 增强是否需要 Kotlin 侧的灰度掩膜。
+     *
+     * **只有 QNN/HTP（NPU）需要**。HTP 管线的 NHWC 包装与 I/O 量化会让灰度网点的边缘产生
+     * 通道发散（彩色色块），**与权重精度无关** —— npu 的 fp16 与 int8 模型都需要（已确认）。
+     *
+     * **Vulkan 不需要**：实测从未出现色块（已确认）；而且原生 fused postproc 本来就会在
+     * 检测到灰度输入时整页强制中性输出（`waifu2x.cpp` 的 is_grayscale 判定 →
+     * postproc `constants[15]`），Kotlin 这套在 Vulkan 上只是双重冗余 —— 白白付出每页两次
+     * 整图 getPixels/setPixels 加一块 47MB（pager）／109MB（条漫）的 IntArray。
+     * 反过来说 QNN 侧**没有任何**原生灰度兜底（`qnn_backend.cpp` 里没有相关逻辑），
+     * 所以掩膜在那里是唯一保障。
+     *
+     * 判据取**偏好**而非 [Waifu2x.lastEngine]：后者要等推理结束才写，而输入钳位必须在推理
+     * **之前**完成。回落方向是安全的 —— QNN 初始化失败会静默回落 Vulkan，此时仍建掩膜只是
+     * 白做一次；反方向（偏好 Vulkan 却跑了 QNN）不可能发生。
+     */
+    private fun needsGrayMask(preferences: ReaderPreferences): Boolean =
+        resolveAiModel(preferences).backend == UpscaleModelSpec.Backend.QNN_HTP
+
+    /**
      * Komiho: GPU AI upscale branch — used when [ReaderPreferences.enhancementMode] is 5.
      *
      * The bundled ncnn model is a fixed 2x network, so [ReaderPreferences.lanczosScale] does
@@ -502,10 +538,10 @@ object MihonSyEnhancer {
             // (the model rebuilds the engine, the tile size takes the engine lock).
             // 2026-09-19 模型插件化: the persisted id may belong to a plugin model package,
             // so resolve through the registry (which lazily scans plugin APKs once per
-            // process) instead of the built-in enum alone.
+            // process) instead of the built-in enum alone — 解析见 [resolveAiModel]，
+            // [enhance] 也要用它（灰度掩膜判定），所以不在这里重复一份。
             val app = Injekt.get<Application>()
-            UpscaleModelRegistry.ensureScanned(app)
-            Waifu2x.setModel(UpscaleModelRegistry.findById(preferences.aiModelId.get()))
+            Waifu2x.setModel(resolveAiModel(preferences))
             // Komiho（跨 HTP 试验期）：不接 onQnnFallback —— 回写偏好会把用户选的 NPU
             // 条目改成 Default，导致「换台机器重试同一个模型」这件事做不了。失败只留日志
             // （Waifu2x 的 `NPU UNAVAILABLE` WARN 带 on-chip arch），当页仍回落 Vulkan 出图。
