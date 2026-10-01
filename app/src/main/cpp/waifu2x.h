@@ -48,6 +48,14 @@ public:
   int precision_mode = 0; // 0 = fp16, 1 = fp32, 2 = int8, 3 = bf16
   bool fp16_arithmetic = false;
 
+  // Komiho (2026-10-01): 上次收敛出的批次大小（片数），0 = 未知。
+  //
+  // 跨页保留的理由：批次只跟 (模型, tile 尺寸) 有关，与页无关；不保留的话每一页都要
+  // 从 1 重新 ramp 一遍，而 ramp 期的提交次数正是要摊掉的那个开销。
+  // 只持有 g_lock 时读写（process_gpu —— 故需 mutable），tile 尺寸/模型变更时清零
+  // （见 nativeUpdatePerformanceConfig / load）。
+  mutable int batch_target_hint = 0;
+
 private:
   ncnn::VulkanDevice *vkdev;
   ncnn::Net net;
@@ -58,6 +66,13 @@ private:
   ncnn::Layer *bicubic_2x;
   bool tta_mode;
   bool gpu_pipeline_available = false;
+
+  // Komiho (2026-10-01): 分配器随引擎生命周期持有 —— process_gpu 首次使用时 acquire
+  // （此刻必持有 g_lock）、~Waifu2x 里 reclaim。原先每页 acquire/reclaim 一次设备池，
+  // 只换来池内锁竞争与队列抖动；这两块显存本来就是「整台设备上唯一在跑推理的引擎」在用。
+  // 归还时机安全：此时已无活跃 VkMat —— process_gpu 里的 VkMat 全是函数局部量，早已析构。
+  mutable ncnn::VkAllocator *blob_allocator = nullptr;
+  mutable ncnn::VkAllocator *staging_allocator = nullptr;
 };
 
 #endif // WAIFU2X_H

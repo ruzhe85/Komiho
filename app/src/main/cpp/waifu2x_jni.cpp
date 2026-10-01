@@ -38,6 +38,11 @@ static std::atomic<bool> g_abort_processing{false};
 // 实测某页 Kotlin 报 4913ms，而原生三趟都是 ~2450ms ⇒ 角标因此虚高 2.4s。
 // 这里把纯耗时单独曝给 Kotlin，让它能把两段等锁都剔除。
 static std::atomic<long long> g_last_inference_ms{-1};
+// Komiho (2026-10-01): 最近一次被 abortProcessing 打断的请求 id（-1 = 没有）。
+// 用途：Kotlin 侧据此区分「这次没出结果是被**抢占**」还是「真的失败」—— 被抢占的页不必再跑
+// 一遍 CPU Lanczos 兜底（那一整幅重采样白白占着 CPU，且该页的 AI 结果稍后会重算）。
+// 按 id 判定：别的页覆盖了它只会退回「照旧跑 Lanczos」，方向是安全的。
+static std::atomic<int> g_last_aborted_id{-1};
 
 // ── Komiho (2026-10-01): 原生诊断日志环 ──────────────────────────────────────
 // LOGD/LOGE（见 native_log.h）在这里留一份进程内副本，由 Kotlin 的
@@ -356,6 +361,7 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
     g_current_id.store(id);
     // Komiho: 本次跑完前先清掉，避免并发下把上一次的纯耗时当成这次的（拿不到就保持 -1）
     g_last_inference_ms.store(-1);
+    g_last_aborted_id.store(-1);
 
     // Komiho: QNN-only 模式下 g_waifu2x 可能尚未加载（ncnn 引擎与 QNN 引擎独立），
     // 所以这里不再以 g_waifu2x 为准入判据 —— 只要 QNN 已初始化就继续往下走；
@@ -452,6 +458,14 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
           if (g_waifu2x) {
             g_waifu2x->progress_ptr = nullptr;
             g_waifu2x->should_abort_ptr = nullptr;
+          }
+
+          // Komiho: 记下「这次没出结果是被抢占打断的」，供 Kotlin 跳过 CPU 兜底
+          // （见 Waifu2x.wasAborted / MihonSyEnhancer.enhanceWithGpu）。放在这里是因为
+          // ret 已成定局，而整个 nativeProcess 都持有 g_lock ⇒ 期间只有 abortProcessing
+          // 能改这个标志（nativeClearAbortProcessing 也要拿锁，插不进来）。
+          if (ret != 0 && g_abort_processing.load()) {
+            g_last_aborted_id.store(id);
           }
 
           AndroidBitmap_unlockPixels(env, outBitmap);
@@ -835,9 +849,19 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeUpdatePerformanceConfig(
     JNIEnv *env, jobject thiz, jint sleep_ms, jint tile_size) {
   std::lock_guard<std::mutex> lock(g_lock);
   if (g_waifu2x) {
+    // Komiho: tile 尺寸变了 ⇒ 上一个尺寸收敛出的批次大小不再适用（见 batch_target_hint）。
+    if (g_waifu2x->tilesize != tile_size) g_waifu2x->batch_target_hint = 0;
     g_waifu2x->tile_sleep_ms = sleep_ms;
     g_waifu2x->tilesize = tile_size;
     LOGD("Updated performance config: sleep=%dms, tilesize=%d", sleep_ms,
          tile_size);
   }
+}
+
+// Komiho (2026-10-01): [id] 那次推理是否被 abortProcessing 打断 —— 供 Kotlin 决定要不要跑
+// CPU Lanczos 兜底。见 g_last_aborted_id 与 MihonSyEnhancer.enhanceWithGpu。
+extern "C" JNIEXPORT jboolean JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeWasAborted(JNIEnv *, jobject,
+                                                               jint id) {
+  return g_last_aborted_id.load() == id ? JNI_TRUE : JNI_FALSE;
 }

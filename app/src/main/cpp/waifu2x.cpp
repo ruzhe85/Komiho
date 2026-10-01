@@ -165,9 +165,24 @@ Waifu2x::~Waifu2x() {
     bicubic_2x->destroy_pipeline(net.opt);
     delete bicubic_2x;
   }
+  // Komiho: 归还随引擎持有的分配器（见 waifu2x.h）。此处已无活跃 VkMat ——
+  // process_gpu 的 VkMat 全是函数局部量，返回前就析构了。
+  if (vkdev) {
+    if (blob_allocator) {
+      vkdev->reclaim_blob_allocator(blob_allocator);
+      blob_allocator = nullptr;
+    }
+    if (staging_allocator) {
+      vkdev->reclaim_staging_allocator(staging_allocator);
+      staging_allocator = nullptr;
+    }
+  }
 }
 
 int Waifu2x::load(const std::string &parampath, const std::string &modelpath) {
+  // Komiho: 换模型 = 换 tile 几何与权重，上一个模型收敛出的批次大小不再适用。
+  batch_target_hint = 0;
+
   net.opt.use_vulkan_compute = vkdev ? true : false;
   net.opt.use_fp16_packed = false;
   net.opt.use_fp16_storage = false;
@@ -335,25 +350,17 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
     }
   }
 
-  ncnn::VkAllocator *blob_vkallocator = vkdev->acquire_blob_allocator();
-  ncnn::VkAllocator *staging_vkallocator = vkdev->acquire_staging_allocator();
-  if (!blob_vkallocator || !staging_vkallocator) {
-    if (blob_vkallocator)
-      vkdev->reclaim_blob_allocator(blob_vkallocator);
-    if (staging_vkallocator)
-      vkdev->reclaim_staging_allocator(staging_vkallocator);
+  // Komiho: 分配器随引擎生命周期持有（见 waifu2x.h）—— 首次在这里 acquire（此刻必持有
+  // g_lock，process_gpu 只从 nativeProcess 进），由 ~Waifu2x 归还。原来每页 acquire/reclaim
+  // 一次设备池，只是白白引入池内锁竞争与队列抖动。
+  if (!blob_allocator) blob_allocator = vkdev->acquire_blob_allocator();
+  if (!staging_allocator) staging_allocator = vkdev->acquire_staging_allocator();
+  if (!blob_allocator || !staging_allocator) {
+    LOGE("Fused process: GPU allocators unavailable");
     return -1;
   }
-
-  struct AllocatorGuard {
-    const ncnn::VulkanDevice *device;
-    ncnn::VkAllocator *blob;
-    ncnn::VkAllocator *staging;
-    ~AllocatorGuard() {
-      device->reclaim_blob_allocator(blob);
-      device->reclaim_staging_allocator(staging);
-    }
-  } allocator_guard{vkdev, blob_vkallocator, staging_vkallocator};
+  ncnn::VkAllocator *blob_vkallocator = blob_allocator;
+  ncnn::VkAllocator *staging_vkallocator = staging_allocator;
 
   ncnn::Option opt = net.opt;
   opt.blob_vkallocator = blob_vkallocator;
@@ -396,14 +403,29 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
   }
   batch_capacity = std::min(batch_capacity, tile_count);
 
-  // Komiho: 起步就给满 batch_capacity。单 tile 的 command buffer 会让「录制下一批」
-  // 的那段时间里 GPU 完全空闲（submit_and_wait 阻塞 CPU，CPU 再录制 → GPU 干等），
-  // 这是 Vulkan 路径最大的空转来源。首帧交互风险由下面的 ui_busy 让位检查 +
-  // 「命中即打回 1」的规则覆盖，不再靠「起步 1」来保护。
-  int batch_target = batch_capacity;
+  // Komiho: 批次大小由一个批次的**实测提交时长**闭环控制，而不是固定片数。
+  //
+  // 原实现用绝对阈值（>=24ms 收缩 / <=12ms 增长）判断，但单片在 256 tile 下就要 ~50ms、
+  // 128 tile 下 ~15ms —— 任何有意义的批次都超过 24ms，于是批次必被拍到 1 且再也回不来
+  // （实测日志 18/18 次都是 4→2→1 之后一直是 1），「一批一次 submit_and_wait」的那份
+  // 固定开销（实测 ~14ms/次）因此完全没被摊掉。
+  //
+  // 新判据 = 对齐一个**固定时长窗口**：窗口恒定 ⇒ 单次不可中断地占用 GPU 的时长可控
+  // （UI 友好性不退化），片数则自动取到该设备 / 该 tile 允许的最大值。
+  //   window > 1.3 × target → 收缩（/2）
+  //   window < 0.7 × target → 增长（+1：比 ×2 收敛更准，ramp 只在新引擎上付一次）
+  constexpr int64_t kBatchWindowTargetUs = 100000; // 100ms
+  constexpr int64_t kBatchWindowHighUs = 130000;
+  constexpr int64_t kBatchWindowLowUs = 70000;
+
+  // 跨页保留收敛值（waifu2x.h 的 batch_target_hint）：批次只跟 (模型, tile 尺寸) 有关、
+  // 与页无关，保留它才不必每页重新 ramp。tile 尺寸/模型变更时由 JNI / load 清零。
+  int batch_target =
+      batch_target_hint > 0 ? std::min(batch_target_hint, batch_capacity) : 1;
   LOGD("Fused Vulkan scheduling: heap_budget=%uMB batch_capacity=%d "
-       "initial_batch=%d tiles=%d",
-       heap_budget_mb, batch_capacity, batch_target, tile_count);
+       "initial_batch=%d tiles=%d window_target=%lldus",
+       heap_budget_mb, batch_capacity, batch_target, tile_count,
+       static_cast<long long>(kBatchWindowTargetUs));
 
   const int input_tile_w = tilesize + prepadding * 2;
   const int input_tile_h = tilesize + prepadding * 2;
@@ -604,20 +626,23 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
           extractor_slots[i] = empty_extractor;
         batch_size = 0;
 
+        // Komiho: 按「实测窗口」闭环收敛（判据见调度处说明）。首个批次含整图上传，
+        // 窗口会天然偏大一点，但 upload ≈ 20ms 不足以把 2 片推过 130ms，不会误伤。
         const int previous_batch_target = batch_target;
         if (ui_busy_ptr && ui_busy_ptr->load()) {
           batch_target = 1;
-        } else if (submit_us >= 24000 && batch_target > 1) {
+        } else if (submit_us >= kBatchWindowHighUs && batch_target > 1) {
           batch_target = std::max(1, batch_target / 2);
-        } else if (submit_us <= 12000 && batch_target < batch_capacity) {
-          // Komiho: 被打回 1 之后按 ×2 恢复，不再一次只 +1 —— 否则要爬好几批才回到
-          // batch_capacity，中间那几批又是一次一个 tile 的空转。
-          batch_target = std::min(batch_capacity, batch_target * 2);
+        } else if (submit_us <= kBatchWindowLowUs && batch_target < batch_capacity) {
+          batch_target++;
         }
+        batch_target_hint = batch_target;
         if (batch_target != previous_batch_target) {
-          LOGD("Fused Vulkan adaptive batch: %d -> %d after %lldus submit",
+          LOGD("Fused Vulkan adaptive batch: %d -> %d after %lldus submit "
+               "(window_target=%lldus capacity=%d)",
                previous_batch_target, batch_target,
-               static_cast<long long>(submit_us));
+               static_cast<long long>(submit_us),
+               static_cast<long long>(kBatchWindowTargetUs), batch_capacity);
         }
 
         if (should_abort_ptr && should_abort_ptr->load())

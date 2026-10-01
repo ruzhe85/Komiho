@@ -163,6 +163,15 @@ class WebtoonViewer(
         recycler.adapter = adapter
         recycler.addOnScrollListener(
             object : RecyclerView.OnScrollListener() {
+                // Komiho (2026-10-01): 手指拖动期间让原生推理让位（见 Waifu2x.setUiBusy）。
+                // 条漫只认 DRAGGING（手指真在动）：SETTLING 的惯性滚动也占位会把增强饿死
+                // —— 单页推理是 8 秒级，而连续滚动时惯性期很长。
+                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                    eu.kanade.tachiyomi.util.waifu2x.Waifu2x.setUiBusy(
+                        newState == RecyclerView.SCROLL_STATE_DRAGGING,
+                    )
+                }
+
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                     onScrolled()
 

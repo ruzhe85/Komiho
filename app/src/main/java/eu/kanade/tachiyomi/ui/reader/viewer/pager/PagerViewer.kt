@@ -133,6 +133,11 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
         override fun onPageScrollStateChanged(state: Int) {
             isIdle = state == ViewPager.SCROLL_STATE_IDLE
+            // Komiho (2026-10-01): 手指拖动期间让原生推理让位（见 [Waifu2x.setUiBusy]）。
+            // 只认 DRAGGING、不认 SETTLING：抬手后的惯性动画很短，而批次大小本身已被时间窗口
+            // 封顶（`waifu2x.cpp`），连惯性期也让位只会白白推迟出图。
+            // 这套让位逻辑在原生里一直存在，但此前没有任何 Kotlin 调用点 —— 等于死代码。
+            Waifu2x.setUiBusy(state == ViewPager.SCROLL_STATE_DRAGGING)
         }
     }
 
@@ -253,6 +258,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     fun onPrepareStart(pageIndex: Int, visible: Boolean) {
         val previous = lastPreparePage
         lastPreparePage = pageIndex
+        // Komiho (2026-10-01): 标记「当前可见页」，供 Waifu2x 的可见页优先闸门把这张页的推理
+        // 排到预取之前（见 Waifu2x.prioritizeEnhancement）。只在 visible 时写 —— 预取调用点
+        // 传 false，不能把它解读成「可见页已经换了」。
+        if (visible) Waifu2x.visiblePageIndex = pageIndex
         if (!visible || previous < 0 || previous == pageIndex) return
         prewarmLog("preempt page=$previous by-page=$pageIndex")
         Waifu2x.abortProcessing()

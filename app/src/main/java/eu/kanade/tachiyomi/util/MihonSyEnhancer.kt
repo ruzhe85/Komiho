@@ -560,6 +560,14 @@ object MihonSyEnhancer {
                 // 无低通，AI 2x 的高频网点会拍频出摩尔纹（回缩在解码器做，因为它持有视图尺寸）。
                 return upscaled
             }
+            // Komiho (2026-10-01): 被抢占打断的页不跑 CPU 兜底 —— 那一整幅重采样要占住
+            // CPU 0.5~1 秒（还会和别的页的增强抢核），而这一页之所以被打断，正是因为可见页
+            // 已经换人；它的原始解码图本来就在屏幕上，AI 结果稍后重算时自然会再来。
+            // 返回 null 等于「保持原始解码图」。
+            if (Waifu2x.wasAborted(pageIndex)) {
+                logcat(LogPriority.DEBUG) { "AI upscale preempted; keeping original decode" }
+                return null
+            }
             logcat(LogPriority.WARN) { "AI upscale produced no result; falling back to Lanczos3" }
         } else {
             logcat(LogPriority.WARN) { "AI upscale unavailable for this ABI; falling back to Lanczos3" }
