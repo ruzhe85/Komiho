@@ -84,7 +84,6 @@ class SyncManager(
             libraryEntries = syncOptions.libraryEntries,
             categories = syncOptions.categories,
             chapters = syncOptions.chapters,
-            tracking = syncOptions.tracking,
             history = syncOptions.history,
             extensionStores = syncOptions.extensionStores,
             appSettings = syncOptions.appSettings,

@@ -119,6 +119,8 @@ fun EditMangaDialog(
         },
     )
 }
+
+private fun onViewCreated(manga: Manga, context: Context, binding: EditMangaDialogBinding, scope: CoroutineScope) {
     loadCover(manga, binding)
 
     val statusAdapter: ArrayAdapter<String> = ArrayAdapter(
