@@ -356,22 +356,25 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
   opt.workspace_vkallocator = blob_vkallocator;
   opt.staging_vkallocator = staging_vkallocator;
 
+  // Komiho: 上传不再单独 submit —— 记进第一个 command buffer，与首个批次的
+  // preproc/推理/postproc 一起提交，省掉一次 submit_and_wait 往返。
+  // input_gpu 仍在此处显式分配：下面 preproc 的 constants 要读它的 w/h/cstep，
+  // 形状必须在录制阶段就确定，不能等 record_clone 时才 create。
   ncnn::VkMat input_gpu;
-  {
-    ncnn::VkCompute upload(vkdev);
-    upload.record_clone(packed_input, input_gpu, opt);
-    const int upload_result = upload.submit_and_wait();
-    if (upload_result != 0 || input_gpu.empty()) {
-      LOGE("Fused upload failed: result=%d empty=%d", upload_result,
-           input_gpu.empty() ? 1 : 0);
-      return -1;
-    }
+  input_gpu.create(w, h, (size_t)4u, 1, blob_vkallocator);
+  if (input_gpu.empty()) {
+    LOGE("Fused input allocation failed");
+    return -1;
   }
 
   ncnn::VkMat output_gpu;
   output_gpu.create(target_w, target_h, (size_t)4u, 1, blob_vkallocator);
   if (output_gpu.empty())
     return -1;
+
+  // Komiho: 回读目标（包装调用方的输出位图内存）提前建好 —— 最后一个批次的
+  // command buffer 末尾会直接录制 output_gpu → packed_output 的克隆。
+  ncnn::Mat packed_output(target_w, target_h, out_pixels, (size_t)4u, 1);
 
   const int xtiles = (w + tilesize - 1) / tilesize;
   const int ytiles = (h + tilesize - 1) / tilesize;
@@ -389,10 +392,11 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
   }
   batch_capacity = std::min(batch_capacity, tile_count);
 
-  // Start with a short command buffer so the first UI interaction cannot be
-  // trapped behind several tiles. Grow only when measured submissions are
-  // short enough to remain friendly to frame scheduling.
-  int batch_target = 1;
+  // Komiho: 起步就给满 batch_capacity。单 tile 的 command buffer 会让「录制下一批」
+  // 的那段时间里 GPU 完全空闲（submit_and_wait 阻塞 CPU，CPU 再录制 → GPU 干等），
+  // 这是 Vulkan 路径最大的空转来源。首帧交互风险由下面的 ui_busy 让位检查 +
+  // 「命中即打回 1」的规则覆盖，不再靠「起步 1」来保护。
+  int batch_target = batch_capacity;
   LOGD("Fused Vulkan scheduling: heap_budget=%uMB batch_capacity=%d "
        "initial_batch=%d tiles=%d",
        heap_budget_mb, batch_capacity, batch_target, tile_count);
@@ -414,6 +418,8 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
   int batch_size = 0;
   int completed_tiles = 0;
   ncnn::VkCompute command(vkdev);
+  // Komiho: 整图上传记进第一个 command buffer，随首个批次一起提交（见上方说明）。
+  command.record_clone(packed_input, input_gpu, opt);
   std::vector<ncnn::VkMat> retained_mats;
   retained_mats.reserve(batch_capacity);
 
@@ -558,6 +564,11 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
       batch_size++;
 
       const bool is_last_tile = xi == xtiles - 1 && yi == ytiles - 1;
+      if (is_last_tile) {
+        // Komiho: 回读并入最后一个批次，省掉一次 submit_and_wait 往返。
+        // 必须录在末块 postproc 之后 —— 此时 output_gpu 才写全。
+        command.record_clone(output_gpu, packed_output, opt);
+      }
       if (batch_size >= batch_target || is_last_tile) {
         bool paused_before_submit = false;
         while (ui_busy_ptr && ui_busy_ptr->load()) {
@@ -595,7 +606,9 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
         } else if (submit_us >= 24000 && batch_target > 1) {
           batch_target = std::max(1, batch_target / 2);
         } else if (submit_us <= 12000 && batch_target < batch_capacity) {
-          batch_target++;
+          // Komiho: 被打回 1 之后按 ×2 恢复，不再一次只 +1 —— 否则要爬好几批才回到
+          // batch_capacity，中间那几批又是一次一个 tile 的空转。
+          batch_target = std::min(batch_capacity, batch_target * 2);
         }
         if (batch_target != previous_batch_target) {
           LOGD("Fused Vulkan adaptive batch: %d -> %d after %lldus submit",
@@ -613,22 +626,8 @@ int Waifu2x::process_gpu(const ncnn::Mat &packed_input, void *out_pixels,
     }
   }
 
-  ncnn::Mat packed_output(target_w, target_h, out_pixels, (size_t)4u, 1);
-  {
-    while (ui_busy_ptr && ui_busy_ptr->load()) {
-      if (should_abort_ptr && should_abort_ptr->load())
-        return -1;
-      std::this_thread::sleep_for(std::chrono::milliseconds(8));
-    }
-    ncnn::VkCompute download(vkdev);
-    download.record_clone(output_gpu, packed_output, opt);
-    const int download_result = download.submit_and_wait();
-    if (download_result != 0) {
-      LOGE("Fused download failed: result=%d", download_result);
-      return -1;
-    }
-  }
-
+  // Komiho: 回读已并入最后一个批次（见上面 is_last_tile 处录制的克隆），
+  // 这里不再单独提交一次。
   if (progress_ptr)
     progress_ptr->store(100);
   return 0;

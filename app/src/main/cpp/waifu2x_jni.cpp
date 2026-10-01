@@ -205,6 +205,54 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
   int ret = -1;
   jobject outBitmap = nullptr;
 
+  // Komiho: 位图拷贝与 alpha 探测都是纯 CPU 工作，不需要引擎锁 —— 挪到 g_lock
+  // 之外，让本页的搬运与上一页（可能仍在锁内跑 GPU）的推理重叠，并顺带缩短
+  // 排队（Kotlin 侧记的 wait = nativeClearAbortProcessing + nativeProcess 两段
+  // 等锁之和）。锁内只留真正的推理。
+  AndroidBitmapInfo info{};
+  if (AndroidBitmap_getInfo(env, bitmap, &info) < 0)
+    return bitmap;
+  if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888)
+    return bitmap;
+
+  void *pixels;
+  if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0)
+    return bitmap;
+
+  const int w = info.width;
+  const int h = info.height;
+  const int stride = info.stride;
+
+  // Keep a packed RGBA copy for the fused Vulkan upload. This also lets the
+  // staged path reconstruct its planar input without keeping Bitmap locked.
+  ncnn::Mat packed_input(w, h, (size_t)4u, 1);
+  if (packed_input.empty()) {
+    AndroidBitmap_unlockPixels(env, bitmap);
+    return bitmap;
+  }
+  for (int y = 0; y < h; y++) {
+    memcpy((unsigned char *)packed_input.data + (size_t)y * w * 4,
+           (const unsigned char *)pixels + (size_t)y * stride,
+           (size_t)w * 4);
+  }
+  AndroidBitmap_unlockPixels(env, bitmap);
+
+  // Komiho: alpha 探测同样挪出锁 —— 纯 CPU 扫描，只依赖 packed_input。
+  bool input_has_alpha =
+      (info.flags & ANDROID_BITMAP_FLAGS_ALPHA_MASK) !=
+      ANDROID_BITMAP_FLAGS_ALPHA_OPAQUE;
+  if (input_has_alpha) {
+    input_has_alpha = false;
+    const unsigned char *packed_pixels =
+        static_cast<const unsigned char *>(packed_input.data);
+    for (int i = 0; i < w * h; i++) {
+      if (packed_pixels[i * 4 + 3] != 255) {
+        input_has_alpha = true;
+        break;
+      }
+    }
+  }
+
   // Inference Scope (GPU) - Holds Lock for entire duration of incremental
   // process
   {
@@ -221,34 +269,6 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
     const bool qnn_active = qnn_backend::is_initialized();
     if (!g_waifu2x && !qnn_active)
       return bitmap;
-
-    AndroidBitmapInfo info{};
-    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0)
-      return bitmap;
-    if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888)
-      return bitmap;
-
-    void *pixels;
-    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0)
-      return bitmap;
-
-    int w = info.width;
-    int h = info.height;
-    int stride = info.stride;
-
-    // Keep a packed RGBA copy for the fused Vulkan upload. This also lets the
-    // staged path reconstruct its planar input without keeping Bitmap locked.
-    ncnn::Mat packed_input(w, h, (size_t)4u, 1);
-    if (packed_input.empty()) {
-      AndroidBitmap_unlockPixels(env, bitmap);
-      return bitmap;
-    }
-    for (int y = 0; y < h; y++) {
-      memcpy((unsigned char *)packed_input.data + (size_t)y * w * 4,
-             (const unsigned char *)pixels + (size_t)y * stride,
-             (size_t)w * 4);
-    }
-    AndroidBitmap_unlockPixels(env, bitmap);
 
     // Komiho: 输出倍率 —— QNN 引擎自报 scale；否则用 ncnn 引擎的。两者都无 → 失败。
     int out_scale = qnn_active ? qnn_backend::scale() : 0;
@@ -280,21 +300,6 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
           if (g_waifu2x) {
             g_waifu2x->progress_ptr = &g_progress;
             g_waifu2x->should_abort_ptr = &g_abort_processing;
-          }
-
-          bool input_has_alpha =
-              (info.flags & ANDROID_BITMAP_FLAGS_ALPHA_MASK) !=
-              ANDROID_BITMAP_FLAGS_ALPHA_OPAQUE;
-          if (input_has_alpha) {
-            input_has_alpha = false;
-            const unsigned char *packed_pixels =
-                static_cast<const unsigned char *>(packed_input.data);
-            for (int i = 0; i < w * h; i++) {
-              if (packed_pixels[i * 4 + 3] != 255) {
-                input_has_alpha = true;
-                break;
-              }
-            }
           }
 
           // Komiho: QNN/HTP 优先 —— 引擎由 Kotlin 侧按模型 backend 初始化；
