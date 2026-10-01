@@ -602,7 +602,7 @@ class WebtoonViewer(
         // 指纹把「首发噪音」与「用户真改了设置」区分开；指纹相同直接跳过。
         val fingerprint = config.imageFingerprint()
         if (fingerprint == lastImageFingerprint) {
-            android.util.Log.d(KOMIHA_REBUILD_TAG, "skip rebuild: image settings unchanged")
+            exh.log.DiagLog.d(KOMIHA_REBUILD_TAG, "skip rebuild: image settings unchanged")
             return
         }
         lastImageFingerprint = fingerprint
@@ -611,7 +611,7 @@ class WebtoonViewer(
         refreshJob?.cancel()
         refreshJob = scope.launch {
             delay(REFRESH_COALESCE_DELAY_MS)
-            android.util.Log.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
+            exh.log.DiagLog.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
             rebuildAdapter()
         }
     }

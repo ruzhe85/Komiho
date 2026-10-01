@@ -2,6 +2,7 @@
 #include "shaders.h"
 #include "command.h"
 #include "cpu.h"
+#include "native_log.h"
 #include <algorithm>
 #include <android/log.h>
 #include <chrono>
@@ -18,9 +19,12 @@
 #include <arm_neon.h>
 #endif
 
+// Komiho (2026-10-01): 原生日志改走 mihonsy_native_log（实现同在 waifu2x_jni.cpp）——
+// 除 logcat 外再写一份进程内环，供「导出诊断日志」在无法使用 adb 的设备上取走。
+// 宏签名与用法不变。
 #define TAG "Waifu2xNative"
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+#define LOGD(...) mihonsy_native_log(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGE(...) mihonsy_native_log(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace {
 

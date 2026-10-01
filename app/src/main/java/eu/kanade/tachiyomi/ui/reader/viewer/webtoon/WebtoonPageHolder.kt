@@ -135,7 +135,7 @@ class WebtoonPageHolder(
     fun bind(page: ReaderPage) {
         // Komiho 诊断：条漫没有 pager 那套 holder 日志，重复绑定只能靠这一行看出来
         // （同一 id 出现两次 = 同一个 holder 被重绑；不同 id = holder 被重建）。
-        android.util.Log.d(
+        exh.log.DiagLog.d(
             KOMIHA_WEBTOON_TAG,
             "bind page=${page.index} id=${System.identityHashCode(this)}",
         )
@@ -251,7 +251,7 @@ class WebtoonPageHolder(
         ) {
             // 同一页 + 同一套「影响像素的设置」已经渲染过（另一条状态重发，或同一 holder 被重绑）
             // → 直接退出，不再烧一次解码 + 增强。画面还在，跳过不影响显示。
-            android.util.Log.d(
+            exh.log.DiagLog.d(
                 KOMIHA_WEBTOON_TAG,
                 "page=${currentPage.index} skip reason=already-rendered " +
                     "id=${System.identityHashCode(this)}",
@@ -294,7 +294,7 @@ class WebtoonPageHolder(
             renderedPage = currentPage
             renderedEnhancementMode = enhancementMode
             renderedEnhancementKey = enhancementKey
-            android.util.Log.d(
+            exh.log.DiagLog.d(
                 KOMIHA_WEBTOON_TAG,
                 "render page=${currentPage.index} mode=$enhancementMode " +
                     "id=${System.identityHashCode(this)}",

@@ -576,7 +576,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         // 增强（请求 memory/disk 双 DISABLED，没有缓存兜底）。指纹相同直接返回。
         val fingerprint = config.imageFingerprint()
         if (fingerprint == lastImageFingerprint) {
-            android.util.Log.d(KOMIHA_REBUILD_TAG, "skip rebuild: image settings unchanged")
+            exh.log.DiagLog.d(KOMIHA_REBUILD_TAG, "skip rebuild: image settings unchanged")
             return
         }
         lastImageFingerprint = fingerprint
@@ -585,7 +585,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         refreshJob?.cancel()
         refreshJob = scope.launch {
             delay(REFRESH_COALESCE_DELAY_MS)
-            android.util.Log.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
+            exh.log.DiagLog.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
             val currentItem = pager.currentItem
             preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
             adapter.refresh()
@@ -694,7 +694,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
  * 「为什么预载从来没有产出过增强结果」。release 下 logcat() 的 DEBUG 会被
  * XLog 的 WARN 级别吞掉，所以这里直接用 android.util.Log。
  */
-private fun prewarmLog(msg: String) = android.util.Log.d("Waifu2xPrewarm", msg)
+private fun prewarmLog(msg: String) = exh.log.DiagLog.d("Waifu2xPrewarm", msg)
 
 /** Komiho 诊断：适配器重建日志（webtoon 侧同名 tag，便于一起 grep）。 */
 private const val KOMIHA_REBUILD_TAG = "Waifu2xRebuild"

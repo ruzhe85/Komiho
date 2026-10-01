@@ -888,7 +888,7 @@ class ReaderViewModel @JvmOverloads constructor(
             if (hit != null) {
                 // Komiho 诊断：这条决策要能在 logcat 里看见（logcat{} 走 XLog，不进 logcat），
                 // 否则排查「第一帧用了哪种 viewer」时只能靠猜。
-                android.util.Log.d(
+                exh.log.DiagLog.d(
                     KOMIHA_AUTOWEBTOON_TAG,
                     "pre-resolve: page ${hit.number} is a tall strip -> webtoon before first feed",
                 )
@@ -899,7 +899,7 @@ class ReaderViewModel @JvmOverloads constructor(
                 markAutoWebtoonForChapter(chapterUrl)
             } else {
                 if (concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)) {
-                    android.util.Log.d(
+                    exh.log.DiagLog.d(
                         KOMIHA_AUTOWEBTOON_TAG,
                         "pre-resolve: none of the first $checkCount pages is tall -> keep page mode",
                     )
@@ -971,7 +971,7 @@ class ReaderViewModel @JvmOverloads constructor(
         logcat { "MihonSY auto-webtoon: chapter $chapterUrl switches to webtoon (in-memory, not saved)" }
         // Komiho 诊断：这条切换会让 Activity 重建 viewer ⇒ 所有可见页重新解码 + 增强。
         // 上面那句 logcat{} 走 XLog，不进 logcat，所以这里补一条 android.util.Log。
-        android.util.Log.d(
+        exh.log.DiagLog.d(
             KOMIHA_AUTOWEBTOON_TAG,
             "auto-webtoon switch chapter=$chapterUrl mode=$previousMode->${getMangaReadingMode()} " +
                 "(viewer will be recreated)",
@@ -989,7 +989,7 @@ class ReaderViewModel @JvmOverloads constructor(
         val currChapter = currChapters.currChapter
         currChapter.requestedPage = currChapter.chapter.last_page_read
         // Komiho 诊断：viewer 重建 = 可见页全部重算（增强不留缓存），值得在日志里留痕。
-        android.util.Log.d(
+        exh.log.DiagLog.d(
             KOMIHA_AUTOWEBTOON_TAG,
             "recreateViewerForAutoMode: sending Event.RecreateViewer " +
                 "(requestedPage=${currChapter.requestedPage})",

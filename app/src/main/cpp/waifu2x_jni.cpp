@@ -1,19 +1,30 @@
 #include "waifu2x.h"
 #include "qnn_backend.h"
+#include "native_log.h"
 #include <android/bitmap.h>
 #include <android/log.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdarg>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <deque>
 #include <jni.h>
 #include <mutex>
+#include <string>
+#include <utility>
 #include <vector>
 
+// Komiho (2026-10-01): 原生日志改走 mihonsy_native_log —— 除 logcat 外再写一份进程内环，
+// 供「设置-高级-导出诊断日志」在无法使用 adb 的设备（鸿蒙等）上取走。宏签名与用法不变。
+// 详见 native_log.h。
 #define TAG "Waifu2xJNI"
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+#define LOGD(...) mihonsy_native_log(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGE(...) mihonsy_native_log(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 static Waifu2x *g_waifu2x = nullptr;
 static std::mutex g_lock;
@@ -27,6 +38,89 @@ static std::atomic<bool> g_abort_processing{false};
 // 实测某页 Kotlin 报 4913ms，而原生三趟都是 ~2450ms ⇒ 角标因此虚高 2.4s。
 // 这里把纯耗时单独曝给 Kotlin，让它能把两段等锁都剔除。
 static std::atomic<long long> g_last_inference_ms{-1};
+
+// ── Komiho (2026-10-01): 原生诊断日志环 ──────────────────────────────────────
+// LOGD/LOGE（见 native_log.h）在这里留一份进程内副本，由 Kotlin 的
+// Waifu2x.nativeLogs() 取走、合并进「设置-高级-导出诊断日志」。鸿蒙这类设备装不了
+// adb，导出文件是唯一能看到 Fused Vulkan scheduling / adaptive batch /
+// processing completed in N ms 的地方 —— 判断瓶颈在排队、批次还是纯计算全靠它。
+namespace {
+
+// 8000 条：一页约 10~30 行（scheduling 1 + adaptive batch 每批 1 + completed 1），
+// 够覆盖一两百页；内存上限约 1MB。
+constexpr size_t kNativeLogCapacity = 8000;
+
+struct NativeLogEntry {
+  int64_t wall_ms;
+  char level;
+  std::string tag;
+  std::string message;
+};
+
+std::mutex g_native_log_mutex;
+std::deque<NativeLogEntry> g_native_log_ring;
+
+// epoch 毫秒 —— 与 Kotlin 侧 System.currentTimeMillis() 同基准，导出时才能合并排序。
+int64_t native_log_wall_ms() {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return static_cast<int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+// 与 logcat 的单字母级别对齐（导出文件的第一列就是它）。
+char native_log_level(int android_priority) {
+  if (android_priority >= ANDROID_LOG_ERROR) return 'E';
+  if (android_priority >= ANDROID_LOG_WARN) return 'W';
+  if (android_priority >= ANDROID_LOG_INFO) return 'I';
+  if (android_priority >= ANDROID_LOG_DEBUG) return 'D';
+  return 'V';
+}
+
+} // namespace
+
+void mihonsy_native_log(int android_priority, const char *tag, const char *fmt,
+                        ...) {
+  char buf[1024];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+
+  // logcat 侧行为不变（原来就是 __android_log_print(prio, TAG, fmt, ...)）。
+  __android_log_print(android_priority, tag, "%s", buf);
+
+  NativeLogEntry entry;
+  entry.wall_ms = native_log_wall_ms();
+  entry.level = native_log_level(android_priority);
+  entry.tag = tag;
+  entry.message = buf;
+  // 环是**按行**序列化的，消息里不能出现 '\n'（会破坏 Kotlin 侧的行解析）。
+  for (char &c : entry.message) {
+    if (c == '\n' || c == '\r') c = ' ';
+  }
+
+  std::lock_guard<std::mutex> lock(g_native_log_mutex);
+  g_native_log_ring.push_back(std::move(entry));
+  while (g_native_log_ring.size() > kNativeLogCapacity)
+    g_native_log_ring.pop_front();
+}
+
+std::string mihonsy_native_log_dump() {
+  std::lock_guard<std::mutex> lock(g_native_log_mutex);
+  std::string out;
+  out.reserve(g_native_log_ring.size() * 96);
+  for (const NativeLogEntry &e : g_native_log_ring) {
+    out += std::to_string(e.wall_ms);
+    out += '|';
+    out += e.level;
+    out += '|';
+    out += e.tag;
+    out += '|';
+    out += e.message;
+    out += '\n';
+  }
+  return out;
+}
 
 // ── Komiho: QNN/HTP (Qualcomm NPU) 接线 ─────────────────────────────────────
 // 引擎选择发生在 Kotlin 侧（ensureEngine 按模型 backend 调 nativeInitQnn 或
@@ -724,6 +818,16 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeSetUiBusy(JNIEnv *env,
                                                               jobject thiz,
                                                               jboolean busy) {
   g_ui_busy.store(busy ? 1 : 0);
+}
+
+// Komiho (2026-10-01): 原生日志环快照，供 Kotlin 的 Waifu2x.nativeLogs() 取出、并入
+// 「设置-高级-导出诊断日志」。每行 `<epochMillis>|<level>|<tag>|<message>`，见 native_log.h。
+// 只在用户点导出的那一刻调用一次，不在推理热路径上。
+extern "C" JNIEXPORT jstring JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeGetLogs(JNIEnv *env,
+                                                            jobject thiz) {
+  const std::string logs = mihonsy_native_log_dump();
+  return env->NewStringUTF(logs.c_str());
 }
 
 extern "C" JNIEXPORT void JNICALL

@@ -4103,7 +4103,13 @@ private fun SettingsTab(
                     onPreferenceClick = {
                         scope.launch(Dispatchers.IO) {
                             val uri = runCatching {
-                                val logs = DiagnosticLogBuffer.getLogs()
+                                // Komiho (2026-10-01): 合并原生日志环 —— 原生日志（Waifu2xNative /
+                                // Waifu2xJNI）只进系统 logcat，进程内缓冲读不到它；鸿蒙这类设备装不了
+                                // adb，导出文件是唯一能看到批次调度与纯耗时的地方。三方都按 epoch
+                                // 毫秒排序合并，所以「Gray mask → 原生调度 → pure=」能对齐。
+                                val logs = DiagnosticLogBuffer.getLogsMerged(
+                                    eu.kanade.tachiyomi.util.waifu2x.Waifu2x.nativeLogs(),
+                                )
                                 val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
                                     .format(java.util.Date())
                                 val file = context.createFileInCacheDir("komiho_debug_$stamp.txt")
