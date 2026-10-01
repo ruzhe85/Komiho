@@ -239,9 +239,6 @@ fun LibraryBottomActionMenu(
     onDownloadClicked: ((DownloadAction) -> Unit)?,
     onDeleteClicked: () -> Unit,
     // SY -->
-    onClickCleanTitles: (() -> Unit)?,
-    onClickCollectRecommendations: (() -> Unit)?,
-    onClickAddToMangaDex: (() -> Unit)?,
     onClickResetInfo: (() -> Unit)?,
     // SY <--
     modifier: Modifier = Modifier,
@@ -270,10 +267,7 @@ fun LibraryBottomActionMenu(
                 }
             }
             // SY -->
-            val showOverflow = onClickCleanTitles != null ||
-                onClickAddToMangaDex != null ||
-                onClickResetInfo != null ||
-                onClickCollectRecommendations != null
+            val showOverflow = onClickResetInfo != null
             val configuration = LocalConfiguration.current
             val moveMarkPrev = remember { !configuration.isTabletUi() }
             var overFlowOpen by remember { mutableStateOf(false) }
@@ -350,24 +344,6 @@ fun LibraryBottomActionMenu(
                             DropdownMenuItem(
                                 text = { Text(stringResource(MR.strings.action_mark_as_unread)) },
                                 onClick = onMarkAsUnreadClicked,
-                            )
-                        }
-                        if (onClickCleanTitles != null) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(SYMR.strings.action_clean_titles)) },
-                                onClick = onClickCleanTitles,
-                            )
-                        }
-                        if (onClickCollectRecommendations != null) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(SYMR.strings.rec_search_short)) },
-                                onClick = onClickCollectRecommendations,
-                            )
-                        }
-                        if (onClickAddToMangaDex != null) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(SYMR.strings.mangadex_add_to_follows)) },
-                                onClick = onClickAddToMangaDex,
                             )
                         }
                         if (onClickResetInfo != null) {

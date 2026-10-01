@@ -16,65 +16,41 @@ import eu.kanade.presentation.browse.SourceOptionsDialog
 import eu.kanade.presentation.browse.SourcesScreen
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.TabContent
-import eu.kanade.tachiyomi.ui.browse.source.SourcesScreen.SmartSearchConfig
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
-import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreenModel.Listing
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
-import exh.ui.smartsearch.SmartSearchScreen
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.MR
-import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
-fun Screen.sourcesTab(
-    smartSearchConfig: SmartSearchConfig? = null,
-): TabContent {
+fun Screen.sourcesTab(): TabContent {
     val navigator = LocalNavigator.currentOrThrow
-    val screenModel = rememberScreenModel { SourcesScreenModel(smartSearchConfig = smartSearchConfig) }
+    val screenModel = rememberScreenModel { SourcesScreenModel() }
     val state by screenModel.state.collectAsState()
 
     return TabContent(
         // SY -->
-        titleRes = when (smartSearchConfig == null) {
-            true -> MR.strings.label_sources
-            false -> SYMR.strings.find_in_another_source
-        },
+        titleRes = MR.strings.label_sources,
         actions = listOf(
             AppBar.Action(
                 title = stringResource(MR.strings.action_global_search),
                 icon = Icons.Outlined.TravelExplore,
-                onClick = { navigator.push(GlobalSearchScreen(smartSearchConfig?.origTitle ?: "")) },
+                onClick = { navigator.push(GlobalSearchScreen("")) },
             ),
-        ).let {
-            when (smartSearchConfig) {
-                null -> {
-                    it.plus(
-                        AppBar.Action(
-                            title = stringResource(MR.strings.action_filter),
-                            icon = Icons.Outlined.FilterList,
-                            onClick = { navigator.push(SourcesFilterScreen()) },
-                        ),
-                    )
-                }
-                else -> it
-            }
-        },
+            AppBar.Action(
+                title = stringResource(MR.strings.action_filter),
+                icon = Icons.Outlined.FilterList,
+                onClick = { navigator.push(SourcesFilterScreen()) },
+            ),
+        ),
         // SY <--
         content = { contentPadding, snackbarHostState ->
             SourcesScreen(
                 state = state,
                 contentPadding = contentPadding,
                 onClickItem = { source, listing ->
-                    // SY -->
-                    val screen = when {
-                        smartSearchConfig != null -> SmartSearchScreen(source.id, smartSearchConfig)
-                        listing == Listing.Popular && screenModel.useNewSourceNavigation -> BrowseSourceScreen(source.id, listing.query)
-                        else -> BrowseSourceScreen(source.id, listing.query)
-                    }
-                    navigator.push(screen)
-                    // SY <--
+                    navigator.push(BrowseSourceScreen(source.id, listing.query))
                 },
                 onClickPin = screenModel::togglePin,
                 onLongClickItem = screenModel::showSourceDialog,
@@ -97,10 +73,6 @@ fun Screen.sourcesTab(
                         onClickSetCategories = {
                             screenModel.showSourceCategoriesDialog(source)
                         }.takeIf { state.categories.isNotEmpty() },
-                        onClickToggleDataSaver = {
-                            screenModel.toggleExcludeFromDataSaver(source)
-                            screenModel.closeDialog()
-                        }.takeIf { state.dataSaverEnabled },
                         onDismiss = screenModel::closeDialog,
                     )
                 }

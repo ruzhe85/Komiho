@@ -416,7 +416,6 @@ dependencies {
     implementation(libs.firebase.crashlytics)
 
     // Better logging (EH)
-    implementation(sylibs.xlog)
 
     // RatingBar (SY)
     implementation(sylibs.ratingbar)

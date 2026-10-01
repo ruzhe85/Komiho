@@ -22,7 +22,7 @@ import eu.kanade.tachiyomi.data.notification.NotificationHandler
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.source.UnmeteredSource
-import eu.kanade.tachiyomi.ui.main.MainActivity
+import app.mihonsy.komga.ui.KomgaMainActivity
 import eu.kanade.tachiyomi.util.lang.chop
 import eu.kanade.tachiyomi.util.system.cancelNotification
 import eu.kanade.tachiyomi.util.system.getBitmapOrNull
@@ -367,7 +367,7 @@ class LibraryUpdateNotifier(
      * Returns an intent to open the main activity.
      */
     private fun getNotificationIntent(): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
+        val intent = Intent(context, KomgaMainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             action = Constants.SHORTCUT_UPDATES
         }

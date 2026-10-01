@@ -93,7 +93,6 @@ class SyncManager(
             // SY -->
             customInfo = syncOptions.customInfo,
             readEntries = syncOptions.readEntries,
-            savedSearches = syncOptions.savedSearches,
             // SY <--
         )
 
@@ -108,7 +107,6 @@ class SyncManager(
             backupExtensionStores = backupCreator.backupExtensionStores(backupOptions),
 
             // SY -->
-            backupSavedSearches = backupCreator.backupSavedSearches(backupOptions),
             // SY <--
         )
         logcat(LogPriority.DEBUG) { "End create backup" }
@@ -182,7 +180,6 @@ class SyncManager(
             backupExtensionStores = remoteBackup.backupExtensionStores,
 
             // SY -->
-            backupSavedSearches = remoteBackup.backupSavedSearches,
             // SY <--
         )
 
@@ -192,11 +189,10 @@ class SyncManager(
         val hasPreferenceChanges = remoteBackup.backupPreferences != backup.backupPreferences
         val hasSourcePreferenceChanges = remoteBackup.backupSourcePreferences != backup.backupSourcePreferences
         val hasExtensionRepoChanges = remoteBackup.backupExtensionStores != backup.backupExtensionStores
-        val hasSavedSearchChanges = remoteBackup.backupSavedSearches != backup.backupSavedSearches
 
         if (!hasMangaChanges && !hasCategoryChanges && !hasSourceChanges &&
             !hasPreferenceChanges && !hasSourcePreferenceChanges &&
-            !hasExtensionRepoChanges && !hasSavedSearchChanges
+            !hasExtensionRepoChanges
         ) {
             // update the sync timestamp
             syncPreferences.lastSyncTimestamp.set(Date().time)
@@ -233,9 +229,6 @@ class SyncManager(
                     libraryEntries = syncOptions.libraryEntries,
                     categories = syncOptions.categories,
                     extensionStores = syncOptions.extensionStores,
-                    // SY -->
-                    savedSearches = syncOptions.savedSearches,
-                    // SY <--
                 ),
             )
 

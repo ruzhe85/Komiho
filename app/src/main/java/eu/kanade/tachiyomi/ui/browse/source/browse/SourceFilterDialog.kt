@@ -6,12 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,7 +18,6 @@ import eu.kanade.presentation.components.AdaptiveSheet
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import tachiyomi.core.common.preference.TriState
-import tachiyomi.domain.source.model.EXHSavedSearch
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.CollapsibleBox
@@ -44,12 +38,6 @@ fun SourceFilterDialog(
     onUpdate: (FilterList) -> Unit,
     // SY -->
     startExpanded: Boolean,
-    savedSearches: List<EXHSavedSearch>,
-    onSave: () -> Unit,
-    onSavedSearch: (EXHSavedSearch) -> Unit,
-    onSavedSearchPress: (EXHSavedSearch) -> Unit,
-    openMangaDexRandom: (() -> Unit)?,
-    openMangaDexFollows: (() -> Unit)?,
     // SY <--
 ) {
     val updateFilters = { onUpdate(filters) }
@@ -73,15 +61,6 @@ fun SourceFilterDialog(
 
                     Spacer(modifier = Modifier.weight(1f))
 
-                    // SY -->
-                    IconButton(onClick = onSave) {
-                        Icon(
-                            Icons.Default.Save,
-                            contentDescription = stringResource(MR.strings.action_save),
-                            tint = MaterialTheme.colorScheme.onBackground,
-                        )
-                    }
-                    // SY <--
                     Button(onClick = {
                         onFilter()
                         onDismissRequest()
@@ -90,23 +69,6 @@ fun SourceFilterDialog(
                     }
                 }
                 HorizontalDivider()
-            }
-
-            if (openMangaDexRandom != null && openMangaDexFollows != null) {
-                item {
-                    MangaDexFilterHeader(
-                        openMangaDexRandom = openMangaDexRandom,
-                        openMangaDexFollows = openMangaDexFollows,
-                    )
-                }
-            }
-
-            item {
-                SavedSearchItem(
-                    savedSearches = savedSearches,
-                    onSavedSearch = onSavedSearch,
-                    onSavedSearchPress = onSavedSearchPress,
-                )
             }
 
             items(filters) {

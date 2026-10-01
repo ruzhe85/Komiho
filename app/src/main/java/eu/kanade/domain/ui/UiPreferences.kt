@@ -49,13 +49,7 @@ class UiPreferences(
 
     val expandFilters: Preference<Boolean> = preferenceStore.getBoolean("eh_expand_filters", false)
 
-
-
-    val recommendsInOverflow: Preference<Boolean> = preferenceStore.getBoolean("recommends_in_overflow", false)
-
     val mergeInOverflow: Preference<Boolean> = preferenceStore.getBoolean("merge_in_overflow", true)
-
-    val previewsRowCount: Preference<Int> = preferenceStore.getInt("pref_previews_row_count", 4)
 
     val useNewSourceNavigation: Preference<Boolean> = preferenceStore.getBoolean("use_new_source_navigation", true)
 

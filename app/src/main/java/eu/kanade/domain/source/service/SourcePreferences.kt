@@ -53,7 +53,6 @@ class SourcePreferences(
     )
 
     // SY -->
-    val enableSourceBlacklist: Preference<Boolean> = preferenceStore.getBoolean("eh_enable_source_blacklist", true)
 
     val sourcesTabCategories: Preference<Set<String>> = preferenceStore.getStringSet("sources_tab_categories", mutableSetOf())
 
@@ -61,39 +60,7 @@ class SourcePreferences(
 
     val sourcesTabSourcesInCategories: Preference<Set<String>> = preferenceStore.getStringSet("sources_tab_source_categories", mutableSetOf())
 
-    val dataSaver: Preference<DataSaver> = preferenceStore.getEnum("data_saver", DataSaver.NONE)
-
-    val dataSaverIgnoreJpeg: Preference<Boolean> = preferenceStore.getBoolean("ignore_jpeg", false)
-
-    val dataSaverIgnoreGif: Preference<Boolean> = preferenceStore.getBoolean("ignore_gif", true)
-
-    val dataSaverImageQuality: Preference<Int> = preferenceStore.getInt("data_saver_image_quality", 80)
-
-    val dataSaverImageFormatJpeg: Preference<Boolean> = preferenceStore.getBoolean("data_saver_image_format_jpeg", false)
-
-    val dataSaverServer: Preference<String> = preferenceStore.getString("data_saver_server", "")
-
-    val dataSaverColorBW: Preference<Boolean> = preferenceStore.getBoolean("data_saver_color_bw", false)
-
-    val dataSaverExcludedSources: Preference<Set<String>> = preferenceStore.getStringSet("data_saver_excluded", emptySet())
-
-    val dataSaverDownloader: Preference<Boolean> = preferenceStore.getBoolean("data_saver_downloader", true)
-
-    enum class DataSaver {
-        NONE,
-        BANDWIDTH_HERO,
-        WSRV_NL,
-    }
-
     val allowLocalSourceHiddenFolders: Preference<Boolean> = preferenceStore.getBoolean("allow_local_source_hidden_folders", false)
 
-    val preferredMangaDexId: Preference<String> = preferenceStore.getString("preferred_mangaDex_id", "0")
-
-    val mangadexSyncToLibraryIndexes: Preference<Set<String>> = preferenceStore.getStringSet(
-        "pref_mangadex_sync_to_library_indexes",
-        emptySet(),
-    )
-
-    val recommendationSearchFlags: Preference<Int> = preferenceStore.getInt("rec_search_flags", Int.MAX_VALUE)
     // SY <--
 }

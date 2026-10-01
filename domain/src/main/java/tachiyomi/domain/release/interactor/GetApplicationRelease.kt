@@ -32,7 +32,7 @@ class GetApplicationRelease(
         // Check if latest version is different from current version
         // SY -->
         val isNewVersion =
-            isNewVersion(arguments.isPreview, arguments.syDebugVersion, arguments.versionName, release.version)
+            isNewVersion(arguments.isPreview, arguments.versionName, release.version)
         // SY <--
         return when {
             isNewVersion -> Result.NewUpdate(release)
@@ -43,17 +43,14 @@ class GetApplicationRelease(
     // SY -->
     private fun isNewVersion(
         isPreview: Boolean,
-        syDebugVersion: String,
         versionName: String,
         versionTag: String,
     ): Boolean {
         // Removes prefixes like "r" or "v"
         val newVersion = versionTag.replace("[^\\d.]".toRegex(), "")
         return if (isPreview) {
-            // Preview builds: based on releases in "jobobby04/TachiyomiSYPreview" repo
-            // tagged as something like "508"
-            val currentInt = syDebugVersion.toIntOrNull()
-            currentInt != null && newVersion.toInt() > currentInt
+            // Preview builds are no longer distinguishable without exh syDebugVersion; never report update
+            false
         } else {
             // Release builds: based on releases tagged as something like "0.1.2".
             // Komiho (2026-09-19): the old loop indexed `newSemVer[index]` against
@@ -84,9 +81,6 @@ class GetApplicationRelease(
         val commitCount: Int,
         val versionName: String,
         val repository: String,
-        // SY -->
-        val syDebugVersion: String,
-        // SY <--
         val forceCheck: Boolean = false,
     )
 

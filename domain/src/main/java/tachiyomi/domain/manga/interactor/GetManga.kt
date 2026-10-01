@@ -1,6 +1,5 @@
 package tachiyomi.domain.manga.interactor
 
-import eu.kanade.tachiyomi.source.online.MetadataSource
 import kotlinx.coroutines.flow.Flow
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -9,7 +8,7 @@ import tachiyomi.domain.manga.repository.MangaRepository
 
 class GetManga(
     private val mangaRepository: MangaRepository,
-) : MetadataSource.GetMangaId {
+) {
 
     suspend fun await(id: Long): Manga? {
         return try {
@@ -31,10 +30,6 @@ class GetManga(
     // SY -->
     suspend fun await(url: String, sourceId: Long): Manga? {
         return mangaRepository.getMangaByUrlAndSourceId(url, sourceId)
-    }
-
-    override suspend fun awaitId(url: String, sourceId: Long): Long? {
-        return await(url, sourceId)?.id
     }
     // SY <--
 }

@@ -8,16 +8,14 @@ import eu.kanade.tachiyomi.data.backup.models.BackupCategory
 import eu.kanade.tachiyomi.data.backup.models.BackupExtensionStore
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.BackupPreference
-import eu.kanade.tachiyomi.data.backup.models.BackupSavedSearch
 import eu.kanade.tachiyomi.data.backup.models.BackupSourcePreferences
 import eu.kanade.tachiyomi.data.backup.restore.restorers.CategoriesRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.ExtensionStoreRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.MangaRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.PreferenceRestorer
-import eu.kanade.tachiyomi.data.backup.restore.restorers.SavedSearchRestorer
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.util.system.createFileInCacheDir
-import exh.source.MERGED_SOURCE_ID
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
@@ -27,7 +25,6 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.Database
 import tachiyomi.i18n.MR
-import tachiyomi.i18n.sy.SYMR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
@@ -51,7 +48,6 @@ class BackupRestorer(
     private val extensionStoreRestorer: ExtensionStoreRestorer = ExtensionStoreRestorer(),
     private val mangaRestorer: MangaRestorer = MangaRestorer(isSync),
     // SY -->
-    private val savedSearchRestorer: SavedSearchRestorer = SavedSearchRestorer(),
     // SY <--
 ) {
 
@@ -104,11 +100,6 @@ class BackupRestorer(
         if (options.categories) {
             restoreAmount += 1
         }
-        // SY -->
-        if (options.savedSearches) {
-            restoreAmount += 1
-        }
-        // SY <--
         if (options.appSettings) {
             restoreAmount += 1
         }
@@ -123,11 +114,6 @@ class BackupRestorer(
             if (options.categories) {
                 restoreCategories(backup.backupCategories)
             }
-            // SY -->
-            if (options.savedSearches) {
-                restoreSavedSearches(backup.backupSavedSearches)
-            }
-            // SY <--
             if (options.appSettings) {
                 restoreAppPreferences(backup.backupPreferences, backup.backupCategories.takeIf { options.categories })
             }
@@ -152,20 +138,6 @@ class BackupRestorer(
         val progress = restoreProgress.incrementAndFetch()
         notifier.showRestoreProgress(
             context.stringResource(MR.strings.categories),
-            progress,
-            restoreAmount,
-            isSync,
-        )
-    }
-
-    // SY -->
-    private fun CoroutineScope.restoreSavedSearches(backupSavedSearches: List<BackupSavedSearch>) = launch {
-        ensureActive()
-        savedSearchRestorer.restoreSavedSearches(backupSavedSearches)
-
-        val progress = restoreProgress.incrementAndFetch()
-        notifier.showRestoreProgress(
-            context.stringResource(SYMR.strings.saved_searches),
             progress,
             restoreAmount,
             isSync,

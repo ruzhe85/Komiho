@@ -1,6 +1,6 @@
 package mihon.domain.chapter.interactor
 
-import exh.source.MERGED_SOURCE_ID
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId

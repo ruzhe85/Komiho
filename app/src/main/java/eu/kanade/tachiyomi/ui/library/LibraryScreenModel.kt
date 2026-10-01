@@ -17,7 +17,6 @@ import eu.kanade.core.util.fastFilterNot
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.chapter.interactor.SetReadStatus
 import eu.kanade.domain.manga.interactor.UpdateManga
-import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.presentation.library.components.LibraryToolbarTitle
 import eu.kanade.presentation.manga.DownloadAction
@@ -30,28 +29,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.util.chapter.getNextUnread
 import eu.kanade.tachiyomi.util.removeCovers
-import exh.favorites.FavoritesSyncHelper
-import exh.md.utils.FollowStatus
-import exh.md.utils.MdUtil
-import exh.metadata.sql.models.SearchTag
-import exh.metadata.sql.models.SearchTitle
-import exh.recs.batch.RecommendationSearchHelper
-import exh.search.Namespace
-import exh.search.QueryComponent
-import exh.search.SearchEngine
-import exh.search.Text
-import exh.source.EH_SOURCE_ID
-import exh.source.ExhPreferences
-import exh.source.MERGED_SOURCE_ID
-import exh.source.isEhBasedManga
-import exh.source.isMetadataSource
-import exh.source.mangaDexSourceIds
-import exh.source.nHentaiSourceIds
-import exh.util.cancellable
-import exh.util.isLewd
-import exh.util.nullIfBlank
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.Job
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -87,11 +65,8 @@ import tachiyomi.domain.library.model.LibraryManga
 import tachiyomi.domain.library.model.LibrarySort
 import tachiyomi.domain.library.model.sort
 import tachiyomi.domain.library.service.LibraryPreferences
-import tachiyomi.domain.manga.interactor.GetIdsOfFavoriteMangaWithMetadata
 import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.manga.interactor.GetMergedMangaById
-import tachiyomi.domain.manga.interactor.GetSearchTags
-import tachiyomi.domain.manga.interactor.GetSearchTitles
 import tachiyomi.domain.manga.interactor.SetCustomMangaInfo
 import tachiyomi.domain.manga.model.CustomMangaInfo
 import tachiyomi.domain.manga.model.Manga
@@ -123,26 +98,13 @@ class LibraryScreenModel(
     private val downloadManager: DownloadManager = Injekt.get(),
     private val downloadCache: DownloadCache = Injekt.get(),
     // SY -->
-    private val exhPreferences: ExhPreferences = Injekt.get(),
-    private val sourcePreferences: SourcePreferences = Injekt.get(),
     private val getMergedMangaById: GetMergedMangaById = Injekt.get(),
-    private val getIdsOfFavoriteMangaWithMetadata: GetIdsOfFavoriteMangaWithMetadata = Injekt.get(),
-    private val getSearchTags: GetSearchTags = Injekt.get(),
-    private val getSearchTitles: GetSearchTitles = Injekt.get(),
-    private val searchEngine: SearchEngine = Injekt.get(),
     private val setCustomMangaInfo: SetCustomMangaInfo = Injekt.get(),
     private val getMergedChaptersByMangaId: GetMergedChaptersByMangaId = Injekt.get(),
 
     syncPreferences: SyncPreferences = Injekt.get(),
     // SY <--
 ) : StateScreenModel<LibraryScreenModel.State>(State()) {
-
-    // SY -->
-    val favoritesSync = FavoritesSyncHelper(preferences.context)
-    val recommendationSearch = RecommendationSearchHelper(preferences.context)
-
-    private var recommendationSearchJob: Job? = null
-    // SY <--
 
     init {
         mutableState.update { state ->
@@ -268,9 +230,6 @@ class LibraryScreenModel(
                 prefs.filterBookmarked,
                 prefs.filterCompleted,
                 prefs.filterIntervalCustom,
-                // SY -->
-                prefs.filterLewd,
-                // SY <--
             )
                 .any { it != TriState.DISABLED }
         }
@@ -283,21 +242,6 @@ class LibraryScreenModel(
             .launchIn(screenModelScope)
 
         // SY -->
-        combine(
-            exhPreferences.isHentaiEnabled.changes(),
-            sourcePreferences.disabledSources.changes(),
-            exhPreferences.enableExhentai.changes(),
-        ) { isHentaiEnabled, disabledSources, enableExhentai ->
-            isHentaiEnabled && (EH_SOURCE_ID.toString() !in disabledSources || enableExhentai)
-        }
-            .distinctUntilChanged()
-            .onEach {
-                mutableState.update { state ->
-                    state.copy(showSyncExh = it)
-                }
-            }
-            .launchIn(screenModelScope)
-
         libraryPreferences.groupLibraryBy.changes()
             .onEach {
                 mutableState.update { state ->
@@ -326,10 +270,6 @@ class LibraryScreenModel(
         val filterBookmarked = preferences.filterBookmarked
         val filterCompleted = preferences.filterCompleted
         val filterIntervalCustom = preferences.filterIntervalCustom
-
-        // SY -->
-        val filterLewd = preferences.filterLewd
-        // SY <--
 
         val filterFnDownloaded: (LibraryItem) -> Boolean = {
             applyFilter(filterDownloaded) { it.isLocal || it.downloadCount > 0 }
@@ -360,10 +300,6 @@ class LibraryScreenModel(
         }
 
         // SY -->
-        val filterFnLewd: (LibraryItem) -> Boolean = {
-            applyFilter(filterLewd) { it.libraryManga.manga.isLewd() }
-        }
-        // SY <--
 
         return fastFilter {
             filterFnDownloaded(it) &&
@@ -371,10 +307,7 @@ class LibraryScreenModel(
                 filterFnStarted(it) &&
                 filterFnBookmarked(it) &&
                 filterFnCompleted(it) &&
-                filterFnIntervalCustom(it) &&
-                // SY -->
-                filterFnLewd(it)
-            // SY <--
+                filterFnIntervalCustom(it)
         }
     }
 
@@ -546,9 +479,6 @@ class LibraryScreenModel(
             libraryPreferences.filterBookmarked.changes(),
             libraryPreferences.filterCompleted.changes(),
             libraryPreferences.filterIntervalCustom.changes(),
-            // SY -->
-            libraryPreferences.filterLewd.changes(),
-            // SY <--
         ) {
             ItemPreferences(
                 downloadBadge = it[0] as Boolean,
@@ -563,9 +493,6 @@ class LibraryScreenModel(
                 filterBookmarked = it[9] as TriState,
                 filterCompleted = it[10] as TriState,
                 filterIntervalCustom = it[11] as TriState,
-                // SY -->
-                filterLewd = it[12] as TriState,
-                // SY <--
             )
         }
     }
@@ -768,51 +695,6 @@ class LibraryScreenModel(
             }
         }
     }
-
-    // SY -->
-    fun cleanTitles() {
-        state.value.selectedManga.fastFilter {
-            it.isEhBasedManga() ||
-                it.source in nHentaiSourceIds
-        }.fastForEach { manga ->
-            val editedTitle =
-                manga.title.replace("\\[.*?]".toRegex(), "").trim().replace("\\(.*?\\)".toRegex(), "").trim()
-                    .replace("\\{.*?\\}".toRegex(), "").trim().let {
-                        if (it.contains("|")) {
-                            it.replace(".*\\|".toRegex(), "").trim()
-                        } else {
-                            it
-                        }
-                    }
-            if (manga.title == editedTitle) return@fastForEach
-            val mangaInfo = CustomMangaInfo(
-                id = manga.id,
-                title = editedTitle.nullIfBlank(),
-                author = manga.author.takeUnless { it == manga.ogAuthor },
-                artist = manga.artist.takeUnless { it == manga.ogArtist },
-                thumbnailUrl = manga.thumbnailUrl.takeUnless { it == manga.ogThumbnailUrl },
-                description = manga.description.takeUnless { it == manga.ogDescription },
-                genre = manga.genre.takeUnless { it == manga.ogGenre },
-                status = manga.status.takeUnless { it == manga.ogStatus },
-            )
-
-            setCustomMangaInfo.set(mangaInfo)
-        }
-        clearSelection()
-    }
-
-    @OptIn(DelicateCoroutinesApi::class)
-    fun syncMangaToDex() {
-        launchIO {
-            MdUtil.getEnabledMangaDex(sourcePreferences, sourceManager)?.let { mdex ->
-                state.value.selectedManga.fastFilter { it.source in mangaDexSourceIds }.fastForEach { manga ->
-                    mdex.updateFollowStatus(MdUtil.getMangaId(manga.url), FollowStatus.READING)
-                }
-            }
-            clearSelection()
-        }
-    }
-
     fun resetInfo() {
         state.value.selectedManga.fastForEach { manga ->
             val mangaInfo = CustomMangaInfo(
@@ -931,147 +813,29 @@ class LibraryScreenModel(
     }
 
     // SY -->
-    fun showRecommendationSearchDialog() {
-        val mangaList = state.value.selectedManga
-        mutableState.update { it.copy(dialog = Dialog.RecommendationSearchSheet(mangaList)) }
-    }
-
     private suspend fun filterLibrary(
         unfiltered: List<LibraryItem>,
         query: String?,
     ): List<LibraryItem> {
-        return if (unfiltered.isNotEmpty() && !query.isNullOrBlank()) {
-            // Prepare filter object
-            val parsedQuery = searchEngine.parseQuery(query)
-            val mangaWithMetaIds = getIdsOfFavoriteMangaWithMetadata.await()
-            val sources = unfiltered
-                .distinctBy { it.libraryManga.manga.source }
-                .fastMapNotNull { sourceManager.get(it.libraryManga.manga.source) }
-                .associateBy { it.id }
-            unfiltered.asFlow().cancellable().filter { item ->
-                val mangaId = item.libraryManga.manga.id
-                if (query.startsWith("id:", true)) {
-                    val id = query.substringAfter("id:").toLongOrNull()
-                    return@filter mangaId == id
-                }
-                val sourceId = item.libraryManga.manga.source
-                if (isMetadataSource(sourceId)) {
-                    if (mangaWithMetaIds.binarySearch(mangaId) < 0) {
-                        // No meta? Filter using title
-                        filterManga(
-                            queries = parsedQuery,
-                            libraryManga = item.libraryManga,
-                            source = sources[sourceId],
-                        )
-                    } else {
-                        val tags = getSearchTags.await(mangaId)
-                        val titles = getSearchTitles.await(mangaId)
-                        filterManga(
-                            queries = parsedQuery,
-                            libraryManga = item.libraryManga,
-                            source = sources[sourceId],
-                            checkGenre = false,
-                            searchTags = tags,
-                            searchTitles = titles,
-                        )
-                    }
-                } else {
-                    filterManga(
-                        queries = parsedQuery,
-                        libraryManga = item.libraryManga,
-                        source = sources[sourceId],
-                    )
-                }
-            }.toList()
-        } else {
-            unfiltered
+        val q = query?.trim() ?: return unfiltered
+        if (q.isEmpty()) return unfiltered
+        if (q.startsWith("id:", true)) {
+            val id = q.substringAfter("id:").toLongOrNull()
+            return unfiltered.filter { it.libraryManga.manga.id == id }
+        }
+        val sourceIdString = q.toLongOrNull()?.toString()
+        return unfiltered.filter { item ->
+            val manga = item.libraryManga.manga
+            val source = sourceManager.get(manga.source)
+            manga.title.contains(q, true) ||
+                (manga.author?.contains(q, true) == true) ||
+                (manga.artist?.contains(q, true) == true) ||
+                (manga.description?.contains(q, true) == true) ||
+                (source?.name?.contains(q, true) == true) ||
+                (sourceIdString != null && manga.source.toString() == sourceIdString) ||
+                (manga.genre.orEmpty().fastAny { it.contains(q, true) })
         }
     }
-
-    private fun filterManga(
-        queries: List<QueryComponent>,
-        libraryManga: LibraryManga,
-        source: Source?,
-        checkGenre: Boolean = true,
-        searchTags: List<SearchTag>? = null,
-        searchTitles: List<SearchTitle>? = null,
-    ): Boolean {
-        val manga = libraryManga.manga
-        val sourceIdString = manga.source.takeUnless { it == LocalSource.ID }?.toString()
-        val genre = if (checkGenre) manga.genre.orEmpty() else emptyList()
-        return queries.all { queryComponent ->
-            when (queryComponent.excluded) {
-                false -> when (queryComponent) {
-                    is Text -> {
-                        val query = queryComponent.asQuery()
-                        manga.title.contains(query, true) ||
-                            (manga.author?.contains(query, true) == true) ||
-                            (manga.artist?.contains(query, true) == true) ||
-                            (manga.description?.contains(query, true) == true) ||
-                            (source?.name?.contains(query, true) == true) ||
-                            (sourceIdString != null && sourceIdString == query) ||
-                            (genre.fastAny { it.contains(query, true) }) ||
-                            (searchTags?.fastAny { it.name.contains(query, true) } == true) ||
-                            (searchTitles?.fastAny { it.title.contains(query, true) } == true)
-                    }
-
-                    is Namespace -> {
-                        searchTags != null &&
-                            searchTags.fastAny {
-                                val tag = queryComponent.tag
-                                (
-                                    it.namespace.equals(queryComponent.namespace, true) &&
-                                        tag?.run { it.name.contains(tag.asQuery(), true) } == true
-                                    ) ||
-                                    (tag == null && it.namespace.equals(queryComponent.namespace, true))
-                            }
-                    }
-
-                    else -> true
-                }
-
-                true -> when (queryComponent) {
-                    is Text -> {
-                        val query = queryComponent.asQuery()
-                        query.isBlank() ||
-                            (
-                                (!manga.title.contains(query, true)) &&
-                                    (manga.author?.contains(query, true) != true) &&
-                                    (manga.artist?.contains(query, true) != true) &&
-                                    (manga.description?.contains(query, true) != true) &&
-                                    (source?.name?.contains(query, true) != true) &&
-                                    (sourceIdString != null && sourceIdString != query) &&
-                                    (!genre.fastAny { it.contains(query, true) }) &&
-                                    (searchTags?.fastAny { it.name.contains(query, true) } != true) &&
-                                    (searchTitles?.fastAny { it.title.contains(query, true) } != true)
-                                )
-                    }
-
-                    is Namespace -> {
-                        val searchedTag = queryComponent.tag?.asQuery()
-                        searchTags == null ||
-                            (queryComponent.namespace.isBlank() && searchedTag.isNullOrBlank()) ||
-                            searchTags.fastAll { mangaTag ->
-                                if (queryComponent.namespace.isBlank() && !searchedTag.isNullOrBlank()) {
-                                    !mangaTag.name.contains(searchedTag, true)
-                                } else if (searchedTag.isNullOrBlank()) {
-                                    mangaTag.namespace == null ||
-                                        !mangaTag.namespace.equals(queryComponent.namespace, true)
-                                } else if (mangaTag.namespace.isNullOrBlank()) {
-                                    true
-                                } else {
-                                    !mangaTag.name.contains(searchedTag, true) ||
-                                        !mangaTag.namespace.equals(queryComponent.namespace, true)
-                                }
-                            }
-                    }
-
-                    else -> true
-                }
-            }
-        }
-    }
-
 // SY <--
 
     private var lastSelectionCategory: Long? = null
@@ -1200,12 +964,6 @@ class LibraryScreenModel(
         ) : Dialog
 
         data class DeleteManga(val manga: List<Manga>) : Dialog
-
-        // SY -->
-        data object SyncFavoritesWarning : Dialog
-        data object SyncFavoritesConfirm : Dialog
-        data class RecommendationSearchSheet(val manga: List<Manga>) : Dialog
-        // SY <--
     }
 
 // SY -->
@@ -1293,37 +1051,7 @@ class LibraryScreenModel(
             .mapValues { (_, libraryItem) -> libraryItem.fastMap { it.id } }
     }
 
-    fun runRecommendationSearch(selection: List<Manga>) {
-        recommendationSearch.runSearch(screenModelScope, selection)?.let {
-            recommendationSearchJob = it
-        }
-    }
-
-    fun cancelRecommendationSearch() {
-        recommendationSearchJob?.cancel()
-    }
-
-    fun runSync() {
-        favoritesSync.runSync(screenModelScope)
-    }
-
-    fun onAcceptSyncWarning() {
-        exhPreferences.exhShowSyncIntro.set(false)
-    }
-
-    fun openFavoritesSyncDialog() {
-        mutableState.update {
-            it.copy(
-                dialog = if (exhPreferences.exhShowSyncIntro.get()) {
-                    Dialog.SyncFavoritesWarning
-                } else {
-                    Dialog.SyncFavoritesConfirm
-                },
-            )
-        }
-    }
 // SY <--
-
     @Immutable
     private data class ItemPreferences(
         val downloadBadge: Boolean,
@@ -1339,9 +1067,6 @@ class LibraryScreenModel(
         val filterBookmarked: TriState,
         val filterCompleted: TriState,
         val filterIntervalCustom: TriState,
-        // SY -->
-        val filterLewd: TriState,
-        // SY <--
     )
 
     @Immutable
@@ -1369,7 +1094,6 @@ class LibraryScreenModel(
         private val activeCategoryIndex: Int = 0,
         private val groupedFavorites: Map<Category, List</* LibraryItem */ Long>> = emptyMap(),
         // SY -->
-        val showSyncExh: Boolean = false,
         val isSyncEnabled: Boolean = false,
         val groupType: Int = LibraryGroup.BY_DEFAULT,
         // SY <--
@@ -1390,17 +1114,6 @@ class LibraryScreenModel(
         val selectedManga by lazy { selection.mapNotNull { libraryData.favoritesById[it]?.libraryManga?.manga } }
 
         // SY -->
-        val showCleanTitles: Boolean by lazy {
-            selectedManga.fastAny {
-                it.isEhBasedManga() ||
-                    it.source in nHentaiSourceIds
-            }
-        }
-
-        val showAddToMangadex: Boolean by lazy {
-            selectedManga.any { it.source in mangaDexSourceIds }
-        }
-
         val showResetInfo: Boolean by lazy {
             selectedManga.fastAny { manga ->
                 manga.title != manga.ogTitle ||

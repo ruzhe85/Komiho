@@ -19,8 +19,6 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.lang.toLocalDate
-import exh.source.EH_SOURCE_ID
-import exh.source.EXH_SOURCE_ID
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -506,10 +504,4 @@ data class UpdatesItem(
     val downloadStateProvider: () -> Download.State,
     val downloadProgressProvider: () -> Int,
     val selected: Boolean = false,
-) {
-    // SY -->
-    fun isEhBasedUpdate(): Boolean {
-        return update.sourceId == EH_SOURCE_ID || update.sourceId == EXH_SOURCE_ID
-    }
-    // SY <--
-}
+)

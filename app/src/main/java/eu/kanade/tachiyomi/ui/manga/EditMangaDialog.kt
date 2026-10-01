@@ -31,10 +31,9 @@ import eu.kanade.tachiyomi.databinding.EditMangaDialogBinding
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.util.lang.chop
 import eu.kanade.tachiyomi.util.system.dpToPx
+import eu.kanade.tachiyomi.util.system.getResourceColor
 import eu.kanade.tachiyomi.widget.materialdialogs.setTextInput
-import exh.ui.metadata.adapters.MetadataUIUtil.getResourceColor
-import exh.util.dropBlank
-import exh.util.trimOrNull
+import tachiyomi.core.common.util.dropBlank
 import kotlinx.coroutines.CoroutineScope
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.manga.model.Manga

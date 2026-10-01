@@ -12,7 +12,7 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.data.updater.AppUpdateDownloadJob
-import eu.kanade.tachiyomi.ui.main.MainActivity
+import app.mihonsy.komga.ui.KomgaMainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.util.system.cancelNotification
 import eu.kanade.tachiyomi.util.system.getParcelableExtraCompat
@@ -438,7 +438,7 @@ class NotificationReceiver : BroadcastReceiver() {
          */
         internal fun openChapterPendingActivity(context: Context, manga: Manga, groupId: Int): PendingIntent {
             val newIntent =
-                Intent(context, MainActivity::class.java).setAction(Constants.SHORTCUT_MANGA)
+                Intent(context, KomgaMainActivity::class.java).setAction(Constants.SHORTCUT_MANGA)
                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     .putExtra(Constants.MANGA_EXTRA, manga.id)
                     .putExtra("notificationId", manga.id.hashCode())
@@ -512,7 +512,7 @@ class NotificationReceiver : BroadcastReceiver() {
          * @param mangaId id of the entry to open
          */
         internal fun openEntryPendingActivity(context: Context, mangaId: Long): PendingIntent {
-            val newIntent = Intent(context, MainActivity::class.java).setAction(Constants.SHORTCUT_MANGA)
+            val newIntent = Intent(context, KomgaMainActivity::class.java).setAction(Constants.SHORTCUT_MANGA)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(Constants.MANGA_EXTRA, mangaId)
                 .putExtra("notificationId", mangaId.hashCode())
@@ -589,7 +589,7 @@ class NotificationReceiver : BroadcastReceiver() {
          * @return [PendingIntent]
          */
         internal fun openExtensionsPendingActivity(context: Context): PendingIntent {
-            val intent = Intent(context, MainActivity::class.java).apply {
+            val intent = Intent(context, KomgaMainActivity::class.java).apply {
                 action = Constants.SHORTCUT_EXTENSIONS
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }

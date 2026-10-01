@@ -148,13 +148,6 @@ private fun ColumnScope.FilterPage(
             onClick = { screenModel.toggleFilter(LibraryPreferences::filterIntervalCustom) },
         )
     }
-    // SY -->
-    val filterLewd by screenModel.libraryPreferences.filterLewd.collectAsState()
-    TriStateItem(
-        label = stringResource(SYMR.strings.lewd),
-        state = filterLewd,
-        onClick = { screenModel.toggleFilter(LibraryPreferences::filterLewd) },
-    )
     // SY <--
 }
 

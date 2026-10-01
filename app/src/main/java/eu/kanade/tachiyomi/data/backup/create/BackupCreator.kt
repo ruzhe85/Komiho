@@ -9,14 +9,12 @@ import eu.kanade.tachiyomi.data.backup.create.creators.CategoriesBackupCreator
 import eu.kanade.tachiyomi.data.backup.create.creators.ExtensionStoresBackupCreator
 import eu.kanade.tachiyomi.data.backup.create.creators.MangaBackupCreator
 import eu.kanade.tachiyomi.data.backup.create.creators.PreferenceBackupCreator
-import eu.kanade.tachiyomi.data.backup.create.creators.SavedSearchBackupCreator
 import eu.kanade.tachiyomi.data.backup.create.creators.SourcesBackupCreator
 import eu.kanade.tachiyomi.data.backup.models.Backup
 import eu.kanade.tachiyomi.data.backup.models.BackupCategory
 import eu.kanade.tachiyomi.data.backup.models.BackupExtensionStore
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.BackupPreference
-import eu.kanade.tachiyomi.data.backup.models.BackupSavedSearch
 import eu.kanade.tachiyomi.data.backup.models.BackupSource
 import eu.kanade.tachiyomi.data.backup.models.BackupSourcePreferences
 import kotlinx.serialization.protobuf.ProtoBuf
@@ -55,7 +53,6 @@ class BackupCreator(
     private val extensionStoresBackupCreator: ExtensionStoresBackupCreator = ExtensionStoresBackupCreator(),
     private val sourcesBackupCreator: SourcesBackupCreator = SourcesBackupCreator(),
     // SY -->
-    private val savedSearchBackupCreator: SavedSearchBackupCreator = SavedSearchBackupCreator(),
     private val getMergedManga: GetMergedManga = Injekt.get(),
     // SY <--
 ) {
@@ -98,9 +95,6 @@ class BackupCreator(
                 backupPreferences = backupAppPreferences(options),
                 backupExtensionStores = backupExtensionStores(options),
                 backupSourcePreferences = backupSourcePreferences(options),
-                // SY -->
-                backupSavedSearches = backupSavedSearches(options),
-                // SY <--
             )
 
             val byteArray = parser.encodeToByteArray(Backup.serializer(), backup)
@@ -166,14 +160,6 @@ class BackupCreator(
 
         return extensionStoresBackupCreator()
     }
-
-    // SY -->
-    suspend fun backupSavedSearches(options: BackupOptions): List<BackupSavedSearch> {
-        if (!options.savedSearches) return emptyList()
-
-        return savedSearchBackupCreator()
-    }
-    // SY <--
 
     companion object {
         private const val MAX_AUTO_BACKUPS: Int = 4

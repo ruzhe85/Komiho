@@ -97,12 +97,6 @@ class LibraryPreferences(
         TriState.DISABLED,
     )
 
-    // SY -->
-    val filterLewd: Preference<TriState> = preferenceStore.getEnum(
-        "pref_filter_library_lewd_v2",
-        TriState.DISABLED,
-    )
-    // SY <--
 
     fun filterTracking(id: Int): Preference<TriState> = preferenceStore.getEnum(
         "pref_filter_library_tracked_${id}_v2",

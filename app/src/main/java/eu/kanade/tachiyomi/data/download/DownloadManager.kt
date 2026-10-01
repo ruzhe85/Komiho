@@ -6,7 +6,6 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.util.storage.DiskUtil
-import exh.log.xLogE
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
@@ -347,7 +346,7 @@ class DownloadManager(
                 mangaFolder.delete()
                 cache.removeManga(manga)
             } else {
-                xLogE("Cache and download folder doesn't match for " + /* SY --> */ manga.ogTitle /* SY <-- */)
+                logcat(LogPriority.ERROR) { "Cache and download folder doesn't match for " + /* SY --> */ manga.ogTitle /* SY <-- */ }
             }
         }
         return cleaned

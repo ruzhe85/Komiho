@@ -19,7 +19,6 @@ import androidx.work.WorkQuery
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import eu.kanade.domain.manga.interactor.UpdateManga
-import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.notification.Notifications
@@ -32,11 +31,7 @@ import eu.kanade.tachiyomi.util.system.isConnectedToWifi
 import eu.kanade.tachiyomi.util.system.isRunning
 import eu.kanade.tachiyomi.util.system.setForegroundSafely
 import eu.kanade.tachiyomi.util.system.workManager
-import exh.md.utils.MdUtil
-import exh.source.LIBRARY_UPDATE_EXCLUDED_SOURCES
-import exh.source.MERGED_SOURCE_ID
-import exh.source.mangaDexSourceIds
-import exh.util.nullIfBlank
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -52,6 +47,8 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.getAndSet
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.core.common.util.nullIfBlank
+import tachiyomi.core.common.util.trimOrNull
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.NoChaptersException
@@ -67,12 +64,9 @@ import tachiyomi.domain.library.service.LibraryPreferences.Companion.MANGA_NON_C
 import tachiyomi.domain.library.service.LibraryPreferences.Companion.MANGA_NON_READ
 import tachiyomi.domain.library.service.LibraryPreferences.Companion.MANGA_OUTSIDE_RELEASE_PERIOD
 import tachiyomi.domain.manga.interactor.FetchInterval
-import tachiyomi.domain.manga.interactor.GetFavorites
 import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.interactor.GetMergedMangaForDownloading
-import tachiyomi.domain.manga.interactor.InsertFlatMetadata
-import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.model.SourceNotInstalledException
 import tachiyomi.domain.source.service.SourceManager
@@ -104,9 +98,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     private val updateMangaFromRemote: UpdateMangaFromRemote = Injekt.get()
 
     // SY -->
-    private val getFavorites: GetFavorites = Injekt.get()
-    private val insertFlatMetadata: InsertFlatMetadata = Injekt.get()
-    private val networkToLocalManga: NetworkToLocalManga = Injekt.get()
     private val getMergedMangaForDownloading: GetMergedMangaForDownloading = Injekt.get()
     // SY <--
 
@@ -152,10 +143,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                 when (target) {
                     Target.CHAPTERS -> updateChapterList()
                     Target.COVERS -> updateCovers()
-                    // SY -->
-                    Target.SYNC_FOLLOWS -> syncFollows()
-                    Target.PUSH_FAVORITES -> pushFavorites()
-                    // SY <--
                 }
                 Result.success()
             } catch (e: Exception) {
@@ -318,9 +305,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
 
         coroutineScope {
             mangaToUpdate.groupBy { it.manga.source }
-                // SY -->
-                .filterNot { it.key in LIBRARY_UPDATE_EXCLUDED_SOURCES }
-                // SY <--
                 .values
                 .map { mangaInSource ->
                     async {
@@ -482,81 +466,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         notifier.cancelProgressNotification()
     }
 
-    // SY -->
-
-    /**
-     * filter all follows from Mangadex and only add reading or rereading manga to library
-     */
-    private suspend fun syncFollows() = coroutineScope {
-        val preferences = Injekt.get<SourcePreferences>()
-        var count = 0
-        val mangaDex = MdUtil.getEnabledMangaDex(preferences, sourceManager = sourceManager)
-            ?: return@coroutineScope
-        val syncFollowStatusInts = preferences.mangadexSyncToLibraryIndexes.get().map { it.toInt() }
-
-        val size: Int
-        mangaDex.fetchAllFollows()
-            .filter { (_, metadata) ->
-                syncFollowStatusInts.contains(metadata.followStatus)
-            }
-            .also { size = it.size }
-            .forEach { (networkManga, metadata) ->
-                ensureActive()
-
-                count++
-                notifier.showProgressNotification(
-                    listOf(Manga.create().copy(ogTitle = networkManga.title)),
-                    count,
-                    size,
-                )
-
-                var dbManga = getManga.await(networkManga.url, mangaDex.id)
-
-                if (dbManga == null) {
-                    dbManga = networkToLocalManga(
-                        Manga.create().copy(
-                            url = networkManga.url,
-                            ogTitle = networkManga.title,
-                            source = mangaDex.id,
-                            favorite = true,
-                            dateAdded = System.currentTimeMillis(),
-                        ),
-                    )
-                } else if (!dbManga.favorite) {
-                    updateManga.awaitUpdateFavorite(dbManga.id, true)
-                }
-
-                updateMangaFromRemote(
-                    dbManga,
-                    fetchDetails = false,
-                    fetchChapters = false,
-                )
-
-                metadata.mangaId = dbManga.id
-                insertFlatMetadata.await(metadata)
-            }
-
-        notifier.cancelProgressNotification()
-    }
-
-    /**
-     * Method that updates the all mangas which are not tracked as "reading" on mangadex
-     */
-    private suspend fun pushFavorites() = coroutineScope {
-        var count = 0
-        val listManga = getFavorites.await().filter { it.source in mangaDexSourceIds }
-
-        listManga.forEach { manga ->
-            ensureActive()
-
-            count++
-            notifier.showProgressNotification(listOf(manga), count, listManga.size)
-        }
-
-        notifier.cancelProgressNotification()
-    }
-    // SY <--
-
     private suspend fun withUpdateNotification(
         updatingManga: CopyOnWriteArrayList<Manga>,
         completed: AtomicInt,
@@ -621,12 +530,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     enum class Target {
         CHAPTERS, // Manga chapters
         COVERS, // Manga covers
-
-        // SY -->
-        SYNC_FOLLOWS, // MangaDex specific, pull mangadex manga in reading, rereading
-
-        PUSH_FAVORITES, // MangaDex specific, push mangadex manga to mangadex
-        // SY <--
     }
 
     companion object {

@@ -17,9 +17,6 @@ import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import eu.kanade.tachiyomi.util.storage.DiskUtil.NOMEDIA_FILE
 import eu.kanade.tachiyomi.util.storage.saveTo
-import exh.source.isEhBasedSource
-import exh.util.DataSaver
-import exh.util.DataSaver.Companion.getImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -380,12 +377,6 @@ class Downloader(
                 reIndexedPages
             }
 
-            val dataSaver = if (sourcePreferences.dataSaverDownloader.get()) {
-                DataSaver(download.source, sourcePreferences)
-            } else {
-                DataSaver.NoOp
-            }
-
             download.status = Download.State.DOWNLOADING
 
             // Start downloading images, consider we can have downloaded images already
@@ -401,7 +392,7 @@ class Downloader(
                         }
                     }
 
-                    withIOContext { getOrDownloadImage(page, download, tmpDir, dataSaver) }
+                    withIOContext { getOrDownloadImage(page, download, tmpDir) }
                     emit(page)
                 }
                     .flowOn(Dispatchers.IO)
@@ -454,7 +445,7 @@ class Downloader(
      * @param download the download of the page.
      * @param tmpDir the temporary directory of the download.
      */
-    private suspend fun getOrDownloadImage(page: Page, download: Download, tmpDir: UniFile, dataSaver: DataSaver) {
+    private suspend fun getOrDownloadImage(page: Page, download: Download, tmpDir: UniFile) {
         // If the image URL is empty, do nothing
         if (page.imageUrl == null) {
             return
@@ -475,7 +466,7 @@ class Downloader(
                 chapterCache.isImageInCache(page.imageUrl!!) ->
                     copyImageFromCache(chapterCache.getImageFile(page.imageUrl!!), tmpDir, filename)
 
-                else -> downloadImage(page, download.source, tmpDir, filename, dataSaver)
+                else -> downloadImage(page, download.source, tmpDir, filename)
             }
 
             // When the page is ready, set page path, progress (just in case) and status
@@ -506,7 +497,6 @@ class Downloader(
         source: HttpSource,
         tmpDir: UniFile,
         filename: String,
-        dataSaver: DataSaver,
     ): UniFile {
         page.status = Page.State.DownloadImage
         page.progress = 0
@@ -515,7 +505,7 @@ class Downloader(
                 ?: tmpDir.createFile("$filename.tmp")!!
 
             try {
-                source.getImage(page, dataSaver = dataSaver).use {
+                source.getImage(page).use {
                     it.body.source().saveTo(
                         // If the server supports partial downloads (HTTP 206),
                         // append to the existing file.
@@ -539,9 +529,6 @@ class Downloader(
             .retryWhen { _, attempt ->
                 if (attempt < 3) {
                     delay((2L shl attempt.toInt()).seconds)
-                    if (source.isEhBasedSource()) {
-                        page.imageUrl = source.getImageUrl(page)
-                    }
                     true
                 } else {
                     false

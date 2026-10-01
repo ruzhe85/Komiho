@@ -6,7 +6,6 @@ import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.extension.model.Extension
 import eu.kanade.tachiyomi.extension.model.LoadResult
 import eu.kanade.tachiyomi.extension.util.ExtensionLoader
-import exh.source.BlacklistedSources
 import mihon.domain.extension.interactor.UpdateExtensionStores
 import mihon.domain.extension.repository.ExtensionStoreRepository
 import tachiyomi.core.common.preference.Preference
@@ -56,16 +55,9 @@ internal class ExtensionApi {
             findExtensions().also { lastExtCheck.set(Instant.now().toEpochMilli()) }
         }
 
-        // SY -->
-        val blacklistEnabled = sourcePreferences.enableSourceBlacklist.get()
-        // SY <--
-
         val installedExtensions = ExtensionLoader.loadExtensions(context)
             .filterIsInstance<LoadResult.Success>()
             .map { it.extension }
-            // SY -->
-            .filterNot { it.isBlacklisted(blacklistEnabled) }
-        // SY <--
 
         val extensionsWithUpdate = mutableListOf<Extension.Installed>()
         for (installedExt in installedExtensions) {
@@ -85,12 +77,4 @@ internal class ExtensionApi {
 
         return extensionsWithUpdate
     }
-
-    // SY -->
-    private fun Extension.isBlacklisted(
-        blacklistEnabled: Boolean = sourcePreferences.enableSourceBlacklist.get(),
-    ): Boolean {
-        return pkgName in BlacklistedSources.BLACKLISTED_EXTENSIONS && blacklistEnabled
-    }
-    // SY <--
 }

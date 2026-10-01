@@ -14,7 +14,7 @@ import eu.kanade.presentation.browse.GlobalSearchScreen
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
-import exh.ui.ifSourcesLoaded
+import eu.kanade.presentation.util.ifSourcesLoaded
 import tachiyomi.presentation.core.screens.LoadingScreen
 
 class GlobalSearchScreen(

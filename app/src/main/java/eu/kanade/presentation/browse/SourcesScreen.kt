@@ -31,7 +31,6 @@ import eu.kanade.tachiyomi.util.system.LocaleHelper
 import tachiyomi.domain.source.model.Pin
 import tachiyomi.domain.source.model.Source
 import tachiyomi.i18n.MR
-import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.components.LabeledCheckbox
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.components.material.SECONDARY_ALPHA
@@ -198,7 +197,6 @@ fun SourceOptionsDialog(
     onClickDisable: () -> Unit,
     // SY -->
     onClickSetCategories: (() -> Unit)?,
-    onClickToggleDataSaver: (() -> Unit)?,
     // SY <--
     onDismiss: () -> Unit,
 ) {
@@ -231,19 +229,6 @@ fun SourceOptionsDialog(
                         text = stringResource(MR.strings.categories),
                         modifier = Modifier
                             .clickable(onClick = onClickSetCategories)
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                    )
-                }
-                if (onClickToggleDataSaver != null) {
-                    Text(
-                        text = if (source.isExcludedFromDataSaver) {
-                            stringResource(SYMR.strings.data_saver_stop_exclude)
-                        } else {
-                            stringResource(SYMR.strings.data_saver_exclude)
-                        },
-                        modifier = Modifier
-                            .clickable(onClick = onClickToggleDataSaver)
                             .fillMaxWidth()
                             .padding(vertical = 16.dp),
                     )

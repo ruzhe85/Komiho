@@ -31,7 +31,7 @@ class GetApplicationReleaseTest {
     }
 
     @Test
-    fun `When has update but is preview expect new update`() = runTest {
+    fun `When has update expect new update`() = runTest {
         every { preference.get() } returns 0
         every { preference.set(any()) }.answers { }
 
@@ -46,11 +46,10 @@ class GetApplicationReleaseTest {
 
         val result = getApplicationRelease.await(
             GetApplicationRelease.Arguments(
-                isPreview = true,
+                isPreview = false,
                 commitCount = 1000,
-                versionName = "",
+                versionName = "100",
                 repository = "test",
-                syDebugVersion = "100",
             ),
         )
 
@@ -78,7 +77,6 @@ class GetApplicationReleaseTest {
                 isPreview = false,
                 commitCount = 0,
                 versionName = "v1.0.0",
-                syDebugVersion = "0",
                 repository = "test",
             ),
         )
@@ -107,7 +105,6 @@ class GetApplicationReleaseTest {
                 isPreview = false,
                 commitCount = 0,
                 versionName = "v2.0.0",
-                syDebugVersion = "0",
                 repository = "test",
             ),
         )
@@ -134,7 +131,6 @@ class GetApplicationReleaseTest {
                 isPreview = false,
                 commitCount = 0,
                 versionName = "v2.0.0",
-                syDebugVersion = "0",
                 repository = "test",
             ),
         )

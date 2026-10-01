@@ -7,7 +7,6 @@ import eu.kanade.tachiyomi.data.backup.models.BackupCategory
 import eu.kanade.tachiyomi.data.backup.models.BackupChapter
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.BackupPreference
-import eu.kanade.tachiyomi.data.backup.models.BackupSavedSearch
 import eu.kanade.tachiyomi.data.backup.models.BackupSource
 import eu.kanade.tachiyomi.data.backup.models.BackupSourcePreferences
 import kotlinx.serialization.Serializable
@@ -57,25 +56,12 @@ abstract class SyncService(
             localSyncData.backup?.backupSourcePreferences,
             remoteSyncData.backup?.backupSourcePreferences,
         )
-
-        // SY -->
-        val mergedSavedSearchesList = mergeSavedSearchesLists(
-            localSyncData.backup?.backupSavedSearches,
-            remoteSyncData.backup?.backupSavedSearches,
-        )
-        // SY <--
-
-        // Create the merged Backup object
         val mergedBackup = Backup(
             backupManga = mergedMangaList,
             backupCategories = mergedCategoriesList,
             backupSources = mergedSourcesList,
             backupPreferences = mergedPreferencesList,
             backupSourcePreferences = mergedSourcePreferencesList,
-
-            // SY -->
-            backupSavedSearches = mergedSavedSearchesList,
-            // SY <--
         )
 
         // Create the merged SData object
@@ -532,59 +518,4 @@ abstract class SyncService(
         return mergedPrefsMap.values.toList()
     }
 
-    // SY -->
-    private fun mergeSavedSearchesLists(
-        localSearches: List<BackupSavedSearch>?,
-        remoteSearches: List<BackupSavedSearch>?,
-    ): List<BackupSavedSearch> {
-        val logTag = "MergeSavedSearches"
-
-        // Define a function to create a composite key from a BackupSavedSearch
-        fun searchCompositeKey(search: BackupSavedSearch): String {
-            return "${search.name}|${search.source}"
-        }
-
-        // Create maps using the composite key
-        val localSearchMap = localSearches?.associateBy { searchCompositeKey(it) } ?: emptyMap()
-        val remoteSearchMap = remoteSearches?.associateBy { searchCompositeKey(it) } ?: emptyMap()
-
-        logcat(LogPriority.DEBUG, logTag) {
-            "Starting saved searches merge. Local saved searches: ${localSearches?.size}, " +
-                "Remote saved searches: ${remoteSearches?.size}"
-        }
-
-        // Merge both saved searches maps
-        val mergedSearches = (localSearchMap.keys + remoteSearchMap.keys).distinct().mapNotNull { compositeKey ->
-            val localSearch = localSearchMap[compositeKey]
-            val remoteSearch = remoteSearchMap[compositeKey]
-
-            logcat(LogPriority.DEBUG, logTag) {
-                "Processing saved search key: $compositeKey. Local search: ${localSearch != null}, " +
-                    "Remote search: ${remoteSearch != null}"
-            }
-
-            when {
-                localSearch != null && remoteSearch == null -> {
-                    logcat(LogPriority.DEBUG, logTag) { "Using local saved search: ${localSearch.name}." }
-                    localSearch
-                }
-                remoteSearch != null && localSearch == null -> {
-                    logcat(LogPriority.DEBUG, logTag) { "Using remote saved search: ${remoteSearch.name}." }
-                    remoteSearch
-                }
-
-                else -> {
-                    logcat(LogPriority.DEBUG, logTag) { "Both remote and local have the same saved search key: $compositeKey. Keeping local." }
-                    localSearch
-                }
-            }
-        }
-
-        logcat(LogPriority.DEBUG, logTag) {
-            "Saved searches merge completed. Total merged saved searches: ${mergedSearches.size}"
-        }
-
-        return mergedSearches
-    }
-    // SY <--
 }

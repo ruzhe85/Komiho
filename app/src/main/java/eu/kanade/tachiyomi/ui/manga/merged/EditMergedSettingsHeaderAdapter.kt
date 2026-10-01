@@ -7,7 +7,6 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.recyclerview.widget.RecyclerView
 import eu.kanade.tachiyomi.databinding.EditMergedSettingsHeaderBinding
-import exh.log.xLogD
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.manga.model.MergedMangaReference
 import tachiyomi.domain.source.service.SourceManager
@@ -78,7 +77,6 @@ class EditMergedSettingsHeaderAdapter(private val state: EditMergedSettingsState
                             else -> MergedMangaReference.CHAPTER_SORT_NO_DEDUPE
                         },
                     )
-                    xLogD(state.mergeReference?.chapterSortMode)
                     editMergedMangaItemSortingListener.onSetPrioritySort(canMove())
                 }
 

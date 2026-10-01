@@ -44,7 +44,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastAny
 import androidx.compose.ui.util.fastMap
@@ -56,42 +55,17 @@ import eu.kanade.presentation.manga.components.MangaActionRow
 import eu.kanade.presentation.manga.components.MangaBottomActionMenu
 import eu.kanade.presentation.manga.components.MangaChapterListItem
 import eu.kanade.presentation.manga.components.MangaInfoBox
-import eu.kanade.presentation.manga.components.MangaInfoButtons
 import eu.kanade.presentation.manga.components.MangaToolbar
 import eu.kanade.presentation.manga.components.MissingChapterCountListItem
-import eu.kanade.presentation.manga.components.PagePreviewItems
-import eu.kanade.presentation.manga.components.PagePreviews
-import eu.kanade.presentation.manga.components.SearchMetadataChips
 import eu.kanade.presentation.util.formatChapterNumber
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.getNameForMangaInfo
-import eu.kanade.tachiyomi.source.online.MetadataSource
-import eu.kanade.tachiyomi.source.online.all.EHentai
-import eu.kanade.tachiyomi.source.online.all.Lanraragi
-import eu.kanade.tachiyomi.source.online.all.MangaDex
-import eu.kanade.tachiyomi.source.online.all.NHentai
-import eu.kanade.tachiyomi.source.online.english.EightMuses
-import eu.kanade.tachiyomi.source.online.english.HBrowse
-import eu.kanade.tachiyomi.source.online.english.Pururin
-import eu.kanade.tachiyomi.source.online.english.Tsumino
 import eu.kanade.tachiyomi.ui.manga.ChapterList
 import eu.kanade.tachiyomi.ui.manga.MangaScreenModel
 import eu.kanade.tachiyomi.ui.manga.MergedMangaData
-import eu.kanade.tachiyomi.ui.manga.PagePreviewState
 import eu.kanade.tachiyomi.util.system.copyToClipboard
-import exh.metadata.MetadataUtil
-import exh.source.MERGED_SOURCE_ID
-import exh.source.getMainSource
-import exh.source.isEhBasedManga
-import exh.ui.metadata.adapters.EHentaiDescription
-import exh.ui.metadata.adapters.EightMusesDescription
-import exh.ui.metadata.adapters.HBrowseDescription
-import exh.ui.metadata.adapters.LanraragiDescription
-import exh.ui.metadata.adapters.MangaDexDescription
-import exh.ui.metadata.adapters.NHentaiDescription
-import exh.ui.metadata.adapters.PururinDescription
-import exh.ui.metadata.adapters.TsuminoDescription
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.service.missingChaptersCount
 import tachiyomi.domain.library.service.LibraryPreferences
@@ -107,7 +81,6 @@ import tachiyomi.presentation.core.util.shouldExpandFAB
 import tachiyomi.source.local.isLocal
 import java.time.Instant
 import java.time.ZoneId
-import java.time.ZonedDateTime
 
 @Composable
 fun MangaScreen(
@@ -142,15 +115,8 @@ fun MangaScreen(
     onEditFetchIntervalClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
     // SY -->
-    onMetadataViewerClicked: () -> Unit,
     onEditInfoClicked: () -> Unit,
-    onRecommendClicked: () -> Unit,
     onMergedSettingsClicked: () -> Unit,
-    onMergeClicked: () -> Unit,
-    onMergeWithAnotherClicked: () -> Unit,
-    onOpenPagePreview: (Int) -> Unit,
-    onMorePreviewsClicked: () -> Unit,
-    previewsRowCount: Int,
     // SY <--
 
     // For bottom action menu
@@ -200,15 +166,8 @@ fun MangaScreen(
             onEditIntervalClicked = onEditFetchIntervalClicked,
             onEditNotesClicked = onEditNotesClicked,
             // SY -->
-            onMetadataViewerClicked = onMetadataViewerClicked,
             onEditInfoClicked = onEditInfoClicked,
-            onRecommendClicked = onRecommendClicked,
             onMergedSettingsClicked = onMergedSettingsClicked,
-            onMergeClicked = onMergeClicked,
-            onMergeWithAnotherClicked = onMergeWithAnotherClicked,
-            onOpenPagePreview = onOpenPagePreview,
-            onMorePreviewsClicked = onMorePreviewsClicked,
-            previewsRowCount = previewsRowCount,
             // SY <--
             onMultiBookmarkClicked = onMultiBookmarkClicked,
             onMultiMarkAsReadClicked = onMultiMarkAsReadClicked,
@@ -245,15 +204,8 @@ fun MangaScreen(
             onEditIntervalClicked = onEditFetchIntervalClicked,
             onEditNotesClicked = onEditNotesClicked,
             // SY -->
-            onMetadataViewerClicked = onMetadataViewerClicked,
             onEditInfoClicked = onEditInfoClicked,
-            onRecommendClicked = onRecommendClicked,
             onMergedSettingsClicked = onMergedSettingsClicked,
-            onMergeClicked = onMergeClicked,
-            onMergeWithAnotherClicked = onMergeWithAnotherClicked,
-            onOpenPagePreview = onOpenPagePreview,
-            onMorePreviewsClicked = onMorePreviewsClicked,
-            previewsRowCount = previewsRowCount,
             // SY <--
             onMultiBookmarkClicked = onMultiBookmarkClicked,
             onMultiMarkAsReadClicked = onMultiMarkAsReadClicked,
@@ -300,15 +252,8 @@ private fun MangaScreenSmallImpl(
     onEditIntervalClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
     // SY -->
-    onMetadataViewerClicked: () -> Unit,
     onEditInfoClicked: () -> Unit,
-    onRecommendClicked: () -> Unit,
     onMergedSettingsClicked: () -> Unit,
-    onMergeClicked: () -> Unit,
-    onMergeWithAnotherClicked: () -> Unit,
-    onOpenPagePreview: (Int) -> Unit,
-    onMorePreviewsClicked: () -> Unit,
-    previewsRowCount: Int,
     // SY <--
 
     // For bottom action menu
@@ -334,13 +279,6 @@ private fun MangaScreenSmallImpl(
             third = state.isAnySelected,
         )
     }
-    // SY -->
-    val metadataDescription = metadataDescription(state.source)
-    var maxWidth by remember {
-        mutableStateOf(Dp.Hairline)
-    }
-    // SY <--
-
     BackHandler(enabled = isAnySelected) {
         onAllChapterSelected(false)
     }
@@ -376,9 +314,7 @@ private fun MangaScreenSmallImpl(
                 onClickEditNotes = onEditNotesClicked,
                 // SY -->
                 onClickEditInfo = onEditInfoClicked.takeIf { state.manga.favorite },
-                onClickRecommend = onRecommendClicked.takeIf { state.showRecommendationsInOverflow },
                 onClickMergedSettings = onMergedSettingsClicked.takeIf { state.manga.source == MERGED_SOURCE_ID },
-                onClickMerge = onMergeClicked.takeIf { state.showMergeInOverflow },
                 // SY <--
                 actionModeCounter = selectedChapterCount,
                 onCancelActionMode = { onAllChapterSelected(false) },
@@ -478,26 +414,11 @@ private fun MangaScreenSmallImpl(
                             onEditIntervalClicked = onEditIntervalClicked,
                             onEditCategory = onEditCategoryClicked,
                             // SY -->
-                            onMergeClicked = onMergeClicked.takeUnless { state.showMergeInOverflow },
                             // SY <--
                         )
                     }
 
                     // SY -->
-                    if (metadataDescription != null) {
-                        item(
-                            key = MangaScreenItem.METADATA_INFO,
-                            contentType = MangaScreenItem.METADATA_INFO,
-                        ) {
-                            metadataDescription(
-                                state,
-                                onMetadataViewerClicked,
-                            ) {
-                                onSearch(it, false)
-                            }
-                        }
-                    }
-                    // SY <--
 
                     item(
                         key = MangaScreenItem.DESCRIPTION_WITH_TAG,
@@ -513,39 +434,11 @@ private fun MangaScreenSmallImpl(
                             onEditNotes = onEditNotesClicked,
                             // SY -->
                             doSearch = onSearch,
-                            searchMetadataChips = remember(state.meta, state.source.id, state.manga.genre) {
-                                SearchMetadataChips(state.meta, state.source.id, state.manga.genre)
-                            },
                             // SY <--
                         )
                     }
 
                     // SY -->
-                    if (!state.showRecommendationsInOverflow || state.showMergeWithAnother) {
-                        item(
-                            key = MangaScreenItem.INFO_BUTTONS,
-                            contentType = MangaScreenItem.INFO_BUTTONS,
-                        ) {
-                            MangaInfoButtons(
-                                showRecommendsButton = !state.showRecommendationsInOverflow,
-                                showMergeWithAnotherButton = state.showMergeWithAnother,
-                                onRecommendClicked = onRecommendClicked,
-                                onMergeWithAnotherClicked = onMergeWithAnotherClicked,
-                            )
-                        }
-                    }
-
-                    if (state.pagePreviewsState !is PagePreviewState.Unused && previewsRowCount > 0) {
-                        PagePreviewItems(
-                            pagePreviewState = state.pagePreviewsState,
-                            onOpenPage = onOpenPagePreview,
-                            onMorePreviewsClicked = onMorePreviewsClicked,
-                            maxWidth = maxWidth,
-                            setMaxWidth = { maxWidth = it },
-                            rowCount = previewsRowCount,
-                        )
-                    }
-                    // SY <--
 
                     item(
                         key = MangaScreenItem.CHAPTER_HEADER,
@@ -570,7 +463,6 @@ private fun MangaScreenSmallImpl(
                         chapterSwipeStartAction = chapterSwipeStartAction,
                         chapterSwipeEndAction = chapterSwipeEndAction,
                         // SY -->
-                        alwaysShowReadingProgress = state.alwaysShowReadingProgress,
                         // SY <--
                         onChapterClicked = onChapterClicked,
                         onDownloadChapter = onDownloadChapter,
@@ -616,15 +508,8 @@ fun MangaScreenLargeImpl(
     onEditIntervalClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
     // SY -->
-    onMetadataViewerClicked: () -> Unit,
     onEditInfoClicked: () -> Unit,
-    onRecommendClicked: () -> Unit,
     onMergedSettingsClicked: () -> Unit,
-    onMergeClicked: () -> Unit,
-    onMergeWithAnotherClicked: () -> Unit,
-    onOpenPagePreview: (Int) -> Unit,
-    onMorePreviewsClicked: () -> Unit,
-    previewsRowCount: Int,
     // SY <--
 
     // For bottom action menu
@@ -651,11 +536,6 @@ fun MangaScreenLargeImpl(
             third = state.isAnySelected,
         )
     }
-
-    // SY -->
-    val metadataDescription = metadataDescription(state.source)
-    // SY <--
-
     val insetPadding = WindowInsets.systemBars.only(WindowInsetsSides.Horizontal).asPaddingValues()
     var topBarHeight by remember { mutableIntStateOf(0) }
 
@@ -683,9 +563,7 @@ fun MangaScreenLargeImpl(
                 onClickEditNotes = onEditNotesClicked,
                 // SY -->
                 onClickEditInfo = onEditInfoClicked.takeIf { state.manga.favorite },
-                onClickRecommend = onRecommendClicked.takeIf { state.showRecommendationsInOverflow },
                 onClickMergedSettings = onMergedSettingsClicked.takeIf { state.manga.source == MERGED_SOURCE_ID },
-                onClickMerge = onMergeClicked.takeIf { state.showMergeInOverflow },
                 // SY <--
                 onCancelActionMode = { onAllChapterSelected(false) },
                 actionModeCounter = selectedChapterCount,
@@ -780,17 +658,8 @@ fun MangaScreenLargeImpl(
                             onEditIntervalClicked = onEditIntervalClicked,
                             onEditCategory = onEditCategoryClicked,
                             // SY -->
-                            onMergeClicked = onMergeClicked.takeUnless { state.showMergeInOverflow },
                             // SY <--
                         )
-                        // SY -->
-                        metadataDescription?.invoke(
-                            state,
-                            onMetadataViewerClicked,
-                        ) {
-                            onSearch(it, false)
-                        }
-                        // SY <--
                         ExpandableMangaDescription(
                             defaultExpandState = true,
                             description = state.manga.description,
@@ -801,29 +670,8 @@ fun MangaScreenLargeImpl(
                             onEditNotes = onEditNotesClicked,
                             // SY -->
                             doSearch = onSearch,
-                            searchMetadataChips = remember(state.meta, state.source.id, state.manga.genre) {
-                                SearchMetadataChips(state.meta, state.source.id, state.manga.genre)
-                            },
                             // SY <--
                         )
-                        // SY -->
-                        if (!state.showRecommendationsInOverflow || state.showMergeWithAnother) {
-                            MangaInfoButtons(
-                                showRecommendsButton = !state.showRecommendationsInOverflow,
-                                showMergeWithAnotherButton = state.showMergeWithAnother,
-                                onRecommendClicked = onRecommendClicked,
-                                onMergeWithAnotherClicked = onMergeWithAnotherClicked,
-                            )
-                        }
-                        if (state.pagePreviewsState !is PagePreviewState.Unused && previewsRowCount > 0) {
-                            PagePreviews(
-                                pagePreviewState = state.pagePreviewsState,
-                                onOpenPage = onOpenPagePreview,
-                                onMorePreviewsClicked = onMorePreviewsClicked,
-                                rowCount = previewsRowCount,
-                            )
-                        }
-                        // SY <--
                     }
                 },
                 endContent = {
@@ -862,7 +710,6 @@ fun MangaScreenLargeImpl(
                                 chapterSwipeStartAction = chapterSwipeStartAction,
                                 chapterSwipeEndAction = chapterSwipeEndAction,
                                 // SY -->
-                                alwaysShowReadingProgress = state.alwaysShowReadingProgress,
                                 // SY <--
                                 onChapterClicked = onChapterClicked,
                                 onDownloadChapter = onDownloadChapter,
@@ -927,7 +774,6 @@ private fun LazyListScope.sharedChapterItems(
     chapterSwipeStartAction: LibraryPreferences.ChapterSwipeAction,
     chapterSwipeEndAction: LibraryPreferences.ChapterSwipeAction,
     // SY -->
-    alwaysShowReadingProgress: Boolean,
     // SY <--
     onChapterClicked: (Chapter) -> Unit,
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
@@ -963,18 +809,11 @@ private fun LazyListScope.sharedChapterItems(
                     date = item.chapter.dateUpload
                         .takeIf { it > 0L }
                         ?.let {
-                            // SY -->
-                            if (manga.isEhBasedManga()) {
-                                MetadataUtil.EX_DATE_FORMAT
-                                    .format(ZonedDateTime.ofInstant(Instant.ofEpochMilli(it), ZoneId.systemDefault()))
-                            } else {
-                                relativeDateText(item.chapter.dateUpload)
-                            }
-                            // SY <--
+                            relativeDateText(item.chapter.dateUpload)
                         },
                     readProgress = item.chapter.lastPageRead
                         .takeIf {
-                            /* SY --> */(!item.chapter.read || alwaysShowReadingProgress)/* SY <-- */ && it > 0L
+                            !item.chapter.read && it > 0L
                         }
                         ?.let {
                             stringResource(
@@ -1036,44 +875,3 @@ private fun onChapterItemClick(
     }
 }
 
-// SY -->
-typealias MetadataDescriptionComposable = @Composable (
-    state: MangaScreenModel.State.Success,
-    openMetadataViewer: () -> Unit,
-    search: (String) -> Unit,
-) -> Unit
-
-@Composable
-fun metadataDescription(source: Source): MetadataDescriptionComposable? {
-    val metadataSource = remember(source.id) { source.getMainSource<MetadataSource<*, *>>() }
-    return remember(metadataSource) {
-        when (metadataSource) {
-            is EHentai -> { state, openMetadataViewer, search ->
-                EHentaiDescription(state, openMetadataViewer, search)
-            }
-            is MangaDex -> { state, openMetadataViewer, _ ->
-                MangaDexDescription(state, openMetadataViewer)
-            }
-            is NHentai -> { state, openMetadataViewer, _ ->
-                NHentaiDescription(state, openMetadataViewer)
-            }
-            is EightMuses -> { state, openMetadataViewer, _ ->
-                EightMusesDescription(state, openMetadataViewer)
-            }
-            is HBrowse -> { state, openMetadataViewer, _ ->
-                HBrowseDescription(state, openMetadataViewer)
-            }
-            is Pururin -> { state, openMetadataViewer, _ ->
-                PururinDescription(state, openMetadataViewer)
-            }
-            is Tsumino -> { state, openMetadataViewer, _ ->
-                TsuminoDescription(state, openMetadataViewer)
-            }
-            is Lanraragi -> { state, openMetadataViewer, _ ->
-                LanraragiDescription(state, openMetadataViewer)
-            }
-            else -> null
-        }
-    }
-}
-// SY <--

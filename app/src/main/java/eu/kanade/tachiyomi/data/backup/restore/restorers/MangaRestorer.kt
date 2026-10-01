@@ -6,11 +6,9 @@ import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.tachiyomi.data.backup.models.BackupCategory
 import eu.kanade.tachiyomi.data.backup.models.BackupChapter
-import eu.kanade.tachiyomi.data.backup.models.BackupFlatMetadata
 import eu.kanade.tachiyomi.data.backup.models.BackupHistory
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.BackupMergedMangaReference
-import exh.EXHMigrations
 import tachiyomi.data.Database
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.UpdateStrategyColumnAdapter
@@ -20,9 +18,7 @@ import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.interactor.FetchInterval
-import tachiyomi.domain.manga.interactor.GetFlatMetadataById
 import tachiyomi.domain.manga.interactor.GetMangaByUrlAndSourceId
-import tachiyomi.domain.manga.interactor.InsertFlatMetadata
 import tachiyomi.domain.manga.interactor.SetCustomMangaInfo
 import tachiyomi.domain.manga.model.CustomMangaInfo
 import tachiyomi.domain.manga.model.Manga
@@ -43,8 +39,6 @@ class MangaRestorer(
     fetchInterval: FetchInterval = Injekt.get(),
     // SY -->
     private val setCustomMangaInfo: SetCustomMangaInfo = Injekt.get(),
-    private val insertFlatMetadata: InsertFlatMetadata = Injekt.get(),
-    private val getFlatMetadataById: GetFlatMetadataById = Injekt.get(),
     // SY <--
 ) {
     private var now = ZonedDateTime.now()
@@ -75,9 +69,6 @@ class MangaRestorer(
         database.transaction {
             val dbManga = findExistingManga(backupManga)
             var manga = backupManga.getMangaImpl()
-            // SY -->
-            manga = EXHMigrations.migrateBackupEntry(manga)
-            // SY <--
             val restoredManga = if (dbManga == null) {
                 restoreNewManga(manga)
             } else {
@@ -93,7 +84,6 @@ class MangaRestorer(
                 excludedScanlators = backupManga.excludedScanlators,
                 // SY -->
                 mergedMangaReferences = backupManga.mergedMangaReferences,
-                flatMetadata = backupManga.flatMetadata,
                 customManga = backupManga.getCustomMangaInfo(),
                 // SY <--
             )
@@ -321,7 +311,6 @@ class MangaRestorer(
         excludedScanlators: List<String>,
         // SY -->
         mergedMangaReferences: List<BackupMergedMangaReference>,
-        flatMetadata: BackupFlatMetadata?,
         customManga: CustomMangaInfo?,
         // SY <--
     ): Manga {
@@ -332,7 +321,6 @@ class MangaRestorer(
         updateManga.awaitUpdateFetchInterval(manga, now, currentFetchWindow)
         // SY -->
         restoreMergedMangaReferencesForManga(manga.id, mergedMangaReferences)
-        flatMetadata?.let { restoreFlatMetadata(manga.id, it) }
         restoreEditedInfo(customManga?.copy(id = manga.id))
         // SY <--
 
@@ -467,12 +455,6 @@ class MangaRestorer(
                     )
                 }
             }
-        }
-    }
-
-    private suspend fun restoreFlatMetadata(mangaId: Long, backupFlatMetadata: BackupFlatMetadata) {
-        if (getFlatMetadataById.await(mangaId) == null) {
-            insertFlatMetadata.await(backupFlatMetadata.getFlatMetadata(mangaId))
         }
     }
 

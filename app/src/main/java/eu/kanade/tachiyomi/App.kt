@@ -27,13 +27,6 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.allowRgb565
 import coil3.request.crossfade
 import coil3.util.DebugLogger
-import com.elvishew.xlog.LogConfiguration
-import com.elvishew.xlog.LogLevel
-import com.elvishew.xlog.XLog
-import com.elvishew.xlog.printer.AndroidPrinter
-import com.elvishew.xlog.printer.Printer
-import com.elvishew.xlog.printer.file.backup.NeverBackupStrategy
-import com.elvishew.xlog.printer.file.naming.DateFileNameGenerator
 import eu.kanade.domain.DomainModule
 import eu.kanade.domain.SYDomainModule
 import eu.kanade.domain.base.BasePreferences
@@ -52,8 +45,6 @@ import eu.kanade.tachiyomi.data.coil.LocalCoverKeyer
 import eu.kanade.tachiyomi.data.coil.MangaCoverFetcher
 import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
 import eu.kanade.tachiyomi.data.coil.MangaKeyer
-import eu.kanade.tachiyomi.data.coil.PagePreviewFetcher
-import eu.kanade.tachiyomi.data.coil.PagePreviewKeyer
 // SY --> Komiho: 进度条缩略图——本地/SMB/WebDAV/远程源均复用 reader 的 PageLoader 加载页原图
 import eu.kanade.tachiyomi.data.coil.ReaderPageThumbnailFetcher
 // SY <--
@@ -63,7 +54,6 @@ import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.di.AppModule
 import eu.kanade.tachiyomi.di.InjektKoinBridge
 import eu.kanade.tachiyomi.di.PreferenceModule
-import eu.kanade.tachiyomi.di.SYPreferenceModule
 import eu.kanade.tachiyomi.di.importModule
 import eu.kanade.tachiyomi.di.initExpensiveComponents
 import eu.kanade.tachiyomi.network.NetworkHelper
@@ -75,13 +65,7 @@ import eu.kanade.tachiyomi.util.system.WebViewUtil
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.system.cancelNotification
 import eu.kanade.tachiyomi.util.system.notify
-import exh.log.CrashlyticsPrinter
-import exh.log.EHLogLevel
-import exh.log.EnhancedFilePrinter
-import exh.log.DiagnosticLogBuffer
-import exh.log.XLogLogcatLogger
-import exh.log.xLogD
-import exh.syDebugVersion
+import eu.kanade.tachiyomi.diagnostic.DiagnosticLogBuffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -96,15 +80,12 @@ import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.widget.WidgetManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import java.security.Security
-import java.text.SimpleDateFormat
-import java.util.Locale
 
 class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factory {
 
@@ -140,15 +121,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         Injekt.importModule(AppModule(this))
         Injekt.importModule(DomainModule())
         // SY -->
-        Injekt.importModule(SYPreferenceModule(this))
         Injekt.importModule(SYDomainModule())
         InjektKoinBridge.startKoin(this)
         initExpensiveComponents(this)
         // SY <--
 
-        setupExhLogging() // EXH logging
         LogcatLogger.install()
-        LogcatLogger.loggers += XLogLogcatLogger() // SY Redirect Logcat to XLog
         DiagnosticLogBuffer.install() // SY Buffer all logcat since cold start for "导出诊断日志"
 
         setupNotificationChannels()
@@ -228,6 +206,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     private fun initializeMigrator() {
         val preferenceStore = Injekt.get<PreferenceStore>()
         // SY -->
+        // 注：key 名沿用 SY 时代的 "eh_last_version_code"（历史命名，仅作为迁移版本号存档，与 exh 无关）
         val preference = preferenceStore.getInt(Preference.appStateKey("eh_last_version_code"), 0)
         // SY <--
         logcat { "Migration from ${preference.get()} to ${BuildConfig.VERSION_CODE}" }
@@ -255,7 +234,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 add(MangaCoverFetcher.MangaCoverFactory(callFactoryLazy))
                 add(MangaCoverFetcher.MangaFactory(callFactoryLazy))
                 // SY -->
-                add(PagePreviewFetcher.Factory(callFactoryLazy))
                 // Komiho: 本地（文件型来源）封面，自带 filesDir 缓存，与 Komga 缓存隔离
                 add(LocalCoverFetcher.Factory(context.applicationContext))
                 // Komiho Phase7: SMB 浏览列表封面（归档首图/单图，filesDir 缓存隔离）
@@ -267,7 +245,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 add(MangaCoverKeyer())
                 add(MangaKeyer())
                 // SY -->
-                add(PagePreviewKeyer())
                 // Komiho: 本地封面缓存键（uri + lastModified）
                 add(LocalCoverKeyer())
                 // Komiho Phase7: SMB 浏览封面 Keyer
@@ -347,72 +324,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e) { "Failed to modify notification channels" }
         }
-    }
-
-    // EXH
-    private fun setupExhLogging() {
-        EHLogLevel.init(this)
-
-        val logLevel = when {
-            EHLogLevel.shouldLog(EHLogLevel.EXTREME) -> LogLevel.ALL
-            EHLogLevel.shouldLog(EHLogLevel.EXTRA) || BuildConfig.DEBUG -> LogLevel.DEBUG
-            else -> LogLevel.WARN
-        }
-
-        val logConfig = LogConfiguration.Builder()
-            .logLevel(logLevel)
-            .disableStackTrace()
-            .disableBorder()
-            .build()
-
-        val printers = mutableListOf<Printer>(AndroidPrinter())
-
-        val logFolder = Injekt.get<StorageManager>().getLogsDirectory()
-
-        if (logFolder != null) {
-            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
-
-            printers += EnhancedFilePrinter
-                .Builder(logFolder) {
-                    fileNameGenerator = object : DateFileNameGenerator() {
-                        override fun generateFileName(logLevel: Int, timestamp: Long): String {
-                            return super.generateFileName(
-                                logLevel,
-                                timestamp,
-                            ) + "-${BuildConfig.BUILD_TYPE}.txt"
-                        }
-                    }
-                    flattener { timeMillis, level, tag, message ->
-                        "${dateFormat.format(timeMillis)} ${LogLevel.getShortLevelName(level)}/$tag: $message"
-                    }
-                    backupStrategy = NeverBackupStrategy()
-                }
-        }
-
-        // Install Crashlytics in prod
-        if (!BuildConfig.DEBUG) {
-            printers += CrashlyticsPrinter(LogLevel.ERROR)
-        }
-
-        XLog.init(
-            logConfig,
-            *printers.toTypedArray(),
-        )
-
-        xLogD("Application booting...")
-        xLogD(
-            """
-                App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE}, ${BuildConfig.COMMIT_SHA}, ${BuildConfig.VERSION_CODE})
-                Preview build: $syDebugVersion
-                Android version: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})
-                Android build ID: ${Build.DISPLAY}
-                Device brand: ${Build.BRAND}
-                Device manufacturer: ${Build.MANUFACTURER}
-                Device name: ${Build.DEVICE}
-                Device model: ${Build.MODEL}
-                Device product name: ${Build.PRODUCT}
-            """.trimIndent(),
-        )
     }
 
     private inner class DisableIncognitoReceiver : BroadcastReceiver() {

@@ -8,10 +8,10 @@ class GetShowLatest(
     private val preferences: UiPreferences,
 ) {
 
-    fun subscribe(hasSmartSearchConfig: Boolean): Flow<Boolean> {
+    fun subscribe(): Flow<Boolean> {
         return preferences.useNewSourceNavigation.changes()
             .map {
-                !hasSmartSearchConfig && !it
+                !it
             }
     }
 }

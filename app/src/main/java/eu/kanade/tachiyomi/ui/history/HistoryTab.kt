@@ -28,7 +28,6 @@ import eu.kanade.presentation.manga.DuplicateMangaDialog
 import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
-import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import kotlinx.coroutines.channels.Channel
@@ -129,12 +128,6 @@ data object HistoryTab : Tab {
                 )
             }
             null -> {}
-        }
-
-        LaunchedEffect(state.list) {
-            if (state.list != null) {
-                (context as? MainActivity)?.ready = true
-            }
         }
 
         LaunchedEffect(Unit) {

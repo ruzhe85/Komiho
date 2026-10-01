@@ -25,7 +25,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import eu.kanade.tachiyomi.databinding.EditMergedSettingsDialogBinding
 import eu.kanade.tachiyomi.ui.manga.MergedMangaData
 import eu.kanade.tachiyomi.util.system.toast
-import exh.source.MERGED_SOURCE_ID
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MergedMangaReference
 import tachiyomi.i18n.MR

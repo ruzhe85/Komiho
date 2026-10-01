@@ -16,7 +16,6 @@ data class BackupOptions(
     val privateSettings: Boolean = false,
     // SY -->
     val customInfo: Boolean = true,
-    val savedSearches: Boolean = true,
     // SY <--
 ) {
 
@@ -32,12 +31,11 @@ data class BackupOptions(
         privateSettings,
         // SY -->
         customInfo,
-        savedSearches,
         // SY <--
     )
 
     fun canCreate() =
-        libraryEntries || categories || appSettings || extensionStores || sourceSettings || savedSearches
+        libraryEntries || categories || appSettings || extensionStores || sourceSettings
 
     companion object {
         val libraryOptions = listOf(
@@ -75,11 +73,6 @@ data class BackupOptions(
                 getter = BackupOptions::customInfo,
                 setter = { options, enabled -> options.copy(customInfo = enabled) },
                 enabled = { it.libraryEntries },
-            ),
-            Entry(
-                label = SYMR.strings.saved_searches,
-                getter = BackupOptions::savedSearches,
-                setter = { options, enabled -> options.copy(savedSearches = enabled) },
             ),
             // SY <--
         )
@@ -120,7 +113,6 @@ data class BackupOptions(
             privateSettings = array[8],
             // SY -->
             customInfo = array[9],
-            savedSearches = array[10],
             // SY <--
         )
     }

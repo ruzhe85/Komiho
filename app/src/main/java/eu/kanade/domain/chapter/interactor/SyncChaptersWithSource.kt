@@ -10,7 +10,6 @@ import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.online.HttpSource
-import exh.source.isEhBasedManga
 import tachiyomi.data.chapter.ChapterSanitizer
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.ShouldUpdateDbChapter
@@ -208,24 +207,6 @@ class SyncChaptersWithSource(
 
             chapter
         }
-
-        // --> EXH (carry over reading progress)
-        if (manga.isEhBasedManga()) {
-            val finalAdded = updatedToAdd.filterNot { it.url in changedOrDuplicateReadUrls }
-            if (finalAdded.isNotEmpty()) {
-                val max = dbChapters.maxOfOrNull { it.lastPageRead }
-                if (max != null && max > 0) {
-                    updatedToAdd = updatedToAdd.map {
-                        if (it.url !in changedOrDuplicateReadUrls) {
-                            it.copy(lastPageRead = max)
-                        } else {
-                            it
-                        }
-                    }
-                }
-            }
-        }
-        // <-- EXH
 
         if (removedChapters.isNotEmpty()) {
             val toDeleteIds = removedChapters.map { it.id }

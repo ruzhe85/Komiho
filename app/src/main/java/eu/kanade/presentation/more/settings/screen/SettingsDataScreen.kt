@@ -65,7 +65,6 @@ import eu.kanade.presentation.util.relativeTimeSpanString
 import eu.kanade.tachiyomi.data.backup.create.BackupCreateJob
 import eu.kanade.tachiyomi.data.backup.restore.BackupRestoreJob
 import eu.kanade.tachiyomi.data.cache.ChapterCache
-import eu.kanade.tachiyomi.data.cache.PagePreviewCache
 import eu.kanade.tachiyomi.data.export.LibraryExporter
 import eu.kanade.tachiyomi.data.export.LibraryExporter.ExportOptions
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
@@ -337,12 +336,6 @@ object SettingsDataScreen : SearchableSettings {
         var cacheReadableSizeSema by remember { mutableIntStateOf(0) }
         val cacheReadableSize = remember(cacheReadableSizeSema) { chapterCache.readableSize }
 
-        // SY -->
-        val pagePreviewCache = remember { Injekt.get<PagePreviewCache>() }
-        var pagePreviewReadableSizeSema by remember { mutableIntStateOf(0) }
-        val pagePreviewReadableSize = remember(pagePreviewReadableSizeSema) { pagePreviewCache.readableSize }
-        // SY <--
-
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_storage_usage),
             preferenceItems = listOf(
@@ -376,26 +369,6 @@ object SettingsDataScreen : SearchableSettings {
                         }
                     },
                 ),
-                // SY -->
-                Preference.PreferenceItem.TextPreference(
-                    title = stringResource(SYMR.strings.pref_clear_page_preview_cache),
-                    subtitle = stringResource(MR.strings.used_cache, pagePreviewReadableSize),
-                    onClick = {
-                        scope.launchNonCancellable {
-                            try {
-                                val deletedFiles = pagePreviewCache.clear()
-                                withUIContext {
-                                    context.toast(context.stringResource(MR.strings.cache_deleted, deletedFiles))
-                                    pagePreviewReadableSizeSema++
-                                }
-                            } catch (e: Throwable) {
-                                logcat(LogPriority.ERROR, e)
-                                withUIContext { context.toast(MR.strings.cache_delete_error) }
-                            }
-                        }
-                    },
-                ),
-                // SY <--
                 Preference.PreferenceItem.SwitchPreference(
                     preference = libraryPreferences.autoClearChapterCache,
                     title = stringResource(MR.strings.pref_auto_clear_chapter_cache),

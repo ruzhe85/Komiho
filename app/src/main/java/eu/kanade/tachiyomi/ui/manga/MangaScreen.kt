@@ -42,7 +42,6 @@ import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.isLocalOrStub
 import eu.kanade.tachiyomi.source.online.HttpSource
 import app.mihonsy.komga.source.KomgaSource
-import eu.kanade.tachiyomi.ui.browse.source.SourcesScreen
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
@@ -54,29 +53,19 @@ import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import eu.kanade.tachiyomi.util.system.toast
-import exh.pagepreview.PagePreviewScreen
-import exh.recs.RecommendsScreen
-import exh.source.MERGED_SOURCE_ID
-import exh.source.getMainSource
-import exh.ui.ifSourcesLoaded
-import exh.ui.metadata.MetadataViewScreen
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.DelicateCoroutinesApi
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
+import eu.kanade.presentation.util.ifSourcesLoaded
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import logcat.LogPriority
-import tachiyomi.core.common.i18n.stringResource
-import tachiyomi.core.common.util.lang.launchUI
 import tachiyomi.core.common.util.lang.withIOContext
-import tachiyomi.core.common.util.lang.withNonCancellableContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
-import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.screens.LoadingScreen
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -84,7 +73,6 @@ import uy.kohesive.injekt.api.get
 class MangaScreen(
     private val mangaId: Long,
     val fromSource: Boolean = false,
-    private val smartSearchConfig: SourcesScreen.SmartSearchConfig? = null,
 ) : Screen(), AssistContentScreen {
 
     private var assistUrl: String? = null
@@ -104,7 +92,7 @@ class MangaScreen(
         val scope = rememberCoroutineScope()
         val lifecycleOwner = LocalLifecycleOwner.current
         val screenModel = rememberScreenModel {
-            MangaScreenModel(context, lifecycleOwner.lifecycle, mangaId, fromSource, smartSearchConfig != null)
+            MangaScreenModel(context, lifecycleOwner.lifecycle, mangaId, fromSource)
         }
 
         val state by screenModel.state.collectAsStateWithLifecycle()
@@ -193,23 +181,10 @@ class MangaScreen(
             onEditFetchIntervalClicked = screenModel::showSetFetchIntervalDialog.takeIf {
                 successState.manga.favorite
             },
-            previewsRowCount = successState.previewsRowCount,
             onEditNotesClicked = { navigator.push(MangaNotesScreen(manga = successState.manga)) },
             // SY -->
-            onMetadataViewerClicked = { openMetadataViewer(navigator, successState.manga) },
             onEditInfoClicked = screenModel::showEditMangaInfoDialog,
-            onRecommendClicked = {
-                openRecommends(navigator, screenModel.source?.getMainSource(), successState.manga)
-            },
             onMergedSettingsClicked = screenModel::showEditMergedSettingsDialog,
-            onMergeClicked = { openSmartSearch(navigator, successState.manga) },
-            onMergeWithAnotherClicked = {
-                mergeWithAnother(navigator, context, successState.manga, screenModel::smartSearchMerge)
-            },
-            onOpenPagePreview = {
-                openPagePreview(context, successState.chapters.minByOrNull { it.chapter.sourceOrder }?.chapter, it)
-            },
-            onMorePreviewsClicked = { openMorePagePreviews(navigator, successState.manga) },
             // SY <--
             onMultiBookmarkClicked = screenModel::bookmarkChapters,
             onMultiMarkAsReadClicked = screenModel::markChaptersRead,
@@ -432,10 +407,6 @@ class MangaScreen(
 
     // SY -->
 
-    private fun openMetadataViewer(navigator: Navigator, manga: Manga) {
-        navigator.push(MetadataViewScreen(manga.id, manga.source))
-    }
-
     private fun openMergedMangaWebview(context: Context, navigator: Navigator, mergedMangaData: MergedMangaData) {
         val sourceManager: SourceManager = Injekt.get()
         val mergedManga = mergedMangaData.manga.values.filterNot { it.source == MERGED_SOURCE_ID }
@@ -452,56 +423,5 @@ class MangaScreen(
             .setNegativeButton(MR.strings.action_cancel.getString(context), null)
             .show()
     }
-
-    private fun openMorePagePreviews(navigator: Navigator, manga: Manga) {
-        navigator.push(PagePreviewScreen(manga.id))
-    }
-
-    private fun openPagePreview(context: Context, chapter: Chapter?, page: Int) {
-        chapter ?: return
-        context.startActivity(ReaderActivity.newIntent(context, chapter.mangaId, chapter.id, page))
-    }
     // SY <--
-
-    // EXH -->
-    private fun openSmartSearch(navigator: Navigator, manga: Manga) {
-        val smartSearchConfig = SourcesScreen.SmartSearchConfig(manga.title, manga.id)
-
-        navigator.push(SourcesScreen(smartSearchConfig))
-    }
-
-    @OptIn(DelicateCoroutinesApi::class)
-    private fun mergeWithAnother(
-        navigator: Navigator,
-        context: Context,
-        manga: Manga,
-        smartSearchMerge: suspend (Manga, Long) -> Manga,
-    ) {
-        launchUI {
-            try {
-                val mergedManga = withNonCancellableContext {
-                    smartSearchMerge(manga, smartSearchConfig?.origMangaId!!)
-                }
-
-                navigator.popUntil { it is SourcesScreen }
-                navigator.pop()
-                navigator replace MangaScreen(mergedManga.id, true)
-                context.toast(SYMR.strings.entry_merged)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-
-                context.toast(context.stringResource(SYMR.strings.failed_merge, e.message.orEmpty()))
-            }
-        }
-    }
-    // EXH <--
-
-    // AZ -->
-    private fun openRecommends(navigator: Navigator, source: Source?, manga: Manga) {
-        source ?: return
-        RecommendsScreen.Args.SingleSourceManga(manga.id, source.id)
-            .let(::RecommendsScreen)
-            .let(navigator::push)
-    }
-    // AZ <--
 }

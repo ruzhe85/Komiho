@@ -173,3 +173,6 @@ SET manga_id = coalesce(:mangaId, manga_id),
     is_syncing = coalesce(:isSyncing, is_syncing),
     memo = coalesce(:memo, memo)
 WHERE _id = :chapterId;
+
+getChaptersByMangaIds:
+SELECT * FROM chapters WHERE manga_id IN :mangaIds;

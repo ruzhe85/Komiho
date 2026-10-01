@@ -179,9 +179,6 @@ fun MangaActionRow(
     onWebViewLongClicked: (() -> Unit)?,
     onEditIntervalClicked: (() -> Unit)?,
     onEditCategory: (() -> Unit)?,
-    // SY -->
-    onMergeClicked: (() -> Unit)?,
-    // SY <--
     modifier: Modifier = Modifier,
 ) {
     val defaultActionButtonColor = MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA)
@@ -231,16 +228,6 @@ fun MangaActionRow(
                 onLongClick = onWebViewLongClicked,
             )
         }
-        // SY -->
-        if (onMergeClicked != null) {
-            MangaActionButton(
-                title = stringResource(SYMR.strings.merge),
-                icon = Icons.AutoMirrored.Outlined.CallMerge,
-                color = defaultActionButtonColor,
-                onClick = onMergeClicked,
-            )
-        }
-        // SY <--
     }
 }
 
@@ -254,7 +241,6 @@ fun ExpandableMangaDescription(
     onCopyTagToClipboard: (tag: String) -> Unit,
     onEditNotes: () -> Unit,
     // SY -->
-    searchMetadataChips: SearchMetadataChips?,
     doSearch: (query: String, global: Boolean) -> Unit,
     // SY <--
     modifier: Modifier = Modifier,
@@ -317,30 +303,20 @@ fun ExpandableMangaDescription(
                 }
                 if (expanded) {
                     // SY -->
-                    if (searchMetadataChips != null) {
-                        NamespaceTags(
-                            tags = searchMetadataChips,
-                            onClick = {
-                                tagSelected = it
-                                showMenu = true
-                            },
-                        )
-                    } else {
-                        // SY <--
-                        FlowRow(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
-                        ) {
-                            tags.forEach {
-                                TagsChip(
-                                    modifier = DefaultTagChipModifier,
-                                    text = it,
-                                    onClick = {
-                                        tagSelected = it
-                                        showMenu = true
-                                    },
-                                )
-                            }
+                    // SY <--
+                    FlowRow(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
+                    ) {
+                        tags.forEach {
+                            TagsChip(
+                                modifier = DefaultTagChipModifier,
+                                text = it,
+                                onClick = {
+                                    tagSelected = it
+                                    showMenu = true
+                                },
+                            )
                         }
                     }
                 } else {

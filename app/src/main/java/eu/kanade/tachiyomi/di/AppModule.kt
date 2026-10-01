@@ -15,19 +15,16 @@ import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.core.security.SecurityPreferences
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.cache.CoverCache
-import eu.kanade.tachiyomi.data.cache.PagePreviewCache
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.sync.service.GoogleDriveService
 import eu.kanade.tachiyomi.extension.ExtensionManager
-import exh.md.utils.MangaDexAuthPreferences
 import eu.kanade.tachiyomi.network.JavaScriptEngine
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.source.AndroidSourceManager
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
-import exh.eh.EHentaiUpdateHelper
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
@@ -172,14 +169,6 @@ class AppModule(val app: Application) : InjektModule {
         // SY <--
         addSingletonFactory { LocalCoverManager(app, get()) }
         addSingletonFactory { StorageManager(app, get()) }
-
-        // SY -->
-        addSingletonFactory { EHentaiUpdateHelper(app) }
-
-        // SY --> Komiho: MangaDex 登录 token 偏好
-        addSingletonFactory { MangaDexAuthPreferences(get()) }
-
-        addSingletonFactory { PagePreviewCache(app) }
 
         addSingletonFactory { GoogleDriveService(app) }
         // SY <--

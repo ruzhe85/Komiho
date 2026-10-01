@@ -48,7 +48,6 @@ fun MoreScreen(
     onClickDataAndStorage: () -> Unit,
     onClickSettings: () -> Unit,
     onClickAbout: () -> Unit,
-    onClickBatchAdd: () -> Unit,
     onClickUpdates: () -> Unit,
     onClickHistory: () -> Unit,
 ) {
@@ -151,14 +150,6 @@ fun MoreScreen(
                     title = stringResource(MR.strings.label_data_storage),
                     icon = Icons.Outlined.Storage,
                     onPreferenceClick = onClickDataAndStorage,
-                )
-            }
-            // SY -->
-            item {
-                TextPreferenceWidget(
-                    title = stringResource(SYMR.strings.eh_batch_add),
-                    icon = Icons.AutoMirrored.Outlined.PlaylistAdd,
-                    onPreferenceClick = onClickBatchAdd,
                 )
             }
             // SY <--

@@ -4,7 +4,7 @@ import app.cash.sqldelight.ExecutableQuery
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlCursor
 import app.cash.sqldelight.db.SqlDriver
-import exh.source.MERGED_SOURCE_ID
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import tachiyomi.view.UpdatesView
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get

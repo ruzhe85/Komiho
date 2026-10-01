@@ -1,7 +1,5 @@
 package eu.kanade.tachiyomi.source.model
 
-import exh.metadata.metadata.RaisedSearchMetadata
-
 /* SY --> */
 open /* SY <-- */ class MangasPage(open val mangas: List<SManga>, open val hasNextPage: Boolean) {
     // SY -->
@@ -43,6 +41,7 @@ open /* SY <-- */ class MangasPage(open val mangas: List<SManga>, open val hasNe
 }
 
 // SY -->
+/*
 class MetadataMangasPage(
     override val mangas: List<SManga>,
     override val hasNextPage: Boolean,
@@ -91,4 +90,5 @@ class MetadataMangasPage(
             ")"
     }
 }
+*/
 // SY <--

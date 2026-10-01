@@ -8,9 +8,6 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import exh.source.isEhBasedSource
-import exh.util.DataSaver
-import exh.util.DataSaver.Companion.getImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -53,10 +50,6 @@ internal class HttpPageLoader(
     private val queue = PriorityBlockingQueue<PriorityPage>()
 
     private val preloadSize = /* SY --> */ readerPreferences.preloadSize.get() // SY <--
-
-    // SY -->
-    private val dataSaver = DataSaver(source, sourcePreferences)
-    // SY <--
 
     init {
         // EXH -->
@@ -152,11 +145,6 @@ internal class HttpPageLoader(
         if (page.status is Page.State.Error) {
             page.status = Page.State.Queue
         }
-        // EXH -->
-        // Grab a new image URL on EXH sources
-        if (source.isEhBasedSource()) {
-            page.imageUrl = null
-        }
 
         if (readerPreferences.readerInstantRetry.get()) {
             boostPage(page)
@@ -224,7 +212,7 @@ internal class HttpPageLoader(
 
             if (force || !chapterCache.isImageInCache(imageUrl)) {
                 page.status = Page.State.DownloadImage
-                val imageResponse = source.getImage(page, dataSaver = dataSaver)
+                val imageResponse = source.getImage(page)
                 chapterCache.putImageToCache(imageUrl, imageResponse)
             }
 

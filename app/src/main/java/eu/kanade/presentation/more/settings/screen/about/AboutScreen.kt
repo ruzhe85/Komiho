@@ -34,9 +34,7 @@ import eu.kanade.tachiyomi.ui.more.NewUpdateScreen
 import eu.kanade.tachiyomi.util.CrashLogUtil
 import eu.kanade.tachiyomi.util.lang.toDateTimestampString
 import eu.kanade.tachiyomi.util.system.copyToClipboard
-import eu.kanade.tachiyomi.util.system.isPreviewBuildType
 import eu.kanade.tachiyomi.util.system.toast
-import exh.syDebugVersion
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import tachiyomi.core.common.util.lang.withIOContext
@@ -266,17 +264,6 @@ object AboutScreen : Screen() {
                     }
                 }
             }
-            // SY -->
-            isPreviewBuildType -> {
-                "Preview r$syDebugVersion".let {
-                    if (withBuildDate) {
-                        "$it (${BuildConfig.COMMIT_SHA}, ${getFormattedBuildTime()})"
-                    } else {
-                        "$it (${BuildConfig.COMMIT_SHA})"
-                    }
-                }
-            }
-            // SY <--
             else -> {
                 "Stable ${BuildConfig.VERSION_NAME}".let {
                     if (withBuildDate) {

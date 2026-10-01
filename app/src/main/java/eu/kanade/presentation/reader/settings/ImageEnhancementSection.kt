@@ -3,7 +3,11 @@ package eu.kanade.presentation.reader.settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -12,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -24,6 +29,7 @@ import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
+import eu.kanade.tachiyomi.util.waifu2x.PluginUpscaleModel
 import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelRegistry
 import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelSpec
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
@@ -203,18 +209,15 @@ fun ImageEnhancementSection(
                         ),
                 )
             } else {
-                SettingsChipRow {
-                    compatible.forEach { model ->
-                        FilterChip(
-                            selected = mode == 5 && activeModel == model,
-                            onClick = {
-                                preferences.aiModelId.set(model.id)
-                                setMode(5)
-                            },
-                            label = { Text(model.displayLabel()) },
-                        )
-                    }
-                }
+                NpuModelPicker(
+                    models = compatible,
+                    activeModel = activeModel,
+                    mode = mode,
+                    onSelect = { model ->
+                        preferences.aiModelId.set(model.id)
+                        setMode(5)
+                    },
+                )
             }
         }
 
@@ -264,6 +267,126 @@ fun ImageEnhancementSection(
 @Composable
 private fun UpscaleModelSpec.displayLabel(): String =
     labelRes?.let { stringResource(it) } ?: labelText.orEmpty()
+
+/**
+ * Komiho (2026-10-01): the NPU picker, folded by **series**.
+ *
+ * The flat chip row stopped scaling as soon as a few model packages landed: nine chips, four
+ * of them one family (`W2xEX Photo Small` / `Omni Small` / `Omni Turbo` / `Universal Fast`).
+ * A series with more than one member now collapses into a single header chip that also names
+ * what is currently selected inside it (`W2xEX · Omni Small`); tapping the header expands its
+ * members into a second row of chips.
+ *
+ * Models that stand alone — and any whose series cannot be derived — stay plain chips that
+ * select on a **single tap**, which is the common case and must never cost an extra tap.
+ *
+ * The series comes from the manifest's optional `group` field, falling back to the label's
+ * first word so packages built before that field existed still fold correctly.
+ *
+ * Selection itself is unchanged: still the one `aiModelId` preference, so exactly one chip is
+ * highlighted across both rows.
+ */
+@Composable
+private fun NpuModelPicker(
+    models: List<PluginUpscaleModel>,
+    activeModel: UpscaleModelSpec,
+    mode: Int,
+    onSelect: (PluginUpscaleModel) -> Unit,
+) {
+    // groupBy preserves encounter order, keeping chips in manifest order.
+    val bySeries = models.groupBy { it.seriesName() }
+    val foldable = bySeries.mapNotNull { (series, members) ->
+        series?.takeIf { members.size > 1 }?.let { it to members }
+    }
+    // A null series (label with no space) and one-member series are never folded.
+    val plain: List<PluginUpscaleModel> = buildList {
+        bySeries.forEach { (series, members) ->
+            if (series == null || members.size == 1) addAll(members)
+        }
+    }
+
+    var expandedSeries by rememberSaveable { mutableStateOf(listOf<String>()) }
+
+    // The series holding the current selection opens by itself, so a collapsed header can
+    // never hide what is actually running. A manual collapse survives: this re-runs only when
+    // the selection moves into a *different* series.
+    val selectedSeries = models.firstOrNull { mode == 5 && it == activeModel }?.seriesName()
+    LaunchedEffect(selectedSeries) {
+        if (selectedSeries != null && selectedSeries !in expandedSeries) {
+            expandedSeries = expandedSeries + selectedSeries
+        }
+    }
+
+    SettingsChipRow {
+        foldable.forEach { (series, members) ->
+            val isExpanded = series in expandedSeries
+            val selected = members.firstOrNull { mode == 5 && it == activeModel }
+            FilterChip(
+                selected = selected != null,
+                onClick = {
+                    expandedSeries = if (isExpanded) {
+                        expandedSeries - series
+                    } else {
+                        expandedSeries + series
+                    }
+                },
+                label = {
+                    Text(if (selected != null) "$series · ${selected.shortLabel(series)}" else series)
+                },
+                trailingIcon = {
+                    Icon(
+                        imageVector = if (isExpanded) {
+                            Icons.Default.KeyboardArrowUp
+                        } else {
+                            Icons.Default.KeyboardArrowDown
+                        },
+                        contentDescription = null,
+                    )
+                },
+            )
+        }
+        plain.forEach { model ->
+            FilterChip(
+                selected = mode == 5 && activeModel == model,
+                onClick = { onSelect(model) },
+                label = { Text(model.displayLabel()) },
+            )
+        }
+    }
+
+    foldable.forEach { (series, members) ->
+        if (series in expandedSeries) {
+            SettingsChipRow {
+                members.forEach { model ->
+                    FilterChip(
+                        selected = mode == 5 && activeModel == model,
+                        onClick = { onSelect(model) },
+                        label = { Text(model.shortLabel(series)) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Series name used to fold this model: the manifest's `group` when present, otherwise the
+ * label's first word (`"W2xEX Omni Small"` -> `"W2xEX"`). A one-word label is a whole name
+ * rather than a `series member` pair, so it yields null and the model stays a flat chip.
+ */
+private fun UpscaleModelSpec.seriesName(): String? {
+    group?.takeIf { it.isNotBlank() }?.let { return it }
+    val label = labelText?.trim().orEmpty()
+    if (label.isEmpty()) return null
+    val head = label.substringBefore(' ')
+    return head.takeIf { head != label }
+}
+
+/** Member name with the series prefix stripped: `"W2xEX Omni Small"` minus `"W2xEX"`. */
+private fun UpscaleModelSpec.shortLabel(series: String): String {
+    val label = labelText.orEmpty()
+    return label.removePrefix(series).trim().ifEmpty { label }
+}
 
 /** Muted heading for a platform group (CPU / GPU / NPU). */
 @Composable

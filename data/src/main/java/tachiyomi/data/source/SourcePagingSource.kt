@@ -4,8 +4,6 @@ import androidx.paging.PagingState
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
-import eu.kanade.tachiyomi.source.model.MetadataMangasPage
-import exh.metadata.metadata.RaisedSearchMetadata
 import mihon.domain.manga.model.toDomainManga
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
@@ -47,7 +45,7 @@ abstract class BaseSourcePagingSource(
 
     override suspend fun load(
         params: LoadParams<Long>,
-    ): LoadResult<Long, /*SY --> */ Pair<Manga, RaisedSearchMetadata?>/*SY <-- */> {
+    ): LoadResult<Long, /*SY --> */ Manga/*SY <-- */> {
         val page = params.key ?: 1
 
         return try {
@@ -69,19 +67,13 @@ abstract class BaseSourcePagingSource(
     open suspend fun getPageLoadResult(
         params: LoadParams<Long>,
         mangasPage: MangasPage,
-    ): LoadResult.Page<Long, /*SY --> */ Pair<Manga, RaisedSearchMetadata?>/*SY <-- */> {
+    ): LoadResult.Page<Long, /*SY --> */ Manga/*SY <-- */> {
         val page = params.key ?: 1
 
         // SY -->
-        val metadata = if (mangasPage is MetadataMangasPage) {
-            mangasPage.mangasMetadata
-        } else {
-            emptyList()
-        }
-
-        val manga = mangasPage.mangas.mapIndexed { index, sManga -> sManga.toDomainManga(source!!.id) to metadata.getOrNull(index) }
-            .filter { seenManga.add(it.first.url) }
-            .let { manga -> manga.zip(networkToLocalManga(manga.map { it.first })).map { it.second to it.first.second } }
+        val manga = mangasPage.mangas.map { sManga -> sManga.toDomainManga(source!!.id) }
+            .filter { seenManga.add(it.url) }
+            .let { manga -> manga.zip(networkToLocalManga(manga)).map { it.second } }
         // SY <--
 
         return LoadResult.Page(
@@ -93,7 +85,7 @@ abstract class BaseSourcePagingSource(
     // SY <--
 
     override fun getRefreshKey(
-        state: PagingState<Long, /*SY --> */ Pair<Manga, RaisedSearchMetadata?>/*SY <-- */>,
+        state: PagingState<Long, /*SY --> */ Manga/*SY <-- */>,
     ): Long? {
         return state.anchorPosition?.let { anchorPosition ->
             val anchorPage = state.closestPageToPosition(anchorPosition)

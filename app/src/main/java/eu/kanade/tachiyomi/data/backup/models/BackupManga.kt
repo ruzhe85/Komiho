@@ -48,7 +48,7 @@ class BackupManga(
 
     // SY specific values
     @ProtoNumber(600) var mergedMangaReferences: List<BackupMergedMangaReference> = emptyList(),
-    @ProtoNumber(601) var flatMetadata: BackupFlatMetadata? = null,
+    // @ProtoNumber(601) was flatMetadata (exh), removed; old backups decode it as an unknown field
     @ProtoNumber(602) var customStatus: Int = 0,
     @ProtoNumber(603) var customThumbnailUrl: String? = null,
 

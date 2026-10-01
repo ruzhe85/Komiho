@@ -389,7 +389,7 @@ object Waifu2x {
             var procMs = 0L
             // 闸门排队与原生锁排队是同一件事（都在等 GPU 空出来），所以一起计入 [waitMs]
             // —— 角标据此剔除的总排队时间才不会漏掉这一段。
-            // 用 exh.log.DiagLog 而非项目 logcat()：release 构建下 XLog 级别是 WARN
+            // 用 eu.kanade.tachiyomi.diagnostic.DiagLog 而非项目 logcat()：release 构建下 XLog 级别是 WARN
             // （App.kt 的 setupExhLogging），logcat() 的 DEBUG/INFO 会被整条吞掉；DiagLog
             // 同时写 android.util.Log 与进程内缓冲，所以 logcat 与「导出诊断日志」都能拿到。
             val waitStart = android.os.SystemClock.uptimeMillis()
@@ -437,7 +437,7 @@ object Waifu2x {
 
             // Komiho 诊断：把「排队等待」与「纯推理」拆开。
             // ⚠️ 老脚本按 `total=…ms src=… from=…` 解析，所以新字段一律追加在 `from=` **之后**。
-            exh.log.DiagLog.d(
+            eu.kanade.tachiyomi.diagnostic.DiagLog.d(
                 "Waifu2xTiming",
                 "wait=${waitMs}ms inference=${procMs}ms total=${waitMs + procMs}ms " +
                     "src=${argb.width}x${argb.height} from=${tag.ifEmpty { "?" }} " +
@@ -488,12 +488,12 @@ object Waifu2x {
      * Komiho (2026-10-01): 原生日志环快照（`Waifu2xNative` / `Waifu2xJNI`），供「导出诊断日志」。
      *
      * 为什么需要：原生日志走 `__android_log_print`，只进系统 logcat；而 App 侧的
-     * [exh.log.DiagnosticLogBuffer] 是进程内缓冲，读不到它 —— 于是导出文件里恰好缺掉
+     * [eu.kanade.tachiyomi.diagnostic.DiagnosticLogBuffer] 是进程内缓冲，读不到它 —— 于是导出文件里恰好缺掉
      * `Fused Vulkan scheduling` / `adaptive batch` / `processing completed in N ms` 这几行，
      * 也就无法判断瓶颈在排队、批次还是纯计算。原生自己另写一份进程内环，这里取出来。
      *
      * 每行格式 `<epochMillis>|<level>|<tag>|<message>`，解析与合并见
-     * [exh.log.DiagnosticLogBuffer.getLogsMerged]。老 .so 没有这个符号时返回空串
+     * [eu.kanade.tachiyomi.diagnostic.DiagnosticLogBuffer.getLogsMerged]。老 .so 没有这个符号时返回空串
      * （导出退化为「只有 Kotlin 侧两个来源」，不阻断导出）。
      */
     fun nativeLogs(): String = try {

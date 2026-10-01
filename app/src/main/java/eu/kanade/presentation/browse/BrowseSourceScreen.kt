@@ -18,13 +18,10 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import eu.kanade.presentation.browse.components.BrowseSourceComfortableGrid
 import eu.kanade.presentation.browse.components.BrowseSourceCompactGrid
-import eu.kanade.presentation.browse.components.BrowseSourceEHentaiList
 import eu.kanade.presentation.browse.components.BrowseSourceList
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.source.Source
-import exh.metadata.metadata.RaisedSearchMetadata
-import exh.source.isEhBasedSource
 import kotlinx.coroutines.flow.StateFlow
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.library.model.LibraryDisplayMode
@@ -41,10 +38,9 @@ import tachiyomi.source.local.LocalSource
 @Composable
 fun BrowseSourceContent(
     source: Source?,
-    mangaList: LazyPagingItems<StateFlow</* SY --> */Pair<Manga, RaisedSearchMetadata?>/* SY <-- */>>,
+    mangaList: LazyPagingItems<StateFlow<Manga>>,
     columns: GridCells,
     // SY -->
-    ehentaiBrowseDisplayMode: Boolean,
     // SY <--
     displayMode: LibraryDisplayMode,
     snackbarHostState: SnackbarHostState,
@@ -133,18 +129,6 @@ fun BrowseSourceContent(
 
         return
     }
-
-    // SY -->
-    if (source?.isEhBasedSource() == true && ehentaiBrowseDisplayMode) {
-        BrowseSourceEHentaiList(
-            mangaList = mangaList,
-            contentPadding = contentPadding,
-            onMangaClick = onMangaClick,
-            onMangaLongClick = onMangaLongClick,
-        )
-        return
-    }
-    // SY <--
 
     when (displayMode) {
         LibraryDisplayMode.ComfortableGrid -> {

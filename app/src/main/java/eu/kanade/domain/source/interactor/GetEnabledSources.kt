@@ -1,7 +1,6 @@
 package eu.kanade.domain.source.interactor
 
 import eu.kanade.domain.source.service.SourcePreferences
-import exh.source.BlacklistedSources
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -26,16 +25,15 @@ class GetEnabledSources(
             ) { a, b, c -> Triple(a, b, c) },
             // SY -->
             combine(
-                preferences.dataSaverExcludedSources.changes(),
                 preferences.sourcesTabSourcesInCategories.changes(),
                 preferences.sourcesTabCategoriesFilter.changes(),
-            ) { a, b, c -> Triple(a, b, c) },
+            ) { a, b -> a to b },
             // SY <--
             repository.getSources(),
         ) {
                 pinnedSourceIds,
                 (enabledLanguages, disabledSources, lastUsedSource),
-                (excludedFromDataSaver, sourcesInCategories, sourceCategoriesFilter),
+                (sourcesInCategories, sourceCategoriesFilter),
                 sources,
             ->
 
@@ -45,7 +43,7 @@ class GetEnabledSources(
             val sourcesInSourceCategories = sourcesAndCategories.map { it.first }
             sources
                 .filter { it.lang in enabledLanguages || it.isLocal() }
-                .filterNot { it.id.toString() in disabledSources || it.id in BlacklistedSources.HIDDEN_SOURCES }
+                .filterNot { it.id.toString() in disabledSources }
                 .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
                 .flatMap {
                     val flag = if ("${it.id}" in pinnedSourceIds) Pins.pinned else Pins.unpinned
@@ -56,7 +54,6 @@ class GetEnabledSources(
                     // SY <--
                     val source = it.copy(
                         pin = flag,
-                        isExcludedFromDataSaver = it.id.toString() in excludedFromDataSaver,
                         categories = categories,
                     )
                     val toFlatten = mutableListOf(source)

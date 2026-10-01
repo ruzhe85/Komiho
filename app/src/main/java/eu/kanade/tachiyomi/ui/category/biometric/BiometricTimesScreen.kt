@@ -12,7 +12,7 @@ import com.google.android.material.timepicker.MaterialTimePicker
 import eu.kanade.presentation.category.BiometricTimesScreen
 import eu.kanade.presentation.category.components.CategoryDeleteDialog
 import eu.kanade.presentation.util.Screen
-import eu.kanade.tachiyomi.ui.main.MainActivity
+import androidx.fragment.app.FragmentActivity
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.flow.collectLatest
 import tachiyomi.i18n.sy.SYMR
@@ -46,7 +46,9 @@ class BiometricTimesScreen : Screen() {
         )
 
         fun showTimePicker(startTime: Duration? = null) {
-            val activity = context as? MainActivity ?: return
+            // Komiho: 遗留 MainActivity 已移除；宿主若是 FragmentActivity（含 supportFragmentManager）才弹时间选择器，
+            // 否则安全空实现。
+            val activity = context as? FragmentActivity ?: return
             val picker = MaterialTimePicker.Builder()
                 .setTitleText(
                     if (startTime ==

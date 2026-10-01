@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS eh;
+DROP TABLE IF EXISTS eh_favorites;
+DROP TABLE IF EXISTS eh_favorites_alternatives;
+DROP TABLE IF EXISTS saved_search;
+DROP TABLE IF EXISTS feed_saved_search;
+DROP TABLE IF EXISTS search_metadata;
+DROP TABLE IF EXISTS search_tags;
+DROP TABLE IF EXISTS search_titles;

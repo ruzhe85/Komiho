@@ -40,22 +40,18 @@ import eu.kanade.presentation.browse.BrowseSourceContent
 import eu.kanade.presentation.browse.MissingSourceScreen
 import eu.kanade.presentation.browse.components.BrowseSourceToolbar
 import eu.kanade.presentation.browse.components.RemoveMangaDialog
-import eu.kanade.presentation.browse.components.SavedSearchCreateDialog
-import eu.kanade.presentation.browse.components.SavedSearchDeleteDialog
 import eu.kanade.presentation.category.components.ChangeCategoryDialog
 import eu.kanade.presentation.manga.DuplicateMangaDialog
 import eu.kanade.presentation.util.AssistContentScreen
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.browse.extension.details.SourcePreferencesScreen
-import eu.kanade.tachiyomi.ui.browse.source.SourcesScreen
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreenModel.Listing
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import eu.kanade.tachiyomi.util.system.toast
-import exh.md.follows.MangaDexFollowsScreen
-import exh.ui.ifSourcesLoaded
+import eu.kanade.presentation.util.ifSourcesLoaded
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -75,8 +71,6 @@ data class BrowseSourceScreen(
     private val listingQuery: String?,
     // SY -->
     private val filtersJson: String? = null,
-    private val savedSearch: Long? = null,
-    private val smartSearchConfig: SourcesScreen.SmartSearchConfig? = null,
     // SY <--
 ) : Screen(), AssistContentScreen {
 
@@ -97,7 +91,6 @@ data class BrowseSourceScreen(
                 listingQuery = listingQuery,
                 // SY -->
                 filtersJson = filtersJson,
-                savedSearch = savedSearch,
                 // SY <--
             )
         }
@@ -245,7 +238,6 @@ data class BrowseSourceScreen(
                 mangaList = screenModel.mangaPagerFlowFlow.collectAsLazyPagingItems(),
                 columns = screenModel.getColumnsPreference(LocalConfiguration.current.orientation),
                 // SY -->
-                ehentaiBrowseDisplayMode = screenModel.ehentaiBrowseDisplayMode,
                 // SY <--
                 displayMode = screenModel.displayMode,
                 snackbarHostState = snackbarHostState,
@@ -253,7 +245,7 @@ data class BrowseSourceScreen(
                 onWebViewClick = onWebViewClick,
                 onHelpClick = { uriHandler.openUri(Constants.URL_HELP) },
                 onLocalSourceHelpClick = onHelpClick,
-                onMangaClick = { navigator.push(MangaScreen(it.id, true, smartSearchConfig)) },
+                onMangaClick = { navigator.push(MangaScreen(it.id, true)) },
                 onMangaLongClick = { manga ->
                     scope.launchIO {
                         val duplicates = screenModel.getDuplicateLibraryManga(manga)
@@ -281,35 +273,6 @@ data class BrowseSourceScreen(
                     onUpdate = screenModel::setFilters,
                     // SY -->
                     startExpanded = screenModel.startExpanded,
-                    onSave = screenModel::onSaveSearch,
-                    savedSearches = state.savedSearches,
-                    onSavedSearch = { search ->
-                        screenModel.onSavedSearch(search) {
-                            context.toast(it)
-                        }
-                    },
-                    onSavedSearchPress = screenModel::onSavedSearchPress,
-                    openMangaDexRandom = if (screenModel.sourceIsMangaDex) {
-                        {
-                            screenModel.onMangaDexRandom {
-                                navigator.replace(
-                                    BrowseSourceScreen(
-                                        sourceId,
-                                        "id:$it",
-                                    ),
-                                )
-                            }
-                        }
-                    } else {
-                        null
-                    },
-                    openMangaDexFollows = if (screenModel.sourceIsMangaDex) {
-                        {
-                            navigator.replace(MangaDexFollowsScreen(sourceId))
-                        }
-                    } else {
-                        null
-                    },
                     // SY <--
                 )
             }
@@ -342,18 +305,6 @@ data class BrowseSourceScreen(
                     },
                 )
             }
-            is BrowseSourceScreenModel.Dialog.CreateSavedSearch -> SavedSearchCreateDialog(
-                onDismissRequest = onDismissRequest,
-                currentSavedSearches = dialog.currentSavedSearches,
-                saveSearch = screenModel::saveSearch,
-            )
-            is BrowseSourceScreenModel.Dialog.DeleteSavedSearch -> SavedSearchDeleteDialog(
-                onDismissRequest = onDismissRequest,
-                name = dialog.name,
-                deleteSavedSearch = {
-                    screenModel.deleteSearch(dialog.idToDelete)
-                },
-            )
             else -> {}
         }
 

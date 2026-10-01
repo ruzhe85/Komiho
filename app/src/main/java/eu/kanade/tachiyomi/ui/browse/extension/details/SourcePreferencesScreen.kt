@@ -37,8 +37,7 @@ import eu.kanade.tachiyomi.data.preference.SharedPreferencesDataStore
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.sourcePreferences
 import eu.kanade.tachiyomi.widget.TachiyomiTextInputEditText.Companion.setIncognito
-import exh.source.EnhancedHttpSource
-import exh.ui.ifSourcesLoaded
+import eu.kanade.presentation.util.ifSourcesLoaded
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.screens.LoadingScreen
@@ -133,21 +132,7 @@ class SourcePreferencesFragment : PreferenceFragmentCompat() {
 
     private fun populateScreen(): PreferenceScreen {
         val sourceId = requireArguments().getLong(SOURCE_ID)
-        // SY -->
-        val source = Injekt.get<SourceManager>()
-            .getOrStub(sourceId)
-            .let { source ->
-                if (source is EnhancedHttpSource) {
-                    if (source.enhancedSource is ConfigurableSource) {
-                        source.source()
-                    } else {
-                        source.originalSource
-                    }
-                } else {
-                    source
-                }
-            }
-        // SY <--
+        val source = Injekt.get<SourceManager>().getOrStub(sourceId)
         val sourceScreen = preferenceManager.createPreferenceScreen(requireContext())
 
         if (source is ConfigurableSource) {

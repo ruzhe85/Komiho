@@ -119,7 +119,7 @@ class PagerPageHolder(
     init {
         // Komiho 诊断：记录 holder 实例身份 —— 用于判断「同一页被增强两次」是
         // 两个 holder 实例各算一次，还是同一个 holder 被调了两次 setImage。
-        exh.log.DiagLog.d(
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
             "Waifu2xHolder",
             "CREATE page=${page.index} extra=${extraPage?.index ?: -1} id=${System.identityHashCode(this)}",
         )
@@ -134,7 +134,7 @@ class PagerPageHolder(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         // Komiho 诊断：holder 何时被回收（与 CREATE 配对即可看出是否同页多实例并存）。
-        exh.log.DiagLog.d(
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
             "Waifu2xHolder",
             "DETACH page=${page.index} id=${System.identityHashCode(this)}",
         )
@@ -235,7 +235,7 @@ class PagerPageHolder(
             ) {
                 // 同一对页已经渲染过（另一条 load 任务或状态重发）→ 直接退出，不再烧一次 GPU。
                 // 放在最前面：省掉下面的等待与整条流水线。
-                exh.log.DiagLog.d(
+                eu.kanade.tachiyomi.diagnostic.DiagLog.d(
                     KOMIHA_PREFETCH_TAG,
                     "page=${page.index} skip reason=already-rendered extra=${extraPage?.index ?: -1}",
                 )
@@ -300,7 +300,7 @@ class PagerPageHolder(
                 // visible = 这次渲染的是不是当前显示页（P3 判据）。
                 // ⚠️ 这里的 `this` 是 withUIContext 的 CoroutineScope，**不是 holder**，
                 // 别拿它当 holder id（会得出「同一页有两个 holder」的错误结论）。
-                exh.log.DiagLog.d(
+                eu.kanade.tachiyomi.diagnostic.DiagLog.d(
                     KOMIHA_PREFETCH_TAG,
                     "page=${page.index} prewarmHit=$prewarmHit usedPreDecoded=${bitmap != null} " +
                         "enhanceMs=${result.enhanceElapsedMillis} visible=$visible " +
@@ -352,7 +352,7 @@ class PagerPageHolder(
             true
         }
         if (settled == null) {
-            exh.log.DiagLog.w(
+            eu.kanade.tachiyomi.diagnostic.DiagLog.w(
                 KOMIHA_PREFETCH_TAG,
                 "page=${page.index} pair settle timeout extra=${second.index}; 按现状继续",
             )

@@ -381,7 +381,7 @@ object MihonSyEnhancer {
      *
      * 开启即固定强档：radius=12, eps=64（eps 越大平滑越强，255 域）。统计引导 = 预平滑亮度 gI，
      * a = var(gI)/(var(gI)+eps)，平坦区 var(gI) ≈ σ²/49（7×7 box，σ²≈100 → ≈2），噪声残留 = a·噪声。
-     * 耗时用 exh.log.DiagLog 而非项目 logcat()：release 构建下 XLog 级别是 WARN，
+     * 耗时用 eu.kanade.tachiyomi.diagnostic.DiagLog 而非项目 logcat()：release 构建下 XLog 级别是 WARN，
      * logcat() 的 DEBUG/INFO 会被整条吞掉（与 Waifu2x.process 同款口径）；DiagLog 同时写
      * android.util.Log 与进程内缓冲，所以 logcat 与「导出诊断日志」都能拿到。
      * 角标的「解码+增强」总耗时天然包含降噪（denoise 在 enhance() 内部跑），
@@ -389,7 +389,7 @@ object MihonSyEnhancer {
      */
     private fun denoiseForAi(input: Bitmap, level: Int, sourceTag: String): Bitmap {
         if (input.width.toLong() * input.height.toLong() > MAX_DENOISE_INPUT_PIXELS) {
-            exh.log.DiagLog.d(
+            eu.kanade.tachiyomi.diagnostic.DiagLog.d(
                 "Waifu2xTiming",
                 "denoise=skipped(level=$level, ${input.width}x${input.height} exceeds cap) from=${sourceTag.ifEmpty { "?" }}",
             )
@@ -411,7 +411,7 @@ object MihonSyEnhancer {
             }
         }
         val ms = SystemClock.uptimeMillis() - start
-        exh.log.DiagLog.d(
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
             "Waifu2xTiming",
             "denoise=${ms}ms level=$level r=$radius eps=$eps " +
                 "src=${input.width}x${input.height} from=${sourceTag.ifEmpty { "?" }}",

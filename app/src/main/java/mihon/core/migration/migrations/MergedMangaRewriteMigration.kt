@@ -3,7 +3,7 @@ package mihon.core.migration.migrations
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.tachiyomi.source.Source
-import exh.source.MERGED_SOURCE_ID
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -90,7 +90,7 @@ class MergedMangaRewriteMigration : Migration {
                     .mapNotNull { it.load(getManga, sourceManager) }
                     .distinct()
                 val chapters =
-                    database.ehQueries
+                    database.chaptersQueries
                         .getChaptersByMangaIds(
                             mergedMangas.map { it.id },
                             ChapterMapper::mapChapter,
@@ -98,7 +98,7 @@ class MergedMangaRewriteMigration : Migration {
                         .awaitAsList()
 
                 val mergedMangaChapters =
-                    database.ehQueries
+                    database.chaptersQueries
                         .getChaptersByMangaIds(
                             loadedMangaList.map { it.manga.id },
                             ChapterMapper::mapChapter,

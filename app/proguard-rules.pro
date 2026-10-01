@@ -26,9 +26,6 @@
 -keep,allowoptimization class eu.kanade.tachiyomi.network.RequestsKt { public protected *; }
 -keep,allowoptimization class eu.kanade.tachiyomi.AppInfo { public protected *; }
 
-# Debug functions
--keep,allowoptimization class exh.debug.DebugFunctions { public *; }
-
 -keepclassmembers class * implements java.io.Serializable {
     java.lang.Object writeReplace();
     java.lang.Object readResolve();
@@ -82,14 +79,6 @@
     *** Companion;
 }
 -keepclasseswithmembers class tachiyomi.** {
-    kotlinx.serialization.KSerializer serializer(...);
-}
-
--keep,includedescriptorclasses class exh.**$$serializer { *; }
--keepclassmembers class exh.** {
-    *** Companion;
-}
--keepclasseswithmembers class exh.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 

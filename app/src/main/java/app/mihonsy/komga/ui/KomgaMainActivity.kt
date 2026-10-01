@@ -260,7 +260,7 @@ import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.domain.ui.model.AppTheme
 // SY --> Komiho: 导出诊断日志
-import exh.log.DiagnosticLogBuffer
+import eu.kanade.tachiyomi.diagnostic.DiagnosticLogBuffer
 import eu.kanade.tachiyomi.util.system.createFileInCacheDir
 import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import eu.kanade.tachiyomi.util.storage.getUriCompat

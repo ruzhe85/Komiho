@@ -33,7 +33,6 @@ import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.source.online.MetadataSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.reader.chapter.ReaderChapterItem
 import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
@@ -60,12 +59,9 @@ import eu.kanade.tachiyomi.util.lang.takeBytes
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import eu.kanade.tachiyomi.util.storage.DiskUtil.MAX_FILE_NAME_BYTES
 import eu.kanade.tachiyomi.util.storage.cacheImageDir
-import exh.metadata.metadata.RaisedSearchMetadata
-import exh.source.MERGED_SOURCE_ID
-import exh.source.getMainSource
-import exh.source.isEhBasedManga
-import exh.util.defaultReaderType
-import exh.util.mangaType
+import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
+import eu.kanade.tachiyomi.util.defaultReaderType
+import eu.kanade.tachiyomi.util.mangaType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -106,7 +102,6 @@ import tachiyomi.domain.history.interactor.GetNextChapters
 import tachiyomi.domain.history.interactor.UpsertHistory
 import tachiyomi.domain.history.model.HistoryUpdate
 import tachiyomi.domain.library.service.LibraryPreferences
-import tachiyomi.domain.manga.interactor.GetFlatMetadataById
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.interactor.GetMergedMangaById
 import tachiyomi.domain.manga.interactor.GetMergedReferencesById
@@ -151,7 +146,6 @@ class ReaderViewModel @JvmOverloads constructor(
     // SY -->
     private val syncPreferences: SyncPreferences = Injekt.get(),
     private val uiPreferences: UiPreferences = Injekt.get(),
-    private val getFlatMetadataById: GetFlatMetadataById = Injekt.get(),
     private val getMergedMangaById: GetMergedMangaById = Injekt.get(),
     private val getMergedReferencesById: GetMergedReferencesById = Injekt.get(),
     private val getMergedChaptersByMangaId: GetMergedChaptersByMangaId = Injekt.get(),
@@ -414,12 +408,6 @@ class ReaderViewModel @JvmOverloads constructor(
                     // SY -->
                     sourceManager.isInitialized.first { it }
                     val source = sourceManager.getOrStub(manga.source)
-                    val metadataSource = source.getMainSource<MetadataSource<*, *>>()
-                    val metadata = if (metadataSource != null) {
-                        getFlatMetadataById.await(mangaId)?.raise(metadataSource.metaClass)
-                    } else {
-                        null
-                    }
                     val mergedReferences = if (source is MergedSource) {
                         runBlocking {
                             getMergedReferencesById.await(manga.id)
@@ -441,7 +429,6 @@ class ReaderViewModel @JvmOverloads constructor(
                         it.copy(
                             manga = manga,
                             /* SY --> */
-                            meta = metadata,
                             mergedManga = mergedManga,
                             dateRelativeTime = relativeTime,
                             ehAutoscrollFreq = if (autoScrollFreq == -1f) {
@@ -884,7 +871,7 @@ class ReaderViewModel @JvmOverloads constructor(
             if (hit != null) {
                 // Komiho 诊断：这条决策要能在 logcat 里看见（logcat{} 走 XLog，不进 logcat），
                 // 否则排查「第一帧用了哪种 viewer」时只能靠猜。
-                exh.log.DiagLog.d(
+                eu.kanade.tachiyomi.diagnostic.DiagLog.d(
                     KOMIHA_AUTOWEBTOON_TAG,
                     "pre-resolve: page ${hit.number} is a tall strip -> webtoon before first feed",
                 )
@@ -895,7 +882,7 @@ class ReaderViewModel @JvmOverloads constructor(
                 markAutoWebtoonForChapter(chapterUrl)
             } else {
                 if (concludeAutoWebtoonCheckIfAllEarlyChecked(checkCount)) {
-                    exh.log.DiagLog.d(
+                    eu.kanade.tachiyomi.diagnostic.DiagLog.d(
                         KOMIHA_AUTOWEBTOON_TAG,
                         "pre-resolve: none of the first $checkCount pages is tall -> keep page mode",
                     )
@@ -967,7 +954,7 @@ class ReaderViewModel @JvmOverloads constructor(
         logcat { "MihonSY auto-webtoon: chapter $chapterUrl switches to webtoon (in-memory, not saved)" }
         // Komiho 诊断：这条切换会让 Activity 重建 viewer ⇒ 所有可见页重新解码 + 增强。
         // 上面那句 logcat{} 走 XLog，不进 logcat，所以这里补一条 android.util.Log。
-        exh.log.DiagLog.d(
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
             KOMIHA_AUTOWEBTOON_TAG,
             "auto-webtoon switch chapter=$chapterUrl mode=$previousMode->${getMangaReadingMode()} " +
                 "(viewer will be recreated)",
@@ -985,7 +972,7 @@ class ReaderViewModel @JvmOverloads constructor(
         val currChapter = currChapters.currChapter
         currChapter.requestedPage = currChapter.chapter.last_page_read
         // Komiho 诊断：viewer 重建 = 可见页全部重算（增强不留缓存），值得在日志里留痕。
-        exh.log.DiagLog.d(
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
             KOMIHA_AUTOWEBTOON_TAG,
             "recreateViewerForAutoMode: sending Event.RecreateViewer " +
                 "(requestedPage=${currChapter.requestedPage})",
@@ -1167,21 +1154,6 @@ class ReaderViewModel @JvmOverloads constructor(
 
     private suspend fun updateChapterProgressOnComplete(readerChapter: ReaderChapter) {
         readerChapter.chapter.read = true
-        // SY -->
-        if (manga?.isEhBasedManga() == true) {
-            viewModelScope.launchNonCancellable {
-                val chapterUpdates = unfilteredChapterList
-                    .filter { it.sourceOrder > readerChapter.chapter.source_order }
-                    .map { chapter ->
-                        ChapterUpdate(
-                            id = chapter.id,
-                            read = true,
-                        )
-                    }
-                updateChapter.awaitAll(chapterUpdates)
-            }
-        }
-        // SY <--
 
         deleteChapterIfNeeded(readerChapter)
 
@@ -1952,7 +1924,6 @@ class ReaderViewModel @JvmOverloads constructor(
 
         // SY -->
         val currentPageText: String = "",
-        val meta: RaisedSearchMetadata? = null,
         val mergedManga: Map<Long, Manga>? = null,
         val ehUtilsVisible: Boolean = false,
         val lastShiftDoubleState: Boolean? = null,

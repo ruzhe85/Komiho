@@ -8,7 +8,7 @@ object MigrateUtils {
     fun updateSourceId(migrationContext: MigrationContext, newId: Long, oldId: Long) {
         val database = migrationContext.get<Database>() ?: return
         runBlocking {
-            database.ehQueries.migrateSource(newId, oldId)
+            database.mangasQueries.migrateSource(newId, oldId)
         }
     }
 

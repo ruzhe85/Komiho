@@ -86,7 +86,7 @@ import eu.kanade.tachiyomi.databinding.ReaderActivityBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
-import eu.kanade.tachiyomi.ui.main.MainActivity
+import app.mihonsy.komga.ui.KomgaMainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.AddToLibraryFirst
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Error
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Success
@@ -111,10 +111,9 @@ import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.view.setComposeContent
-import exh.source.isEhBasedSource
-import exh.ui.ifSourcesLoaded
-import exh.util.defaultReaderType
-import exh.util.mangaType
+import eu.kanade.presentation.util.ifSourcesLoaded
+import eu.kanade.tachiyomi.util.defaultReaderType
+import eu.kanade.tachiyomi.util.mangaType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -1098,14 +1097,6 @@ class ReaderActivity : BaseActivity() {
                     return@forEachIndexed
                 }
 
-                // If we are using EHentai/ExHentai, get a new image URL
-                viewModel.manga?.let { m ->
-                    val src = sourceManager.get(m.source)
-                    if (src?.isEhBasedSource() == true) {
-                        page.imageUrl = null
-                    }
-                }
-
                 val loader = page.chapter.pageLoader
                 if (page.index == exhCurrentpage()?.index && loader is HttpPageLoader) {
                     loader.boostPage(page)
@@ -1276,7 +1267,7 @@ class ReaderActivity : BaseActivity() {
     private fun openMangaScreen() {
         viewModel.manga?.id?.let { id ->
             startActivity(
-                Intent(this, MainActivity::class.java).apply {
+                Intent(this, KomgaMainActivity::class.java).apply {
                     action = Constants.SHORTCUT_MANGA
                     putExtra(Constants.MANGA_EXTRA, id)
                     addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
