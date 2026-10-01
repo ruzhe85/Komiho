@@ -118,19 +118,6 @@ class MangaScreen(
             }
         }
 
-        // SY -->
-        LaunchedEffect(Unit) {
-            screenModel.redirectFlow
-                .take(1)
-                .onEach {
-                    navigator.replace(
-                        MangaScreen(it.mangaId),
-                    )
-                }
-                .launchIn(this)
-        }
-        // SY <--
-
         MangaScreen(
             state = successState,
             snackbarHostState = screenModel.snackbarHostState,

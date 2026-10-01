@@ -239,7 +239,7 @@ fun LibraryBottomActionMenu(
     onDownloadClicked: ((DownloadAction) -> Unit)?,
     onDeleteClicked: () -> Unit,
     // SY -->
-    onClickResetInfo: (() -> Unit)?,
+    onClickResetInfo: (() -> Unit)? = null,
     // SY <--
     modifier: Modifier = Modifier,
 ) {

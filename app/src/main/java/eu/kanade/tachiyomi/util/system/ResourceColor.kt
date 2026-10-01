@@ -5,6 +5,9 @@ import android.graphics.Color
 import androidx.annotation.AttrRes
 import androidx.annotation.ColorInt
 import androidx.core.graphics.alpha
+import androidx.core.graphics.blue
+import androidx.core.graphics.green
+import androidx.core.graphics.red
 import kotlin.math.roundToInt
 
 /**

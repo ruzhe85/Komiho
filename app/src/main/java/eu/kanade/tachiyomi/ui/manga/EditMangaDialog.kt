@@ -36,6 +36,7 @@ import eu.kanade.tachiyomi.widget.materialdialogs.setTextInput
 import tachiyomi.core.common.util.dropBlank
 import kotlinx.coroutines.CoroutineScope
 import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.core.common.util.trimOrNull
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
