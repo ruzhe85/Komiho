@@ -44,20 +44,6 @@
       "label": "W2xEX Omni Turbo"
     },
     {
-      "id": "qnn-waifu2x-cunet-anime-noise2-x2",
-      "stem": "waifu2x-cunet-anime-noise2-x2",
-      "scale": 2,
-      "padding": 18,
-      "label": "Waifu2x Cunet Noise2"
-    },
-    {
-      "id": "qnn-waifu2x-cunet-anime-noise3-x2",
-      "stem": "waifu2x-cunet-anime-noise3-x2",
-      "scale": 2,
-      "padding": 18,
-      "label": "Waifu2x Cunet Noise3"
-    },
-    {
       "id": "qnn-realcugan-pro-x2-denoise3x-int8",
       "stem": "realcugan-pro-x2-denoise3x-int8",
       "scale": 2,
