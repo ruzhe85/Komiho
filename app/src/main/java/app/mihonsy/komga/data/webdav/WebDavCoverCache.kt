@@ -110,12 +110,16 @@ object WebDavCoverCache {
         if (!isWebDavChapter(chapterUrl)) return null
         val file = coverFile(context, chapterUrl)?.takeIf { it.isFile && it.length() > 0 }
         if (file != null) return if (coverConcurrency() <= 0) null else file
-        generateAsync(context, chapterUrl)
+        generateAsync(context, chapterUrl, startDelayMs = 0L)
         return null
     }
 
-    /** 异步生成封面：档位 0 直接跳过；缓存已有/同窗口去重/失败退避内均跳过；后台线程执行、失败静默（logcat）。 */
-    fun generateAsync(context: Context, chapterUrl: String) {
+    /**
+     * 异步生成封面（对外入口统一走这里）：
+     * @param startDelayMs 生成前延迟，仅阅读器路径需要（3s，避开与阅读线程同时整本缓存
+     * 下载的竞态）；列表补拉传 0。延迟在**并发槽位外**睡，不占槽位拖慢排队。
+     */
+    fun generateAsync(context: Context, chapterUrl: String, startDelayMs: Long = 3000L) {
         if (!isWebDavChapter(chapterUrl)) return
         val concurrency = coverConcurrency()
         if (concurrency <= 0) return
@@ -134,6 +138,8 @@ object WebDavCoverCache {
         val isDirectory = WebDavConnectionStore.extractFullUrl(chapterUrl).endsWith('/')
         val app = context.applicationContext
         thread(name = "webdav-cover", isDaemon = true) {
+            // 读路径延迟：不占并发槽位（浏览器补拉传 0 直进队列）。
+            if (startDelayMs > 0) Thread.sleep(startDelayMs)
             // 全局限流：并发槽位（用户档位）+ 相邻任务最小间隔。改档即时生效。
             synchronized(slotLock) {
                 while (activeSlots >= concurrency) slotLock.wait()
@@ -155,9 +161,6 @@ object WebDavCoverCache {
                         }
                     return@thread
                 }
-                // 延迟 3s 再拉：避开与阅读线程同时整本缓存下载的竞态（rar/7z 无 Range 场景
-                // ensureFallbackFile 无跨实例互斥）；Range 服务器无此问题，延迟无感。
-                Thread.sleep(3000)
                 runCatching { generate(app, chapterUrl, target) }
                     .onFailure {
                         recordFailure(chapterUrl)
