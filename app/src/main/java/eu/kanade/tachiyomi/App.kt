@@ -127,7 +127,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // SY <--
 
         LogcatLogger.install()
-        DiagnosticLogBuffer.install() // SY Buffer all logcat since cold start for "导出诊断日志"
+        DiagnosticLogBuffer.install(this) // SY 落盘缓冲所有 logcat（崩溃自动重启后仍可导出）
 
         setupNotificationChannels()
 

@@ -4096,7 +4096,7 @@ private fun SettingsTab(
                         prefs.readerProgressBubbleEnabled = it
                     },
                 )
-                // SY --> Komiho: 导出诊断日志——把本次冷启动后全部 logcat 导出为 txt 供分析
+                // SY --> Komiho: 导出诊断日志——把落盘的诊断缓冲（含崩溃自动重启前的上一会话）导出为 txt 供分析
                 TextPreferenceWidget(
                     title = composeStringResource(R.string.settings_export_diagnostic_logs),
                     icon = Icons.Filled.Description,
@@ -4119,7 +4119,7 @@ private fun SettingsTab(
                                     append("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE}, ${BuildConfig.VERSION_CODE})\n")
                                     append("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})\n")
                                     append("Device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
-                                    append("Logs since cold start: ${logs.lineSequence().count()} lines\n\n")
+                                    append("Log lines: ${logs.lineSequence().count()} (persisted to disk, may span the last app restart)\n\n")
                                 }
                                 file.writeText(header + logs)
                                 file.getUriCompat(context)
