@@ -9095,6 +9095,13 @@ private fun ClearHistoryDialog(
     )
 }
 
+/** 书签列表进程内缓存：让书签 tab 再次进入时先用上次结果即时上屏、随后后台刷新，避免每次进入都转圈。
+ *  仅作 UI 提示；进程死亡即丢，下次进入重新查库（与 [ChapterPageCountMemo] 同风格）。 */
+private object BookmarksMemo {
+    @Volatile
+    var items: List<BookmarkItem>? = null
+}
+
 /** 书签 tab：按页书签（一本书可多条），按书聚合一行，展开看多页；点页跳到该页，删除删对应书签。 */
 @Composable
 private fun BookmarksTabLocal(
@@ -9104,8 +9111,9 @@ private fun BookmarksTabLocal(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val bookmarkRepo = remember { Injekt.get<BookmarkRepository>() }
-    var items by remember { mutableStateOf<List<BookmarkItem>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    // 缓存优先：有上次结果就先用它即时上屏（不转圈），随后由 load() 后台刷新。
+    var items by remember { mutableStateOf(BookmarksMemo.items) }
+    var loading by remember { mutableStateOf(items == null) }
     var expanded by remember { mutableStateOf<Set<Long>>(emptySet()) }
 
     // SY: 同历史 tab——来源名称（WebDAV 连接名）快照，IO 线程取一次给整列表用。
@@ -9120,10 +9128,14 @@ private fun BookmarksTabLocal(
 
     fun load() {
         scope.launch {
-            loading = true
-            items = withContext(Dispatchers.IO) {
-                runCatching { bookmarkRepo.getBookmarksBySource(LocalSource.ID) }
-                    .getOrDefault(emptyList())
+            // 只有"从没加载过"（无缓存）才显示转圈；有缓存时静默刷新，旧列表保持可见。
+            if (items == null) loading = true
+            val loaded = withContext(Dispatchers.IO) {
+                runCatching { bookmarkRepo.getBookmarksBySource(LocalSource.ID) }.getOrNull()
+            }
+            if (loaded != null) {
+                items = loaded
+                BookmarksMemo.items = loaded
             }
             loading = false
         }
@@ -9145,11 +9157,12 @@ private fun BookmarksTabLocal(
     }
     // SY <--
 
+    val list = items
     when {
         loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        items.isEmpty() -> LocalEmptyHint(Icons.Filled.Bookmark, composeStringResource(R.string.local_bookmarks_empty))
+        list.isNullOrEmpty() -> LocalEmptyHint(Icons.Filled.Bookmark, composeStringResource(R.string.local_bookmarks_empty))
         else -> {
-            val groups = items.groupBy { it.chapterId }.toList()
+            val groups = list.groupBy { it.chapterId }.toList()
             LazyColumn(Modifier.fillMaxSize()) {
                 items(groups, key = { it.first }) { (chapterId, bms) ->
                     val first = bms.first()
