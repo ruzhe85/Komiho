@@ -8,6 +8,7 @@ import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
 // SY <--
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import kotlinx.coroutines.flow.MutableStateFlow
 // SY: 散图目录封面需在后台上拉目录（PROPFIND 为 suspend）。
 import kotlinx.coroutines.runBlocking
 import logcat.LogPriority
@@ -34,9 +35,12 @@ import kotlin.math.min
 // SY --> Komiho Phase4: WebDAV 历史/书签封面 —— 打开章节时「顺便」生成首图封面。
 // 思路（用户定）：ChapterLoader 打开 WebDAV 章节时若封面缓存缺失，则用独立连接按
 // Range 拉首图（尾部 64KB + 中央目录 + 首图条目，通常 < 1MB 流量），采样压缩后落
-// filesDir/komiho_webdav_covers/；之后历史/书签行直接读磁盘显示，**不向服务器发任何
-// 请求**（与 Browse tab 无封面同口径防风控）。生成失败（不支持压缩/加密无密码/网络）
-// 只影响本次，下次打开自动重试。缓存键 = 完整文件 URL 的 sha256，无自动 LRU（每张
+// filesDir/komiho_webdav_covers/；历史/书签行读磁盘显示。
+// Komiho (2026-10-02): 新增「WebDAV显示封面」并发档位（设置→高级，0-6 默认 0）——
+// 档位 0 = 完全不显示封面不发请求（原防风控口径）；档位 ≥1 = 允许拉封面，历史/书签
+// 列表也会对缺缓存的行触发限流后台生成（全局并发槽位 + 400ms 最小间隔 + 失败退避
+// 10 分钟，见 [coverForDisplay]）。生成失败（不支持压缩/加密无密码/网络）只影响本次，
+// 下次自动重试。缓存键 = 完整文件 URL 的 sha256，无自动 LRU（每张
 // 40-70KB，可存上千张；如需回收可清 komiho_webdav_covers 目录，不影响其他缓存）。
 object WebDavCoverCache {
 
@@ -72,6 +76,9 @@ object WebDavCoverCache {
     private val paceLock = Object()
     private var lastStart = 0L
 
+    /** 封面落盘版本号：每次成功写入 +1。展示侧 collect 它作为重组 key，生成完即可上屏。 */
+    val coverTick = MutableStateFlow(0L)
+
     /** 是否 WebDAV 章节（双格式 webdav://connId/URL 与 webdav:URL）。 */
     fun isWebDavChapter(chapterUrl: String): Boolean = chapterUrl.startsWith("webdav:")
 
@@ -84,12 +91,17 @@ object WebDavCoverCache {
         return File(dir, "v2-" + sha256(fullUrl) + ".jpg")
     }
 
-    /** 已生成的封面文件（历史/书签行用；null = 显示占位图标，不发请求）。
-     *  并发档位 0 = 完全不显示封面（已缓存的也不显示），与设置项小字口径一致。 */
-    fun existingCoverFile(context: Context, chapterUrl: String): File? {
-        if (coverConcurrency() <= 0) return null
+    /** 展示用封面（历史/书签/聚合卡）：
+     *  档位 0 → 永远 null（不显示、不发请求）；
+     *  档位 ≥1 → 命中缓存直接返回；缓存缺失则**由列表页触发限流后台生成**（本轮先占位，
+     *  生成完成后 [coverTick] 自增驱动重组上屏）。列表补拉与打开章节共用同一条限流队列，
+     *  突发几十行也只是按并发档位排队 + 400ms 间隔慢慢补，不会形成请求风暴。 */
+    fun coverForDisplay(context: Context, chapterUrl: String): File? {
         if (!isWebDavChapter(chapterUrl)) return null
-        return coverFile(context, chapterUrl)?.takeIf { it.isFile && it.length() > 0 }
+        val file = coverFile(context, chapterUrl)?.takeIf { it.isFile && it.length() > 0 }
+        if (file != null) return if (coverConcurrency() <= 0) null else file
+        generateAsync(context, chapterUrl)
+        return null
     }
 
     /** 异步生成封面：档位 0 直接跳过；缓存已有/同窗口去重/失败退避内均跳过；后台线程执行、失败静默（logcat）。 */
@@ -112,8 +124,6 @@ object WebDavCoverCache {
         val isDirectory = WebDavConnectionStore.extractFullUrl(chapterUrl).endsWith('/')
         val app = context.applicationContext
         thread(name = "webdav-cover", isDaemon = true) {
-            // 先移出去：失败后下次打开还能重试。
-            synchronized(inFlight) { inFlight.remove(chapterUrl) }
             // 全局限流：并发槽位（用户档位）+ 相邻任务最小间隔。改档即时生效。
             synchronized(slotLock) {
                 while (activeSlots >= concurrency) slotLock.wait()
@@ -144,6 +154,8 @@ object WebDavCoverCache {
                         logcat(LogPriority.INFO) { "[WebDavCover] 封面生成失败：${it.message}" }
                     }
             } finally {
+                // 生成结束才放出去：期间列表重组再触发会被 inFlight 去重挡住，不会重复拉。
+                synchronized(inFlight) { inFlight.remove(chapterUrl) }
                 synchronized(slotLock) {
                     activeSlots--
                     slotLock.notifyAll()
@@ -317,6 +329,7 @@ object WebDavCoverCache {
                 tmp.copyTo(target, overwrite = true)
                 tmp.delete()
             }
+            coverTick.value = coverTick.value + 1
         }
         bmp.recycle()
     }
