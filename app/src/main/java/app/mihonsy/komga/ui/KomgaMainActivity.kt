@@ -4096,6 +4096,31 @@ private fun SettingsTab(
                         prefs.readerProgressBubbleEnabled = it
                     },
                 )
+                // SY --> Komiho: WebDAV 显示封面并发档位（0 不显示，1-6 拉封面并发上限，防网盘风控）
+                var webdavCoverConcurrency by remember {
+                    mutableIntStateOf(WebDavCoverCache.coverConcurrency())
+                }
+                val webdavCoverPrefs = remember { Injekt.get<PreferenceStore>() }
+                SliderItem(
+                    value = webdavCoverConcurrency,
+                    valueRange = 0..6,
+                    label = composeStringResource(R.string.webdav_cover_display),
+                    valueString = if (webdavCoverConcurrency == 0) {
+                        composeStringResource(R.string.webdav_cover_off)
+                    } else {
+                        webdavCoverConcurrency.toString()
+                    },
+                    onChange = {
+                        webdavCoverConcurrency = it
+                        webdavCoverPrefs.getInt(WebDavCoverCache.KEY_COVER_CONCURRENCY, 0).set(it)
+                    },
+                )
+                Text(
+                    composeStringResource(R.string.webdav_cover_display_summary),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+                // SY <--
                 // SY --> Komiho: 导出诊断日志——把落盘的诊断缓冲（含崩溃自动重启前的上一会话）导出为 txt 供分析
                 TextPreferenceWidget(
                     title = composeStringResource(R.string.settings_export_diagnostic_logs),

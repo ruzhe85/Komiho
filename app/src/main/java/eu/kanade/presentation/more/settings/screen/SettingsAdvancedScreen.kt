@@ -25,13 +25,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.res.stringResource as appString
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import androidx.core.text.HtmlCompat
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import app.mihonsy.komga.data.webdav.WebDavCoverCache
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.extension.interactor.TrustExtension
 import eu.kanade.domain.source.service.SourcePreferences
@@ -73,7 +71,6 @@ import logcat.LogPriority
 import okhttp3.Headers
 import tachiyomi.core.common.i18n.pluralStringResource
 import tachiyomi.core.common.i18n.stringResource
-import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
@@ -159,7 +156,6 @@ object SettingsAdvancedScreen : SearchableSettings {
             getDataGroup(),
             getNetworkGroup(networkPreferences = networkPreferences),
             getLibraryGroup(libraryPreferences = libraryPreferences),
-            getWebDavGroup(),
             getDownloadsGroup(downloadPreferences = downloadPreferences),
             getReaderGroup(basePreferences = basePreferences),
             // SY --> Komiho: 已移除 source/扩展体系——扩展组隐藏
@@ -372,27 +368,6 @@ object SettingsAdvancedScreen : SearchableSettings {
             ),
         )
     }
-
-    // SY -->
-    @Composable
-    private fun getWebDavGroup(): Preference.PreferenceGroup {
-        val coverConcurrency = remember {
-            Injekt.get<PreferenceStore>().getInt(WebDavCoverCache.KEY_COVER_CONCURRENCY, 0)
-        }
-
-        return Preference.PreferenceGroup(
-            title = appString(R.string.label_webdav),
-            preferenceItems = listOf(
-                Preference.PreferenceItem.ListPreference(
-                    preference = coverConcurrency,
-                    entries = (0..6).associateWith { it.toString() },
-                    title = appString(R.string.webdav_cover_display),
-                    subtitle = appString(R.string.webdav_cover_display_summary),
-                ),
-            ),
-        )
-    }
-    // SY <--
 
     // SY ->
     @Composable
