@@ -1,9 +1,7 @@
 package mihon.domain.chapter.interactor
 
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
-import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.manga.model.Manga
@@ -17,7 +15,6 @@ import tachiyomi.domain.manga.model.Manga
  */
 class FilterChaptersForDownload(
     private val getChaptersByMangaId: GetChaptersByMangaId,
-    private val getMergedChaptersByMangaId: GetMergedChaptersByMangaId,
     private val downloadPreferences: DownloadPreferences,
     private val getCategories: GetCategories,
 ) {
@@ -40,15 +37,7 @@ class FilterChaptersForDownload(
 
         if (!downloadPreferences.downloadNewUnreadChaptersOnly.get()) return newChapters
 
-        // SY -->
-        val existingChapters = if (manga.source == MERGED_SOURCE_ID) {
-            getMergedChaptersByMangaId.await(manga.id)
-        } else {
-            getChaptersByMangaId.await(manga.id)
-        }
-
-        val readChapterNumbers = existingChapters
-            // SY <--
+        val readChapterNumbers = getChaptersByMangaId.await(manga.id)
             .asSequence()
             .filter { it.read && it.isRecognizedNumber }
             .map { it.chapterNumber }

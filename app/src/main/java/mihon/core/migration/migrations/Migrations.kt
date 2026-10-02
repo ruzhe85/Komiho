@@ -7,7 +7,6 @@ val migrations: List<Migration>
         SetupBackupCreateMigration(),
         SetupLibraryUpdateMigration(),
         SetupSyncDataMigration(),
-        MergedMangaRewriteMigration(),
         LogoutFromMALMigration(),
         MoveDOHSettingMigration(),
         ResetRotationSettingMigration(),

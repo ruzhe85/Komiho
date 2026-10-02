@@ -3,7 +3,6 @@ package tachiyomi.data.source
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -47,10 +46,7 @@ class SourceRepositoryImpl(
             sourceIdWithFavoriteCount
         }
             .map {
-                // SY -->
-                it.filterNot { it.source == MERGED_SOURCE_ID }
-                    // SY <--
-                    .map { (sourceId, count) ->
+                it.map { (sourceId, count) ->
                         val source = sourceManager.getOrStub(sourceId)
                         val domainSource = mapSourceToDomainSource(source).copy(
                             isStub = source is StubSource,

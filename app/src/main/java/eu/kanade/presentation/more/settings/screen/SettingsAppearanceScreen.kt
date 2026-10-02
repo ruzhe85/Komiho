@@ -165,11 +165,6 @@ object SettingsAppearanceScreen : SearchableSettings {
                     preference = uiPreferences.expandFilters,
                     title = stringResource(SYMR.strings.toggle_expand_search_filters),
                 ),
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = uiPreferences.mergeInOverflow,
-                    title = stringResource(SYMR.strings.put_merge_in_overflow),
-                    subtitle = stringResource(SYMR.strings.put_merge_in_overflow_summary),
-                ),
             ),
         )
     }

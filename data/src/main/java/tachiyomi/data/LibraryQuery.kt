@@ -4,7 +4,6 @@ import app.cash.sqldelight.ExecutableQuery
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlCursor
 import app.cash.sqldelight.db.SqlDriver
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import tachiyomi.view.LibraryView
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -99,52 +98,7 @@ class LibraryQuery(
                 GROUP BY manga_id
             ) AS MC
             ON MC.manga_id = M._id
-            WHERE $condition AND M.source <> $MERGED_SOURCE_ID
-            UNION
-            SELECT
-                M.*,
-                coalesce(C.total, 0) AS totalCount,
-                coalesce(C.readCount, 0) AS readCount,
-                coalesce(C.latestUpload, 0) AS latestUpload,
-                coalesce(C.fetchedAt, 0) AS chapterFetchedAt,
-                coalesce(C.lastRead, 0) AS lastRead,
-                coalesce(C.bookmarkCount, 0) AS bookmarkCount,
-                coalesce(MC.categories, '0') AS categories
-            FROM mangas M
-            LEFT JOIN (
-                SELECT merged.manga_id,merged.merge_id
-                FROM merged
-                GROUP BY merged.merge_id
-            ) as ME
-            ON ME.merge_id = M._id
-            LEFT JOIN (
-                SELECT
-                    ME.merge_id,
-                    count(*) AS total,
-                    sum(read) AS readCount,
-                    coalesce(max(chapters.date_upload), 0) AS latestUpload,
-                    coalesce(max(history.last_read), 0) AS lastRead,
-                    coalesce(max(chapters.date_fetch), 0) AS fetchedAt,
-                    sum(chapters.bookmark) AS bookmarkCount
-                FROM chapters
-                LEFT JOIN excluded_scanlators
-                ON chapters.manga_id = excluded_scanlators.manga_id
-                AND chapters.scanlator = excluded_scanlators.scanlator
-                LEFT JOIN history
-                ON chapters._id = history.chapter_id
-                LEFT JOIN merged as ME
-                ON ME.manga_id = chapters.manga_id
-                WHERE excluded_scanlators.scanlator IS NULL
-                GROUP BY ME.merge_id
-            ) AS C
-            ON ME.merge_id = C.merge_id
-            LEFT JOIN (
-                SELECT manga_id, group_concat(category_id) AS categories
-                FROM mangas_categories
-                GROUP BY manga_id
-            ) AS MC
-            ON MC.manga_id = M._id
-            WHERE $condition AND M.source = $MERGED_SOURCE_ID;
+            WHERE $condition;
             """.trimIndent(),
             mapper,
             parameters = 0,

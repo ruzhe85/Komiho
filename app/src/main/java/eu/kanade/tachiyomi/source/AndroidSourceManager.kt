@@ -7,8 +7,6 @@ import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.source.online.all.MergedSource
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -70,9 +68,6 @@ class AndroidSourceManager(
                     )
 
                     mutableMap.apply {
-                        // SY -->
-                        put(MERGED_SOURCE_ID, MergedSource())
-                        // SY <--
                         // Komga client (V2) -->
                         put(KomgaSource.ID, KomgaSource(context))
                         // Komga client (V2) <--

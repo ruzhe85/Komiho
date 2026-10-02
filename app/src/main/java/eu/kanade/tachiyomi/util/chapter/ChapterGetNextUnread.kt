@@ -11,10 +11,9 @@ import tachiyomi.domain.manga.model.Manga
  */
 fun List<Chapter>.getNextUnread(
     manga: Manga,
-    downloadManager: DownloadManager /* SY --> */,
-    mergedManga: Map<Long, Manga>, /* SY <-- */
+    downloadManager: DownloadManager,
 ): Chapter? {
-    return applyFilters(manga, downloadManager/* SY --> */, mergedManga/* SY <-- */).let { chapters ->
+    return applyFilters(manga, downloadManager).let { chapters ->
         if (manga.sortDescending()) {
             chapters.findLast { !it.read }
         } else {

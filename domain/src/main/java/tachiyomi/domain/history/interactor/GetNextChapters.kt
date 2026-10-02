@@ -1,8 +1,6 @@
 package tachiyomi.domain.history.interactor
 
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
-import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.service.getChapterSort
 import tachiyomi.domain.history.repository.HistoryRepository
@@ -11,9 +9,6 @@ import kotlin.math.max
 
 class GetNextChapters(
     private val getChaptersByMangaId: GetChaptersByMangaId,
-    // SY -->
-    private val getMergedChaptersByMangaId: GetMergedChaptersByMangaId,
-    // SY <--
     private val getManga: GetManga,
     private val historyRepository: HistoryRepository,
 ) {
@@ -25,19 +20,6 @@ class GetNextChapters(
 
     suspend fun await(mangaId: Long, onlyUnread: Boolean = true): List<Chapter> {
         val manga = getManga.await(mangaId) ?: return emptyList()
-
-        // SY -->
-        if (manga.source == MERGED_SOURCE_ID) {
-            val chapters = getMergedChaptersByMangaId.await(mangaId, applyScanlatorFilter = true)
-                .sortedWith(getChapterSort(manga, sortDescending = false))
-
-            return if (onlyUnread) {
-                chapters.filterNot { it.read }
-            } else {
-                chapters
-            }
-        }
-        // SY <--
 
         val chapters = getChaptersByMangaId.await(mangaId, applyScanlatorFilter = true)
             .sortedWith(getChapterSort(manga, sortDescending = false))

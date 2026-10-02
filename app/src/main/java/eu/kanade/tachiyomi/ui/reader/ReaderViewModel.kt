@@ -33,7 +33,6 @@ import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.reader.chapter.ReaderChapterItem
 import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
@@ -59,7 +58,6 @@ import eu.kanade.tachiyomi.util.lang.takeBytes
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import eu.kanade.tachiyomi.util.storage.DiskUtil.MAX_FILE_NAME_BYTES
 import eu.kanade.tachiyomi.util.storage.cacheImageDir
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import eu.kanade.tachiyomi.util.defaultReaderType
 import eu.kanade.tachiyomi.util.mangaType
 import kotlinx.coroutines.CancellationException
@@ -90,7 +88,6 @@ import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.decoder.ImageDecoder
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
-import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.UpdateChapter
 import tachiyomi.domain.chapter.model.BookmarkItem
 import tachiyomi.domain.chapter.model.Chapter
@@ -103,8 +100,6 @@ import tachiyomi.domain.history.interactor.UpsertHistory
 import tachiyomi.domain.history.model.HistoryUpdate
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.GetManga
-import tachiyomi.domain.manga.interactor.GetMergedMangaById
-import tachiyomi.domain.manga.interactor.GetMergedReferencesById
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.source.local.isLocal
@@ -146,9 +141,6 @@ class ReaderViewModel @JvmOverloads constructor(
     // SY -->
     private val syncPreferences: SyncPreferences = Injekt.get(),
     private val uiPreferences: UiPreferences = Injekt.get(),
-    private val getMergedMangaById: GetMergedMangaById = Injekt.get(),
-    private val getMergedReferencesById: GetMergedReferencesById = Injekt.get(),
-    private val getMergedChaptersByMangaId: GetMergedChaptersByMangaId = Injekt.get(),
     private val setReadStatus: SetReadStatus = Injekt.get(),
     // SY -->
     private val bookmarkRepository: BookmarkRepository = Injekt.get(),
@@ -242,23 +234,16 @@ class ReaderViewModel @JvmOverloads constructor(
     private val chapterList by lazy {
         val manga = manga!!
         // SY -->
-        val (chapters, mangaMap) = runBlocking {
-            if (manga.source == MERGED_SOURCE_ID) {
-                getMergedChaptersByMangaId.await(manga.id, applyScanlatorFilter = true) to
-                    getMergedMangaById.await(manga.id)
-                        .associateBy { it.id }
-            } else {
-                getChaptersByMangaId.await(manga.id, applyScanlatorFilter = true) to null
-            }
+        val chapters = runBlocking {
+            getChaptersByMangaId.await(manga.id, applyScanlatorFilter = true)
         }
         fun isChapterDownloaded(chapter: Chapter): Boolean {
-            val chapterManga = mangaMap?.get(chapter.mangaId) ?: manga
             return downloadManager.isChapterDownloaded(
                 chapterName = chapter.name,
                 chapterScanlator = chapter.scanlator,
                 chapterUrl = chapter.url,
-                mangaTitle = chapterManga.ogTitle,
-                sourceId = chapterManga.source,
+                mangaTitle = manga.ogTitle,
+                sourceId = manga.source,
             )
         }
         // SY <--
@@ -401,6 +386,10 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     suspend fun init(mangaId: Long, initialChapterId: Long /* SY --> */, page: Int?/* SY <-- */): Result<Boolean> {
         if (!needsInit()) return Result.success(true)
+        // SY --> Komiho: 诊断——阅读器初始化入口日志。此前 init 的「漫画缺失」分支与异常分支都
+        // 不打日志，「打开 EPUB 闪退回浏览器」时导出诊断日志里看不到任何阅读器记录。
+        eu.kanade.tachiyomi.diagnostic.DiagLog.i("ReaderInit", "init manga=$mangaId chapter=$initialChapterId page=$page")
+        // SY <--
         return withIOContext {
             try {
                 val manga = getManga.await(mangaId)
@@ -408,20 +397,6 @@ class ReaderViewModel @JvmOverloads constructor(
                     // SY -->
                     sourceManager.isInitialized.first { it }
                     val source = sourceManager.getOrStub(manga.source)
-                    val mergedReferences = if (source is MergedSource) {
-                        runBlocking {
-                            getMergedReferencesById.await(manga.id)
-                        }
-                    } else {
-                        emptyList()
-                    }
-                    val mergedManga = if (source is MergedSource) {
-                        runBlocking {
-                            getMergedMangaById.await(manga.id)
-                        }.associateBy { it.id }
-                    } else {
-                        emptyMap()
-                    }
                     val relativeTime = uiPreferences.relativeTime.get()
                     val autoScrollFreq = readerPreferences.autoscrollInterval.get()
                     // SY <--
@@ -429,7 +404,6 @@ class ReaderViewModel @JvmOverloads constructor(
                         it.copy(
                             manga = manga,
                             /* SY --> */
-                            mergedManga = mergedManga,
                             dateRelativeTime = relativeTime,
                             ehAutoscrollFreq = if (autoScrollFreq == -1f) {
                                 ""
@@ -450,10 +424,7 @@ class ReaderViewModel @JvmOverloads constructor(
                         downloadProvider = downloadProvider,
                         manga = manga,
                         source = source, /* SY --> */
-                        sourceManager = sourceManager,
                         readerPrefs = readerPreferences,
-                        mergedReferences = mergedReferences,
-                        mergedManga = mergedManga, /* SY <-- */
                         // SY --> Komiho: 非流化缓存进度通道（远程整本下载：PDF / WebDAV 回退）。
                         onCacheProgress = { frac ->
                             _chapterCacheProgress.value = frac
@@ -470,6 +441,10 @@ class ReaderViewModel @JvmOverloads constructor(
                     Result.success(true)
                 } else {
                     // Unlikely but okay
+                    eu.kanade.tachiyomi.diagnostic.DiagLog.e(
+                        "ReaderInit",
+                        "manga not found mangaId=$mangaId（init 返回 false，阅读器将关闭 → 退回上一层）",
+                    )
                     Result.success(false)
                 }
             } catch (e: Throwable) {
@@ -480,6 +455,12 @@ class ReaderViewModel @JvmOverloads constructor(
                 if (e is ArchivePasswordException || e is PdfPasswordException) {
                     archivePasswordChapter = chapterList.firstOrNull { chapterId == it.chapter.id }
                     archivePasswordPage = page
+                } else {
+                    eu.kanade.tachiyomi.diagnostic.DiagLog.e(
+                        "ReaderInit",
+                        "init 失败 mangaId=$mangaId chapter=$initialChapterId",
+                        e,
+                    )
                 }
                 // SY <--
                 Result.failure(e)
@@ -1881,14 +1862,7 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     private fun enqueueDeleteReadChapters(chapter: ReaderChapter) {
         if (!chapter.chapter.read) return
-        val mergedManga = state.value.mergedManga
-        // SY -->
-        val manga = if (mergedManga.isNullOrEmpty()) {
-            manga
-        } else {
-            mergedManga[chapter.chapter.manga_id]
-        } ?: return
-        // SY <--
+        val manga = manga ?: return
 
         viewModelScope.launchNonCancellable {
             downloadManager.enqueueChaptersToDelete(listOf(chapter.chapter.toDomainChapter()!!), manga)
@@ -1924,7 +1898,6 @@ class ReaderViewModel @JvmOverloads constructor(
 
         // SY -->
         val currentPageText: String = "",
-        val mergedManga: Map<Long, Manga>? = null,
         val ehUtilsVisible: Boolean = false,
         val lastShiftDoubleState: Boolean? = null,
         val indexPageToShift: Int? = null,

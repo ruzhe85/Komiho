@@ -1,11 +1,9 @@
 package eu.kanade.domain.chapter.interactor
 
 import eu.kanade.domain.download.interactor.DeleteDownload
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import logcat.LogPriority
 import tachiyomi.core.common.util.lang.withNonCancellableContext
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.repository.ChapterRepository
@@ -18,9 +16,6 @@ class SetReadStatus(
     private val deleteDownload: DeleteDownload,
     private val mangaRepository: MangaRepository,
     private val chapterRepository: ChapterRepository,
-    // SY -->
-    private val getMergedChaptersByMangaId: GetMergedChaptersByMangaId,
-    // SY <--
 ) {
 
     private val mapper = { chapter: Chapter, read: Boolean ->
@@ -74,22 +69,7 @@ class SetReadStatus(
         )
     }
 
-    // SY -->
-    private suspend fun awaitMerged(mangaId: Long, read: Boolean) = withNonCancellableContext f@{
-        return@f await(
-            read = read,
-            chapters = getMergedChaptersByMangaId
-                .await(mangaId, dedupe = false)
-                .toTypedArray(),
-        )
-    }
-
-    suspend fun await(manga: Manga, read: Boolean) = if (manga.source == MERGED_SOURCE_ID) {
-        awaitMerged(manga.id, read)
-    } else {
-        await(manga.id, read)
-    }
-    // SY <--
+    suspend fun await(manga: Manga, read: Boolean) = await(manga.id, read)
 
     sealed interface Result {
         data object Success : Result

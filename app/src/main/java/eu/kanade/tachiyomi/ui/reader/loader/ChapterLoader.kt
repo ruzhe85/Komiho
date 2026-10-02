@@ -17,7 +17,6 @@ import app.mihonsy.komga.source.KomgaSource
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import logcat.LogPriority
@@ -31,9 +30,7 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.model.Manga
-import tachiyomi.domain.manga.model.MergedMangaReference
 import tachiyomi.domain.source.model.StubSource
-import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.LocalSource
@@ -51,10 +48,7 @@ class ChapterLoader(
     private val manga: Manga,
     private val source: Source,
     // SY -->
-    private val sourceManager: SourceManager,
     private val readerPrefs: ReaderPreferences,
-    private val mergedReferences: List<MergedMangaReference>,
-    private val mergedManga: Map<Long, Manga>,
     // SY --> Komiho: 非流化缓存（远程整本下载）进度回调（值域 0f..1f），挂接到 ViewModel 进度通道。
     private val onCacheProgress: (Float) -> Unit = {},
     // SY <--
@@ -126,67 +120,6 @@ class ChapterLoader(
             skipCache = true,
         )
         return when {
-            // SY -->
-            source is MergedSource -> {
-                val mangaReference = mergedReferences.firstOrNull {
-                    it.mangaId == chapter.chapter.manga_id
-                } ?: error("Merge reference null")
-                val source = sourceManager.get(mangaReference.mangaSourceId)
-                    ?: error("Source ${mangaReference.mangaSourceId} was null")
-                val manga = mergedManga[chapter.chapter.manga_id] ?: error("Manga for merged chapter was null")
-                val isMergedMangaDownloaded = downloadManager.isChapterDownloaded(
-                    chapterName = chapter.chapter.name,
-                    chapterScanlator = chapter.chapter.scanlator,
-                    chapterUrl = chapter.chapter.url,
-                    mangaTitle = manga.ogTitle,
-                    sourceId = manga.source,
-                    skipCache = true,
-                )
-                when {
-                    isMergedMangaDownloaded -> DownloadPageLoader(
-                        chapter = chapter,
-                        manga = manga,
-                        source = source,
-                        downloadManager = downloadManager,
-                        downloadProvider = downloadProvider,
-                    )
-                    source is HttpSource -> HttpPageLoader(chapter, source)
-                    source is LocalSource -> source.getFormat(chapter.chapter).let { format ->
-                        when (format) {
-                            is Format.Directory -> DirectoryPageLoader(format.file)
-                            is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
-                            is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
-                            // SY --> Komiho: 本地 PDF（彩色扫描漫画常见）—— 自写提取内嵌图 + 系统渲染兜底。
-                            is Format.Pdf -> PdfPageLoader(format.file, context)
-                            // SY --> Komiho Phase3/Phase7: 远程 PDF（WebDAV/SMB）—— 整本落缓存后复用本地解析。
-                            is Format.RemotePdf -> {
-                                // SY --> Komiho Phase7: 打开远程 PDF 时顺便生成历史/书签封面（SMB/WebDAV 各自缓存）。
-                                if (RemoteScheme.isSmb(format.remoteUrl)) {
-                                    SmbCoverCache.generateAsync(context, format.remoteUrl)
-                                } else {
-                                    WebDavCoverCache.generateAsync(context, format.remoteUrl)
-                                }
-                                // SY <--
-                                PdfPageLoader(format.remoteUrl, context)
-                            }
-                            // SY <--
-                            // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）
-                            // SY: SMB 且 URL 以 / 结尾 = 散图目录章节（点目录内图片打开）。
-                            is Format.RemoteArchive -> when {
-                                smbIsDirectoryChapter(format.remoteUrl) -> smbDirectoryLoader(format.remoteUrl)
-                                webDavIsDirectoryChapter(format.remoteUrl) -> webDavDirectoryLoader(format.remoteUrl)
-                                // Komiho: 远程 .epub 也必须走 EPUB 解析（按 OPF/spine 抽图片），
-                                // 否则会被当普通 zip 读、按条目顺序显示一堆 html/css。
-                                isRemoteEpubChapter(format.remoteUrl) -> EpubPageLoader(remoteArchiveHandle(format.remoteUrl), context)
-                                else -> ArchivePageLoader(remoteArchiveHandle(format.remoteUrl))
-                            }
-                            // SY <--
-                        }
-                    }
-                    else -> error(context.stringResource(MR.strings.loader_not_implemented_error))
-                }
-            }
-            // SY <--
             isDownloaded -> DownloadPageLoader(
                 chapter,
                 manga,

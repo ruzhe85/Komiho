@@ -161,40 +161,5 @@ class ChapterRepositoryImpl(
             .getChapterByUrl(url, ::mapChapter)
             .awaitAsList()
     }
-
-    override suspend fun getMergedChapterByMangaId(mangaId: Long, applyScanlatorFilter: Boolean): List<Chapter> {
-        return database.chaptersQueries
-            .getMergedChaptersByMangaId(
-                mangaId,
-                applyScanlatorFilter.toLong(),
-                ::mapChapter,
-            )
-            .awaitAsList()
-    }
-
-    override suspend fun getMergedChapterByMangaIdAsFlow(
-        mangaId: Long,
-        applyScanlatorFilter: Boolean,
-    ): Flow<List<Chapter>> {
-        return database.chaptersQueries
-            .getMergedChaptersByMangaId(
-                mangaId,
-                applyScanlatorFilter.toLong(),
-                ::mapChapter,
-            )
-            .subscribeToList()
-    }
-
-    override suspend fun getScanlatorsByMergeId(mangaId: Long): List<String> {
-        return database.chaptersQueries
-            .getScanlatorsByMergeId(mangaId) { it.orEmpty() }
-            .awaitAsList()
-    }
-
-    override fun getScanlatorsByMergeIdAsFlow(mangaId: Long): Flow<List<String>> {
-        return database.chaptersQueries
-            .getScanlatorsByMergeId(mangaId) { it.orEmpty() }
-            .subscribeToList()
-    }
     // SY <--
 }

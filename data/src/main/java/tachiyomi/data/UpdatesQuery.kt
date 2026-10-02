@@ -4,7 +4,6 @@ import app.cash.sqldelight.ExecutableQuery
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlCursor
 import app.cash.sqldelight.db.SqlDriver
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import tachiyomi.view.UpdatesView
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -88,43 +87,7 @@ class UpdatesQuery(
                     LEFT JOIN excluded_scanlators
                         ON mangas._id = excluded_scanlators.manga_id
                         AND chapters.scanlator = excluded_scanlators.scanlator
-                    WHERE mangas.source <> $MERGED_SOURCE_ID
-                    AND date_fetch > date_added
-
-                    UNION ALL
-
-                    -- Merged source
-                    SELECT
-                        mangas._id AS mangaId,
-                        mangas.title AS mangaTitle,
-                        chapters._id AS chapterId,
-                        chapters.name AS chapterName,
-                        chapters.scanlator,
-                        chapters.url AS chapterUrl,
-                        chapters.read,
-                        chapters.bookmark,
-                        chapters.last_page_read,
-                        mangas.source,
-                        mangas.favorite,
-                        mangas.thumbnail_url AS thumbnailUrl,
-                        mangas.cover_last_modified AS coverLastModified,
-                        chapters.date_upload AS dateUpload,
-                        chapters.date_fetch AS datefetch,
-                        excluded_scanlators.scanlator AS excludedScanlator
-                    FROM mangas
-                    LEFT JOIN (
-                        SELECT merged.manga_id, merged.merge_id
-                        FROM merged
-                        GROUP BY merged.merge_id
-                    ) AS ME
-                        ON ME.merge_id = mangas._id
-                    JOIN chapters
-                        ON ME.manga_id = chapters.manga_id
-                    LEFT JOIN excluded_scanlators
-                        ON ME.merge_id = excluded_scanlators.manga_id
-                        AND chapters.scanlator = excluded_scanlators.scanlator
-                    WHERE mangas.source = $MERGED_SOURCE_ID
-                    AND date_fetch > date_added
+                    WHERE date_fetch > date_added
                 ) AS combined
                 WHERE
                     favorite = 1

@@ -31,13 +31,11 @@ import eu.kanade.tachiyomi.util.system.isConnectedToWifi
 import eu.kanade.tachiyomi.util.system.isRunning
 import eu.kanade.tachiyomi.util.system.setForegroundSafely
 import eu.kanade.tachiyomi.util.system.workManager
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import logcat.LogPriority
@@ -66,7 +64,6 @@ import tachiyomi.domain.library.service.LibraryPreferences.Companion.MANGA_OUTSI
 import tachiyomi.domain.manga.interactor.FetchInterval
 import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.manga.interactor.GetManga
-import tachiyomi.domain.manga.interactor.GetMergedMangaForDownloading
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.model.SourceNotInstalledException
 import tachiyomi.domain.source.service.SourceManager
@@ -98,7 +95,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     private val updateMangaFromRemote: UpdateMangaFromRemote = Injekt.get()
 
     // SY -->
-    private val getMergedMangaForDownloading: GetMergedMangaForDownloading = Injekt.get()
     // SY <--
 
     private val notifier = LibraryUpdateNotifier(context)
@@ -382,22 +378,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     private fun downloadChapters(manga: Manga, chapters: List<Chapter>) {
         // We don't want to start downloading while the library is updating, because websites
         // may don't like it and they could ban the user.
-        // SY -->
-        if (manga.source == MERGED_SOURCE_ID) {
-            val downloadingManga = runBlocking { getMergedMangaForDownloading.await(manga.id) }
-                .associateBy { it.id }
-            chapters.groupBy { it.mangaId }
-                .forEach {
-                    downloadManager.downloadChapters(
-                        downloadingManga[it.key] ?: return@forEach,
-                        it.value,
-                        false,
-                    )
-                }
-
-            return
-        }
-        // SY <--
         downloadManager.downloadChapters(manga, chapters, false)
     }
 

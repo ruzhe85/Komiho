@@ -8,7 +8,6 @@ import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.all.MergedSource
 import logcat.LogPriority
 import mihon.domain.source.models.RemoteMangaUpdate
 import tachiyomi.core.common.util.lang.withIOContext
@@ -69,19 +68,13 @@ class UpdateMangaFromRemote(
                 )
             }
             awaitUpdateFromSource(manga, update.manga, manualFetch)
-            // SY -->
-            val newChapters = if (source is MergedSource) {
-                source.fetchChaptersAndSync(manga, downloadChapters = manualFetch)
-            } else {
-                syncChaptersWithSource.await(
-                    rawSourceChapters = update.chapters,
-                    manga = manga,
-                    source = source,
-                    manualFetch = manualFetch,
-                    fetchWindow = fetchWindow,
-                )
-            }
-            // SY <--
+            val newChapters = syncChaptersWithSource.await(
+                rawSourceChapters = update.chapters,
+                manga = manga,
+                source = source,
+                manualFetch = manualFetch,
+                fetchWindow = fetchWindow,
+            )
             val updatedManga = mangaRepository.getMangaById(manga.id)
 
             Result.success(RemoteMangaUpdate(manga = updatedManga, newChapters = newChapters))

@@ -23,7 +23,6 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import eu.kanade.domain.manga.model.hasCustomCover
 import eu.kanade.domain.manga.model.toSManga
 import eu.kanade.presentation.category.components.ChangeCategoryDialog
@@ -46,14 +45,12 @@ import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.home.HomeScreen
-import eu.kanade.tachiyomi.ui.manga.merged.EditMergedSettingsDialog
 import eu.kanade.tachiyomi.ui.manga.notes.MangaNotesScreen
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import eu.kanade.tachiyomi.util.system.toast
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import eu.kanade.presentation.util.ifSourcesLoaded
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -64,11 +61,8 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
-import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.screens.LoadingScreen
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 class MangaScreen(
     private val mangaId: Long,
@@ -134,19 +128,11 @@ class MangaScreen(
             },
             // SY -->
             onWebViewClicked = {
-                if (successState.mergedData == null) {
-                    openMangaInWebView(
-                        navigator,
-                        screenModel.manga,
-                        screenModel.source,
-                    )
-                } else {
-                    openMergedMangaWebview(
-                        context,
-                        navigator,
-                        successState.mergedData,
-                    )
-                }
+                openMangaInWebView(
+                    navigator,
+                    screenModel.manga,
+                    screenModel.source,
+                )
             }.takeIf { isHttpSource },
             // SY <--
             onWebViewLongClicked = {
@@ -171,7 +157,6 @@ class MangaScreen(
             onEditNotesClicked = { navigator.push(MangaNotesScreen(manga = successState.manga)) },
             // SY -->
             onEditInfoClicked = screenModel::showEditMangaInfoDialog,
-            onMergedSettingsClicked = screenModel::showEditMergedSettingsDialog,
             // SY <--
             onMultiBookmarkClicked = screenModel::bookmarkChapters,
             onMultiMarkAsReadClicked = screenModel::markChaptersRead,
@@ -271,14 +256,6 @@ class MangaScreen(
                     manga = dialog.manga,
                     onDismissRequest = screenModel::dismissDialog,
                     onPositiveClick = screenModel::updateMangaInfo,
-                )
-            }
-            is MangaScreenModel.Dialog.EditMergedSettings -> {
-                EditMergedSettingsDialog(
-                    mergedData = dialog.mergedData,
-                    onDismissRequest = screenModel::dismissDialog,
-                    onDeleteClick = screenModel::deleteMerge,
-                    onPositiveClick = screenModel::updateMergeSettings,
                 )
             }
             // SY <--
@@ -391,24 +368,4 @@ class MangaScreen(
         val url = source.getMangaUrl(manga.toSManga())
         context.copyToClipboard(url, url)
     }
-
-    // SY -->
-
-    private fun openMergedMangaWebview(context: Context, navigator: Navigator, mergedMangaData: MergedMangaData) {
-        val sourceManager: SourceManager = Injekt.get()
-        val mergedManga = mergedMangaData.manga.values.filterNot { it.source == MERGED_SOURCE_ID }
-        val sources = mergedManga.map { sourceManager.getOrStub(it.source) }
-        MaterialAlertDialogBuilder(context)
-            .setTitle(MR.strings.action_open_in_web_view.getString(context))
-            .setSingleChoiceItems(
-                Array(mergedManga.size) { index -> sources[index].toString() },
-                -1,
-            ) { dialog, index ->
-                dialog.dismiss()
-                openMangaInWebView(navigator, mergedManga[index], sources[index] as? HttpSource)
-            }
-            .setNegativeButton(MR.strings.action_cancel.getString(context), null)
-            .show()
-    }
-    // SY <--
 }

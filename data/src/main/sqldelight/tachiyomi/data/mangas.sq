@@ -194,9 +194,6 @@ AND (
         WHERE read = 1
         OR last_page_read != 0
     )
-)
-AND _id NOT IN (
-    SELECT manga_id FROM merged WHERE manga_id != merge_id
 );
 
 insertReturningId:

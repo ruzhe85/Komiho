@@ -8,12 +8,9 @@ import eu.kanade.tachiyomi.data.backup.models.BackupCategory
 import eu.kanade.tachiyomi.data.backup.models.BackupChapter
 import eu.kanade.tachiyomi.data.backup.models.BackupHistory
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
-import eu.kanade.tachiyomi.data.backup.models.BackupMergedMangaReference
 import tachiyomi.data.Database
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.UpdateStrategyColumnAdapter
-import tachiyomi.data.manga.MangaMapper
-import tachiyomi.data.manga.MergedMangaMapper
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
@@ -83,7 +80,6 @@ class MangaRestorer(
                 history = backupManga.history,
                 excludedScanlators = backupManga.excludedScanlators,
                 // SY -->
-                mergedMangaReferences = backupManga.mergedMangaReferences,
                 customManga = backupManga.getCustomMangaInfo(),
                 // SY <--
             )
@@ -310,7 +306,6 @@ class MangaRestorer(
         history: List<BackupHistory>,
         excludedScanlators: List<String>,
         // SY -->
-        mergedMangaReferences: List<BackupMergedMangaReference>,
         customManga: CustomMangaInfo?,
         // SY <--
     ): Manga {
@@ -320,7 +315,6 @@ class MangaRestorer(
         restoreExcludedScanlators(manga, excludedScanlators)
         updateManga.awaitUpdateFetchInterval(manga, now, currentFetchWindow)
         // SY -->
-        restoreMergedMangaReferencesForManga(manga.id, mergedMangaReferences)
         restoreEditedInfo(customManga?.copy(id = manga.id))
         // SY <--
 
@@ -406,57 +400,6 @@ class MangaRestorer(
     }
 
     // SY -->
-
-    /**
-     * Restore the categories from Json
-     *
-     * @param manga the merge manga for the references
-     * @param backupMergedMangaReferences the list of backup manga references for the merged manga
-     */
-    private suspend fun restoreMergedMangaReferencesForManga(
-        mergeMangaId: Long,
-        backupMergedMangaReferences: List<BackupMergedMangaReference>,
-    ) {
-        // Get merged manga references from file and from db
-        val dbMergedMangaReferences =
-            database.mergedQueries.selectAll(MergedMangaMapper::map)
-                .awaitAsList()
-
-        // Iterate over them
-        backupMergedMangaReferences.forEach { backupMergedMangaReference ->
-            // If the backupMergedMangaReference isn't in the db,
-            // remove the id and insert a new backupMergedMangaReference
-            // Store the inserted id in the backupMergedMangaReference
-            if (dbMergedMangaReferences.none {
-                    backupMergedMangaReference.mergeUrl == it.mergeUrl &&
-                        backupMergedMangaReference.mangaUrl == it.mangaUrl
-                }
-            ) {
-                // Let the db assign the id
-                val mergedManga = database.mangasQueries.getMangaByUrlAndSource(
-                    backupMergedMangaReference.mangaUrl,
-                    backupMergedMangaReference.mangaSourceId,
-                    MangaMapper::mapManga,
-                )
-                    .awaitAsOneOrNull()
-                    ?: return@forEach
-                backupMergedMangaReference.getMergedMangaReference().run {
-                    database.mergedQueries.insert(
-                        infoManga = isInfoManga,
-                        getChapterUpdates = getChapterUpdates,
-                        chapterSortMode = chapterSortMode.toLong(),
-                        chapterPriority = chapterPriority.toLong(),
-                        downloadChapters = downloadChapters,
-                        mergeId = mergeMangaId,
-                        mergeUrl = mergeUrl,
-                        mangaId = mergedManga.id,
-                        mangaUrl = mangaUrl,
-                        mangaSource = mangaSourceId,
-                    )
-                }
-            }
-        }
-    }
 
     private fun restoreEditedInfo(mangaJson: CustomMangaInfo?) {
         mangaJson ?: return

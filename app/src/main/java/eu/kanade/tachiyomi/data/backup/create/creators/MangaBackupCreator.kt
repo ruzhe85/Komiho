@@ -7,9 +7,7 @@ import eu.kanade.tachiyomi.data.backup.models.BackupChapter
 import eu.kanade.tachiyomi.data.backup.models.BackupHistory
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.backupChapterMapper
-import eu.kanade.tachiyomi.data.backup.models.backupMergedMangaReferenceMapper
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
-import eu.kanade.tachiyomi.source.online.all.MERGED_SOURCE_ID
 import tachiyomi.data.Database
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.domain.category.interactor.GetCategories
@@ -45,14 +43,6 @@ class MangaBackupCreator(
                 null
             }, /* SY <-- */
         )
-
-        // SY -->
-        if (manga.source == MERGED_SOURCE_ID) {
-            mangaObject.mergedMangaReferences = database.mergedQueries
-                .selectByMergeId(manga.id, backupMergedMangaReferenceMapper)
-                .awaitAsList()
-        }
-        // SY <--
 
         mangaObject.excludedScanlators = database.excluded_scanlatorsQueries
             .getExcludedScanlatorsByMangaId(manga.id)
