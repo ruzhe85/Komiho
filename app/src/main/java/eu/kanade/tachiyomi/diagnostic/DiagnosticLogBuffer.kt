@@ -5,6 +5,7 @@ import logcat.LogPriority
 import logcat.LogcatLogger
 import java.io.BufferedWriter
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,6 +47,9 @@ object DiagnosticLogBuffer {
         logFile = File(context.filesDir, "komiho_diagnostic_log.txt")
         // 不清空旧文件：崩溃自动重启后仍需上一会话的日志（见类注释）。
         openWriter()
+        // 注册为 logcat 的 Logger —— 这是 logcat() 调用进入本缓冲的唯一入口
+        // （DiagLog 走 record() 直接进来，不依赖这里）。漏注册会让导出整段为空。
+        LogcatLogger.loggers += Logger
     }
 
     private fun openWriter() {
@@ -54,7 +58,8 @@ object DiagnosticLogBuffer {
                 writer?.close()
             } catch (_: Throwable) {
             }
-            writer = logFile.bufferedWriter()
+            // 追加模式：绝不能截断，否则冷启动会清掉上一会话（崩溃前）的日志。
+            writer = FileOutputStream(logFile, /* append = */ true).bufferedWriter()
         }
     }
 
