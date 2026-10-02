@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
+    <plurals name="eh_retry_toast">
+        <item quantity="other">重試 %1$d 個失敗的頁面……</item>
+    </plurals>
 </resources>

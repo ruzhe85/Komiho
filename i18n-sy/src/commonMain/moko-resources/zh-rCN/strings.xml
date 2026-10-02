@@ -164,4 +164,10 @@
     <string name="rec_services_to_search">用于搜索的推荐服务</string>
     <string name="rec_group_source">来源的推荐</string>
     <string name="rec_group_tracker">记录平台的推荐</string>
+    <string name="entry_type_manga">日漫</string>
+    <string name="changelog_version">版本 %1$s</string>
+    <string name="custom_entry_info">自定义作品信息</string>
+    <string name="tap_scroll_page">点按按页滚动</string>
+    <string name="tracking_status">追踪状态</string>
+    <string name="aes_256">AES 256</string>
 </resources>

@@ -145,4 +145,10 @@
     <string name="rec_hide_library_entries">隱藏已在您書櫃中的結果</string>
     <string name="rec_group_tracker">歷程平臺的推薦</string>
     <string name="rec_group_source">來源的推薦</string>
+    <string name="entry_type_manga">漫畫(日本)</string>
+    <string name="changelog_version">版本 %1$s</string>
+    <string name="custom_entry_info">自訂作品資訊</string>
+    <string name="tap_scroll_page">點按按頁滾動</string>
+    <string name="tracking_status">追蹤狀態</string>
+    <string name="aes_256">AES 256</string>
 </resources>

@@ -188,4 +188,10 @@
     <string name="allow_deduplication">Allow deduplication:</string>
     <string name="deduplication_mode">Dedupe mode:</string>
     <string name="deduplication_entry_info">Info entry:</string>
+    <string name="entry_type_manga">Manga</string>
+    <string name="changelog_version">Version %1$s</string>
+    <string name="custom_entry_info">Custom entry info</string>
+    <string name="aes_256">AES 256</string>
+    <string name="tap_scroll_page">Tap scroll by page</string>
+    <string name="tracking_status">Tracking status</string>
 </resources>
