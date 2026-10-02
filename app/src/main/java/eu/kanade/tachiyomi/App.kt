@@ -27,6 +27,9 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.allowRgb565
 import coil3.request.crossfade
 import coil3.util.DebugLogger
+// SY --> Komiho: 进程启动时把「应用语言」对齐到平台 per-app locale（阅读器走 AppCompat 的那条路）
+import app.mihonsy.komga.applyAppLanguageToPlatform
+// SY <--
 import eu.kanade.domain.DomainModule
 import eu.kanade.domain.SYDomainModule
 import eu.kanade.domain.base.BasePreferences
@@ -181,6 +184,14 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             .launchIn(scope)
 
         setAppCompatDelegateThemeMode(Injekt.get<UiPreferences>().themeMode.get())
+
+        // SY --> Komiho: 「应用语言」与平台 per-app locale 是两份状态，会分叉（旧版本写入的偏好、
+        // 或从未点过语言项）。AppCompatActivity（阅读器）的 configuration 由 AppCompat 按
+        // per-app locale 重写，分叉时它读到空值 → 回退系统语言（中文机锁死中文），
+        // 把 ReaderActivity.attachBaseContext 的 withAppLanguage() 包装整个冲掉。
+        // 这里每次进程启动无条件对齐一次。
+        applyAppLanguageToPlatform()
+        // SY <--
 
         // Updates widget update
         WidgetManager(Injekt.get(), Injekt.get()).apply { init(scope) }

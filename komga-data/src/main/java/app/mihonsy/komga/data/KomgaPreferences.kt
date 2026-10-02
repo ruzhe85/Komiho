@@ -183,9 +183,14 @@ class KomgaPreferences(context: Context) {
 
     /**
      * 应用语言："" = 跟随系统（默认），"zh-CN" / "zh-TW" / "en"。
-     * 由 KomgaBaseActivity.attachBaseContext 应用（ComponentActivity 不走
-     * AppCompatDelegate 的 per-app locale），选择时同时调
-     * AppCompatDelegate.setApplicationLocales 以覆盖 MihonSY 的 AppCompat 页面。
+     *
+     * 由 [app.mihonsy.komga.data.withAppLanguage] 在 Context 上包装，覆盖
+     * **ComponentActivity**（KomgaBaseActivity）界面；AppCompatActivity 界面（阅读器）则由
+     * AppCompat 的 per-app locale 决定，因此进程启动时会用
+     * [app.mihonsy.komga.applyAppLanguageToPlatform] 把本偏好对齐到平台 per-app locale。
+     *
+     * 注意：这里和平台 per-app locale 是两份状态，**不能只依赖设置页那次调用**
+     * （旧版本写入的偏好、或从未点过语言项，都会让两者分叉 → 阅读器回退系统语言）。
      */
     var appLanguage: String
         get() = prefs.getString(KEY_APP_LANGUAGE, "").orEmpty()

@@ -267,10 +267,9 @@ import eu.kanade.tachiyomi.util.storage.getUriCompat
 import eu.kanade.tachiyomi.util.system.toShareIntent
 // SY <--
 import eu.kanade.presentation.util.LocalBackPress
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource as composeStringResource
-import androidx.core.os.LocaleListCompat
+import app.mihonsy.komga.applyAppLanguageToPlatform
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -4654,16 +4653,12 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    if (prefs.appLanguage != tag) {
-                                        prefs.appLanguage = tag
-                                        AppCompatDelegate.setApplicationLocales(
-                                            if (tag.isEmpty()) {
-                                                LocaleListCompat.getEmptyLocaleList()
-                                            } else {
-                                                LocaleListCompat.forLanguageTags(tag)
-                                            },
-                                        )
-                                    }
+                                    prefs.appLanguage = tag
+                                    // Komiho: 无条件对齐平台 per-app locale（不再只在「值变了」时才调）。
+                                    // 偏好与平台值可能早已分叉（旧版本写入的偏好、或从没点过语言项），
+                                    // 这时就算点的是当前项，也要把平台值补上——否则阅读器
+                                    // （AppCompatActivity）会一直回退系统语言。
+                                    context.applyAppLanguageToPlatform()
                                     showAppLanguage = false
                                     activity?.recreate()
                                 }
