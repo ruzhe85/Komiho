@@ -69,9 +69,6 @@ import tachiyomi.source.local.LocalSource
 data class BrowseSourceScreen(
     val sourceId: Long,
     private val listingQuery: String?,
-    // SY -->
-    private val filtersJson: String? = null,
-    // SY <--
 ) : Screen(), AssistContentScreen {
 
     private var assistUrl: String? = null
@@ -89,9 +86,6 @@ data class BrowseSourceScreen(
             BrowseSourceScreenModel(
                 sourceId = sourceId,
                 listingQuery = listingQuery,
-                // SY -->
-                filtersJson = filtersJson,
-                // SY <--
             )
         }
         val state by screenModel.state.collectAsState()

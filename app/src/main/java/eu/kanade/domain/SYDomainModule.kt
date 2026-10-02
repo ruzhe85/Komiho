@@ -37,7 +37,6 @@ import tachiyomi.domain.manga.interactor.UpdateMergedSettings
 import tachiyomi.domain.manga.repository.CustomMangaRepository
 import tachiyomi.domain.manga.repository.MangaMergeRepository
 import uy.kohesive.injekt.api.InjektRegistrar
-import xyz.nulldev.ts.api.http.serializer.FilterSerializer
 
 class SYDomainModule : InjektModule {
 
@@ -48,7 +47,6 @@ class SYDomainModule : InjektModule {
         addFactory { GetMangaBySource(get()) }
         addFactory { DeleteChapters(get()) }
         addFactory { DeleteMangaById(get()) }
-        addFactory { FilterSerializer() }
         addFactory { GetChapterByUrl(get()) }
         addFactory { GetSourceCategories(get()) }
         addFactory { CreateSourceCategory(get()) }

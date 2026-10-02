@@ -232,8 +232,7 @@ abstract class HttpSource : CatalogueSource {
         message = "The helper functions are inherently limiting and hides the underlying implementation. " +
             "Source developers should make their own implementation according to their needs.",
     )
-    /* SY --> protected <-- SY */
-    open fun latestUpdatesRequest(page: Int): Request = throw UnsupportedOperationException()
+    protected open fun latestUpdatesRequest(page: Int): Request = throw UnsupportedOperationException()
 
     /**
      * Parses the response from the site and returns a [MangasPage] object.
@@ -244,8 +243,7 @@ abstract class HttpSource : CatalogueSource {
         message = "The helper functions are inherently limiting and hides the underlying implementation. " +
             "Source developers should make their own implementation according to their needs.",
     )
-    /* SY --> protected <-- SY */
-    open fun latestUpdatesParse(response: Response): MangasPage = throw UnsupportedOperationException()
+    protected open fun latestUpdatesParse(response: Response): MangasPage = throw UnsupportedOperationException()
 
     /**
      * Returns an observable with the updated details for a manga. Normally it's not needed to

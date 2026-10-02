@@ -32,8 +32,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.mapAsCheckboxState
 import tachiyomi.core.common.util.lang.launchIO
@@ -52,16 +50,12 @@ import tachiyomi.domain.source.repository.SourcePagingSource
 import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import xyz.nulldev.ts.api.http.serializer.FilterSerializer
 import java.time.Instant
 import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
 
 open class BrowseSourceScreenModel(
     private val sourceId: Long,
     listingQuery: String?,
-    // SY -->
-    private val filtersJson: String? = null,
-    // SY <--
     private val sourceManager: SourceManager = Injekt.get(),
     sourcePreferences: SourcePreferences = Injekt.get(),
     private val libraryPreferences: LibraryPreferences = Injekt.get(),
@@ -86,8 +80,6 @@ open class BrowseSourceScreenModel(
 
     // SY -->
     val startExpanded by uiPreferences.expandFilters.asState(screenModelScope)
-
-    private val filterSerializer = FilterSerializer()
     // SY <--
 
     init {
@@ -110,18 +102,6 @@ open class BrowseSourceScreenModel(
         if (!getIncognitoState.await(source.id)) {
             sourcePreferences.lastUsedSource.set(source.id)
         }
-
-        // SY -->
-        val jsonFilters = filtersJson
-        val filters = state.value.filters
-        if (jsonFilters != null) {
-            runCatching {
-                val filtersJson = Json.decodeFromString<JsonArray>(jsonFilters)
-                filterSerializer.deserialize(filters, filtersJson)
-                search(filters = filters)
-            }
-        }
-        // SY <--
     }
 
     /**
