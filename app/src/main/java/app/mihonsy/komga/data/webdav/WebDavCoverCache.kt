@@ -37,9 +37,10 @@ import kotlin.math.min
 // Range 拉首图（尾部 64KB + 中央目录 + 首图条目，通常 < 1MB 流量），采样压缩后落
 // filesDir/komiho_webdav_covers/；历史/书签行读磁盘显示。
 // Komiho (2026-10-02): 新增「WebDAV显示封面」并发档位（设置→高级，0-6 默认 0）——
-// 档位 0 = 完全不显示封面不发请求（原防风控口径）；档位 ≥1 = 允许拉封面，历史/书签
-// 列表也会对缺缓存的行触发限流后台生成（全局并发槽位 + 400ms 最小间隔 + 失败退避
-// 10 分钟，见 [coverForDisplay]）。生成失败（不支持压缩/加密无密码/网络）只影响本次，
+// 档位 = 是否/以多快**拉取新封面**：0 = 不再拉取（不发请求），≥1 = 允许拉封面（全局并发
+// 槽位 + 随档位缩放的最小间隔 + 失败退避 10 分钟，见 [coverForDisplay]）。**显示与档位无关**：
+// 已缓存的封面在历史/书签/聚合卡照常显示（见 [coverCachedOnly]），浏览器列表按档位显示；
+// 生成失败（不支持压缩/加密无密码/网络）只影响本次，
 // 下次自动重试。缓存键 = 完整文件 URL 的 sha256，无自动 LRU（每张
 // 40-70KB，可存上千张；如需回收可清 komiho_webdav_covers 目录，不影响其他缓存）。
 object WebDavCoverCache {
@@ -47,12 +48,16 @@ object WebDavCoverCache {
     /** 封面缓存目录名（filesDir 下）。public 供设置页统计/清除，避免目录名漂移。 */
     const val DIR = "komiho_webdav_covers"
 
-    /** 设置 → 高级 →「WebDAV显示封面」：0 不显示封面（不发请求），1-6 = 拉封面的全局并发上限。 */
+    /** 设置 → 高级 →「WebDAV显示封面」：0 = 不再拉取封面（不发请求，已缓存仍显示），1-6 = 拉封面并发上限。 */
     const val KEY_COVER_CONCURRENCY = "komiho_webdav_cover_concurrency"
     private const val MAX_CONCURRENCY = 6
 
-    /** 全局限流：相邻两次封面网络任务的最小间隔（防风控，比裸并发数更有效）。 */
-    private const val MIN_INTERVAL_MS = 400L
+    /** 全局限流：相邻两次封面网络任务的最小间隔。随「并发档位」缩放——档位越高越快，
+     *  既保留低档位的防风控口径，又让高档位真正提速（档位 1 ≈ 400ms，6 ≈ 100ms 下限）。 */
+    private const val BASE_INTERVAL_MS = 400L
+    private const val MIN_INTERVAL_FLOOR_MS = 100L
+    private fun intervalMs(concurrency: Int): Long =
+        (BASE_INTERVAL_MS / concurrency.coerceAtLeast(1)).coerceAtLeast(MIN_INTERVAL_FLOOR_MS)
 
     /** 失败退避：同章节失败后多久内不再尝试（避免受限模式下反复打请求）。 */
     private const val FAIL_RETRY_MS = 10 * 60 * 1000L
@@ -105,12 +110,10 @@ object WebDavCoverCache {
         return File(dir, "v2-" + sha256(fullUrl) + ".jpg")
     }
 
-    /** 只读缓存、不触发生成（档位 0 或未缓存均返回 null）。
-     *  供「一次映射全量条目」的路径（首页聚合卡摘要等）使用——那些路径若触发生成
-     *  会把整份历史灌进限流队列，当前屏幕的封面请求全得排队。补拉只应由
-     *  按可见行组合的路径（历史/书签/浏览行）经 [coverForDisplay] 触发。 */
+    /** 只读缓存、不触发生成。**与档位无关**：档位 0（关闭）只表示不再拉取新封面，
+     *  已落盘的封面仍应显示（历史/书签/聚合卡）；未缓存则返回 null。
+     *  供「一次映射全量条目」的路径使用——那些路径若触发生成会把整份历史灌进限流队列。 */
     fun coverCachedOnly(context: Context, chapterUrl: String): File? {
-        if (coverConcurrency() <= 0) return null
         if (!isWebDavChapter(chapterUrl)) return null
         return coverFile(context, chapterUrl)?.takeIf { it.isFile && it.length() > 0 }
     }
@@ -172,7 +175,7 @@ object WebDavCoverCache {
                 if (myEpoch != null && myEpoch != activeEpoch) return@thread
                 synchronized(paceLock) {
                     val now = android.os.SystemClock.elapsedRealtime()
-                    val wait = MIN_INTERVAL_MS - (now - lastStart)
+                    val wait = intervalMs(concurrency) - (now - lastStart)
                     if (wait > 0) Thread.sleep(wait)
                     lastStart = android.os.SystemClock.elapsedRealtime()
                 }

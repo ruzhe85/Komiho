@@ -4121,9 +4121,15 @@ private fun SettingsTab(
                 if (showCoverConcurrencyDialog) {
                     AlertDialog(
                         onDismissRequest = { showCoverConcurrencyDialog = false },
-                        title = { Text(composeStringResource(R.string.webdav_cover_display)) },
+                        title = { Text(composeStringResource(R.string.webdav_cover_concurrency_title)) },
                         text = {
                             Column {
+                                Text(
+                                    text = composeStringResource(R.string.webdav_cover_display_summary),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 8.dp),
+                                )
                                 listOf(0, 1, 2, 3, 4, 5, 6).forEach { option ->
                                     Row(
                                         modifier = Modifier
@@ -4162,11 +4168,6 @@ private fun SettingsTab(
                         },
                     )
                 }
-                Text(
-                    composeStringResource(R.string.webdav_cover_display_summary),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 24.dp),
-                )
                 // SY <--
                 // SY --> Komiho: 导出诊断日志——把落盘的诊断缓冲（含崩溃自动重启前的上一会话）导出为 txt 供分析
                 TextPreferenceWidget(

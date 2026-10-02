@@ -354,6 +354,7 @@
     <string name="storage_cover_cache_desc">本地 / SMB / WebDAV 三套封面縮圖；清除後瀏覽時自動重建，不影響閱讀進度。Komga 封面快取獨立管理（書庫 → 預覽圖）。</string>
     <string name="label_webdav">WebDAV</string>
     <string name="webdav_cover_display">WebDAV顯示封面</string>
+    <string name="webdav_cover_concurrency_title">封面拉取併發數</string>
     <string name="webdav_cover_display_summary">併發太高可能觸發風控，謹慎選擇。</string>
     <string name="webdav_cover_off">關閉</string>
     <string name="storage_cache_cleared">已清除快取（%1$s）</string>
