@@ -8835,14 +8835,12 @@ private fun HistoryTabLocal(
             val stat = remember(rep.chapterUrl, file) { getFileStat(rep.chapterUrl, file) }
             // SY --> Komiho: 封面改走 LocalCoverFetcher（与 Komga 共用缓存池）。
             // 旧的 resolveCoverUri 只认目录，归档/EPUB 一直没封面；现在归档可拆包取首图。
-            // WebDAV 章节（无本地文件）→ 读打开时「顺便」生成的封面缓存（无则占位图标）。
-            // webdavCoverTick：档位>0 时列表会补拉封面，落盘完成 bump 版本号驱动本行重组上屏。
-            val webdavCoverTick by WebDavCoverCache.coverTick.collectAsState()
-            val coverModel: Any? = remember(file, stat.modified, queryTick, webdavCoverTick) {
+            // WebDAV 章节（无本地文件）→ 读打开时「顺便」生成的封面缓存（无则占位图标，不触发生成）。
+            val coverModel: Any? = remember(file, stat.modified, queryTick) {
                 file?.let { LocalCoverData(it, stat.modified) }
                     ?: rep.thumbnailUrl?.takeIf { it.isNotBlank() }
                     // SY: WebDAV/SMB 章节（无本地文件）→ 读打开时「顺便」生成的封面缓存（无则占位图标）。
-                    ?: WebDavCoverCache.coverForDisplay(context, rep.chapterUrl)
+                    ?: WebDavCoverCache.existingCoverFile(context, rep.chapterUrl)
                     ?: SmbCoverCache.existingCoverFile(context, rep.chapterUrl)
             }
             // SY <--
@@ -9053,14 +9051,13 @@ private fun BookmarksTabLocal(
                     }
                     val stat = remember(first.chapterUrl, file) { getFileStat(first.chapterUrl, file) }
                     // SY --> Komiho: 同上，封面走 LocalCoverFetcher（归档也能拆包取首图）；
-                    // WebDAV 章节 → 打开时「顺便」生成的封面缓存（queryTick 在 remember key 里，
+                    // WebDAV 章节 → 打开时「顺便」生成的封面缓存（resumeTick 在 remember key 里，
                     // 阅读器回来 ON_RESUME 复查时刚生成的封面即可上屏）。
-                    val webdavCoverTick by WebDavCoverCache.coverTick.collectAsState()
-                    val coverModel: Any? = remember(file, stat.modified, resumeTick, webdavCoverTick) {
+                    val coverModel: Any? = remember(file, stat.modified, resumeTick) {
                         file?.let { LocalCoverData(it, stat.modified) }
                             ?: first.thumbnailUrl?.takeIf { it.isNotBlank() }
                             // SY: WebDAV/SMB 章节 → 打开时「顺便」生成的封面缓存。
-                            ?: WebDavCoverCache.coverForDisplay(context, first.chapterUrl)
+                            ?: WebDavCoverCache.existingCoverFile(context, first.chapterUrl)
                             ?: SmbCoverCache.existingCoverFile(context, first.chapterUrl)
                     }
                     // SY <--
