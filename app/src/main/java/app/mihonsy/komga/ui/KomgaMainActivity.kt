@@ -7019,8 +7019,8 @@ private fun WebDavCoverThumb(
         contentDescription = null,
         contentScale = ContentScale.Crop,
         modifier = modifier,
-        loading = icon,
-        error = icon,
+        loading = { _, _ -> icon() },
+        error = { _, _ -> icon() },
     )
 }
 
