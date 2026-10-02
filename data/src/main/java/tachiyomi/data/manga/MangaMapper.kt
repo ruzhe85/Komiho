@@ -4,7 +4,6 @@ import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import kotlinx.serialization.json.JsonObject
 import tachiyomi.domain.library.model.LibraryManga
 import tachiyomi.domain.manga.model.Manga
-import tachiyomi.domain.manga.model.MangaWithChapterCount
 import tachiyomi.view.LibraryView
 
 object MangaMapper {
@@ -148,74 +147,6 @@ object MangaMapper {
         chapterFetchedAt = chapterFetchedAt,
         lastRead = lastRead,
     )
-
-    fun mapMangaWithChapterCount(
-        id: Long,
-        source: Long,
-        url: String,
-        artist: String?,
-        author: String?,
-        description: String?,
-        genre: List<String>?,
-        title: String,
-        status: Long,
-        thumbnailUrl: String?,
-        favorite: Boolean,
-        lastUpdate: Long?,
-        nextUpdate: Long?,
-        initialized: Boolean,
-        viewerFlags: Long,
-        chapterFlags: Long,
-        coverLastModified: Long,
-        dateAdded: Long,
-        // SY -->
-        @Suppress("UNUSED_PARAMETER")
-        filteredScanlators: String?,
-        // SY <--
-        updateStrategy: UpdateStrategy,
-        calculateInterval: Long,
-        lastModifiedAt: Long,
-        favoriteModifiedAt: Long?,
-        version: Long,
-        isSyncing: Long,
-        notes: String,
-        memo: JsonObject,
-        totalCount: Long,
-    ): MangaWithChapterCount = MangaWithChapterCount(
-        manga = mapManga(
-            id,
-            source,
-            url,
-            artist,
-            author,
-            description,
-            genre,
-            title,
-            status,
-            thumbnailUrl,
-            favorite,
-            lastUpdate,
-            nextUpdate,
-            initialized,
-            viewerFlags,
-            chapterFlags,
-            coverLastModified,
-            dateAdded,
-            // SY -->
-            null,
-            // SY <--
-            updateStrategy,
-            calculateInterval,
-            lastModifiedAt,
-            favoriteModifiedAt,
-            version,
-            isSyncing,
-            notes,
-            memo,
-        ),
-        chapterCount = totalCount,
-    )
-
     fun mapLibraryView(libraryView: LibraryView): LibraryManga {
         return LibraryManga(
             manga = Manga(
