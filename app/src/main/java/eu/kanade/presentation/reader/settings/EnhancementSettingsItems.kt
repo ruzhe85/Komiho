@@ -38,9 +38,14 @@ import tachiyomi.presentation.core.util.collectAsState
 /**
  * 一级列表的方式行：左侧 radio 表示当前方式，右侧箭头表示可进入详情。
  *
- * 整行点击 = 启用该方式 **并** 进入详情页。把「启用」和「进详情」拆成两个点击热点，在手机
- * 上误触率明显偏高；合并成一个动作后，用户不会遇到「点进详情看一眼、返回、结果什么都没
- * 变」的空转。
+ * 两个点击热区分工不同：
+ *  - **圆圈**（[onSelect]）＝ 只切到该方式，停在当前页 —— 与 Material 的 radio 习惯一致，
+ *    用户只想换个算法、不想进去调参数时，不必再返回一次；
+ *  - **行内其它区域**（[onClick]）＝ 切到该方式 **并** 进入它的详情页，省掉「点进去看一眼、
+ *    返回、结果什么都没变」的空转。
+ *
+ * 圆圈必须自己消费点击（`RadioButton.onClick` 传非空），否则事件会冒泡到整行的 clickable，
+ * 把「选中」变成「跳转」。
  *
  * [subtitle] 只在**当前方式**下显示真实取值（算法名 / 模型名），其余行显示占位符 —— 否则四
  * 行会同时报出四个值，反而看不出哪个在生效。
@@ -51,6 +56,7 @@ internal fun EnhancementMethodRow(
     subtitle: String?,
     selected: Boolean,
     onClick: () -> Unit,
+    onSelect: () -> Unit = onClick,
 ) {
     Row(
         modifier = Modifier
@@ -63,7 +69,7 @@ internal fun EnhancementMethodRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        RadioButton(selected = selected, onClick = null)
+        RadioButton(selected = selected, onClick = onSelect)
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = label,

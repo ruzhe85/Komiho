@@ -407,6 +407,8 @@
     <string name="enhancement_section_methods">增強方式</string>
     <string name="enhancement_detail_model">模型</string>
     <string name="enhancement_detail_advanced">AI 選項</string>
+    <!-- Komiho: NPU 詳情裡「沒有系列、或系列只有它一個」的模型統一歸到這個組。 -->
+    <string name="enhancement_series_standalone">Standalone</string>
     <string name="enhancement_scale">倍率</string>
     <string name="ai_model_anime_video">AnimeVideo</string>
     <string name="ai_model_omni_turbo">Omni-Turbo</string>

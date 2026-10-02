@@ -133,8 +133,11 @@ private fun EnhancementRootList(
         onClick = { setEnhancementMode(preferences, 0) },
     )
 
-    // CPU：点击即启用并进入详情（算法与倍率沿用上次的选择，详情页里可改）。
+    // CPU：圆圈只切方式，整行则切方式 + 进详情（算法与倍率沿用上次的选择，详情页里可改）。
     val cpuActive = mode in 2..3
+    val activateCpu: () -> Unit = {
+        setEnhancementMode(preferences, if (lastMode in 2..3) lastMode else 2)
+    }
     EnhancementMethodRow(
         label = stringResource(MR.strings.enhancement_group_cpu),
         subtitle = if (cpuActive) {
@@ -145,46 +148,54 @@ private fun EnhancementRootList(
         },
         selected = cpuActive,
         onClick = {
-            setEnhancementMode(preferences, if (lastMode in 2..3) lastMode else 2)
+            activateCpu()
             onOpen(EnhancementDetail.CPU)
         },
+        onSelect = activateCpu,
     )
 
     // GPU：当前已是 Vulkan 模型则保持不变，否则回落到默认（OmniMiniV2）—— 不静默换掉用户
     // 在另一个后端上选过的模型。
     val gpuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.NCNN_VULKAN
+    val activateGpu: () -> Unit = {
+        if (!gpuActive) {
+            if (activeModel.backend != UpscaleModelSpec.Backend.NCNN_VULKAN) {
+                preferences.aiModelId.set(AiUpscaleModel.Default.id)
+            }
+            setEnhancementMode(preferences, 5)
+        }
+    }
     EnhancementMethodRow(
         label = stringResource(MR.strings.enhancement_group_gpu),
         subtitle = if (gpuActive) activeModel.displayLabel() else PLACEHOLDER,
         selected = gpuActive,
         onClick = {
-            if (!gpuActive) {
-                if (activeModel.backend != UpscaleModelSpec.Backend.NCNN_VULKAN) {
-                    preferences.aiModelId.set(AiUpscaleModel.Default.id)
-                }
-                setEnhancementMode(preferences, 5)
-            }
+            activateGpu()
             onOpen(EnhancementDetail.GPU)
         },
+        onSelect = activateGpu,
     )
 
     // NPU：门控与详情页共用同一条件（CDSP 优先）。没有可用模型时不改设置，只进详情页看提示。
     if (npuAvailable) {
         val npuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP
+        val activateNpu: () -> Unit = {
+            if (!npuActive) {
+                compatibleNpuModels(context).firstOrNull()?.let { target ->
+                    preferences.aiModelId.set(target.id)
+                    setEnhancementMode(preferences, 5)
+                }
+            }
+        }
         EnhancementMethodRow(
             label = stringResource(MR.strings.enhancement_group_npu),
             subtitle = if (npuActive) activeModel.displayLabel() else PLACEHOLDER,
             selected = npuActive,
             onClick = {
-                if (!npuActive) {
-                    val target = compatibleNpuModels(context).firstOrNull()
-                    if (target != null) {
-                        preferences.aiModelId.set(target.id)
-                        setEnhancementMode(preferences, 5)
-                    }
-                }
+                activateNpu()
                 onOpen(EnhancementDetail.NPU)
             },
+            onSelect = activateNpu,
         )
     }
 
@@ -384,8 +395,7 @@ private fun NpuDetail(
                 ),
         )
     } else {
-        // groupBy 保持遭遇顺序 = manifest 顺序，组的先后与包内声明一致。
-        compatible.groupBy { it.seriesName() }.forEach { (series, members) ->
+        npuSeriesGroups(compatible).forEach { (series, members) ->
             NpuSeriesChips(
                 series = series,
                 members = members,
@@ -403,12 +413,34 @@ private fun NpuDetail(
 }
 
 /**
- * 一个系列（或无系列的单成员/散项）的 chip 行。
+ * 把模型按系列归组：**多成员的系列各自成组；单成员系列与解析不出系列名的一律并入
+ * «Standalone» 组**（key 为 `null`）。
  *
- * 多成员才给系列小标题并显示去掉前缀的短名（`W2xEX` + `Omni Small`）；否则直接平铺完整名
- * （`NomosUni Span` / `Real-ESRGAN`），避免"标题比内容还多"。
+ * 后者是必须的：上一版让它们「不设标题、直接平铺」，结果它们既不像独立项、又紧挨着别组的
+ * chip 行，看起来像挂在那个组下面。现在每组都有标题，归属一目了然。
  *
- * 保持不折叠：纵向平铺后没有压高度的压力，而折叠会重新引入"多点一次才知道有什么"的问题。
+ * 顺序沿用 manifest（[LinkedHashMap] 保持遭遇顺序），所以 Standalone 组出现在它第一个成员的
+ * 位置。
+ */
+private fun npuSeriesGroups(
+    models: List<PluginUpscaleModel>,
+): List<Pair<String?, List<PluginUpscaleModel>>> {
+    val groups = LinkedHashMap<String?, MutableList<PluginUpscaleModel>>()
+    models.groupBy { it.seriesName() }.forEach { (series, members) ->
+        val key = series?.takeIf { members.size > 1 }
+        groups.getOrPut(key) { mutableListOf() }.addAll(members)
+    }
+    return groups.map { it.key to it.value.toList() }
+}
+
+/**
+ * 一个组的 chip 行：组标题 + 该组成员的 chip。
+ *
+ * [series] 为 null 表示 Standalone 组，标题取 `enhancement_series_standalone`；有系列名时成员
+ * 显示去掉前缀的短名（`W2xEX` + `Omni Small`），Standalone 组则显示完整名 —— 它的名字本身
+ * 就是全名。
+ *
+ * 保持不折叠：纵向平铺后没有压高度的压力，而折叠会重新引入「多点一次才知道有什么」的问题。
  */
 @Composable
 private fun NpuSeriesChips(
@@ -417,10 +449,7 @@ private fun NpuSeriesChips(
     activeModel: UpscaleModelSpec,
     onSelect: (PluginUpscaleModel) -> Unit,
 ) {
-    val titledSeries = series?.takeIf { members.size > 1 }
-    if (titledSeries != null) {
-        EnhancementParamLabel(titledSeries)
-    }
+    EnhancementParamLabel(series ?: stringResource(MR.strings.enhancement_series_standalone))
     SettingsChipRow {
         members.forEach { model ->
             FilterChip(
@@ -428,8 +457,8 @@ private fun NpuSeriesChips(
                 onClick = { onSelect(model) },
                 label = {
                     Text(
-                        if (titledSeries != null) {
-                            model.shortLabel(titledSeries)
+                        if (series != null) {
+                            model.shortLabel(series)
                         } else {
                             model.displayLabel()
                         },

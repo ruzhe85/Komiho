@@ -562,6 +562,8 @@
     <string name="enhancement_section_methods">Enhancement method</string>
     <string name="enhancement_detail_model">Model</string>
     <string name="enhancement_detail_advanced">AI options</string>
+    <!-- Komiho: NPU 详情里「没有系列、或系列只有它一个」的模型统一归到这个组。 -->
+    <string name="enhancement_series_standalone">Standalone</string>
     <string name="enhancement_scale">Scale</string>
     <string name="ai_model_anime_video">AnimeVideo</string>
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
