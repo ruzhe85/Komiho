@@ -4,6 +4,7 @@ import android.content.Context
 import logcat.LogPriority
 import logcat.LogcatLogger
 import java.io.BufferedWriter
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource as appString
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import androidx.core.text.HtmlCompat
@@ -380,13 +381,13 @@ object SettingsAdvancedScreen : SearchableSettings {
         }
 
         return Preference.PreferenceGroup(
-            title = stringResource(R.string.label_webdav),
+            title = appString(R.string.label_webdav),
             preferenceItems = listOf(
                 Preference.PreferenceItem.ListPreference(
                     preference = coverConcurrency,
                     entries = (0..6).associateWith { it.toString() },
-                    title = stringResource(R.string.webdav_cover_display),
-                    subtitle = stringResource(R.string.webdav_cover_display_summary),
+                    title = appString(R.string.webdav_cover_display),
+                    subtitle = appString(R.string.webdav_cover_display_summary),
                 ),
             ),
         )
