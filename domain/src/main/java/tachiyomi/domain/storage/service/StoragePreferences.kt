@@ -137,12 +137,6 @@ class StoragePreferences(
         0,
     )
 
-    /** Komiho: WebDAV 浏览器显示封面（默认关防风控；开启后封面拉取仍受「WebDAV显示封面」并发档位限流）。 */
-    val webdavBrowseShowCover: Preference<Boolean> = preferenceStore.getBoolean(
-        Preference.appStateKey("webdav_browse_show_cover"),
-        false,
-    )
-
     /**
      * Komiho: WebDAV 浏览器最后访问目录（按连接记忆，切来源/重启后恢复，不重置到根）。
      * 格式：每行 "connId<空格>url1(\u001F url2)*"（\u001F 为路径段分隔符，URL 编码后不会出现）。

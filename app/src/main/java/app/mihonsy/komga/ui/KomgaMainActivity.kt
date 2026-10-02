@@ -254,6 +254,7 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.presentation.more.settings.screen.about.WhatsNewDialog
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
+import eu.kanade.presentation.more.settings.widget.ListPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PreferenceGroupHeader
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
@@ -4101,18 +4102,25 @@ private fun SettingsTab(
                     mutableIntStateOf(WebDavCoverCache.coverConcurrency())
                 }
                 val webdavCoverPrefs = remember { Injekt.get<PreferenceStore>() }
-                SliderItem(
+                ListPreferenceWidget(
                     value = webdavCoverConcurrency,
-                    valueRange = 0..6,
-                    label = composeStringResource(R.string.webdav_cover_display),
-                    // 与偏好条目标题一致（titleLarge + 16sp，见 BasePreferenceWidget.TitleFontSize）。
-                    labelStyle = MaterialTheme.typography.titleLarge.copy(fontSize = 16.sp),
-                    valueString = if (webdavCoverConcurrency == 0) {
+                    title = composeStringResource(R.string.webdav_cover_display),
+                    subtitle = if (webdavCoverConcurrency == 0) {
                         composeStringResource(R.string.webdav_cover_off)
                     } else {
                         webdavCoverConcurrency.toString()
                     },
-                    onChange = {
+                    icon = Icons.Filled.Image,
+                    entries = mapOf(
+                        0 to composeStringResource(R.string.webdav_cover_off),
+                        1 to "1",
+                        2 to "2",
+                        3 to "3",
+                        4 to "4",
+                        5 to "5",
+                        6 to "6",
+                    ),
+                    onValueChange = {
                         webdavCoverConcurrency = it
                         webdavCoverPrefs.getInt(WebDavCoverCache.KEY_COVER_CONCURRENCY, 0).set(it)
                     },
@@ -4126,7 +4134,6 @@ private fun SettingsTab(
                 // SY --> Komiho: 导出诊断日志——把落盘的诊断缓冲（含崩溃自动重启前的上一会话）导出为 txt 供分析
                 TextPreferenceWidget(
                     title = composeStringResource(R.string.settings_export_diagnostic_logs),
-                    icon = Icons.Filled.Description,
                     onPreferenceClick = {
                         scope.launch(Dispatchers.IO) {
                             val uri = runCatching {
@@ -6564,8 +6571,9 @@ private fun WebDavBrowsePane(
     var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.webdavBrowseDisplayMode.get())) }
     var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.webdavBrowseSort.get())) }
     var columnCount by remember { mutableStateOf(prefs.webdavBrowseColumns.get()) }
-    // SY --> Komiho: 浏览器显示封面（默认关防风控；开启后封面拉取仍受「WebDAV显示封面」并发档位限流）。
-    var showCover by remember { mutableStateOf(prefs.webdavBrowseShowCover.get()) }
+    // SY --> Komiho (2026-10-02): 浏览器不再单独设「显示封面」开关，直接跟随「WebDAV显示封面」档位——
+    // 档位≥1 才显示（并在进入目录时入队生成），档位 0 恒不显示也不发请求。开关已在选项菜单隐藏。
+    val showCover = WebDavCoverCache.coverConcurrency() > 0
     // SY <--
     var showOptions by remember { mutableStateOf(false) }
     // SY --> Komiho: 文件浏览器顶部搜索（范围 = 当前目录，便于在数百子目录中快速定位）。
@@ -6717,6 +6725,21 @@ private fun WebDavBrowsePane(
     // SY --> Komiho: 递归搜索开启且有关键词时，列表改为展示递归命中结果；否则维持当前目录视图。
     val showRecursive = searchActive && searchRecursive && searchQuery.isNotBlank()
     val displayList = if (showRecursive) searchResults else visible
+    // SY --> Komiho: 进入目录即对当前目录的 目录/归档 条目启动封面生成——不再只依赖逐行可见时才触发
+    // （用户反馈「进目录没启动封面生成」）。是否真正发请求/并发上限/400ms 间隔仍由「WebDAV显示封面」
+    // 档位与限流队列决定（档位 0 时 generateAsync 直接返回）；递归搜索结果不预生成。
+    val coverContext = LocalContext.current
+    LaunchedEffect(displayList, showRecursive) {
+        if (showRecursive) return@LaunchedEffect
+        displayList.forEach { e ->
+            if (e.isDir || e.isArchive) {
+                val base = if (e.isDir) e.url.trimEnd('/') else e.url
+                val chapterUrl = WebDavConnectionStore.toChapterUrl(conn.id, base) + if (e.isDir) "/" else ""
+                WebDavCoverCache.generateAsync(coverContext, chapterUrl, startDelayMs = 0L)
+            }
+        }
+    }
+    // SY <--
     val onOpenItem: (WebDavEntry) -> Unit =
         if (showRecursive) {
             onSearchItemOpen
@@ -6910,8 +6933,8 @@ private fun WebDavBrowsePane(
         displayMode = displayMode,
         onDisplayModeChange = { displayMode = it; prefs.webdavBrowseDisplayMode.set(it.prefValue) },
         showCover = showCover,
-        onShowCoverChange = { showCover = it; prefs.webdavBrowseShowCover.set(it) },
-        showCoverEnabled = true,
+        onShowCoverChange = {},
+        showCoverEnabled = false,
         columnCount = columnCount,
         onColumnChange = { columnCount = it; prefs.webdavBrowseColumns.set(it) },
         sort = sort,
