@@ -20,7 +20,6 @@ import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.SearchToolbar
 import tachiyomi.i18n.MR
-import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.components.Pill
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.theme.active
@@ -37,10 +36,6 @@ fun LibraryToolbar(
     onClickRefresh: () -> Unit,
     onClickGlobalUpdate: () -> Unit,
     onClickOpenRandomManga: () -> Unit,
-    onClickSyncNow: () -> Unit,
-    // SY -->
-    isSyncEnabled: Boolean,
-    // SY <--
     searchQuery: String?,
     onSearchQueryChange: (String?) -> Unit,
     scrollBehavior: TopAppBarScrollBehavior?,
@@ -60,10 +55,6 @@ fun LibraryToolbar(
         onClickRefresh = onClickRefresh,
         onClickGlobalUpdate = onClickGlobalUpdate,
         onClickOpenRandomManga = onClickOpenRandomManga,
-        onClickSyncNow = onClickSyncNow,
-        // SY -->
-        isSyncEnabled = isSyncEnabled,
-        // SY <--
         scrollBehavior = scrollBehavior,
     )
 }
@@ -78,10 +69,6 @@ private fun LibraryRegularToolbar(
     onClickRefresh: () -> Unit,
     onClickGlobalUpdate: () -> Unit,
     onClickOpenRandomManga: () -> Unit,
-    onClickSyncNow: () -> Unit,
-    // SY -->
-    isSyncEnabled: Boolean,
-    // SY <--
     scrollBehavior: TopAppBarScrollBehavior?,
 ) {
     val pillAlpha = if (isSystemInDarkTheme()) 0.12f else 0.08f
@@ -127,18 +114,7 @@ private fun LibraryRegularToolbar(
                         title = stringResource(MR.strings.action_open_random_manga),
                         onClick = onClickOpenRandomManga,
                     ),
-                ).toMutableList().apply {
-                    // SY -->
-                    if (isSyncEnabled) {
-                        add(
-                            AppBar.OverflowAction(
-                                title = stringResource(SYMR.strings.sync_library),
-                                onClick = onClickSyncNow,
-                            ),
-                        )
-                    }
-                    // SY <--
-                }.toList(),
+                ),
             )
         },
         scrollBehavior = scrollBehavior,

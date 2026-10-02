@@ -17,7 +17,6 @@ import eu.kanade.core.util.fastFilterNot
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.chapter.interactor.SetReadStatus
 import eu.kanade.domain.manga.interactor.UpdateManga
-import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.presentation.library.components.LibraryToolbarTitle
 import eu.kanade.presentation.manga.DownloadAction
 import eu.kanade.tachiyomi.data.cache.CoverCache
@@ -93,11 +92,7 @@ class LibraryScreenModel(
     private val sourceManager: SourceManager = Injekt.get(),
     private val downloadManager: DownloadManager = Injekt.get(),
     private val downloadCache: DownloadCache = Injekt.get(),
-    // SY -->
     private val setCustomMangaInfo: SetCustomMangaInfo = Injekt.get(),
-
-    syncPreferences: SyncPreferences = Injekt.get(),
-    // SY <--
 ) : StateScreenModel<LibraryScreenModel.State>(State()) {
 
     init {
@@ -241,13 +236,6 @@ class LibraryScreenModel(
                 mutableState.update { state ->
                     state.copy(groupType = it)
                 }
-            }
-            .launchIn(screenModelScope)
-        syncPreferences.syncService
-            .changes()
-            .distinctUntilChanged()
-            .onEach { syncService ->
-                mutableState.update { it.copy(isSyncEnabled = syncService != 0) }
             }
             .launchIn(screenModelScope)
         // SY <--
@@ -1012,8 +1000,6 @@ class LibraryScreenModel(
         val libraryData: LibraryData = LibraryData(),
         private val activeCategoryIndex: Int = 0,
         private val groupedFavorites: Map<Category, List</* LibraryItem */ Long>> = emptyMap(),
-        // SY -->
-        val isSyncEnabled: Boolean = false,
         val groupType: Int = LibraryGroup.BY_DEFAULT,
         // SY <--
     ) {

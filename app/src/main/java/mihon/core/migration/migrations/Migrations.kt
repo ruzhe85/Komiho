@@ -6,7 +6,6 @@ val migrations: List<Migration>
     get() = listOf(
         SetupBackupCreateMigration(),
         SetupLibraryUpdateMigration(),
-        SetupSyncDataMigration(),
         LogoutFromMALMigration(),
         MoveDOHSettingMigration(),
         ResetRotationSettingMigration(),

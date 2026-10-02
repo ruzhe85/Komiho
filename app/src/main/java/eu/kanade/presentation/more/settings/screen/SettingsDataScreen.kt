@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
-import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
@@ -46,35 +45,22 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.core.net.toUri
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import com.google.zxing.client.android.Intents
 import com.hippo.unifile.UniFile
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
-import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.screen.data.CreateBackupScreen
 import eu.kanade.presentation.more.settings.screen.data.RestoreBackupScreen
 import eu.kanade.presentation.more.settings.screen.data.StorageInfo
-import eu.kanade.presentation.more.settings.screen.data.SyncSettingsSelector
-import eu.kanade.presentation.more.settings.screen.data.SyncTriggerOptionsScreen
 import eu.kanade.presentation.more.settings.widget.BasePreferenceWidget
-import eu.kanade.presentation.more.settings.widget.EditTextPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PrefsHorizontalPadding
-import eu.kanade.presentation.more.settings.widget.TrailingWidgetBuffer
 import eu.kanade.presentation.util.relativeTimeSpanString
 import eu.kanade.tachiyomi.data.backup.create.BackupCreateJob
 import eu.kanade.tachiyomi.data.backup.restore.BackupRestoreJob
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.export.LibraryExporter
 import eu.kanade.tachiyomi.data.export.LibraryExporter.ExportOptions
-import eu.kanade.tachiyomi.data.sync.SyncDataJob
-import eu.kanade.tachiyomi.data.sync.SyncManager
-import eu.kanade.tachiyomi.data.sync.service.GoogleDriveService
-import eu.kanade.tachiyomi.data.sync.service.GoogleDriveSyncService
 import eu.kanade.tachiyomi.util.system.DeviceUtil
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.displayablePath
@@ -87,7 +73,6 @@ import tachiyomi.domain.manga.interactor.GetFavorites
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.i18n.MR
-import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
@@ -118,9 +103,6 @@ object SettingsDataScreen : SearchableSettings {
         val backupPreferences = Injekt.get<BackupPreferences>()
         val storagePreferences = Injekt.get<StoragePreferences>()
 
-        val syncPreferences = remember { Injekt.get<SyncPreferences>() }
-        val syncService by syncPreferences.syncService.collectAsState()
-
         return listOf(
             getStorageLocationPref(storagePreferences = storagePreferences),
             getAllFilesAccessPref(),
@@ -129,7 +111,7 @@ object SettingsDataScreen : SearchableSettings {
             getBackupAndRestoreGroup(backupPreferences = backupPreferences),
             getDataGroup(),
             getExportGroup(),
-        ) + getSyncPreferences(syncPreferences = syncPreferences, syncService = syncService)
+        )
     }
 
     @Composable
@@ -514,279 +496,4 @@ object SettingsDataScreen : SearchableSettings {
         )
     }
 
-    // SY -->
-    @Composable
-    private fun getSyncPreferences(syncPreferences: SyncPreferences, syncService: Int): List<Preference> {
-        return listOf(
-            Preference.PreferenceGroup(
-                title = stringResource(SYMR.strings.pref_sync_service_category),
-                preferenceItems = listOf(
-                    Preference.PreferenceItem.ListPreference(
-                        preference = syncPreferences.syncService,
-                        title = stringResource(SYMR.strings.pref_sync_service),
-                        entries = mapOf(
-                            SyncManager.SyncService.NONE.value to stringResource(MR.strings.off),
-                            SyncManager.SyncService.SYNCYOMI.value to stringResource(SYMR.strings.syncyomi),
-                            SyncManager.SyncService.GOOGLE_DRIVE.value to stringResource(SYMR.strings.google_drive),
-                        ),
-                        onValueChanged = { true },
-                    ),
-                ),
-            ),
-        ) + getSyncServicePreferences(syncPreferences, syncService)
-    }
-
-    @Composable
-    private fun getSyncServicePreferences(syncPreferences: SyncPreferences, syncService: Int): List<Preference> {
-        val syncServiceType = SyncManager.SyncService.fromInt(syncService)
-
-        val basePreferences = getBasePreferences(syncServiceType, syncPreferences)
-
-        return if (syncServiceType != SyncManager.SyncService.NONE) {
-            basePreferences + getAdditionalPreferences(syncPreferences)
-        } else {
-            basePreferences
-        }
-    }
-
-    @Composable
-    private fun getBasePreferences(
-        syncServiceType: SyncManager.SyncService,
-        syncPreferences: SyncPreferences,
-    ): List<Preference> {
-        val navigator = LocalNavigator.currentOrThrow
-        val preferences = when (syncServiceType) {
-            SyncManager.SyncService.NONE -> emptyList()
-            SyncManager.SyncService.SYNCYOMI -> getSelfHostPreferences(syncPreferences)
-            SyncManager.SyncService.GOOGLE_DRIVE -> getGoogleDrivePreferences()
-        }
-
-        return if (syncServiceType != SyncManager.SyncService.NONE) {
-            preferences + Preference.PreferenceItem.TextPreference(
-                title = stringResource(SYMR.strings.pref_choose_what_to_sync),
-                onClick = {
-                    navigator.push(SyncSettingsSelector())
-                },
-            )
-        } else {
-            preferences
-        }
-    }
-
-    @Composable
-    private fun getAdditionalPreferences(syncPreferences: SyncPreferences): List<Preference> {
-        return listOf(getSyncNowPref(), getAutomaticSyncGroup(syncPreferences))
-    }
-
-    @Composable
-    private fun getGoogleDrivePreferences(): List<Preference> {
-        val context = LocalContext.current
-        val googleDriveSync = Injekt.get<GoogleDriveService>()
-        return listOf(
-            Preference.PreferenceItem.TextPreference(
-                title = stringResource(SYMR.strings.pref_google_drive_sign_in),
-                onClick = {
-                    val intent = googleDriveSync.getSignInIntent()
-                    context.startActivity(intent)
-                },
-            ),
-            getGoogleDrivePurge(),
-        )
-    }
-
-    @Composable
-    private fun getGoogleDrivePurge(): Preference.PreferenceItem.TextPreference {
-        val scope = rememberCoroutineScope()
-        val context = LocalContext.current
-        val googleDriveSync = remember { GoogleDriveSyncService(context) }
-        var showPurgeDialog by remember { mutableStateOf(false) }
-
-        if (showPurgeDialog) {
-            PurgeConfirmationDialog(
-                onConfirm = {
-                    showPurgeDialog = false
-                    scope.launch {
-                        val result = googleDriveSync.deleteSyncDataFromGoogleDrive()
-                        when (result) {
-                            GoogleDriveSyncService.DeleteSyncDataStatus.NOT_INITIALIZED -> context.toast(
-                                SYMR.strings.google_drive_not_signed_in,
-                                duration = 5000,
-                            )
-                            GoogleDriveSyncService.DeleteSyncDataStatus.NO_FILES -> context.toast(
-                                SYMR.strings.google_drive_sync_data_not_found,
-                                duration = 5000,
-                            )
-                            GoogleDriveSyncService.DeleteSyncDataStatus.SUCCESS -> context.toast(
-                                SYMR.strings.google_drive_sync_data_purged,
-                                duration = 5000,
-                            )
-                            GoogleDriveSyncService.DeleteSyncDataStatus.ERROR -> context.toast(
-                                SYMR.strings.google_drive_sync_data_purge_error,
-                                duration = 10000,
-                            )
-                        }
-                    }
-                },
-                onDismissRequest = { showPurgeDialog = false },
-            )
-        }
-
-        return Preference.PreferenceItem.TextPreference(
-            title = stringResource(SYMR.strings.pref_google_drive_purge_sync_data),
-            onClick = { showPurgeDialog = true },
-        )
-    }
-
-    @Composable
-    private fun PurgeConfirmationDialog(
-        onConfirm: () -> Unit,
-        onDismissRequest: () -> Unit,
-    ) {
-        AlertDialog(
-            onDismissRequest = onDismissRequest,
-            title = { Text(text = stringResource(SYMR.strings.pref_purge_confirmation_title)) },
-            text = { Text(text = stringResource(SYMR.strings.pref_purge_confirmation_message)) },
-            dismissButton = {
-                TextButton(onClick = onDismissRequest) {
-                    Text(text = stringResource(MR.strings.action_cancel))
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = onConfirm) {
-                    Text(text = stringResource(MR.strings.action_ok))
-                }
-            },
-        )
-    }
-
-    @Composable
-    private fun getSelfHostPreferences(syncPreferences: SyncPreferences): List<Preference> {
-        val scope = rememberCoroutineScope()
-
-        val qrScanLauncher = rememberLauncherForActivityResult(ScanContract()) {
-            if (it.contents != null && it.contents.isNotEmpty()) {
-                syncPreferences.clientAPIKey.set(it.contents)
-            }
-        }
-        val context = LocalContext.current
-        val scanOptions = remember {
-            ScanOptions().apply {
-                setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                setOrientationLocked(false)
-                setPrompt(SYMR.strings.scan_qr_code.getString(context))
-                addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.MIXED_SCAN)
-            }
-        }
-
-        return listOf(
-            Preference.PreferenceItem.EditTextPreference(
-                title = stringResource(SYMR.strings.pref_sync_host),
-                subtitle = stringResource(SYMR.strings.pref_sync_host_summ),
-                preference = syncPreferences.clientHost,
-                onValueChanged = { newValue ->
-                    scope.launch {
-                        // Trim spaces at the beginning and end, then remove trailing slash if present
-                        val trimmedValue = newValue.trim()
-                        val modifiedValue = trimmedValue.trimEnd { it == '/' }
-                        syncPreferences.clientHost.set(modifiedValue)
-                    }
-                    true
-                },
-            ),
-            Preference.PreferenceItem.CustomPreference(
-                title = stringResource(SYMR.strings.pref_sync_api_key),
-            ) {
-                val values by syncPreferences.clientAPIKey.collectAsState()
-                EditTextPreferenceWidget(
-                    title = stringResource(SYMR.strings.pref_sync_api_key),
-                    subtitle = stringResource(SYMR.strings.pref_sync_api_key_summ),
-                    onConfirm = {
-                        syncPreferences.clientAPIKey.set(it)
-                        true
-                    },
-                    icon = null,
-                    value = values,
-                    widget = {
-                        IconButton(
-                            onClick = { qrScanLauncher.launch(scanOptions) },
-                            modifier = Modifier.padding(start = TrailingWidgetBuffer),
-                        ) {
-                            Icon(
-                                Icons.Filled.QrCodeScanner,
-                                contentDescription = stringResource(SYMR.strings.scan_qr_code),
-                            )
-                        }
-                    },
-                )
-            },
-        )
-    }
-
-    @Composable
-    private fun getSyncNowPref(): Preference.PreferenceGroup {
-        val context = LocalContext.current
-        return Preference.PreferenceGroup(
-            title = stringResource(SYMR.strings.pref_sync_now_group_title),
-            preferenceItems = listOf(
-                getSyncOptionsPref(),
-                Preference.PreferenceItem.TextPreference(
-                    title = stringResource(SYMR.strings.pref_sync_now),
-                    subtitle = stringResource(SYMR.strings.pref_sync_now_subtitle),
-                    onClick = {
-                        if (!SyncDataJob.isRunning(context)) {
-                            SyncDataJob.startNow(context, manual = true)
-                        } else {
-                            context.toast(SYMR.strings.sync_in_progress)
-                        }
-                    },
-                ),
-            ),
-        )
-    }
-
-    @Composable
-    private fun getSyncOptionsPref(): Preference.PreferenceItem.TextPreference {
-        val navigator = LocalNavigator.currentOrThrow
-        return Preference.PreferenceItem.TextPreference(
-            title = stringResource(SYMR.strings.pref_sync_options),
-            subtitle = stringResource(SYMR.strings.pref_sync_options_summ),
-            onClick = { navigator.push(SyncTriggerOptionsScreen()) },
-        )
-    }
-
-    @Composable
-    private fun getAutomaticSyncGroup(syncPreferences: SyncPreferences): Preference.PreferenceGroup {
-        val context = LocalContext.current
-        val syncIntervalPref = syncPreferences.syncInterval
-        val lastSync by syncPreferences.lastSyncTimestamp.collectAsState()
-
-        return Preference.PreferenceGroup(
-            title = stringResource(SYMR.strings.pref_sync_automatic_category),
-            preferenceItems = listOf(
-                Preference.PreferenceItem.ListPreference(
-                    preference = syncIntervalPref,
-                    title = stringResource(SYMR.strings.pref_sync_interval),
-                    entries = mapOf(
-                        0 to stringResource(MR.strings.off),
-                        30 to stringResource(SYMR.strings.update_30min),
-                        60 to stringResource(SYMR.strings.update_1hour),
-                        180 to stringResource(SYMR.strings.update_3hour),
-                        360 to stringResource(MR.strings.update_6hour),
-                        720 to stringResource(MR.strings.update_12hour),
-                        1440 to stringResource(MR.strings.update_24hour),
-                        2880 to stringResource(MR.strings.update_48hour),
-                        10080 to stringResource(MR.strings.update_weekly),
-                    ),
-                    onValueChanged = {
-                        SyncDataJob.setupTask(context, it)
-                        true
-                    },
-                ),
-                Preference.PreferenceItem.InfoPreference(
-                    stringResource(SYMR.strings.last_synchronization, relativeTimeSpanString(lastSync)),
-                ),
-            ),
-        )
-    }
-    // SY <--
 }
