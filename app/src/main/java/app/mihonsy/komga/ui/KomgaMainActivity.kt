@@ -8840,7 +8840,7 @@ private fun HistoryTabLocal(
                 file?.let { LocalCoverData(it, stat.modified) }
                     ?: rep.thumbnailUrl?.takeIf { it.isNotBlank() }
                     // SY: WebDAV/SMB 章节（无本地文件）→ 读打开时「顺便」生成的封面缓存（无则占位图标）。
-                    ?: WebDavCoverCache.existingCoverFile(context, rep.chapterUrl)
+                    ?: WebDavCoverCache.coverCachedOnly(context, rep.chapterUrl)
                     ?: SmbCoverCache.existingCoverFile(context, rep.chapterUrl)
             }
             // SY <--
@@ -9057,7 +9057,7 @@ private fun BookmarksTabLocal(
                         file?.let { LocalCoverData(it, stat.modified) }
                             ?: first.thumbnailUrl?.takeIf { it.isNotBlank() }
                             // SY: WebDAV/SMB 章节 → 打开时「顺便」生成的封面缓存。
-                            ?: WebDavCoverCache.existingCoverFile(context, first.chapterUrl)
+                            ?: WebDavCoverCache.coverCachedOnly(context, first.chapterUrl)
                             ?: SmbCoverCache.existingCoverFile(context, first.chapterUrl)
                     }
                     // SY <--
