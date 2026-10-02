@@ -137,4 +137,31 @@
     <!-- Stats page -->
     <!-- Humanize time -->
 
+
+    <string name="clean_orphaned_downloads">清理孤立的下载</string>
+    <string name="clean_read_downloads">清理已读</string>
+    <string name="clean_read_entries_not_in_library">清理不在书架中的作品</string>
+    <string name="md_follows_unfollowed">取消收藏</string>
+    <string name="log_extra">额外</string>
+    <string name="reset_tags">重置标签</string>
+    <string name="reset_info">重置信息</string>
+    <string name="use_intelligent_search">搜索标题 +标题关键词</string>
+    <string name="data_to_include_in_migration">迁移中包含的数据</string>
+    <string name="include_extra_search_parameter">搜索时包含额外的搜索参数</string>
+    <string name="use_most_chapters">使用具有最多章节的图源（较慢）</string>
+    <string name="use_first_source">使用第一个图源的备选方案</string>
+    <string name="skip_this_step_next_time">下次跳过此步骤</string>
+    <string name="hide_not_found_entries">隐藏未找到的作品</string>
+    <string name="search_parameter">搜索参数（例如：language:chinese）</string>
+    <string name="more_info">更多信息</string>
+    <string name="fetch_chapter_updates">获取章节更新</string>
+    <string name="allow_deduplication">允许删除重复数据：</string>
+    <string name="deduplication_mode">去重模式：</string>
+    <string name="deduplication_entry_info">作品信息：</string>
+    <string name="only_show_updated_entries">仅显示包含新章节的条目</string>
+    <string name="rec_search">查找共同推荐</string>
+    <string name="rec_hide_library_entries">隐藏已添加到书架中的作品</string>
+    <string name="rec_services_to_search">用于搜索的推荐服务</string>
+    <string name="rec_group_source">来源的推荐</string>
+    <string name="rec_group_tracker">记录平台的推荐</string>
 </resources>

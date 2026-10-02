@@ -118,4 +118,31 @@
     <!-- MangaDex relations-->
     <string name="aes_128">AES 128</string>
 
+
+    <string name="clean_orphaned_downloads">清理孤立的下載</string>
+    <string name="clean_read_downloads">清理已讀</string>
+    <string name="clean_read_entries_not_in_library">清理不在書櫃中的作品</string>
+    <string name="md_follows_unfollowed">取消收藏</string>
+    <string name="log_extra">額外</string>
+    <string name="reset_tags">重設標籤</string>
+    <string name="reset_info">重設資訊</string>
+    <string name="use_intelligent_search">搜尋標題 + 標題關鍵字</string>
+    <string name="data_to_include_in_migration">遷移中包含的資料</string>
+    <string name="include_extra_search_parameter">搜尋時包含額外的搜尋參數</string>
+    <string name="use_most_chapters">使用章節數最多的來源（較慢）</string>
+    <string name="use_first_source">使用第一個來源的備用方案</string>
+    <string name="skip_this_step_next_time">下次跳過此步驟</string>
+    <string name="hide_not_found_entries">隱藏未找到的作品</string>
+    <string name="search_parameter">搜尋參數（例如：language:chinese）</string>
+    <string name="more_info">更多資訊</string>
+    <string name="fetch_chapter_updates">取得章節更新</string>
+    <string name="allow_deduplication">允許刪除重複資料：</string>
+    <string name="deduplication_mode">刪除重複模式：</string>
+    <string name="deduplication_entry_info">作品資訊：</string>
+    <string name="only_show_updated_entries">僅顯示包含新章節的條目</string>
+    <string name="rec_search">尋找共同推薦</string>
+    <string name="rec_services_to_search">用於搜尋的推薦系統</string>
+    <string name="rec_hide_library_entries">隱藏已在您書櫃中的結果</string>
+    <string name="rec_group_tracker">歷程平臺的推薦</string>
+    <string name="rec_group_source">來源的推薦</string>
 </resources>

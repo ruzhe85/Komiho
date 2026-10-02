@@ -161,4 +161,31 @@
     <!-- Scanlator filters -->
 
     <!-- MangaDex relations-->
+
+    <string name="clean_orphaned_downloads">Clean orphaned</string>
+    <string name="clean_read_downloads">Clean read</string>
+    <string name="clean_read_entries_not_in_library">Clean entries not in library</string>
+    <string name="md_follows_unfollowed">Unfollowed</string>
+    <string name="log_extra">Extra</string>
+    <string name="reset_tags">Reset Tags</string>
+    <string name="reset_info">Reset Info</string>
+    <string name="use_intelligent_search">Search title + keywords of title</string>
+    <string name="data_to_include_in_migration">Data to include in migration</string>
+    <string name="include_extra_search_parameter">Include extra search parameter when searching</string>
+    <string name="use_most_chapters">Use source with the most chapters (slower)</string>
+    <string name="use_first_source">Use first source with alternative</string>
+    <string name="skip_this_step_next_time">Skip this step next time</string>
+    <string name="hide_not_found_entries">Hide not found entries</string>
+    <string name="only_show_updated_entries">Only show entries with new chapters</string>
+    <string name="search_parameter">Search parameter (e.g. language:english)</string>
+    <string name="rec_search">Find common recommendations</string>
+    <string name="rec_hide_library_entries">Hide results already in your library</string>
+    <string name="rec_services_to_search">Recommendation services to search</string>
+    <string name="rec_group_source">Source recommendations</string>
+    <string name="rec_group_tracker">Tracker recommendations</string>
+    <string name="more_info">More info</string>
+    <string name="fetch_chapter_updates">Fetch chapter updates</string>
+    <string name="allow_deduplication">Allow deduplication:</string>
+    <string name="deduplication_mode">Dedupe mode:</string>
+    <string name="deduplication_entry_info">Info entry:</string>
 </resources>
