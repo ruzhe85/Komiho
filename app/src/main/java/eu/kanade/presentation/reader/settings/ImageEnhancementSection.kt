@@ -273,9 +273,13 @@ private fun UpscaleModelSpec.displayLabel(): String =
  *
  * The flat chip row stopped scaling as soon as a few model packages landed: nine chips, four
  * of them one family (`W2xEX Photo Small` / `Omni Small` / `Omni Turbo` / `Universal Fast`).
- * A series with more than one member now collapses into a single header chip that also names
- * what is currently selected inside it (`W2xEX · Omni Small`); tapping the header expands its
+ * A series with more than one member collapses into a single header chip that also names what
+ * is currently selected inside it (`W2xEX · Omni Small`); tapping the header expands its
  * members into a second row of chips.
+ *
+ * It behaves as an **accordion — only one series is ever open**: opening another closes the
+ * previous one, tapping the open header closes it, and picking a standalone model closes
+ * everything. Letting several stay open would drift back into the flat list this replaces.
  *
  * Models that stand alone — and any whose series cannot be derived — stay plain chips that
  * select on a **single tap**, which is the common case and must never cost an extra tap.
@@ -305,30 +309,31 @@ private fun NpuModelPicker(
         }
     }
 
-    var expandedSeries by rememberSaveable { mutableStateOf(listOf<String>()) }
+    // Accordion: at most one series is open. Folding exists to keep this row short, so
+    // letting several open at once would just rebuild the flat list it replaced. A nullable
+    // String (not a set) matches that: "which series is open" has one answer at a time.
+    var expandedSeries by rememberSaveable { mutableStateOf<String?>(null) }
 
     // The series holding the current selection opens by itself, so a collapsed header can
-    // never hide what is actually running. A manual collapse survives: this re-runs only when
-    // the selection moves into a *different* series.
+    // never hide what is actually running. This re-runs only when the selection moves into a
+    // *different* series, so it cannot fight a manual collapse.
     val selectedSeries = models.firstOrNull { mode == 5 && it == activeModel }?.seriesName()
     LaunchedEffect(selectedSeries) {
-        if (selectedSeries != null && selectedSeries !in expandedSeries) {
-            expandedSeries = expandedSeries + selectedSeries
+        if (selectedSeries != null) {
+            expandedSeries = selectedSeries
         }
     }
 
     SettingsChipRow {
         foldable.forEach { (series, members) ->
-            val isExpanded = series in expandedSeries
+            val isExpanded = expandedSeries == series
             val selected = members.firstOrNull { mode == 5 && it == activeModel }
             FilterChip(
                 selected = selected != null,
                 onClick = {
-                    expandedSeries = if (isExpanded) {
-                        expandedSeries - series
-                    } else {
-                        expandedSeries + series
-                    }
+                    // Opening a series closes whichever one was open; tapping the open one
+                    // closes it, so the header doubles as the collapse control.
+                    expandedSeries = if (isExpanded) null else series
                 },
                 label = {
                     Text(if (selected != null) "$series · ${selected.shortLabel(series)}" else series)
@@ -348,14 +353,18 @@ private fun NpuModelPicker(
         plain.forEach { model ->
             FilterChip(
                 selected = mode == 5 && activeModel == model,
-                onClick = { onSelect(model) },
+                onClick = {
+                    onSelect(model)
+                    // A standalone model belongs to no series, so nothing should stay open.
+                    expandedSeries = null
+                },
                 label = { Text(model.displayLabel()) },
             )
         }
     }
 
     foldable.forEach { (series, members) ->
-        if (series in expandedSeries) {
+        if (expandedSeries == series) {
             SettingsChipRow {
                 members.forEach { model ->
                     FilterChip(
