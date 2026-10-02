@@ -76,6 +76,20 @@ object WebDavCoverCache {
     private val paceLock = Object()
     private var lastStart = 0L
 
+    /** 「当前浏览目录」代号：浏览器每进入一个目录自增一次。封面任务入队时记录该代号，
+     *  执行前若已过期（用户切走了）则直接作废——实现「最新目录优先」，不让旧目录的积压
+     *  把新目录的封面堵在 400ms 限流队列后面。 */
+    @Volatile private var activeEpoch = 0L
+
+    /** 浏览器进入某目录时调用：自增代号并返回，使上一目录尚未执行的封面任务全部作废。 */
+    fun beginDirectory(): Long {
+        activeEpoch++
+        return activeEpoch
+    }
+
+    /** 当前目录代号（只读，供搜索结果等"不改目录"场景沿用当前代号）。 */
+    fun currentEpoch(): Long = activeEpoch
+
     /** 封面落盘版本号：每次成功写入 +1。展示侧 collect 它作为重组 key，生成完即可上屏。 */
     val coverTick = MutableStateFlow(0L)
 
@@ -110,7 +124,7 @@ object WebDavCoverCache {
         if (!isWebDavChapter(chapterUrl)) return null
         val file = coverFile(context, chapterUrl)?.takeIf { it.isFile && it.length() > 0 }
         if (file != null) return if (coverConcurrency() <= 0) null else file
-        generateAsync(context, chapterUrl, startDelayMs = 0L)
+        generateAsync(context, chapterUrl, startDelayMs = 0L, epoch = activeEpoch)
         return null
     }
 
@@ -119,7 +133,12 @@ object WebDavCoverCache {
      * @param startDelayMs 生成前延迟，仅阅读器路径需要（3s，避开与阅读线程同时整本缓存
      * 下载的竞态）；列表补拉传 0。延迟在**并发槽位外**睡，不占槽位拖慢排队。
      */
-    fun generateAsync(context: Context, chapterUrl: String, startDelayMs: Long = 3000L) {
+    fun generateAsync(
+        context: Context,
+        chapterUrl: String,
+        startDelayMs: Long = 3000L,
+        epoch: Long? = null,
+    ) {
         if (!isWebDavChapter(chapterUrl)) return
         val concurrency = coverConcurrency()
         if (concurrency <= 0) return
@@ -137,6 +156,8 @@ object WebDavCoverCache {
         // 归档章节仍走原来的「拆包取首图」。
         val isDirectory = WebDavConnectionStore.extractFullUrl(chapterUrl).endsWith('/')
         val app = context.applicationContext
+        // 目录限定任务（epoch 非空）记录入队代号：执行前若已过期（用户切走）则作废。
+        val myEpoch = epoch
         thread(name = "webdav-cover", isDaemon = true) {
             // 读路径延迟：不占并发槽位（浏览器补拉传 0 直进队列）。
             if (startDelayMs > 0) Thread.sleep(startDelayMs)
@@ -146,6 +167,9 @@ object WebDavCoverCache {
                 activeSlots++
             }
             try {
+                // 目录限定任务若已过期（用户切走）→ 作废，直接释放槽位（finally 清理），
+                // 不进入 400ms 节奏，把节奏让给最新目录。
+                if (myEpoch != null && myEpoch != activeEpoch) return@thread
                 synchronized(paceLock) {
                     val now = android.os.SystemClock.elapsedRealtime()
                     val wait = MIN_INTERVAL_MS - (now - lastStart)

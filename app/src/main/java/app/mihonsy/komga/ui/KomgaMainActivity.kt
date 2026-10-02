@@ -254,7 +254,6 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.presentation.more.settings.screen.about.WhatsNewDialog
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
-import eu.kanade.presentation.more.settings.widget.ListPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PreferenceGroupHeader
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
@@ -4097,34 +4096,72 @@ private fun SettingsTab(
                         prefs.readerProgressBubbleEnabled = it
                     },
                 )
-                // SY --> Komiho: WebDAV 显示封面并发档位（0 不显示，1-6 拉封面并发上限，防网盘风控）
+                // SY --> Komiho: WebDAV 显示封面并发档位（0 关闭，1-6 拉封面并发上限，防网盘风控）。
+                // 无图标；当前值显示在标题右侧（类开关位置），点击弹窗单选。
                 var webdavCoverConcurrency by remember {
                     mutableIntStateOf(WebDavCoverCache.coverConcurrency())
                 }
                 val webdavCoverPrefs = remember { Injekt.get<PreferenceStore>() }
-                ListPreferenceWidget(
-                    value = webdavCoverConcurrency,
+                var showCoverConcurrencyDialog by remember { mutableStateOf(false) }
+                TextPreferenceWidget(
                     title = composeStringResource(R.string.webdav_cover_display),
-                    subtitle = if (webdavCoverConcurrency == 0) {
-                        composeStringResource(R.string.webdav_cover_off)
-                    } else {
-                        webdavCoverConcurrency.toString()
+                    widget = {
+                        Text(
+                            text = if (webdavCoverConcurrency == 0) {
+                                composeStringResource(R.string.webdav_cover_off)
+                            } else {
+                                webdavCoverConcurrency.toString()
+                            },
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     },
-                    icon = Icons.Filled.Image,
-                    entries = mapOf(
-                        0 to composeStringResource(R.string.webdav_cover_off),
-                        1 to "1",
-                        2 to "2",
-                        3 to "3",
-                        4 to "4",
-                        5 to "5",
-                        6 to "6",
-                    ),
-                    onValueChange = {
-                        webdavCoverConcurrency = it
-                        webdavCoverPrefs.getInt(WebDavCoverCache.KEY_COVER_CONCURRENCY, 0).set(it)
-                    },
+                    onPreferenceClick = { showCoverConcurrencyDialog = true },
                 )
+                if (showCoverConcurrencyDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showCoverConcurrencyDialog = false },
+                        title = { Text(composeStringResource(R.string.webdav_cover_display)) },
+                        text = {
+                            Column {
+                                listOf(0, 1, 2, 3, 4, 5, 6).forEach { option ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                webdavCoverConcurrency = option
+                                                webdavCoverPrefs
+                                                    .getInt(WebDavCoverCache.KEY_COVER_CONCURRENCY, 0)
+                                                    .set(option)
+                                                showCoverConcurrencyDialog = false
+                                            }
+                                            .padding(vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        RadioButton(
+                                            selected = option == webdavCoverConcurrency,
+                                            onClick = null,
+                                        )
+                                        Text(
+                                            text = if (option == 0) {
+                                                composeStringResource(R.string.webdav_cover_off)
+                                            } else {
+                                                option.toString()
+                                            },
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.padding(start = 16.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showCoverConcurrencyDialog = false }) {
+                                Text(stringResource(MR.strings.action_cancel))
+                            }
+                        },
+                    )
+                }
                 Text(
                     composeStringResource(R.string.webdav_cover_display_summary),
                     style = MaterialTheme.typography.bodySmall,
@@ -6552,6 +6589,11 @@ private fun webDavCrumbName(url: String): String {
 }
 // SY <--
 
+/** 进入 WebDAV 目录时预生成封面的条目上限（约一两屏）。目录封面每张都要一次 PROPFIND
+ *  （见 WebDavCoverCache.generateFromDirectory）+ 首图 GET；对整个大目录（几百项）全量入队
+ *  会以 400ms/张的节奏持续数分钟占满连接、拖慢其它加载。其余条目随滚动到可见时由行触发。 */
+private const val WEBDAV_COVER_PREFETCH_LIMIT = 12
+
 /** WebDAV 浏览页（Phase4 全局首页形态）：挂在 Browse tab 下，连接由顶栏来源按钮决定。
  *  UI 与本地文件浏览器同一套「列表模式」：面包屑（可点快速跳层）+ 列表/紧凑网格 +
  *  排序/显示选项（Tune）。显示模式/排序/列数为独立偏好（webdav_browse_*），不与本地浏览互串；
@@ -6729,13 +6771,24 @@ private fun WebDavBrowsePane(
     // （用户反馈「进目录没启动封面生成」）。是否真正发请求/并发上限/400ms 间隔仍由「WebDAV显示封面」
     // 档位与限流队列决定（档位 0 时 generateAsync 直接返回）；递归搜索结果不预生成。
     val coverContext = LocalContext.current
-    LaunchedEffect(displayList, showRecursive) {
+    // 进入目录先自增「目录代号」——remember 在本次组合中先于 LazyColumn 子项执行，保证行组合
+    // （coverForDisplay）拿到的就是新代号；于是上一目录尚未执行的任务作废（最新目录优先）。
+    val dirEpoch = remember(displayList, showRecursive) {
+        if (showRecursive) WebDavCoverCache.currentEpoch() else WebDavCoverCache.beginDirectory()
+    }
+    LaunchedEffect(displayList, showRecursive, dirEpoch) {
         if (showRecursive) return@LaunchedEffect
-        displayList.forEach { e ->
+        // 只预生成前 [WEBDAV_COVER_PREFETCH_LIMIT] 个 目录/归档 条目（约一两屏），避免对
+        // 整个大目录全量入队把连接占满（目录封面每张一次 PROPFIND + 首图 GET）。其余条目
+        // 随滚动到可见时由行自身触发（WebDavCoverThumb → coverForDisplay）。
+        var enqueued = 0
+        for (e in displayList) {
+            if (enqueued >= WEBDAV_COVER_PREFETCH_LIMIT) break
             if (e.isDir || e.isArchive) {
                 val base = if (e.isDir) e.url.trimEnd('/') else e.url
                 val chapterUrl = WebDavConnectionStore.toChapterUrl(conn.id, base) + if (e.isDir) "/" else ""
-                WebDavCoverCache.generateAsync(coverContext, chapterUrl, startDelayMs = 0L)
+                WebDavCoverCache.generateAsync(coverContext, chapterUrl, startDelayMs = 0L, epoch = dirEpoch)
+                enqueued++
             }
         }
     }
@@ -7031,6 +7084,7 @@ private fun WebDavCoverThumb(
         WebDavConnectionStore.toChapterUrl(conn.id, base) + if (entry.isDir) "/" else ""
     }
     val cover = remember(chapterUrl, coverTick) {
+        // 展示用封面：命中缓存直接显示；缺失时按「当前目录代号」入队生成（过期任务作废）。
         WebDavCoverCache.coverForDisplay(context, chapterUrl)
     }
     if (cover == null) {
