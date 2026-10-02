@@ -4105,7 +4105,8 @@ private fun SettingsTab(
                     value = webdavCoverConcurrency,
                     valueRange = 0..6,
                     label = composeStringResource(R.string.webdav_cover_display),
-                    labelStyle = MaterialTheme.typography.titleLarge,
+                    // 与偏好条目标题一致（titleLarge + 16sp，见 BasePreferenceWidget.TitleFontSize）。
+                    labelStyle = MaterialTheme.typography.titleLarge.copy(fontSize = 16.sp),
                     valueString = if (webdavCoverConcurrency == 0) {
                         composeStringResource(R.string.webdav_cover_off)
                     } else {
@@ -6563,6 +6564,9 @@ private fun WebDavBrowsePane(
     var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.webdavBrowseDisplayMode.get())) }
     var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.webdavBrowseSort.get())) }
     var columnCount by remember { mutableStateOf(prefs.webdavBrowseColumns.get()) }
+    // SY --> Komiho: 浏览器显示封面（默认关防风控；开启后封面拉取仍受「WebDAV显示封面」并发档位限流）。
+    var showCover by remember { mutableStateOf(prefs.webdavBrowseShowCover.get()) }
+    // SY <--
     var showOptions by remember { mutableStateOf(false) }
     // SY --> Komiho: 文件浏览器顶部搜索（范围 = 当前目录，便于在数百子目录中快速定位）。
     var searchQuery by remember { mutableStateOf("") }
@@ -6877,7 +6881,7 @@ private fun WebDavBrowsePane(
             displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(displayList, key = { it.url }) { e ->
-                        WebDavFileRow(entry = e, onOpen = { onOpenItem(e) })
+                        WebDavFileRow(conn = conn, entry = e, showCover = showCover, onOpen = { onOpenItem(e) })
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -6893,7 +6897,7 @@ private fun WebDavBrowsePane(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(displayList, key = { it.url }) { e ->
-                        WebDavGridItem(entry = e, onClick = { onOpenItem(e) })
+                        WebDavGridItem(conn = conn, entry = e, showCover = showCover, onClick = { onOpenItem(e) })
                     }
                 }
             }
@@ -6905,9 +6909,9 @@ private fun WebDavBrowsePane(
         onDismiss = { showOptions = false },
         displayMode = displayMode,
         onDisplayModeChange = { displayMode = it; prefs.webdavBrowseDisplayMode.set(it.prefValue) },
-        showCover = false,
-        onShowCoverChange = {},
-        showCoverEnabled = false,
+        showCover = showCover,
+        onShowCoverChange = { showCover = it; prefs.webdavBrowseShowCover.set(it) },
+        showCoverEnabled = true,
         columnCount = columnCount,
         onColumnChange = { columnCount = it; prefs.webdavBrowseColumns.set(it) },
         sort = sort,
@@ -6915,29 +6919,108 @@ private fun WebDavBrowsePane(
     )
 }
 
-/** WebDAV 列表模式一行：与本地 [FileRow] 共用 [FileListRow] 骨架与图标语义；无封面。 */
+/** WebDAV 列表模式一行：与本地 [FileRow] 共用 [FileListRow] 骨架与图标语义；showCover 开时显示封面。 */
 @Composable
-private fun WebDavFileRow(entry: WebDavEntry, onOpen: () -> Unit) {
+private fun WebDavFileRow(conn: WebDavConnection, entry: WebDavEntry, showCover: Boolean, onOpen: () -> Unit) {
     FileListRow(name = entry.name, clickable = true, onOpen = onOpen) {
-        Icon(
-            fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
-            contentDescription = null,
-            tint = fileKindTint(entry.isDir, entry.isArchive),
-            modifier = Modifier.size(24.dp),
+        WebDavCoverThumb(
+            conn = conn,
+            entry = entry,
+            showCover = showCover,
+            modifier = Modifier.size(width = 40.dp, height = 56.dp),
+            iconSize = 24.dp,
         )
     }
 }
 
-/** WebDAV 网格模式一格：与本地网格未开封面形态一致（图标居中 + 两行名称）。 */
+/** WebDAV 网格模式一格：未开封面与本地网格未开形态一致（图标居中 + 两行名称）；开封面形态同本地网格。 */
 @Composable
-private fun WebDavGridItem(entry: WebDavEntry, onClick: () -> Unit) {
-    FileGridCell(
-        name = entry.name,
-        icon = fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
-        iconTint = fileKindTint(entry.isDir, entry.isArchive),
-        iconSize = 56.dp,
-        clickable = true,
-        onClick = onClick,
+private fun WebDavGridItem(conn: WebDavConnection, entry: WebDavEntry, showCover: Boolean, onClick: () -> Unit) {
+    if (!showCover) {
+        FileGridCell(
+            name = entry.name,
+            icon = fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
+            iconTint = fileKindTint(entry.isDir, entry.isArchive),
+            iconSize = 56.dp,
+            clickable = true,
+            onClick = onClick,
+        )
+        return
+    }
+    val context = LocalContext.current
+    val iconSize = 56.dp
+    Column(
+        modifier = Modifier.clickable(onClick = onClick).padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
+            contentAlignment = Alignment.Center,
+        ) {
+            WebDavCoverThumb(
+                conn = conn,
+                entry = entry,
+                showCover = true,
+                modifier = Modifier.fillMaxSize(),
+                iconSize = iconSize,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = entry.name,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** WebDAV 条目封面渲染：仅归档/目录取封面（单图回落图标，避免逐图 GET）。
+ *  封面复用 WebDavCoverCache 缓存（键 = 章节 URL，与阅读器打开同键，历史/浏览互通）；
+ *  「WebDAV显示封面」档位 0 时 coverForDisplay 恒 null，仅显示图标不发请求。
+ *  coverTick 为重组 key：档位>0 时列表补拉落盘完成即上屏。 */
+@Composable
+private fun WebDavCoverThumb(
+    conn: WebDavConnection,
+    entry: WebDavEntry,
+    showCover: Boolean,
+    modifier: Modifier = Modifier,
+    iconSize: Dp,
+) {
+    val icon: @Composable () -> Unit = {
+        Icon(
+            fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
+            contentDescription = null,
+            tint = fileKindTint(entry.isDir, entry.isArchive),
+            modifier = Modifier.size(iconSize),
+        )
+    }
+    if (!showCover || !(entry.isArchive || entry.isDir)) {
+        icon()
+        return
+    }
+    val context = LocalContext.current
+    val coverTick by WebDavCoverCache.coverTick.collectAsState()
+    val chapterUrl = remember(entry.url, entry.isDir) {
+        // 目录章节以尾斜杠标识；先剥掉 PROPFIND href 可能自带的尾斜杠再补一个，避免「//」。
+        val base = if (entry.isDir) entry.url.trimEnd('/') else entry.url
+        WebDavConnectionStore.toChapterUrl(conn.id, base) + if (entry.isDir) "/" else ""
+    }
+    val cover = remember(chapterUrl, coverTick) {
+        WebDavCoverCache.coverForDisplay(context, chapterUrl)
+    }
+    if (cover == null) {
+        icon()
+        return
+    }
+    SubcomposeAsyncImage(
+        model = ImageRequest.Builder(context).data(cover).build(),
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = modifier,
+        loading = icon,
+        error = icon,
     )
 }
 
