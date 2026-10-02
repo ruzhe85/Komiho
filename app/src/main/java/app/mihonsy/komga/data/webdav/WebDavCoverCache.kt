@@ -17,6 +17,7 @@ import mihon.core.common.archive.ArchiveReader
 import mihon.core.common.archive.WebDavRandomAccessSource
 import mihon.core.common.archive.RemoteZipReader
 import tachiyomi.core.common.util.system.ImageUtil
+import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.domain.storage.service.StoragePreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -41,11 +42,35 @@ object WebDavCoverCache {
 
     /** 封面缓存目录名（filesDir 下）。public 供设置页统计/清除，避免目录名漂移。 */
     const val DIR = "komiho_webdav_covers"
+
+    /** 设置 → 高级 →「WebDAV显示封面」：0 不显示封面（不发请求），1-6 = 拉封面的全局并发上限。 */
+    const val KEY_COVER_CONCURRENCY = "komiho_webdav_cover_concurrency"
+    private const val MAX_CONCURRENCY = 6
+
+    /** 全局限流：相邻两次封面网络任务的最小间隔（防风控，比裸并发数更有效）。 */
+    private const val MIN_INTERVAL_MS = 400L
+
+    /** 失败退避：同章节失败后多久内不再尝试（避免受限模式下反复打请求）。 */
+    private const val FAIL_RETRY_MS = 10 * 60 * 1000L
+
+    /** 当前封面并发档位（0-6，默认 0 = 防风控最保守）。 */
+    fun coverConcurrency(): Int =
+        Injekt.get<PreferenceStore>().getInt(KEY_COVER_CONCURRENCY, 0).get().coerceIn(0, MAX_CONCURRENCY)
     private const val MAX_PX = 450
     private const val JPEG_QUALITY = 80
 
     /** 正在生成的章节 URL（同窗口去重：连开同一章/快速翻卷只触发一次）。 */
     private val inFlight = mutableSetOf<String>()
+
+    /** 失败退避表：章节 URL → 上次失败时刻（elapsedRealtime）。 */
+    private val failAt = HashMap<String, Long>()
+
+    // 全局限流原语：在飞的封面任务计数 + 最小间隔时刻。并发档位每次进入时现读，
+    // 用户改档立即生效，无需重建信号量。
+    private val slotLock = Object()
+    private var activeSlots = 0
+    private val paceLock = Object()
+    private var lastStart = 0L
 
     /** 是否 WebDAV 章节（双格式 webdav://connId/URL 与 webdav:URL）。 */
     fun isWebDavChapter(chapterUrl: String): Boolean = chapterUrl.startsWith("webdav:")
@@ -59,17 +84,26 @@ object WebDavCoverCache {
         return File(dir, "v2-" + sha256(fullUrl) + ".jpg")
     }
 
-    /** 已生成的封面文件（历史/书签行用；null = 显示占位图标，不发请求）。 */
+    /** 已生成的封面文件（历史/书签行用；null = 显示占位图标，不发请求）。
+     *  并发档位 0 = 完全不显示封面（已缓存的也不显示），与设置项小字口径一致。 */
     fun existingCoverFile(context: Context, chapterUrl: String): File? {
+        if (coverConcurrency() <= 0) return null
         if (!isWebDavChapter(chapterUrl)) return null
         return coverFile(context, chapterUrl)?.takeIf { it.isFile && it.length() > 0 }
     }
 
-    /** 异步生成封面：缓存已有则跳过；同窗口去重；后台线程执行、失败静默（logcat）。 */
+    /** 异步生成封面：档位 0 直接跳过；缓存已有/同窗口去重/失败退避内均跳过；后台线程执行、失败静默（logcat）。 */
     fun generateAsync(context: Context, chapterUrl: String) {
         if (!isWebDavChapter(chapterUrl)) return
+        val concurrency = coverConcurrency()
+        if (concurrency <= 0) return
         val target = coverFile(context, chapterUrl) ?: return
         if (target.isFile && target.length() > 0) return
+        // 失败退避：10 分钟内失败过的章节不再发请求。
+        synchronized(failAt) {
+            val f = failAt[chapterUrl]
+            if (f != null && android.os.SystemClock.elapsedRealtime() - f < FAIL_RETRY_MS) return
+        }
         synchronized(inFlight) {
             if (!inFlight.add(chapterUrl)) return
         }
@@ -80,18 +114,46 @@ object WebDavCoverCache {
         thread(name = "webdav-cover", isDaemon = true) {
             // 先移出去：失败后下次打开还能重试。
             synchronized(inFlight) { inFlight.remove(chapterUrl) }
-            if (isDirectory) {
-                // 散图每页独立 GET，不存在整本缓存竞态，无需延迟。
-                runCatching { generateFromDirectory(chapterUrl, target) }
-                    .onFailure { logcat(LogPriority.INFO) { "[WebDavCover] 目录封面生成失败：${it.message}" } }
-                return@thread
+            // 全局限流：并发槽位（用户档位）+ 相邻任务最小间隔。改档即时生效。
+            synchronized(slotLock) {
+                while (activeSlots >= concurrency) slotLock.wait()
+                activeSlots++
             }
-            // 延迟 3s 再拉：避开与阅读线程同时整本缓存下载的竞态（rar/7z 无 Range 场景
-            // ensureFallbackFile 无跨实例互斥）；Range 服务器无此问题，延迟无感。
-            Thread.sleep(3000)
-            runCatching { generate(app, chapterUrl, target) }
-                .onFailure { logcat(LogPriority.INFO) { "[WebDavCover] 封面生成失败：${it.message}" } }
+            try {
+                synchronized(paceLock) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val wait = MIN_INTERVAL_MS - (now - lastStart)
+                    if (wait > 0) Thread.sleep(wait)
+                    lastStart = android.os.SystemClock.elapsedRealtime()
+                }
+                if (isDirectory) {
+                    // 散图每页独立 GET，不存在整本缓存竞态，无需延迟。
+                    runCatching { generateFromDirectory(chapterUrl, target) }
+                        .onFailure {
+                            recordFailure(chapterUrl)
+                            logcat(LogPriority.INFO) { "[WebDavCover] 目录封面生成失败：${it.message}" }
+                        }
+                    return@thread
+                }
+                // 延迟 3s 再拉：避开与阅读线程同时整本缓存下载的竞态（rar/7z 无 Range 场景
+                // ensureFallbackFile 无跨实例互斥）；Range 服务器无此问题，延迟无感。
+                Thread.sleep(3000)
+                runCatching { generate(app, chapterUrl, target) }
+                    .onFailure {
+                        recordFailure(chapterUrl)
+                        logcat(LogPriority.INFO) { "[WebDavCover] 封面生成失败：${it.message}" }
+                    }
+            } finally {
+                synchronized(slotLock) {
+                    activeSlots--
+                    slotLock.notifyAll()
+                }
+            }
         }
+    }
+
+    private fun recordFailure(chapterUrl: String) {
+        synchronized(failAt) { failAt[chapterUrl] = android.os.SystemClock.elapsedRealtime() }
     }
 
     private fun generate(context: Context, chapterUrl: String, target: File) {
