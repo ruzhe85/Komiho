@@ -91,7 +91,17 @@ object WebDavCoverCache {
         return File(dir, "v2-" + sha256(fullUrl) + ".jpg")
     }
 
-    /** 展示用封面（历史/书签/聚合卡）：
+    /** 只读缓存、不触发生成（档位 0 或未缓存均返回 null）。
+     *  供「一次映射全量条目」的路径（首页聚合卡摘要等）使用——那些路径若触发生成
+     *  会把整份历史灌进限流队列，当前屏幕的封面请求全得排队。补拉只应由
+     *  按可见行组合的路径（历史/书签/浏览行）经 [coverForDisplay] 触发。 */
+    fun coverCachedOnly(context: Context, chapterUrl: String): File? {
+        if (coverConcurrency() <= 0) return null
+        if (!isWebDavChapter(chapterUrl)) return null
+        return coverFile(context, chapterUrl)?.takeIf { it.isFile && it.length() > 0 }
+    }
+
+    /** 展示用封面（历史/书签/浏览行）：
      *  档位 0 → 永远 null（不显示、不发请求）；
      *  档位 ≥1 → 命中缓存直接返回；缓存缺失则**由列表页触发限流后台生成**（本轮先占位，
      *  生成完成后 [coverTick] 自增驱动重组上屏）。列表补拉与打开章节共用同一条限流队列，

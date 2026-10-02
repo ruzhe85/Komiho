@@ -8314,6 +8314,8 @@ private fun SourceDashboardPane(
             runCatching { repo.getHistoryBySourceDetailed(KomgaSource.ID).first() }.getOrDefault(emptyList()).forEach { komgaLocal.add(it) }
             // SY: 封面回退链与历史/书签行同口径（本地文件 → WebDAV 缓存 → SMB 缓存）。
             // 注意：Komga 封面不走 coverOf（需挂起解析 Manga + 鉴权 fetcher），单独在下方 suspend 块处理。
+            // Komiho (2026-10-02): coverOf 在摘要构建里映射**全量**历史条目，WebDAV 只读缓存
+            // （coverCachedOnly）不触发生成——否则会把整份历史灌进限流队列，当前屏幕全排队。
             val coverOf: (LocalHistoryItem?) -> Any? = { item ->
                 val url = item?.chapterUrl
                 if (url == null ||
@@ -8324,7 +8326,7 @@ private fun SourceDashboardPane(
                 } else {
                     resolveLocalFile(url)?.let { LocalCoverData(it, runCatching { it.lastModified() }.getOrDefault(0L)) }
                         ?: item.thumbnailUrl?.takeIf { it.isNotBlank() }
-                        ?: WebDavCoverCache.coverForDisplay(context, url)
+                        ?: WebDavCoverCache.coverCachedOnly(context, url)
                         ?: SmbCoverCache.existingCoverFile(context, url)
                 }
             }
