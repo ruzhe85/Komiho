@@ -6422,6 +6422,12 @@ private suspend fun openLocalFile(
     // 不再从目录第 1 页开始（用户反馈：点 79 却从 01 开始读）。
     startImageName: String? = null,
 ) {
+    // SY --> Komiho: 诊断——本地打开入口日志（与 [openWebDavTestFile]/[openSmbFile] 同口径）。
+    eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+        "LocalOpen",
+        "打开文件 relPath=$relPath uri=${file.uri} startImage=$startImageName",
+    )
+    // SY <--
     try {
         val (mangaId, chapterId, initialPage) = withContext(Dispatchers.IO) {
             val fs = Injekt.get<LocalSourceFileSystem>()
@@ -6567,8 +6573,13 @@ private suspend fun openLocalFile(
             }
             Triple(manga.id!!, chapter.id!!.toLong(), startPage)
         }
+        eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+            "LocalOpen",
+            "启动阅读器 manga=$mangaId chapter=$chapterId page=$initialPage",
+        )
         context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, initialPage))
     } catch (e: Throwable) {
+        eu.kanade.tachiyomi.diagnostic.DiagLog.e("LocalOpen", "打开文件失败 relPath=$relPath", e)
         android.widget.Toast.makeText(
             context,
             context.getString(R.string.open_failed, e.message),
@@ -7183,6 +7194,13 @@ private suspend fun openWebDavTestFile(
         } else {
             WebDavConnectionStore.toChapterUrl(conn.id, httpUrl)
         }
+        // SY --> Komiho: 诊断——本函数此前无任何日志，失败只弹 Toast，导出诊断日志里看不到，
+        // 无法排查「打开 EPUB 闪退回浏览器」这类问题。用 DiagLog 双写 logcat 与导出缓冲。
+        eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+            "WebDavOpen",
+            "打开文件 raw=$rawUrl fileName=$decodedName isImage=$isImageFile mangaUrl=$mangaUrl chapterUrl=$chapterUrl",
+        )
+        // SY <--
         prefs.webdavTestUrl.set(httpUrl)
         val (mangaId, chapterId, initialPage) = withContext(Dispatchers.IO) {
             val mangaRepo = Injekt.get<MangaRepository>()
@@ -7313,8 +7331,13 @@ private suspend fun openWebDavTestFile(
                 ?: error(context.getString(R.string.webdav_chapter_write_failed))
             Triple(manga.id!!, chapter.id!!.toLong(), startPage)
         }
+        eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+            "WebDavOpen",
+            "启动阅读器 manga=$mangaId chapter=$chapterId page=$initialPage",
+        )
         context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, initialPage))
     } catch (e: Throwable) {
+        eu.kanade.tachiyomi.diagnostic.DiagLog.e("WebDavOpen", "打开文件失败 raw=$rawUrl", e)
         android.widget.Toast.makeText(
             context,
             context.getString(R.string.open_failed, e.message),
@@ -7830,6 +7853,12 @@ private suspend fun openSmbFile(
         } else {
             SmbConnectionStore.toChapterUrl(conn.id, relPath)
         }
+        // SY --> Komiho: 诊断——SMB 打开入口日志（与 [openWebDavTestFile] 同口径）。
+        eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+            "SmbOpen",
+            "打开文件 relPath=$relPath isImage=$isImageFile mangaUrl=$mangaUrl chapterUrl=$chapterUrl",
+        )
+        // SY <--
         val (mangaId, chapterId, initialPage) = withContext(Dispatchers.IO) {
             val mangaRepo = Injekt.get<MangaRepository>()
             val chapterRepo = Injekt.get<ChapterRepository>()
@@ -7952,8 +7981,13 @@ private suspend fun openSmbFile(
                 ?: error(context.getString(R.string.webdav_chapter_write_failed))
             Triple(manga.id!!, chapter.id!!.toLong(), startPage)
         }
+        eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+            "SmbOpen",
+            "启动阅读器 manga=$mangaId chapter=$chapterId page=$initialPage",
+        )
         context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, initialPage))
     } catch (e: Throwable) {
+        eu.kanade.tachiyomi.diagnostic.DiagLog.e("SmbOpen", "打开文件失败 relPath=$relPath", e)
         // SY: broken pipe 等服务器断连翻成人话，其余原样。
         val msg = if (smbIsConnectionReset(e)) context.getString(R.string.smb_conn_reset) else e.message
         android.widget.Toast.makeText(

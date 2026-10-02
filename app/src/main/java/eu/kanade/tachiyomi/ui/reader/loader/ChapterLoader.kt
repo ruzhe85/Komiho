@@ -60,15 +60,24 @@ class ChapterLoader(
      */
     suspend fun loadChapter(chapter: ReaderChapter /* SY --> */, page: Int? = null/* SY <-- */) {
         if (chapterIsReady(chapter)) {
+            // SY --> Komiho: 已加载则跳过——也记一条，避免「打开了却没 Loading pages」的困惑。
+            logcat { "Chapter already loaded, skip reload: ${chapter.chapter.name} url=${chapter.chapter.url}" }
+            // SY <--
             return
         }
 
         chapter.state = ReaderChapter.State.Loading
         withIOContext {
-            logcat { "Loading pages for ${chapter.chapter.name}" }
+            // SY --> Komiho: 补章节 URL（含扩展名，如 .epub/.cbz）与加载器类型，便于在导出诊断
+            // 日志里按文件名/格式检索（章节名不带扩展名，按 "epub" 搜不到）。
+            logcat { "Loading pages for ${chapter.chapter.name} url=${chapter.chapter.url}" }
+            // SY <--
             try {
                 val loader = getPageLoader(chapter)
                 chapter.pageLoader = loader
+                // SY --> Komiho: 记录实际选用的 PageLoader（EpubPageLoader / PdfPageLoader / 归档 / 散图目录）。
+                logcat { "PageLoader=${loader::class.simpleName} for ${chapter.chapter.name} url=${chapter.chapter.url}" }
+                // SY <--
                 // SY --> Komiho: 把非流化缓存进度回调挂到加载器，供远程整本下载（PDF / WebDAV 回退）上报。
                 loader.progressReporter = { frac -> onCacheProgress(frac) }
                 // SY <--

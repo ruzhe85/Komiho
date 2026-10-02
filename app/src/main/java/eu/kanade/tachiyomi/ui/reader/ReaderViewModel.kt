@@ -296,7 +296,7 @@ class ReaderViewModel @JvmOverloads constructor(
             }
             .run {
                 if (basePreferences.downloadedOnly.get()) {
-                    filterDownloaded(manga, mangaMap)
+                    filterDownloaded(manga)
                 } else {
                     this
                 }
