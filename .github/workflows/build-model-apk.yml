@@ -29,14 +29,14 @@ name: Build model package APK
         required: true
         type: string
       model_version_name:
-        description: 'Package versionName'
+        description: 'Package versionName (display only — it does NOT decide whether the package installs over an older one)'
         required: false
         default: '1.0'
         type: string
       model_version_code:
-        description: 'Package versionCode (bump it to ship a package update)'
+        description: 'Package versionCode (positive integer). Must exceed the installed one to install over it. Leave blank to use the CI run number, which always increases'
         required: false
-        default: '1'
+        default: ''
         type: string
 
 jobs:
@@ -157,12 +157,21 @@ jobs:
       - name: Build model package APK
         env:
           KOMIHO_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KOMIHO_RELEASE_KEYSTORE_PASSWORD }}
+          MODEL_VERSION_CODE: ${{ inputs.model_version_code }}
         run: |
+          # versionCode is what the installer compares against the installed package;
+          # versionName is display-only. Blank input = use the run number: it is monotonic, so a
+          # rebuilt package is always seen as an update instead of a same-version downgrade.
+          CODE="${MODEL_VERSION_CODE:-${{ github.run_number }}}"
+          case "$CODE" in
+            ''|*[!0-9]*) echo "::error::model_version_code must be a positive integer, got '$CODE'"; exit 1 ;;
+          esac
+          echo "model package versionCode = $CODE"
           ./gradlew :modelapk:assembleRelease \
             -PmodelId="cn.ruzhe.komiho.model.${SOC}" \
             -PmodelLabel="Komiho-${SOC}" \
             -PmodelVersionName="${{ inputs.model_version_name }}" \
-            -PmodelVersionCode="${{ inputs.model_version_code }}" \
+            -PmodelVersionCode="$CODE" \
             --no-daemon --stacktrace
 
       - name: "Strip dex and re-sign (asset-only guarantee)"

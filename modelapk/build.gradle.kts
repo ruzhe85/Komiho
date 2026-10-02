@@ -37,7 +37,14 @@ android {
         minSdk = 26
         targetSdk = 36
 
-        versionCode = (project.findProperty("modelVersionCode") as String?)?.toIntOrNull() ?: 1
+        // Komiho (2026-10-02): an unparsable value must fail loudly. Falling back to 1 is how a
+        // rebuilt package silently ends up with the *same* versionCode as the installed one and
+        // gets refused as an update ("2.0".toIntOrNull() == null -> 1 did exactly that). The
+        // packaging workflow leaves this blank and passes the CI run number instead, which is
+        // monotonic, so every rebuilt package is installable over the previous one.
+        versionCode = (project.findProperty("modelVersionCode") as String?)
+            ?.let { requireNotNull(it.toIntOrNull()) { "modelVersionCode must be an integer, got '$it'" } }
+            ?: 1
         versionName = (project.findProperty("modelVersionName") as String?) ?: "1.0"
 
         manifestPlaceholders["modelLabel"] =
