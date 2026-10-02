@@ -37,9 +37,11 @@ import kotlin.math.min
 // Range 拉首图（尾部 64KB + 中央目录 + 首图条目，通常 < 1MB 流量），采样压缩后落
 // filesDir/komiho_webdav_covers/；历史/书签行读磁盘显示。
 // Komiho (2026-10-02): 新增「WebDAV显示封面」并发档位（设置→高级，0-6 默认 0）——
-// 档位 = 是否/以多快**拉取新封面**：0 = 不再拉取（不发请求），≥1 = 允许拉封面（全局并发
-// 槽位 + 随档位缩放的最小间隔 + 失败退避 10 分钟，见 [coverForDisplay]）。**显示与档位无关**：
-// 已缓存的封面在历史/书签/聚合卡照常显示（见 [coverCachedOnly]），浏览器列表按档位显示；
+// 档位 = **浏览器侧**封面显示/预取的开关与速度：0 = 浏览器不显示也不预取封面（不发请求），
+// ≥1 = 浏览器按档位并发拉取显示（全局并发槽位 + 随档位缩放的最小间隔 + 失败退避 10 分钟，
+// 见 [coverForDisplay]）。**打开章节「顺便生成」不受档位限制**（见 [generateAsync] 的 fromBrowser）：
+// 无论档位多少，打开 WebDAV 章节都会照常生成封面（限流按 1 槽位算），历史/书签/聚合卡
+// 因此始终有封面（见 [coverCachedOnly]）。
 // 生成失败（不支持压缩/加密无密码/网络）只影响本次，
 // 下次自动重试。缓存键 = 完整文件 URL 的 sha256，无自动 LRU（每张
 // 40-70KB，可存上千张；如需回收可清 komiho_webdav_covers 目录，不影响其他缓存）。
@@ -118,16 +120,17 @@ object WebDavCoverCache {
         return coverFile(context, chapterUrl)?.takeIf { it.isFile && it.length() > 0 }
     }
 
-    /** 展示用封面（历史/书签/浏览行）：
-     *  档位 0 → 永远 null（不显示、不发请求）；
+    /** 展示用封面（**WebDAV 浏览器列表**）：
+     *  档位 0 → 永远 null（浏览器不显示、不发请求）；
      *  档位 ≥1 → 命中缓存直接返回；缓存缺失则**由列表页触发限流后台生成**（本轮先占位，
      *  生成完成后 [coverTick] 自增驱动重组上屏）。列表补拉与打开章节共用同一条限流队列，
-     *  突发几十行也只是按并发档位排队 + 400ms 间隔慢慢补，不会形成请求风暴。 */
+     *  突发几十行也只是按并发档位排队 + 400ms 间隔慢慢补，不会形成请求风暴。
+     *  注：历史/书签/聚合卡走 [coverCachedOnly]，**不受档位影响**。 */
     fun coverForDisplay(context: Context, chapterUrl: String): File? {
         if (!isWebDavChapter(chapterUrl)) return null
         val file = coverFile(context, chapterUrl)?.takeIf { it.isFile && it.length() > 0 }
         if (file != null) return if (coverConcurrency() <= 0) null else file
-        generateAsync(context, chapterUrl, startDelayMs = 0L, epoch = activeEpoch)
+        generateAsync(context, chapterUrl, startDelayMs = 0L, epoch = activeEpoch, fromBrowser = true)
         return null
     }
 
@@ -135,16 +138,22 @@ object WebDavCoverCache {
      * 异步生成封面（对外入口统一走这里）：
      * @param startDelayMs 生成前延迟，仅阅读器路径需要（3s，避开与阅读线程同时整本缓存
      * 下载的竞态）；列表补拉传 0。延迟在**并发槽位外**睡，不占槽位拖慢排队。
+     * @param fromBrowser true = 浏览器列表触发（受「WebDAV显示封面」档位限制，0 档直接返回）；
+     *  false（默认）= 阅读器「打开章节顺便生成」等非浏览器路径，**不受档位限制**——0 档只关
+     *  浏览器显示/预取，打开章节仍照常生成，历史/书签/聚合卡才有封面可显示。
      */
     fun generateAsync(
         context: Context,
         chapterUrl: String,
         startDelayMs: Long = 3000L,
         epoch: Long? = null,
+        fromBrowser: Boolean = false,
     ) {
         if (!isWebDavChapter(chapterUrl)) return
         val concurrency = coverConcurrency()
-        if (concurrency <= 0) return
+        if (fromBrowser && concurrency <= 0) return
+        // 0 档且非浏览器路径时仍要跑：限流按 1 槽位算，避免 0 槽位死等。
+        val effectiveConcurrency = concurrency.coerceAtLeast(1)
         val target = coverFile(context, chapterUrl) ?: return
         if (target.isFile && target.length() > 0) return
         // 失败退避：10 分钟内失败过的章节不再发请求。
@@ -164,9 +173,9 @@ object WebDavCoverCache {
         thread(name = "webdav-cover", isDaemon = true) {
             // 读路径延迟：不占并发槽位（浏览器补拉传 0 直进队列）。
             if (startDelayMs > 0) Thread.sleep(startDelayMs)
-            // 全局限流：并发槽位（用户档位）+ 相邻任务最小间隔。改档即时生效。
+            // 全局限流：并发槽位（用户档位，0 档按 1 算）+ 相邻任务最小间隔。改档即时生效。
             synchronized(slotLock) {
-                while (activeSlots >= concurrency) slotLock.wait()
+                while (activeSlots >= effectiveConcurrency) slotLock.wait()
                 activeSlots++
             }
             try {
@@ -175,7 +184,7 @@ object WebDavCoverCache {
                 if (myEpoch != null && myEpoch != activeEpoch) return@thread
                 synchronized(paceLock) {
                     val now = android.os.SystemClock.elapsedRealtime()
-                    val wait = intervalMs(concurrency) - (now - lastStart)
+                    val wait = intervalMs(effectiveConcurrency) - (now - lastStart)
                     if (wait > 0) Thread.sleep(wait)
                     lastStart = android.os.SystemClock.elapsedRealtime()
                 }

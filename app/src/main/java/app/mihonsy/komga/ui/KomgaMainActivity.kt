@@ -6780,16 +6780,17 @@ private fun WebDavBrowsePane(
     val showRecursive = searchActive && searchRecursive && searchQuery.isNotBlank()
     val displayList = if (showRecursive) searchResults else visible
     // SY --> Komiho: 进入目录即对当前目录的 目录/归档 条目启动封面生成——不再只依赖逐行可见时才触发
-    // （用户反馈「进目录没启动封面生成」）。是否真正发请求/并发上限/400ms 间隔仍由「WebDAV显示封面」
-    // 档位与限流队列决定（档位 0 时 generateAsync 直接返回）；递归搜索结果不预生成。
+    // （用户反馈「进目录没启动封面生成」）。是否真正发请求/并发上限/400ms 间隔由「WebDAV显示封面」
+    // 档位与限流队列决定（档位 0 时浏览器侧不发请求：fromBrowser=true 直接返回；打开章节的生成
+    // 不受档位影响）；递归搜索结果不预生成。
     val coverContext = LocalContext.current
     // 进入目录先自增「目录代号」——remember 在本次组合中先于 LazyColumn 子项执行，保证行组合
     // （coverForDisplay）拿到的就是新代号；于是上一目录尚未执行的任务作废（最新目录优先）。
     val dirEpoch = remember(displayList, showRecursive) {
         if (showRecursive) WebDavCoverCache.currentEpoch() else WebDavCoverCache.beginDirectory()
     }
-    LaunchedEffect(displayList, showRecursive, dirEpoch) {
-        if (showRecursive) return@LaunchedEffect
+    LaunchedEffect(displayList, showRecursive, dirEpoch, showCover) {
+        if (showRecursive || !showCover) return@LaunchedEffect
         // 只预生成前 [WEBDAV_COVER_PREFETCH_LIMIT] 个 目录/归档 条目（约一两屏），避免对
         // 整个大目录全量入队把连接占满（目录封面每张一次 PROPFIND + 首图 GET）。其余条目
         // 随滚动到可见时由行自身触发（WebDavCoverThumb → coverForDisplay）。
@@ -6799,7 +6800,7 @@ private fun WebDavBrowsePane(
             if (e.isDir || e.isArchive) {
                 val base = if (e.isDir) e.url.trimEnd('/') else e.url
                 val chapterUrl = WebDavConnectionStore.toChapterUrl(conn.id, base) + if (e.isDir) "/" else ""
-                WebDavCoverCache.generateAsync(coverContext, chapterUrl, startDelayMs = 0L, epoch = dirEpoch)
+                WebDavCoverCache.generateAsync(coverContext, chapterUrl, startDelayMs = 0L, epoch = dirEpoch, fromBrowser = true)
                 enqueued++
             }
         }

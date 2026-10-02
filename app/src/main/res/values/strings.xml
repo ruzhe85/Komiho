@@ -371,7 +371,7 @@
     <string name="label_webdav">WebDAV</string>
     <string name="webdav_cover_display">WebDAV显示封面</string>
     <string name="webdav_cover_concurrency_title">封面拉取并发数</string>
-    <string name="webdav_cover_display_summary">并发太高可能触发风控，谨慎选择。</string>
+    <string name="webdav_cover_display_summary">0 = 仅在浏览器隐藏封面（打开章节仍会生成，历史/书签照常显示）；并发太高可能触发风控，谨慎选择。</string>
     <string name="webdav_cover_off">关闭</string>
     <string name="storage_cache_cleared">已清除缓存（%1$s）</string>
     <string name="storage_confirm">确认</string>
