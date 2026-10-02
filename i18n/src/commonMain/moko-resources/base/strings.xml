@@ -558,6 +558,10 @@
     <string name="enhancement_group_cpu">CPU</string>
     <string name="enhancement_group_gpu">GPU</string>
     <string name="enhancement_group_npu">NPU</string>
+    <!-- Komiho (2026-10-02): 图像增强页改为「一级选方式 + 二级详情」，以下为一级/详情页文案。 -->
+    <string name="enhancement_section_methods">Enhancement method</string>
+    <string name="enhancement_detail_model">Model</string>
+    <string name="enhancement_detail_advanced">AI options</string>
     <string name="enhancement_scale">Scale</string>
     <string name="ai_model_anime_video">AnimeVideo</string>
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
