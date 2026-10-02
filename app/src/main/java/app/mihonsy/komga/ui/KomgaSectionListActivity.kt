@@ -303,7 +303,7 @@ fun BookShelfCard(
                             .padding(horizontal = 6.dp, vertical = 5.dp),
                     ) {
                         Text(
-                            text = book.metadata.title ?: book.name,
+                            text = book.titledWithNumber(),
                             color = Color.White,
                             style = MaterialTheme.typography.labelMedium,
                             maxLines = 2,
@@ -323,7 +323,7 @@ fun BookShelfCard(
             }
             if (!titleInside) {
                 Text(
-                    text = book.metadata.title ?: book.name,
+                    text = book.titledWithNumber(),
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,

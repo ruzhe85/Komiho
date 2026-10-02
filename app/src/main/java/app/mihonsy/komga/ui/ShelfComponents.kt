@@ -694,6 +694,20 @@ private fun ReadlistPickerDialog(
     )
 }
 
+/** Komiho: 书籍展示序号 —— 优先 Komga 卷号 `metadata.number`，取不到回退整型 [BookDto.number]
+ *  （仅 >0 才算，Komga 对无编号的书可能返回 0）；都没有返回 null。 */
+val BookDto.displayNumber: String?
+    get() = metadata.number?.takeIf { it.isNotBlank() }
+        ?: number?.takeIf { it > 0 }?.toString()
+
+/** Komiho: 书籍列表标题（有序号时前缀 "序号 · "）。列表行与网格卡片共用，保证两处序号口径一致。
+ *  序号来源见 [displayNumber]；标题沿用 Komga 的 `metadata.title`，取不到回退文件名。 */
+fun BookDto.titledWithNumber(): String {
+    val title = metadata.title ?: name
+    val n = displayNumber ?: return title
+    return "$n · $title"
+}
+
 /** List-mode book row — cover thumbnail + title + series + read state. */
 @Composable
 fun BookShelfListRow(
@@ -727,7 +741,7 @@ fun BookShelfListRow(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = book.metadata.title ?: book.name,
+                    text = book.titledWithNumber(),
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
