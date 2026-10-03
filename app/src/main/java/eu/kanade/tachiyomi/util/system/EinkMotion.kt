@@ -90,29 +90,31 @@ object EinkMotion {
         activity.window.decorView.post {
             runCatching {
                 val content = activity.findViewById<android.view.ViewGroup>(android.R.id.content)
-                    ?: return@post
-                val contentChild = content.getChildAt(0) ?: return@post
+                    ?: return@post bail("no android.R.id.content")
+                val contentChild = content.getChildAt(0) ?: return@post bail("content has no child")
                 val tagId = contentChild.resources.getIdentifier(
                     "androidx_compose_ui_view_composition_context",
                     "id",
                     "androidx.compose.ui",
                 )
-                if (tagId == 0) return@post
-                val recomposer = contentChild.getTag(tagId) as? Recomposer ?: return@post
+                if (tagId == 0) return@post bail("tag id not found")
+                val recomposer = contentChild.getTag(tagId) as? Recomposer
+                    ?: return@post bail("recomposer tag missing (class=${contentChild.getTag(tagId)?.javaClass?.simpleName})")
                 val scale = recomposer.effectCoroutineContext[MotionDurationScale]
-                    ?: return@post
+                    ?: return@post bail("no MotionDurationScale in recomposer context")
                 val setter = scale.javaClass.declaredMethods.firstOrNull {
                     it.parameterTypes.size == 1 &&
                         it.parameterTypes[0] == Float::class.javaPrimitiveType &&
                         it.returnType == Void.TYPE
-                } ?: return@runCatching
+                } ?: return@runCatching bail("setter signature not found")
                 setter.isAccessible = true
                 setter.invoke(scale, target)
-                android.util.Log.d(
-                    "EinkMotion",
-                    "compose durationScale → $target (${scale.javaClass.simpleName})",
-                )
+                android.util.Log.i("EinkMotion", "compose durationScale → $target")
             }
         }
     }
+
+    /** 失败原因落到 logcat（Log.i 级别，避开部分厂商对 debug 日志的过滤）。 */
+    private fun bail(reason: String): Unit =
+        run { android.util.Log.i("EinkMotion", "compose gate skipped: $reason") }
 }
