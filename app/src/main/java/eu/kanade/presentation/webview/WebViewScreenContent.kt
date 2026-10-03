@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.LinearProgressIndicator
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -304,11 +305,20 @@ fun WebViewScreenContent(
                     }
                 }
                 when (val loadingState = currentWindow.state.loadingState) {
-                    is LoadingState.Initializing -> LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .align(Alignment.BottomCenter),
-                    )
+                    is LoadingState.Initializing -> if (EinkMotion.isAnimationOff) {
+                        LinearProgressIndicator(
+                            progress = { 0.25f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter),
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter),
+                        )
+                    }
                     is LoadingState.Loading -> LinearProgressIndicator(
                         progress = { loadingState.progress },
                         modifier = Modifier

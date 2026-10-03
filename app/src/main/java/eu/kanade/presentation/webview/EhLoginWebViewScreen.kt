@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.LinearProgressIndicator
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,11 +74,20 @@ fun EhLoginWebViewScreen(
                     navigationIcon = Icons.Outlined.Close,
                 )
                 when (val loadingState = state.loadingState) {
-                    is LoadingState.Initializing -> LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .align(Alignment.BottomCenter),
-                    )
+                    is LoadingState.Initializing -> if (EinkMotion.isAnimationOff) {
+                        LinearProgressIndicator(
+                            progress = { 0.25f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter),
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter),
+                        )
+                    }
                     is LoadingState.Loading -> {
                         val animatedProgress by animateFloatAsState(
                             loadingState.progress,

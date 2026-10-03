@@ -28,7 +28,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import eu.kanade.presentation.util.isTabletUi
-import androidx.compose.material3.CircularProgressIndicator
+import eu.kanade.tachiyomi.util.system.EinkMotion
+import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -247,7 +248,7 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
     ) { padding ->
         when {
             loading -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
             }
             error != null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text(error ?: stringResource(MR.strings.reader_load_failed), color = MaterialTheme.colorScheme.error)

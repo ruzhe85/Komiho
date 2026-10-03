@@ -35,11 +35,16 @@ import androidx.compose.ui.tooling.preview.Preview
  * A combined [CircularProgressIndicator] that always rotates.
  *
  * By always rotating we give the feedback to the user that the application isn't 'stuck'.
+ *
+ * Komiho: [reducedMotion] 为 true（E-Ink 模式关动画）时不跑**无限循环**动画 ——
+ * `rememberInfiniteTransition` 读的是帧时钟而非 `MotionDurationScale`，动画总闸盖不住，
+ * 只会让墨水屏持续刷新留残影。此时改画一个固定进度的静态环，保留「在加载」的语义。
  */
 @Composable
 fun CombinedCircularProgressIndicator(
     progress: () -> Float,
     modifier: Modifier = Modifier,
+    reducedMotion: Boolean = false,
 ) {
     AnimatedContent(
         targetState = progress() == 0f,
@@ -49,19 +54,28 @@ fun CombinedCircularProgressIndicator(
     ) { indeterminate ->
         if (indeterminate) {
             // Indeterminate
-            CircularProgressIndicator()
+            if (reducedMotion) {
+                CircularProgressIndicator(progress = { STATIC_INDETERMINATE_PROGRESS })
+            } else {
+                CircularProgressIndicator()
+            }
         } else {
             // Determinate
-            val infiniteTransition = rememberInfiniteTransition(label = "infiniteRotation")
-            val rotation by infiniteTransition.animateFloat(
-                initialValue = 0f,
-                targetValue = 360f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(2000, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart,
-                ),
-                label = "rotation",
-            )
+            val rotation = if (reducedMotion) {
+                0f
+            } else {
+                val infiniteTransition = rememberInfiniteTransition(label = "infiniteRotation")
+                val value by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(2000, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart,
+                    ),
+                    label = "rotation",
+                )
+                value
+            }
             val animatedProgress by animateFloatAsState(
                 targetValue = progress(),
                 animationSpec = ProgressIndicatorDefaults.ProgressAnimationSpec,
@@ -74,6 +88,12 @@ fun CombinedCircularProgressIndicator(
         }
     }
 }
+
+/**
+ * 静态「加载中」环的固定进度（约 1/4 圈）。纯展示用，不代表真实进度，
+ * 只是为了在 E-Ink 无动画模式下仍有「非空环」表示忙碌。
+ */
+private const val STATIC_INDETERMINATE_PROGRESS = 0.25f
 
 @Preview
 @Composable

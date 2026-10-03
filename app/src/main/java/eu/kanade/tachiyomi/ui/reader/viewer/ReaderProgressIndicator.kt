@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.isVisible
 import com.google.android.material.progressindicator.CircularProgressIndicator
 import eu.kanade.presentation.theme.TachiyomiTheme
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
 
 /**
@@ -51,7 +52,10 @@ class ReaderProgressIndicator @JvmOverloads constructor(
     override fun Content() {
         TachiyomiTheme {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                CombinedCircularProgressIndicator(progress = { progress })
+                CombinedCircularProgressIndicator(
+                    progress = { progress },
+                    reducedMotion = EinkMotion.isAnimationOff,
+                )
                 labelText?.let {
                     Spacer(Modifier.height(12.dp))
                     // 文字颜色随主题（TachiyomiTheme 提供的 content color），不硬编码。

@@ -13,6 +13,7 @@ import com.google.android.material.progressindicator.CircularProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderButton
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderTransitionView
 import eu.kanade.tachiyomi.util.system.dpToPx
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
@@ -101,7 +102,13 @@ class PagerTransitionHolder(
      */
     private fun setLoading() {
         val progress = CircularProgressIndicator(context)
-        progress.isIndeterminate = true
+        // Komiho: E-Ink 关动画 → 静态进度环（无限旋转动画盖不住，且持续刷新留残影）。
+        if (EinkMotion.isAnimationOff) {
+            progress.isIndeterminate = false
+            progress.setProgressCompat(25, false)
+        } else {
+            progress.isIndeterminate = true
+        }
 
         val textView = AppCompatTextView(context).apply {
             wrapContent()

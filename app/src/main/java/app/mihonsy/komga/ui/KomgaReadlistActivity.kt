@@ -12,7 +12,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CircularProgressIndicator
+import eu.kanade.tachiyomi.util.system.EinkMotion
+import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -121,7 +122,7 @@ private fun KomgaReadlistScreen(readlistId: String, readlistName: String, modifi
     ) { padding ->
         when {
             loading -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
             }
             error != null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

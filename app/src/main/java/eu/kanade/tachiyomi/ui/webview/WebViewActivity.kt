@@ -12,6 +12,7 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import eu.kanade.tachiyomi.util.system.WebViewUtil
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toShareIntent
@@ -36,15 +37,16 @@ class WebViewActivity : BaseActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Komiho: E-Ink 关动画时 push/pop 转场归零（显式转场优先于主题窗口动画）。
+        val (pushEnter, pushExit) = EinkMotion.transitionRes(
+            R.anim.shared_axis_x_push_enter,
+            R.anim.shared_axis_x_push_exit,
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            overrideActivityTransition(
-                OVERRIDE_TRANSITION_OPEN,
-                R.anim.shared_axis_x_push_enter,
-                R.anim.shared_axis_x_push_exit,
-            )
+            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, pushEnter, pushExit)
         } else {
             @Suppress("DEPRECATION")
-            overridePendingTransition(R.anim.shared_axis_x_push_enter, R.anim.shared_axis_x_push_exit)
+            overridePendingTransition(pushEnter, pushExit)
         }
         super.onCreate(savedInstanceState)
 
@@ -87,15 +89,15 @@ class WebViewActivity : BaseActivity() {
 
     override fun finish() {
         super.finish()
+        val (popEnter, popExit) = EinkMotion.transitionRes(
+            R.anim.shared_axis_x_pop_enter,
+            R.anim.shared_axis_x_pop_exit,
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            overrideActivityTransition(
-                OVERRIDE_TRANSITION_CLOSE,
-                R.anim.shared_axis_x_pop_enter,
-                R.anim.shared_axis_x_pop_exit,
-            )
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, popEnter, popExit)
         } else {
             @Suppress("DEPRECATION")
-            overridePendingTransition(R.anim.shared_axis_x_pop_enter, R.anim.shared_axis_x_pop_exit)
+            overridePendingTransition(popEnter, popExit)
         }
     }
 

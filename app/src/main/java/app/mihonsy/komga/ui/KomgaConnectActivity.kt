@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -232,7 +233,15 @@ private fun KomgaConnectScreen(editId: String? = null) {
                     modifier = Modifier.weight(1f),
                 ) {
                     if (testing) {
-                        CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp)
+                        if (EinkMotion.isAnimationOff) {
+                            CircularProgressIndicator(
+                                progress = { 0.25f },
+                                modifier = Modifier.height(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp)
+                        }
                     } else {
                         Text(stringResource(MR.strings.action_test_connection))
                     }
@@ -243,7 +252,15 @@ private fun KomgaConnectScreen(editId: String? = null) {
                     modifier = Modifier.weight(1f),
                 ) {
                     if (connecting) {
-                        CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp)
+                        if (EinkMotion.isAnimationOff) {
+                            CircularProgressIndicator(
+                                progress = { 0.25f },
+                                modifier = Modifier.height(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp)
+                        }
                     } else {
                         Text(stringResource(MR.strings.action_connect))
                     }

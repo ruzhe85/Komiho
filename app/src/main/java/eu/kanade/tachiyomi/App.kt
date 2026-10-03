@@ -213,11 +213,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityPostCreated(activity: Activity, savedInstanceState: Bundle?) {
                 EinkMotion.applyComposeDurationScale(activity)
+                EinkMotion.applyWindowAnimations(activity)
             }
 
             override fun onActivityResumed(activity: Activity) {
                 resumedActivity = activity
                 EinkMotion.applyComposeDurationScale(activity)
+                EinkMotion.applyWindowAnimations(activity)
             }
 
             override fun onActivityPaused(activity: Activity) {
@@ -234,12 +236,16 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // Komiho: 在设置页**当场**切换 E-Ink 总开关/关动画子项时，用户还停在这个
         // Activity 上 —— 只靠 Resumed 重应用的话，要等离开再回来动画才归零，观感上
         // 就是「设置了没效果」。所以订阅偏好变化，对前台 Activity 立即重应用。
+        val reapplyEinkMotion = { activity: Activity ->
+            EinkMotion.applyComposeDurationScale(activity)
+            EinkMotion.applyWindowAnimations(activity)
+        }
         Injekt.get<UiPreferences>().let { prefs ->
             prefs.einkMode.changes().drop(1)
-                .onEach { EinkMotion.applyComposeDurationScale(resumedActivity ?: return@onEach) }
+                .onEach { reapplyEinkMotion(resumedActivity ?: return@onEach) }
                 .launchIn(scope)
             prefs.einkDisableAnimation.changes().drop(1)
-                .onEach { EinkMotion.applyComposeDurationScale(resumedActivity ?: return@onEach) }
+                .onEach { reapplyEinkMotion(resumedActivity ?: return@onEach) }
                 .launchIn(scope)
         }
 

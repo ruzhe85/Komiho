@@ -26,6 +26,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -511,6 +512,11 @@ class WebtoonViewer(
      * Scrolls one screen over a period of time
      */
     fun linearScroll(duration: Duration) {
+        // Komiho: E-Ink 关动画 → 直接跳一屏，不跑 animateScrollBy（连续小步重绘会叠残影）。
+        if (EinkMotion.isAnimationOff) {
+            recycler.scrollBy(0, activity.resources.displayMetrics.heightPixels)
+            return
+        }
         animateScrollBy(
             activity.resources.displayMetrics.heightPixels,
             duration.inWholeMilliseconds.toInt(),

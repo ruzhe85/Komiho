@@ -12,6 +12,7 @@ import androidx.core.animation.doOnEnd
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import eu.kanade.tachiyomi.ui.reader.viewer.GestureDetectorWithLongTap
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import kotlin.math.abs
 
 /**
@@ -141,7 +142,8 @@ class WebtoonRecyclerView @JvmOverloads constructor(
             setScaleRate(currentScale)
         }
         animatorSet.playTogether(translationXAnimator, translationYAnimator, scaleAnimator)
-        animatorSet.duration = ANIMATOR_DURATION_TIME.toLong()
+        // Komiho: E-Ink 关动画 → 时长 0（AnimatorSet 立即跳终值，无中间帧残影）。
+        animatorSet.duration = EinkMotion.duration(context, ANIMATOR_DURATION_TIME).toLong()
         animatorSet.interpolator = DecelerateInterpolator()
         animatorSet.start()
         animatorSet.doOnEnd {
@@ -171,7 +173,7 @@ class WebtoonRecyclerView @JvmOverloads constructor(
             animatorSet.play(translationYAnimator)
         }
 
-        animatorSet.duration = 400
+        animatorSet.duration = EinkMotion.duration(context, ZOOM_FLING_DURATION).toLong()
         animatorSet.interpolator = DecelerateInterpolator()
         animatorSet.start()
 
@@ -388,6 +390,9 @@ class WebtoonRecyclerView @JvmOverloads constructor(
 }
 
 private const val ANIMATOR_DURATION_TIME = 200
+
+/** 捏合后惯性缩放（[WebtoonRecyclerView.zoomFling]）的常规时长（ms）。 */
+private const val ZOOM_FLING_DURATION = 400
 
 // Komiho: 即时点击翻页的判定阈值（取自 ComicScreen 的 ImgActivity）——
 // 按压时长上限 420ms，允许的最大位移为视区的 1/20（5%），超出即认为是滑动/长按，

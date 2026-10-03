@@ -14,14 +14,20 @@ import uy.kohesive.injekt.api.get
  *
  * 墨水屏上「取消动画」不是观感偏好，而是**物理约束**：每次动画都要全屏刷新若干次，
  * 残影会叠加、功耗上升，而且半透明的中间态在 16 级灰阶上会被量化成脏块。所以这里
- * 提供一个全局开关，三类动画各自接入：
+ * 提供一个全局开关，四类动画各自接入：
  *
  * - **Compose**：[applyComposeDurationScale]（见其注释 —— 为什么不是 CompositionLocal）。
+ * - **窗口**：[applyWindowAnimations] / [transitionRes] —— Activity 之间的切换走的是
+ *   主题窗口动画，完全不经过 Compose，是「关不掉动画」最容易漏的一层。
  * - **View**：[duration] 严格返回 **0**，不要用系统动画倍率折算 —— 现有的
  *   `Int.getSystemScaledDuration()` 带 `coerceAtLeast(1)`，1ms 仍会触发一次
  *   invalidate，在墨水屏上就是**一帧残影**，等于没关。
  * - **Coil**：`App` 里全局 `crossfade(300 * animatorDurationScale)` 改 `false`。
  *   页面级请求本来就都是 `crossfade(false)`，只有 App 级的那个还开着。
+ *
+ * 注意：Compose 的**无限循环动画**（`rememberInfiniteTransition`，如加载转圈）读的是
+ * 帧时钟而非 MotionDurationScale，总闸盖不住，只能在组件里按 [isAnimationOff] 走静态分支
+ * （见 `CombinedCircularProgressIndicator`）。
  *
  * 读的是 [UiPreferences.isEinkAnimationOff]（= E-Ink 模式开 **且**「关闭动画」子项开），
  * 两个条件分开是为了让用户能只要动画归零、不要灰阶化 —— 前者是纯收益，后者主观。
@@ -40,6 +46,48 @@ object EinkMotion {
      */
     fun duration(context: Context, normalMillis: Int): Int =
         if (isAnimationOff) 0 else normalMillis
+
+    /**
+     * Activity 打开/关闭转场资源：E-Ink 关动画时返回 `0 to 0`（系统视作无转场），
+     * 否则原样返回调用方给的 push/pop 动画。
+     *
+     * 用途：`overrideActivityTransition` / `overridePendingTransition` 的显式转场
+     * **优先于**主题的 `android:windowAnimationStyle`，所以 [applyWindowAnimations]
+     * 盖不住它们 —— 阅读器（进/出）与内置 WebView 这两处必须各自判定。
+     */
+    fun transitionRes(enterRes: Int, exitRes: Int): Pair<Int, Int> =
+        if (isAnimationOff) 0 to 0 else enterRes to exitRes
+
+    /**
+     * 应用/还原 **Activity 窗口转场**（动画总闸里 Compose 之外的那一层）。
+     *
+     * Compose 动画走 recomposer 的 MotionDurationScale，但 Activity 之间的切换是
+     * **窗口动画**（主题 `android:windowAnimationStyle` → `Animation.Komiho.WindowFade`
+     * 的 200/150ms fade），完全不经过 Compose —— 不单独关的话「菜单进出」永远在动，
+     * 用户看到的就是「E-Ink 模式关不掉动画」。
+     *
+     * - 关动画：`Window.setWindowAnimations(0)` → 本窗口进出瞬时；
+     * - 开动画：把主题里的 `android:windowAnimationStyle` 解出来设回去（只还原这一项，
+     *   不动静态主题；因为「关闭动画」子项切换不会 recreate Activity，必须显式还原）。
+     *
+     * 对显式 `overrideActivityTransition` / `overridePendingTransition` 的页面无效，
+     * 那些点用 [transitionRes] 判定。异常一律吞掉：失败 = 保留主题转场。
+     */
+    fun applyWindowAnimations(activity: Activity) {
+        runCatching {
+            val window = activity.window ?: return@runCatching
+            if (isAnimationOff) {
+                window.setWindowAnimations(0)
+            } else {
+                val typed = activity.obtainStyledAttributes(
+                    intArrayOf(android.R.attr.windowAnimationStyle),
+                )
+                val resId = typed.getResourceId(0, 0)
+                typed.recycle()
+                window.setWindowAnimations(resId)
+            }
+        }
+    }
 
     /**
      * Compose 侧的动画缩放因子：0 = 立即跳终值。

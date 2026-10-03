@@ -106,6 +106,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import eu.kanade.tachiyomi.util.system.isNightMode
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toShareIntent
@@ -228,15 +229,17 @@ class ReaderActivity : BaseActivity() {
      */
     override fun onCreate(savedInstanceState: Bundle?) {
         registerSecureActivity(this)
+        // Komiho: E-Ink 关动画时 push/pop 转场归零（显式转场优先于主题窗口动画，
+        // 盖不住，必须在这里判定）。
+        val (pushEnter, pushExit) = EinkMotion.transitionRes(
+            R.anim.shared_axis_x_push_enter,
+            R.anim.shared_axis_x_push_exit,
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            overrideActivityTransition(
-                OVERRIDE_TRANSITION_OPEN,
-                R.anim.shared_axis_x_push_enter,
-                R.anim.shared_axis_x_push_exit,
-            )
+            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, pushEnter, pushExit)
         } else {
             @Suppress("DEPRECATION")
-            overridePendingTransition(R.anim.shared_axis_x_push_enter, R.anim.shared_axis_x_push_exit)
+            overridePendingTransition(pushEnter, pushExit)
         }
 
         enableEdgeToEdge()
@@ -421,7 +424,12 @@ class ReaderActivity : BaseActivity() {
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            CircularProgressIndicator()
+                            // Komiho: E-Ink 关动画 → 不转圈（无限动画盖不住），画静态环。
+                            if (EinkMotion.isAnimationOff) {
+                                CircularProgressIndicator(progress = { 0.25f })
+                            } else {
+                                CircularProgressIndicator()
+                            }
                             Text(stringResource(MR.strings.loading))
                         }
                     },
@@ -784,15 +792,15 @@ class ReaderActivity : BaseActivity() {
             )
         }
         super.finish()
+        val (popEnter, popExit) = EinkMotion.transitionRes(
+            R.anim.shared_axis_x_pop_enter,
+            R.anim.shared_axis_x_pop_exit,
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            overrideActivityTransition(
-                OVERRIDE_TRANSITION_CLOSE,
-                R.anim.shared_axis_x_pop_enter,
-                R.anim.shared_axis_x_pop_exit,
-            )
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, popEnter, popExit)
         } else {
             @Suppress("DEPRECATION")
-            overridePendingTransition(R.anim.shared_axis_x_pop_enter, R.anim.shared_axis_x_pop_exit)
+            overridePendingTransition(popEnter, popExit)
         }
     }
 

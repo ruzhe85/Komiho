@@ -18,7 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
+import eu.kanade.tachiyomi.util.system.EinkMotion
+import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Done
@@ -150,7 +151,7 @@ private fun KomgaSectionListScreen(section: HomeSection, modifier: Modifier = Mo
     ) { padding ->
         when {
             loading -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
             }
             error != null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -166,11 +167,20 @@ private fun IndexingDownloadBanner(modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.Center,
     ) {
         var textHeight by remember { mutableStateOf(0.dp) }
-        CircularProgressIndicator(
-            modifier = Modifier.requiredSize(textHeight),
-            color = MaterialTheme.colorScheme.onSecondary,
-            strokeWidth = textHeight / 8,
-        )
+        if (EinkMotion.isAnimationOff) {
+            CircularProgressIndicator(
+                progress = { 0.25f },
+                modifier = Modifier.requiredSize(textHeight),
+                color = MaterialTheme.colorScheme.onSecondary,
+                strokeWidth = textHeight / 8,
+            )
+        } else {
+            CircularProgressIndicator(
+                modifier = Modifier.requiredSize(textHeight),
+                color = MaterialTheme.colorScheme.onSecondary,
+                strokeWidth = textHeight / 8,
+            )
+        }
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = stringResource(MR.strings.download_notifier_cache_renewal),

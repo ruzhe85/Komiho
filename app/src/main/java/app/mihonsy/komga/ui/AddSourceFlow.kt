@@ -52,6 +52,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -1030,7 +1031,15 @@ private fun WebDavFormPage(
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (testing) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                if (EinkMotion.isAnimationOff) {
+                    CircularProgressIndicator(
+                        progress = { 0.25f },
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
                 Spacer(Modifier.width(8.dp))
             }
             Text(composeStringResource(R.string.addsrc_test))
@@ -1157,7 +1166,15 @@ private fun SmbFormPage(
             },
         ) {
             if (lanScanning) {
-                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                if (EinkMotion.isAnimationOff) {
+                    CircularProgressIndicator(
+                        progress = { 0.25f },
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                }
                 Spacer(Modifier.width(8.dp))
             }
             Text(scanLabel, style = MaterialTheme.typography.bodyMedium)
@@ -1300,7 +1317,15 @@ private fun SmbFormPage(
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (testing) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                if (EinkMotion.isAnimationOff) {
+                    CircularProgressIndicator(
+                        progress = { 0.25f },
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
                 Spacer(Modifier.width(8.dp))
             }
             Text(composeStringResource(R.string.addsrc_test))
@@ -1517,7 +1542,15 @@ private fun KomgaFormPage(
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (testing) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                if (EinkMotion.isAnimationOff) {
+                    CircularProgressIndicator(
+                        progress = { 0.25f },
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
                 Spacer(Modifier.width(8.dp))
             }
             Text(composeStringResource(R.string.addsrc_test))

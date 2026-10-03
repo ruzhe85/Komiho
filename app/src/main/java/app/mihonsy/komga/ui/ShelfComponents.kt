@@ -47,8 +47,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import app.mihonsy.komga.data.download.DownloadUiState
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import eu.kanade.tachiyomi.util.system.EinkMotion
+import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -668,7 +669,7 @@ private fun ReadlistPickerDialog(
                 Spacer(Modifier.height(8.dp))
                 when {
                     loading -> Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
                     }
                     error != null -> Text(error ?: context.getString(R.string.load_failed_short), color = MaterialTheme.colorScheme.error)
                     filtered.isEmpty() -> Text(
@@ -793,10 +794,19 @@ fun DownloadBadge(
         DownloadUiState.NONE -> IconButton(onClick = onDownloadClick, modifier = modifier) {
             Icon(Icons.Filled.Download, contentDescription = stringResource(MR.strings.desc_download), tint = MaterialTheme.colorScheme.onSurface)
         }
-        DownloadUiState.QUEUED, DownloadUiState.DOWNLOADING -> CircularProgressIndicator(
-            modifier = modifier,
-            strokeWidth = 2.dp,
-        )
+        DownloadUiState.QUEUED, DownloadUiState.DOWNLOADING -> if (EinkMotion.isAnimationOff) {
+            // Komiho: E-Ink 关动画 → 静态环（无限动画不受 Compose 时长倍率控制）。
+            CircularProgressIndicator(
+                progress = { 0.25f },
+                modifier = modifier,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            CircularProgressIndicator(
+                modifier = modifier,
+                strokeWidth = 2.dp,
+            )
+        }
         DownloadUiState.DOWNLOADED -> Icon(
             Icons.Filled.Done,
             contentDescription = stringResource(MR.strings.desc_downloaded),

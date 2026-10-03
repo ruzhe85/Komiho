@@ -11,6 +11,7 @@ import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProgressIndicatorDefaults
@@ -134,13 +135,24 @@ private fun DownloadingIndicator(
             (downloadState == Download.State.DOWNLOADING && downloadProgress == 0)
         if (indeterminate) {
             arrowColor = strokeColor
-            CircularProgressIndicator(
-                modifier = IndicatorModifier,
-                color = strokeColor,
-                strokeWidth = IndicatorStrokeWidth,
-                trackColor = Color.Transparent,
-                strokeCap = StrokeCap.Butt,
-            )
+            if (EinkMotion.isAnimationOff) {
+                CircularProgressIndicator(
+                    progress = { 0.25f },
+                    modifier = IndicatorModifier,
+                    color = strokeColor,
+                    strokeWidth = IndicatorStrokeWidth,
+                    trackColor = Color.Transparent,
+                    strokeCap = StrokeCap.Butt,
+                )
+            } else {
+                CircularProgressIndicator(
+                    modifier = IndicatorModifier,
+                    color = strokeColor,
+                    strokeWidth = IndicatorStrokeWidth,
+                    trackColor = Color.Transparent,
+                    strokeCap = StrokeCap.Butt,
+                )
+            }
         } else {
             val animatedProgress by animateFloatAsState(
                 targetValue = downloadProgress / 100f,

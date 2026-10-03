@@ -125,7 +125,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import eu.kanade.presentation.components.TabbedDialog
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import tachiyomi.presentation.core.components.CheckboxItem
+import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
 import tachiyomi.presentation.core.components.SliderItem
 import tachiyomi.presentation.core.components.SortItem
 import androidx.compose.material3.Icon
@@ -1703,7 +1705,7 @@ private fun HomeTab(
     Box(Modifier.fillMaxSize()) {
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
             }
                 error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2765,7 +2767,7 @@ private fun LibraryTab(
         val shelfModifier = if (inSelection) Modifier.weight(1f) else Modifier.fillMaxSize()
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
             }
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -3209,7 +3211,7 @@ private fun SeriesReadlistPickerDialog(
                 Spacer(Modifier.height(8.dp))
                 when {
                     loading -> Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
                     }
                     error != null -> Text(error ?: context.getString(R.string.load_failed_short), color = MaterialTheme.colorScheme.error)
                     filtered.isEmpty() -> Text(
@@ -3315,7 +3317,7 @@ private fun SeriesCollectionPickerDialog(
                 Spacer(Modifier.height(8.dp))
                 when {
                     loading -> Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
                     }
                     error != null -> Text(error ?: context.getString(R.string.load_failed_short), color = MaterialTheme.colorScheme.error)
                     filtered.isEmpty() -> Text(
@@ -3426,7 +3428,7 @@ private fun ListsTab(
             Box(Modifier.fillMaxSize()) {
                 when {
                     loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
                     }
                     error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -3839,7 +3841,7 @@ private fun EmbeddedSearch(
 
         when {
             searching -> Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
             }
             error != null -> Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
                 Text(error ?: "", color = MaterialTheme.colorScheme.error)
@@ -5180,7 +5182,15 @@ private fun KomgaAbout(
             },
             trailing = {
                 if (checking) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    if (EinkMotion.isAnimationOff) {
+                        CircularProgressIndicator(
+                            progress = { 0.25f },
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    }
                 }
             },
         )
@@ -6159,7 +6169,11 @@ private fun LocalFileBrowser(
 
         // 递归搜索进行中：顶部细进度条（不遮挡已流式出现的命中项）。
         if (showRecursive && searchScanning) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (EinkMotion.isAnimationOff) {
+                LinearProgressIndicator(progress = { 0.25f }, modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
         }
 
         // 列目录内容。
@@ -6167,7 +6181,7 @@ private fun LocalFileBrowser(
             // 递归搜索进行中：优先于 loading 展示，避免误显「正在连接」。
             showRecursive && searchScanning && displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
+                    CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
                     Spacer(Modifier.height(12.dp))
                     Text(
                         text = composeStringResource(R.string.searching),
@@ -6176,7 +6190,7 @@ private fun LocalFileBrowser(
                     )
                 }
             }
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff) }
             displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = composeStringResource(if (showRecursive) R.string.no_match_results else R.string.local_empty_dir),
@@ -7048,14 +7062,18 @@ private fun WebDavBrowsePane(
         // 列目录内容（空目录提示已按要求去掉：非加载、无错误且无条目时留白）。
         // 递归搜索进行中：顶部细进度条（不遮挡已流式出现的命中项）。
         if (showRecursive && searchScanning) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (EinkMotion.isAnimationOff) {
+                LinearProgressIndicator(progress = { 0.25f }, modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
         }
 
         when {
             // 递归搜索进行中：优先于 loading 展示，避免误显「正在连接」。
             showRecursive && searchScanning && displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
+                    CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
                     Spacer(Modifier.height(12.dp))
                     Text(
                         text = composeStringResource(R.string.searching),
@@ -7064,7 +7082,7 @@ private fun WebDavBrowsePane(
                     )
                 }
             }
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff) }
             errorText != null -> Column(
                 Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -7749,14 +7767,18 @@ private fun SmbBrowsePane(
 
         // 递归搜索进行中：顶部细进度条（不遮挡已流式出现的命中项）。
         if (showRecursive && searchScanning) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (EinkMotion.isAnimationOff) {
+                LinearProgressIndicator(progress = { 0.25f }, modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
         }
 
         when {
             // 递归搜索进行中：优先于 loading 展示，避免与「正在连接 NAS…」混淆。
             showRecursive && searchScanning && displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
+                    CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
                     Spacer(Modifier.height(12.dp))
                     Text(
                         text = composeStringResource(R.string.searching),
@@ -7767,7 +7789,7 @@ private fun SmbBrowsePane(
             }
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
+                    CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
                     Spacer(Modifier.height(12.dp))
                     Text(
                         text = smbConnectingMsg,
@@ -8293,7 +8315,15 @@ private fun LocalFileRow(
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    loading = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp)) } },
+                    loading = {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            if (EinkMotion.isAnimationOff) {
+                                CircularProgressIndicator(progress = { 0.25f }, modifier = Modifier.size(20.dp))
+                            } else {
+                                CircularProgressIndicator(Modifier.size(20.dp))
+                            }
+                        }
+                    },
                     error = {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(Icons.Filled.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -9277,7 +9307,7 @@ private fun BookmarksTabLocal(
 
     val list = items
     when {
-        loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff) }
         list.isNullOrEmpty() -> LocalEmptyHint(Icons.Filled.Bookmark, composeStringResource(R.string.local_bookmarks_empty))
         else -> {
             val groups = list.groupBy { it.chapterId }.toList()
@@ -9555,7 +9585,7 @@ private fun DownloadsTab(
 
     when {
         loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+            CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
         }
         seriesList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {

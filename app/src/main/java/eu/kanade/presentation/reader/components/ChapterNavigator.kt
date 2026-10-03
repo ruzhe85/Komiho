@@ -56,6 +56,7 @@ import coil3.compose.SubcomposeAsyncImage
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.theme.TachiyomiPreviewTheme
 import eu.kanade.presentation.util.isTabletUi
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import kotlinx.coroutines.flow.collect
@@ -325,10 +326,19 @@ private fun PagePreviewStrip(
                             .clip(RoundedCornerShape(6.dp)),
                         loading = {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(18.dp),
-                                )
+                                // Komiho: E-Ink 关动画 → 静态环，避免缩略图加载时整屏持续刷新。
+                                if (EinkMotion.isAnimationOff) {
+                                    CircularProgressIndicator(
+                                        progress = { 0.25f },
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                } else {
+                                    CircularProgressIndicator(
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
                             }
                         },
                     )

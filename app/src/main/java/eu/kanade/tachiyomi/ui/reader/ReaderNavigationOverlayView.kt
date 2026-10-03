@@ -13,6 +13,7 @@ import androidx.core.graphics.withTranslation
 import androidx.core.view.isVisible
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation
 import eu.kanade.tachiyomi.ui.reader.viewer.navigation.DisabledNavigation
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import tachiyomi.core.common.i18n.stringResource
 import kotlin.math.abs
 
@@ -33,7 +34,7 @@ class ReaderNavigationOverlayView(context: Context, attributeSet: AttributeSet) 
 
         viewPropertyAnimator = animate()
             .alpha(1f)
-            .setDuration(FADE_DURATION)
+            .setDuration(EinkMotion.duration(context, FADE_DURATION.toInt()).toLong())
             .withStartAction {
                 isVisible = true
             }
@@ -92,7 +93,7 @@ class ReaderNavigationOverlayView(context: Context, attributeSet: AttributeSet) 
         if (viewPropertyAnimator == null && isVisible) {
             viewPropertyAnimator = animate()
                 .alpha(0f)
-                .setDuration(FADE_DURATION)
+                .setDuration(EinkMotion.duration(context, FADE_DURATION.toInt()).toLong())
                 .withEndAction {
                     isVisible = false
                     viewPropertyAnimator = null

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +66,11 @@ fun KomgaCover(
             modifier = Modifier.fillMaxSize(),
             loading = {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(strokeWidth = 2.dp)
+                    if (EinkMotion.isAnimationOff) {
+                        CircularProgressIndicator(progress = { 0.25f }, strokeWidth = 2.dp)
+                    } else {
+                        CircularProgressIndicator(strokeWidth = 2.dp)
+                    }
                 }
             },
             error = {
