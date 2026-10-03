@@ -89,7 +89,8 @@ object EinkMotion {
         // 包在外面的话异常直接打进主线程 → 无限崩溃循环（真机踩过）。
         activity.window.decorView.post {
             runCatching {
-                val content = activity.findViewById<View>(android.R.id.content) ?: return@post
+                val content = activity.findViewById<android.view.ViewGroup>(android.R.id.content)
+                    ?: return@post
                 val contentChild = content.getChildAt(0) ?: return@post
                 val tagId = contentChild.resources.getIdentifier(
                     "androidx_compose_ui_view_composition_context",
@@ -114,5 +115,4 @@ object EinkMotion {
             }
         }
     }
-}
 }
