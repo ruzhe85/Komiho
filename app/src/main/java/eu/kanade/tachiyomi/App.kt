@@ -209,22 +209,39 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 没有全 App 一处生效的入口，所以挂在生命周期回调上：PostCreated 兜住首次
         // 进入，Resumed 兜住运行中切开关 / 系统倍率变化（ContentObserver 会覆盖回
         // 系统值，靠这里收敛）。
+        var resumedActivity: Activity? = null
         registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityPostCreated(activity: Activity, savedInstanceState: Bundle?) {
                 EinkMotion.applyComposeDurationScale(activity)
             }
 
             override fun onActivityResumed(activity: Activity) {
+                resumedActivity = activity
                 EinkMotion.applyComposeDurationScale(activity)
+            }
+
+            override fun onActivityPaused(activity: Activity) {
+                if (resumedActivity === activity) resumedActivity = null
             }
 
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
             override fun onActivityStarted(activity: Activity) = Unit
-            override fun onActivityPaused(activity: Activity) = Unit
             override fun onActivityStopped(activity: Activity) = Unit
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
             override fun onActivityDestroyed(activity: Activity) = Unit
         })
+
+        // Komiho: 在设置页**当场**切换 E-Ink 总开关/关动画子项时，用户还停在这个
+        // Activity 上 —— 只靠 Resumed 重应用的话，要等离开再回来动画才归零，观感上
+        // 就是「设置了没效果」。所以订阅偏好变化，对前台 Activity 立即重应用。
+        Injekt.get<UiPreferences>().let { prefs ->
+            prefs.einkMode.changes().drop(1)
+                .onEach { EinkMotion.applyComposeDurationScale(resumedActivity ?: return@onEach) }
+                .launchIn(scope)
+            prefs.einkDisableAnimation.changes().drop(1)
+                .onEach { EinkMotion.applyComposeDurationScale(resumedActivity ?: return@onEach) }
+                .launchIn(scope)
+        }
 
         setAppCompatDelegateThemeMode(Injekt.get<UiPreferences>().themeMode.get())
 
