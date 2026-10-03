@@ -50,9 +50,8 @@ object EinkMotion {
         get() = if (isAnimationOff) 0f else 1f
 
     /**
-     * 把 Compose 动画总闸应用到 [activity] 窗口的 recomposer 上（App 的
-     * ActivityLifecycleCallbacks 在 PostCreated / Resumed 各调一次，Resumed 里再
-     * post 一拍执行以避开与 recomposer 创建的时序竞争）。
+     * 把 Compose 动画总闸应用到 [activity] 窗口的**真** recomposer 上（App 的
+     * ActivityLifecycleCallbacks 在 PostCreated / Resumed 各调一次）。
      *
      * ## 为什么不是 `LocalMotionDurationScale` CompositionLocal
      *
@@ -61,36 +60,46 @@ object EinkMotion {
      * 1.10.1）里**根本不存在**（已解包 aar 逐个确认），那是更新的 androidx 才有的 API。
      * 本版本里 Compose 动画读时长倍率的唯一来源是 recomposer 协程上下文里的
      * [MotionDurationScale] 元素（`androidx.compose.ui.MotionDurationScale`，公开接口），
-     * 由 `WindowRecomposer` 在建窗口时用系统「动画时长倍率」初始化；而拿到 recomposer
-     * 实例的入口 `View.windowRecomposer()` 与 `Recomposer.runningRecomposers`
-     * （返回的是只有元数据的 `RecomposerInfo`）都拿不到上下文。
+     * 由 `WindowRecomposer` 在建窗口时用系统「动画时长倍率」初始化。
      *
-     * 所以这里**按签名自发现**地反射调用 `WindowRecomposer_androidKt` 里
-     * `(View) -> Recomposer` 的静态方法（internal、且 internal 函数会被 Kotlin 做
-     * JVM 名修饰，按签名找比按名字找稳），再逐个把 scale 写成目标值：
-     * - E-Ink 开 → **严格 0**（0 = Compose 视作动画已禁用，立即跳终值，不产生中间帧）；
-     * - E-Ink 关 → 设回系统倍率（[animatorDurationScale]），与 Compose 自己的默认行为一致。
+     * ## 为什么只读缓存、绝不创建
      *
-     * 实例的类型是 ui 内部的 `MotionDurationScaleImpl`（`scaleFactor` 有公开读、私有写），
-     * 接口本身没有 setter，同样走反射写。两层脆弱性都用 [runCatching] 兜住：失败 =
-     * Compose 动画保持系统倍率，其余两层（View / Coil）不受影响。
+     * `setContent` 创建的 recomposer 缓存在 `android.R.id.content` **直接子 view** 的
+     * tag（`R.id.androidx_compose_ui_view_composition_context`）上。internal 的
+     * `View.windowRecomposer()` 会沿 view 树向上找这个缓存，找不到就**创建新的** ——
+     * 传 decorView 时找的是缓存 fallback 到 decor 自身，于是凭空造出第二个孤儿
+     * recomposer：scale 设在孤儿上对真正的 composition 无效（真机表现「动画照旧」），
+     * 孤儿还带着全套生命周期观察者与真身并存（皮肤切换 recreate 后行为异常）。
      *
-     * 系统倍率变化时 Compose 的 ContentObserver 会覆盖回系统值 —— 所以 Resumed 时
-     * 重调本函数即可收敛。
+     * 所以这里直接读那个 tag 拿真身；**拿不到就什么都不做**（组合还没开始 / 非
+     * Compose Activity），等下一次 Resumed 再收敛 —— 绝不借 internal 入口创建实例。
+     * - E-Ink 开 → scale **严格 0**（Compose 视作动画已禁用，立即跳终值）；
+     * - E-Ink 关 → 设回系统倍率（[animatorDurationScale]），与默认行为一致。
+     *
+     * `MotionDurationScaleImpl` 的 `scaleFactor` 是公开读 / 私有写（且 release 包里
+     * 被 R8 改名），所以 setter 按**签名**扫（单 float 参数、void 返回），不按名字。
+     * 反射全程 [runCatching] 兜底：失败 = Compose 动画保持系统倍率，其余两层
+     * （View / Coil）不受影响。系统倍率变化时 Compose 的 ContentObserver 会覆盖回
+     * 系统值 —— Resumed 重调本函数即可收敛。
      */
     fun applyComposeDurationScale(activity: Activity) {
         val target = if (isAnimationOff) 0f else activity.animatorDurationScale
-        // post 到主线程：PostCreated 时 recomposer 可能还没建好，推后一拍收敛。
+        // post 到主线程：PostCreated 时 setContent 的缓存可能还没落 tag。
         // ⚠️ lambda 在主线程**稍后**才跑，runCatching 必须包在 lambda 内部 ——
-        // 包在外面的话反射异常直接打进主线程 → 无限崩溃循环（真机踩过）。
+        // 包在外面的话异常直接打进主线程 → 无限崩溃循环（真机踩过）。
         activity.window.decorView.post {
             runCatching {
-                val recomposer = findWindowRecomposer(activity.window.decorView)
+                val content = activity.findViewById<View>(android.R.id.content) ?: return@post
+                val contentChild = content.getChildAt(0) ?: return@post
+                val tagId = contentChild.resources.getIdentifier(
+                    "androidx_compose_ui_view_composition_context",
+                    "id",
+                    "androidx.compose.ui",
+                )
+                if (tagId == 0) return@post
+                val recomposer = contentChild.getTag(tagId) as? Recomposer ?: return@post
                 val scale = recomposer.effectCoroutineContext[MotionDurationScale]
-                    ?: return@runCatching
-                // 不能按方法名找 `setScaleFactor`：release 包被 R8 改名（真机踩过，
-                // NoSuchMethodException）。按签名扫：单 float 参数、void 返回，
-                // 这个类里唯一的这种私有写方法就是 scaleFactor 的 setter。
+                    ?: return@post
                 val setter = scale.javaClass.declaredMethods.firstOrNull {
                     it.parameterTypes.size == 1 &&
                         it.parameterTypes[0] == Float::class.javaPrimitiveType &&
@@ -98,23 +107,12 @@ object EinkMotion {
                 } ?: return@runCatching
                 setter.isAccessible = true
                 setter.invoke(scale, target)
+                android.util.Log.d(
+                    "EinkMotion",
+                    "compose durationScale → $target (${scale.javaClass.simpleName})",
+                )
             }
         }
     }
-
-    /**
-     * 反射调用 `androidx.compose.ui.platform.WindowRecomposer_androidKt` 中签名
-     * `(View) -> Recomposer` 的方法（即 internal 的 `View.windowRecomposer()`）。
-     * 没建过窗口 recomposer 时它同时会创建一个 —— 这正是 setContent 的同款入口。
-     */
-    private fun findWindowRecomposer(rootView: View): Recomposer {
-        val ktClass = Class.forName("androidx.compose.ui.platform.WindowRecomposer_androidKt")
-        val method = ktClass.declaredMethods.firstOrNull {
-            it.parameterTypes.size == 1 &&
-                it.parameterTypes[0] == View::class.java &&
-                it.returnType == Recomposer::class.java
-        } ?: error("WindowRecomposer_androidKt: 未找到 (View) -> Recomposer 的方法")
-        method.isAccessible = true
-        return method.invoke(null, rootView) as Recomposer
-    }
+}
 }
