@@ -5,8 +5,9 @@
   新增版本時三份都要同步。
 -->
 <changelog bulletedList="true">
-    <changelogversion versionName="1.4.0" changeDate="October 3, 2026">
-        <changelogtext>[b]Komiho 1.4.0[/b]</changelogtext>
+    <changelogversion versionName="1.4.1" changeDate="October 4, 2026">
+        <changelogtext>[b]Komiho 1.4.1[/b]</changelogtext>
+        <changelogtext>[b]修復[/b] 歷史無法寫入頁數</changelogtext>
         <changelogtext>[b]新增[/b] WebDAV 同步</changelogtext>
         <changelogtext>[b]新增[/b] 影像增強-降低摩爾紋</changelogtext>
         <changelogtext>[b]新增[/b] 設定-進階-進度條縮圖</changelogtext>
@@ -14,6 +15,7 @@
         <changelogtext>[b]新增[/b] 設定-進階-WebDAV 顯示封面</changelogtext>
         <changelogtext>[b]新增[/b] NPU 模型 Real-CUGAN Pro/SE（需更新安裝模型包）</changelogtext>
         <changelogtext>[b]優化[/b] AI 增強排程、Vulkan 推論與進度條拖曳效能</changelogtext>
+        <changelogtext>[b]優化[/b] 自動進入條漫模式判斷機制</changelogtext>
         <changelogtext>[b]修復[/b] PDF 封面／總頁數顯示</changelogtext>
         <changelogtext>[b]修復[/b] 受DRM保護的EPUB現在明確提示無法閱讀</changelogtext>
         <changelogtext>[b]修復[/b] 僅做權限加密的PDF不再要求密碼</changelogtext>

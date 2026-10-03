@@ -1,7 +1,8 @@
 # Komiho Changelog
 
-## v1.4.0 (2026-10-03)
+## v1.4.1 (2026-10-04)
 
+- Fixed Reading history could not record the page number
 - New WebDAV sync
 - New Image enhancement — moiré reduction
 - New Settings → Advanced → progress bar thumbnails
@@ -9,6 +10,7 @@
 - New Settings → Advanced → show WebDAV covers
 - New NPU models Real-CUGAN Pro/SE (requires updating the model package)
 - Improved AI enhancement scheduling, Vulkan inference, and progress bar dragging performance
+- Improved Auto webtoon mode detection
 - Fixed PDF cover / page count display
 - Fixed DRM-protected EPUBs now clearly report that they can't be read
 - Fixed Permission-only encrypted PDFs no longer ask for a password

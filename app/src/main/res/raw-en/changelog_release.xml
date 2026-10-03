@@ -6,8 +6,9 @@
   Keep both files in sync when adding a release.
 -->
 <changelog bulletedList="true">
-    <changelogversion versionName="1.4.0" changeDate="October 3, 2026">
-        <changelogtext>[b]Komiho 1.4.0[/b]</changelogtext>
+    <changelogversion versionName="1.4.1" changeDate="October 4, 2026">
+        <changelogtext>[b]Komiho 1.4.1[/b]</changelogtext>
+        <changelogtext>[b]Fixed[/b] Reading history could not record the page number</changelogtext>
         <changelogtext>[b]New[/b] WebDAV sync</changelogtext>
         <changelogtext>[b]New[/b] Image enhancement — moiré reduction</changelogtext>
         <changelogtext>[b]New[/b] Settings → Advanced → progress bar thumbnails</changelogtext>
@@ -15,6 +16,7 @@
         <changelogtext>[b]New[/b] Settings → Advanced → show WebDAV covers</changelogtext>
         <changelogtext>[b]New[/b] NPU models Real-CUGAN Pro/SE (requires updating the model package)</changelogtext>
         <changelogtext>[b]Improved[/b] AI enhancement scheduling, Vulkan inference, and progress bar dragging performance</changelogtext>
+        <changelogtext>[b]Improved[/b] Auto webtoon mode detection</changelogtext>
         <changelogtext>[b]Fixed[/b] PDF cover / page count display</changelogtext>
         <changelogtext>[b]Fixed[/b] DRM-protected EPUBs now clearly report that they can't be read</changelogtext>
         <changelogtext>[b]Fixed[/b] Permission-only encrypted PDFs no longer ask for a password</changelogtext>
