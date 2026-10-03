@@ -1,5 +1,19 @@
 # Komiho Changelog
 
+## v1.4.0 (2026-10-03)
+
+- New WebDAV sync
+- New Image enhancement — moiré reduction
+- New Settings → Advanced → progress bar thumbnails
+- New Settings → Advanced → export diagnostic log
+- New Settings → Advanced → show WebDAV covers
+- New NPU models Real-CUGAN Pro/SE (requires updating the model package)
+- Improved AI enhancement scheduling, Vulkan inference, and progress bar dragging performance
+- Fixed PDF cover / page count display
+- Fixed DRM-protected EPUBs now clearly report that they can't be read
+- Fixed Permission-only encrypted PDFs no longer ask for a password
+- Fixed Certificate-based DRM PDFs now show a clear message instead of looping on "wrong password"
+
 ## v1.3.1 (2026-09-26)
 
 - New Image enhancement — "Force AI on large images" toggle: images with enough resolution but poor scan quality also get AI detail restoration

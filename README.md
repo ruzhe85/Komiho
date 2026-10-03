@@ -8,7 +8,7 @@
 
 支持 **Komga、本地文件、WebDAV、SMB** 等多种漫画来源
 
-包名 `cn.ruzhe.komiho` ｜ 版本 1.3.1 (11) ｜ Android 8.0+
+包名 `cn.ruzhe.komiho` ｜ 版本 1.4.0 (12) ｜ Android 8.0+
 
 [中文](./README.md) | [English](./README.en.md)
 

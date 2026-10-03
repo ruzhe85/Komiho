@@ -8,7 +8,7 @@
 
 Supports **Komga, local files, WebDAV, SMB** and more comic sources
 
-Package `cn.ruzhe.komiho` ｜ Version 1.3.1 (11) ｜ Android 8.0+
+Package `cn.ruzhe.komiho` ｜ Version 1.4.0 (12) ｜ Android 8.0+
 
 [English](./README.en.md) | [中文](./README.md)
 
