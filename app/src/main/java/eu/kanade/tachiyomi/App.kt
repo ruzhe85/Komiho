@@ -61,13 +61,16 @@ import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegate
 import eu.kanade.tachiyomi.util.system.DeviceUtil
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import eu.kanade.tachiyomi.util.system.GLUtil
 import eu.kanade.tachiyomi.util.system.WebViewUtil
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.system.cancelNotification
 import eu.kanade.tachiyomi.util.system.notify
+import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import eu.kanade.tachiyomi.diagnostic.DiagnosticLogBuffer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import logcat.LogPriority
@@ -183,6 +186,22 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             .onEach { ImageUtil.hardwareBitmapThreshold = it }
             .launchIn(scope)
 
+        // Komiho: E-Ink 模式 → 释放 GPU/NPU 引擎。市场墨水屏的 SoC 跑不动 Vulkan 推理，
+        // 留着 AI 档只是白占显存、白耗电。
+        //
+        // 顺序不能反：**先打断**在跑的推理，再销毁。否则在途的预热任务会再次
+        // ensureEngine 把 Vulkan 上下文建起来（引擎是懒加载的，只有 destroy 之后
+        // 没有人再 process 才真的释放）。另外增强侧已经把 AI 档收敛到 CPU 档
+        // （MihonSyEnhancer.effectiveMode），所以这里销毁后不会被自动重建。
+        Injekt.get<UiPreferences>().einkMode.changes()
+            .drop(1) // 首发是当前值，不是"刚被打开"
+            .onEach { enabled ->
+                if (!enabled) return@onEach
+                runCatching { Waifu2x.abortProcessing() }
+                runCatching { Waifu2x.destroy() }
+            }
+            .launchIn(scope)
+
         setAppCompatDelegateThemeMode(Injekt.get<UiPreferences>().themeMode.get())
 
         // SY --> Komiho: 「应用语言」与平台 per-app locale 是两份状态，会分叉（旧版本写入的偏好、
@@ -273,7 +292,14 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     .build(),
             )
 
-            crossfade((300 * this@App.animatorDurationScale).toInt())
+            // Komiho: E-Ink 模式下关掉淡入 —— 墨水屏上一次交叉淡入要在两个灰阶之间
+            // 渐变整屏，留下明显的灰色残影。页面级请求本来就都是 crossfade(false)，
+            // 只有这个 App 级的还开着。
+            if (EinkMotion.isAnimationOff) {
+                crossfade(false)
+            } else {
+                crossfade((300 * this@App.animatorDurationScale).toInt())
+            }
             allowRgb565(DeviceUtil.isLowRamDevice(this@App))
             if (networkPreferences.verboseLogging.get()) logger(DebugLogger())
 

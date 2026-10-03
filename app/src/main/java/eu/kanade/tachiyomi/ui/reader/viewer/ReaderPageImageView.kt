@@ -43,9 +43,11 @@ import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.data.coil.originalSizeDisplay
 import eu.kanade.tachiyomi.data.coil.pageIndex
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.EnhanceTimings
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
@@ -434,12 +436,17 @@ open class ReaderPageImageView @JvmOverloads constructor(
             // Enhancement now applies to every reading mode (webtoon/strip included).
             is BufferedSource -> {
                 val preferences = Injekt.get<ReaderPreferences>()
+                // Komiho: E-Ink 灰阶化也必须走这条 Coil / 自定义解码器链 ——
+                // 下面那条 SSIV 直解路径完全绕过位图处理，灰阶化会形同虚设。
+                // 这与「必须强制 customDecoder」是同一个原因。
+                val einkGrayOn = Injekt.get<UiPreferences>().isEinkGrayscaleActive
                 // MihonSY: only enhance streams that actually look like a standard
                 // image (JPEG/PNG/WebP/GIF magic). Downloaded chapters packed as CBZ
                 // (encrypted or raw archives) can yield non-image streams; feeding
                 // those to the enhancement decoder crashed the reader. Non-standard
                 // streams fall back to the original SSIV direct-decode path.
-                val enhancementOn = preferences.enhancementMode.get() != 0 && isStandardImageStream(data)
+                val enhancementOn = (preferences.enhancementMode.get() != 0 || einkGrayOn) &&
+                    isStandardImageStream(data)
                 if (!enhancementOn) {
                     setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
                     setImage(ImageSource.inputStream(data.inputStream()))
@@ -452,7 +459,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .data(data)
                     .memoryCachePolicy(CachePolicy.DISABLED)
                     .diskCachePolicy(CachePolicy.DISABLED)
-                    .enhanced(enhancementOn && !this@ReaderPageImageView.skipEnhance)
+                    // Komiho: enhanced 只表达「真增强」。E-Ink 灰阶化开启时也要走这条链，
+                    // 但不能因此把解码目标抬到 2048 再回缩 —— 那是白跑一趟高分辨率解码。
+                    .enhanced(preferences.enhancementMode.get() != 0 && !this@ReaderPageImageView.skipEnhance)
                     .customDecoder(true)
                     // Komiho: webtoon 原始尺寸模式（1:1 显示）不下调 AI 面积回缩 ——
                     // 没有缩小就没有摩尔纹，回缩只会丢细节。
@@ -590,6 +599,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     private fun Int.getSystemScaledDuration(): Int {
+        // Komiho: E-Ink 模式下严格 0。下面的 coerceAtLeast(1) 在系统动画关掉时会算出
+        // 1ms —— 但 1ms 仍会触发一次 invalidate，在墨水屏上就是一帧残影，等于没关。
+        // 覆盖 SSIV 的双击缩放与 PhotoView 的缩放过渡两处调用。
+        if (EinkMotion.isAnimationOff) return 0
         return (this * context.animatorDurationScale).toInt().coerceAtLeast(1)
     }
 

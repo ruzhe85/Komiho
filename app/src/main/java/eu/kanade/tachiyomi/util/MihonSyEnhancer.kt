@@ -4,6 +4,7 @@ package eu.kanade.tachiyomi.util
 import android.app.Application
 import android.graphics.Bitmap
 import android.os.SystemClock
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelRegistry
 import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelSpec
@@ -45,6 +46,12 @@ object MihonSyEnhancer {
      * 位图像素走 native 堆、不进 Java 堆上限，8GB 机型余量充足（8MP 输入门 = 800 宽下高 ≤11250）。
      */
     private const val MAX_ENHANCE_OUTPUT_PIXELS = 36_000_000L
+
+    /**
+     * AI 超分档的档位值（ncnn + Vulkan / QNN HTP，固定 2x）。见
+     * [ReaderPreferences.enhancementMode]。E-Ink 模式下会被 [effectiveMode] 收敛掉。
+     */
+    private const val ENHANCE_MODE_AI_UPX2 = 5
 
     /**
      * 倍率。AI 档（mode 5）由模型固定为 2x；CPU 档（2/3）用 [ReaderPreferences.lanczosScale]。
@@ -248,7 +255,7 @@ object MihonSyEnhancer {
 
         // Single selector: 0 = Off, 2 = Lanczos3, 3 = Catmull-Rom.
         // (MihonSY: Anime4K (1) and Spline36 (4) are disabled and excluded from the build.)
-        val mode = preferences.enhancementMode.get()
+        val mode = effectiveMode(preferences)
 
         // Komiho (2026-09-23): 拦「注定白做」的增强。输入已经大到 × scale 之后必然超过
         // [MAX_ENHANCE_OUTPUT_PIXELS]，输出就会被 [capOutputSize] 缩回来 —— 先超分再缩，
@@ -429,6 +436,26 @@ object MihonSyEnhancer {
             // 失败：用（可能拷贝过的）原图继续，降噪跳过。
             argb
         }
+    }
+
+    /**
+     * 实际生效的档位。E-Ink 模式下把 AI 档（mode 5）收敛到 CPU 档。
+     *
+     * 理由有两条，第二条比性能更重要：
+     * 1. 市面墨水屏的 SoC 跑不动 Vulkan 推理，实测 GPU 档 1~3s/页，而 native 的
+     *    Lanczos3 1.5x 约 0.3~0.6s/页 —— 在这类设备上 CPU 反而快 3~5 倍，还省电。
+     * 2. AI 2x 超分补出的高频网点，会被墨水屏的 16 级量化放大成脏点与摩尔纹，
+     *    再叠上粗像素网格后**画质上是负收益**。KCC 这个行业事实标准完全不做超分。
+     *
+     * 收敛到 [ReaderPreferences.enhancementLastCpuMode]（用户上次用的 CPU 档），
+     * **不改偏好本身** —— 关掉 E-Ink 模式后档位还是原来那个，不需要"还原"。
+     */
+    private fun effectiveMode(preferences: ReaderPreferences): Int {
+        val mode = preferences.enhancementMode.get()
+        if (mode != ENHANCE_MODE_AI_UPX2) return mode
+        if (!Injekt.get<UiPreferences>().isEinkModeActive) return mode
+        val cpu = preferences.enhancementLastCpuMode.get()
+        return if (cpu in 2..3) cpu else 2
     }
 
     /** 当前档位实际会用到的放大倍率（AI 档固定见 [AI_UPSCALE_FACTOR]，CPU 档取偏好）。 */

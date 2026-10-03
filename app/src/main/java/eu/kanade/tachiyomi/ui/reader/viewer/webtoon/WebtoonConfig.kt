@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.navigation.EdgeNavigation
 import eu.kanade.tachiyomi.ui.reader.viewer.navigation.KindlishNavigation
 import eu.kanade.tachiyomi.ui.reader.viewer.navigation.LNavigation
 import eu.kanade.tachiyomi.ui.reader.viewer.navigation.RightAndLeftNavigation
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -87,6 +88,15 @@ class WebtoonConfig(
         private set
 
     // SY <--
+
+    /**
+     * Komiho: E-Ink 模式下强制瞬时滚动（v1 匀速 / v2 缓动都不跑）。
+     *
+     * 条页的 smooth scroll 是连续的小步重绘，墨水屏上每一步都留一层浅灰影，滚一屏
+     * 叠下来页面就"发脏"。所以 E-Ink 下直接走 `scrollBy` / `scrollToPosition`。
+     */
+    val scrollAnimationEnabled: Boolean
+        get() = (usePageTransitions || usePageTransitionsV2) && !EinkMotion.isAnimationOff
     init {
         readerPreferences.cropBordersWebtoon
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })

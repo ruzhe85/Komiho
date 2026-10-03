@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.ui.reader.setting
 import android.os.Build
 import androidx.compose.ui.graphics.BlendMode
 import dev.icerock.moko.resources.StringResource
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
 import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
 import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelRegistry
@@ -12,6 +13,8 @@ import tachiyomi.core.common.preference.getEnum
 import tachiyomi.core.common.preference.getEnumSet
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 class ReaderPreferences(
     preferenceStore: PreferenceStore,
@@ -356,6 +359,13 @@ class ReaderPreferences(
         append('|').append(aiAreaDownscaleStrength.get())
         append('|').append(cropBorders.get())
         append('|').append(cropBordersWebtoon.get())
+        // Komiho: E-Ink 灰阶化会改变**像素**，所以必须进指纹 —— 否则改了灰阶设置后，
+        // pager 的 prepared pages 与 holder 的「这一对页已渲染」守卫都还认旧设置，
+        // 用户得退出重进或一直划动才看到变化（与上面几个 AI 档位是同一个道理）。
+        val einkPrefs = Injekt.get<UiPreferences>()
+        append('|').append(if (einkPrefs.isEinkGrayscaleActive) 1 else 0)
+        append('|').append(einkPrefs.einkGrayLevelsOrDefault())
+        append('|').append(if (einkPrefs.einkKeepColorPages.get()) 1 else 0)
     }
     // MihonSY image enhancement <--
     // MihonSY <--

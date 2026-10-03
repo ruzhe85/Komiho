@@ -497,8 +497,9 @@ class WebtoonViewer(
      */
     private fun scrollUp() {
         // Komiho: v1（匀速，固定时长）/ v2（五次方减速，时长按距离算）互斥，v2 优先。
+        // E-Ink 下 config.scrollAnimationEnabled 为 false → 直接走 scrollBy 瞬时滚动。
         val useV2 = config.usePageTransitionsV2
-        if (useV2 || config.usePageTransitions) {
+        if (config.scrollAnimationEnabled) {
             val duration = if (useV2) computeEaseOutDuration(-scrollDistance) else config.tapScrollDurationMillis
             animateScrollBy(-scrollDistance, duration, easeOut = useV2)
         } else {
@@ -529,7 +530,7 @@ class WebtoonViewer(
                 val nextItem = adapter.items.getOrNull(position + 1)
                 if (nextItem is ReaderPage) {
                     // v2 同样走平滑滚动（这条路径是整页对齐，曲线由系统 smooth scroll 决定）
-                    if (config.usePageTransitions || config.usePageTransitionsV2) {
+                    if (config.scrollAnimationEnabled) {
                         recycler.smoothScrollToPosition(position + 1)
                     } else {
                         recycler.scrollToPosition(position + 1)
@@ -544,7 +545,7 @@ class WebtoonViewer(
     private fun scrollDownBy() {
         // SY <--
         val useV2 = config.usePageTransitionsV2
-        if (useV2 || config.usePageTransitions) {
+        if (config.scrollAnimationEnabled) {
             val duration = if (useV2) computeEaseOutDuration(scrollDistance) else config.tapScrollDurationMillis
             animateScrollBy(scrollDistance, duration, easeOut = useV2)
         } else {

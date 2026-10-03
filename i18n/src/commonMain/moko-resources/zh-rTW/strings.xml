@@ -903,6 +903,7 @@
     <string name="pref_incognito_mode_extension_summary">停止紀錄擴充的閱讀歷史</string>
     <string name="label_auto">自動</string>
     <string name="theme_monochrome">單色</string>
+    <string name="theme_eink">電子墨水</string>
     <string name="tracked_privately">私下紀錄</string>
     <string name="action_toggle_private_on">私下紀錄</string>
     <string name="action_toggle_private_off">公開紀錄</string>

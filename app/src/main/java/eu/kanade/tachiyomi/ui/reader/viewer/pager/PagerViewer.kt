@@ -541,7 +541,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             if (holder != null && config.navigateToPan && holder.canPanRight()) {
                 holder.panRight()
             } else {
-                pager.setCurrentItem(pager.currentItem + 1, config.usePageTransitions)
+                pager.setCurrentItem(pager.currentItem + 1, config.pageSlideAnimationsEnabled)
             }
         }
     }
@@ -555,7 +555,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             if (holder != null && config.navigateToPan && holder.canPanLeft()) {
                 holder.panLeft()
             } else {
-                pager.setCurrentItem(pager.currentItem - 1, config.usePageTransitions)
+                pager.setCurrentItem(pager.currentItem - 1, config.pageSlideAnimationsEnabled)
             }
         }
     }

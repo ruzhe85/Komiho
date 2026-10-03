@@ -146,6 +146,7 @@ import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.util.collectAsState
 import app.mihonsy.komga.ui.KomgaSeriesActivity
+import eu.kanade.domain.ui.UiPreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.ByteArrayOutputStream
@@ -1842,7 +1843,17 @@ class ReaderActivity : BaseActivity() {
         }
 
         private fun setLayerPaint(grayscale: Boolean, invertedColors: Boolean) {
-            val paint = if (grayscale || invertedColors) getCombinedPaint(grayscale, invertedColors) else null
+            // Komiho: E-Ink 灰阶化开启时，「灰度」这一项必须让位 ——
+            // 我们的量化已经把像素压到面板的 16 级真实档位，再套一层
+            // ColorMatrix.setSaturation(0) 就是**二次**非线性压缩，层次会塌掉
+            // （表现是整页发灰、发闷）。反色（黑白墨水屏上的常用功能）不受影响，
+            // 它作用在已量化的像素上且语义不同。
+            val effectiveGrayscale = grayscale && !Injekt.get<UiPreferences>().isEinkGrayscaleActive
+            val paint = if (effectiveGrayscale || invertedColors) {
+                getCombinedPaint(effectiveGrayscale, invertedColors)
+            } else {
+                null
+            }
             binding.viewerContainer.setLayerType(LAYER_TYPE_HARDWARE, paint)
         }
     }

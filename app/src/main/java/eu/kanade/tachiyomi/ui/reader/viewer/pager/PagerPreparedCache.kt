@@ -14,6 +14,7 @@ import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.data.coil.pageIndex
 import eu.kanade.tachiyomi.data.coil.prewarm
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.isStandardImageStream
@@ -329,9 +330,13 @@ object PagerPagePreparer {
         pageIndex: Int,
         skipEnhance: Boolean,
     ): Bitmap? {
-        if (isAnimated || enhancementMode == 0) return null
+        // Komiho: E-Ink 灰阶化也要走预解码 —— 否则预热产出的位图与 holder 请求产出的
+        // 不是同一张，首帧会先闪一下未灰阶化的图再跳一次。
+        val einkGrayOn = Injekt.get<UiPreferences>().isEinkGrayscaleActive
+        if (isAnimated || (enhancementMode == 0 && !einkGrayOn)) return null
         // Komiho: 系统渲染兜底产出的位图无需再做增强（避免无谓 2x 放大）。
-        if (skipEnhance) return null
+        // 灰阶化与增强是两件事，兜底页仍然要转灰阶。
+        if (skipEnhance && !einkGrayOn) return null
         if (!isStandardImageStream(source)) return null
         val width = viewer.pager.width
         val height = viewer.pager.height
@@ -342,7 +347,9 @@ object PagerPagePreparer {
                 .data(source.peek())
                 .memoryCachePolicy(CachePolicy.DISABLED)
                 .diskCachePolicy(CachePolicy.DISABLED)
-                .enhanced(true)
+                // Komiho: 只在真增强时置 true。E-Ink 灰阶化单独走灰阶化分支，
+                // 不该因此把解码目标抬到 2048 再回缩（白跑一趟高分辨率解码）。
+                .enhanced(enhancementMode != 0)
                 .customDecoder(true)
                 // Komiho 诊断：标出「这是预载请求」+ 页号，便于与 holder 侧请求区分。
                 .prewarm(true)

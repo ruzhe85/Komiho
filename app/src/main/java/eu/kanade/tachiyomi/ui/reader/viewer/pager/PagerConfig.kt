@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.navigation.EdgeNavigation
 import eu.kanade.tachiyomi.ui.reader.viewer.navigation.KindlishNavigation
 import eu.kanade.tachiyomi.ui.reader.viewer.navigation.LNavigation
 import eu.kanade.tachiyomi.ui.reader.viewer.navigation.RightAndLeftNavigation
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
@@ -54,6 +55,16 @@ class PagerConfig(
 
     // SY -->
     var usePageTransitions = false
+
+    /**
+     * Komiho: E-Ink 模式下强制走「瞬时换页」。
+     *
+     * ViewPager 的滑移是整屏连续重绘 —— 墨水屏每次重绘都留残影，一次翻页能叠出好几层
+     * 灰影（这正是当初放弃卷曲动画的原因）。所以这里直接等价于用户关掉了
+     * 「翻页动画」开关，而不是去改 ViewPager 的表现。
+     */
+    val pageSlideAnimationsEnabled: Boolean
+        get() = usePageTransitions && !EinkMotion.isAnimationOff
 
     var shiftDoublePage = false
 

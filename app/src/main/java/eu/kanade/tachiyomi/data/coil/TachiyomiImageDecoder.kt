@@ -13,9 +13,11 @@ import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import coil3.request.bitmapConfig
 import com.hippo.unifile.UniFile
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.EnhanceTimings
 import eu.kanade.tachiyomi.util.MihonSyEnhancer
+import eu.kanade.tachiyomi.util.eink.EinkGray
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import eu.kanade.tachiyomi.util.storage.CbzCrypto.getCoverStream
 import mihon.core.common.archive.archiveReader
@@ -260,7 +262,56 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             }
         }
 
+        // Komiho: E-Ink 灰阶化。位置很关键 —— 必须在下面那次 hardware 位图转换**之前**：
+        // 硬件位图禁止 getPixels/setPixels（IllegalStateException）。
+        //
+        // ① 增强输出的尺寸是「显示尺寸 × 1.5~3」（见 enhanceTarget 的注释），而量化与
+        //    抖动**必须发生在最终显示尺寸上** —— 否则 SSIV 的整图双线性缩小会把抖动
+        //    图案抹平、把量化边界打散，等于白做，还可能凭空产生假中间灰。
+        //    aiAreaDownscale 默认关、且只对 mode 5 生效，所以这里无条件补一次回缩
+        //    （它内部有 0.85 的缩比门，尺寸已经够小就自动不动）。
+        //
+        // ② 非增强路径本来就按视图尺寸采样（dstWidth/dstHeight），无需回缩。
+        var einkGrayscaleApplied = false
+        val einkPrefs = Injekt.get<UiPreferences>()
+        if (einkPrefs.isEinkGrayscaleActive && bitmap.width > 0 && bitmap.height > 0) {
+            try {
+                val viewW = dstWidth.takeIf { it in 1..MAX_REASONABLE_DIM } ?: 0
+                val viewH = dstHeight.takeIf { it in 1..MAX_REASONABLE_DIM } ?: 0
+                val oversized = viewW > 0 && viewH > 0 &&
+                    (bitmap.width > viewW || bitmap.height > viewH)
+                if (oversized && !options.originalSizeDisplay) {
+                    val downscaled = MihonSyEnhancer.areaDownscaleToDisplay(
+                        bitmap,
+                        viewWidth = viewW,
+                        viewHeight = viewH,
+                        isTallStrip = isTallStrip,
+                        strength = preferences.aiAreaDownscaleStrength.get() / 100f,
+                    )
+                    if (downscaled !== bitmap) {
+                        bitmap.recycle()
+                        bitmap = downscaled
+                    }
+                }
+                einkGrayscaleApplied = EinkGray.apply(
+                    bitmap,
+                    EinkGray.Config(
+                        levels = einkPrefs.einkGrayLevelsOrDefault(),
+                        keepColorPages = einkPrefs.einkKeepColorPages.get(),
+                        // 曲线预设与抖动开关暂固定：抖动按 KCC / KoReader 的建议交给
+                        // 设备固件，应用层默认不做；曲线用最柔和的档。
+                        curve = EinkGray.Curve.SOFT,
+                        dither = false,
+                    ),
+                )
+            } catch (e: Throwable) {
+                // 灰阶化失败就原样输出，绝不因它让整页读不出来。
+                einkGrayscaleApplied = false
+            }
+        }
+
         if (
+            !einkGrayscaleApplied &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             options.bitmapConfig == Bitmap.Config.HARDWARE &&
             ImageUtil.canUseHardwareBitmap(bitmap)
@@ -333,5 +384,13 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         }
 
         const val MAX_ENHANCE_SOURCE_DIMENSION = 2048
+
+        /**
+         * Komiho: 「显示尺寸」的可信上界。
+         *
+         * 视图尚未 layout 时 [coil3.request.Options.size] 会给出 `Int.MAX_VALUE`，
+         * 直接拿去和位图尺寸比较会溢出成「不需要回缩」的相反结论，所以先夹一道。
+         */
+        private const val MAX_REASONABLE_DIM = 20000
     }
 }

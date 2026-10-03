@@ -911,6 +911,7 @@
     <string name="pref_incognito_mode_extension_summary">暂停记录插件的阅读历史</string>
     <string name="label_auto">自动</string>
     <string name="theme_monochrome">单色</string>
+    <string name="theme_eink">电子墨水</string>
     <string name="pref_always_decode_long_strip_with_ssiv_2">在长条阅读模式中使用旧版解码器</string>
     <string name="pref_mark_duplicate_read_chapter_read">将重复的已读章节都标记为已读</string>
     <string name="author">作者</string>

@@ -5,12 +5,15 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalMotionDurationScale
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.presentation.theme.colorscheme.BaseColorScheme
 import eu.kanade.presentation.theme.colorscheme.CatppuccinColorScheme
+import eu.kanade.presentation.theme.colorscheme.EinkColorScheme
 import eu.kanade.presentation.theme.colorscheme.GreenAppleColorScheme
 import eu.kanade.presentation.theme.colorscheme.LavenderColorScheme
 import eu.kanade.presentation.theme.colorscheme.MidnightDuskColorScheme
@@ -24,6 +27,7 @@ import eu.kanade.presentation.theme.colorscheme.TealTurqoiseColorScheme
 import eu.kanade.presentation.theme.colorscheme.TidalWaveColorScheme
 import eu.kanade.presentation.theme.colorscheme.YinYangColorScheme
 import eu.kanade.presentation.theme.colorscheme.YotsubaColorScheme
+import eu.kanade.tachiyomi.util.system.EinkMotion
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -56,17 +60,22 @@ private fun BaseTachiyomiTheme(
 ) {
     val context = LocalContext.current
     val isDark = isSystemInDarkTheme()
-    MaterialExpressiveTheme(
-        colorScheme = remember(appTheme, isDark, isAmoled) {
-            getThemeColorScheme(
-                context = context,
-                appTheme = appTheme,
-                isDark = isDark,
-                isAmoled = isAmoled,
-            )
-        },
-        content = content,
-    )
+    // Komiho（E-Ink 模式）：Dialog / BottomSheet 走的是这个主题（见 ViewExtensions.setContent），
+    // 所以动画总闸在这里也要来一份，否则弹窗仍会淡入淡出 → 墨水屏上留残影。
+    val motionScale = if (EinkMotion.isAnimationOff) 0f else LocalMotionDurationScale.current
+    CompositionLocalProvider(LocalMotionDurationScale provides motionScale) {
+        MaterialExpressiveTheme(
+            colorScheme = remember(appTheme, isDark, isAmoled) {
+                getThemeColorScheme(
+                    context = context,
+                    appTheme = appTheme,
+                    isDark = isDark,
+                    isAmoled = isAmoled,
+                )
+            },
+            content = content,
+        )
+    }
 }
 
 private fun getThemeColorScheme(
@@ -90,6 +99,8 @@ private fun getThemeColorScheme(
 private val colorSchemes: Map<AppTheme, BaseColorScheme> = mapOf(
     AppTheme.DEFAULT to TachiyomiColorScheme,
     AppTheme.CATPPUCCIN to CatppuccinColorScheme,
+    // Komiho: E-Ink 模式自动切到这一项（见 EinkColorScheme）
+    AppTheme.EINK to EinkColorScheme,
     AppTheme.GREEN_APPLE to GreenAppleColorScheme,
     AppTheme.LAVENDER to LavenderColorScheme,
     AppTheme.MIDNIGHT_DUSK to MidnightDuskColorScheme,
