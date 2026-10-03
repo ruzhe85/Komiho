@@ -92,11 +92,7 @@ object EinkMotion {
                 val content = activity.findViewById<android.view.ViewGroup>(android.R.id.content)
                     ?: return@post bail("no android.R.id.content")
                 val contentChild = content.getChildAt(0) ?: return@post bail("content has no child")
-                val tagId = contentChild.resources.getIdentifier(
-                    "androidx_compose_ui_view_composition_context",
-                    "id",
-                    "androidx.compose.ui",
-                )
+                val tagId = resolveCompositionContextTagId(contentChild)
                 if (tagId == 0) return@post bail("tag id not found")
                 val recomposer = contentChild.getTag(tagId) as? Recomposer
                     ?: return@post bail("recomposer tag missing (class=${contentChild.getTag(tagId)?.javaClass?.simpleName})")
@@ -117,4 +113,26 @@ object EinkMotion {
     /** 失败原因落到 logcat（Log.i 级别，避开部分厂商对 debug 日志的过滤）。 */
     private fun bail(reason: String): Unit =
         run { android.util.Log.i("EinkMotion", "compose gate skipped: $reason") }
+
+    /**
+     * 解析 compose-ui 缓存 recomposer 用的 view tag 资源 id
+     * （`R.id.androidx_compose_ui_view_composition_context`）。
+     *
+     * AAR 资源合并进 app 后挂在**应用包名**下，不是库自己的包名 —— 所以先按应用包名
+     * 查 `getIdentifier`（compose-ui 1.10 真机实测：按库包名查不到），失败再回退到
+     * 反射读被 AGP 内联进 app dex 的 `androidx.compose.ui.R$id` 常量。
+     */
+    private const val COMPOSITION_CONTEXT_ID_NAME = "androidx_compose_ui_view_composition_context"
+
+    private fun resolveCompositionContextTagId(view: View): Int {
+        view.resources.getIdentifier(
+            COMPOSITION_CONTEXT_ID_NAME,
+            "id",
+            view.context.packageName,
+        ).takeIf { it != 0 }?.let { return it }
+        return runCatching {
+            val rid = Class.forName("androidx.compose.ui.R\$id")
+            rid.getField(COMPOSITION_CONTEXT_ID_NAME).getInt(null)
+        }.getOrDefault(0)
+    }
 }
