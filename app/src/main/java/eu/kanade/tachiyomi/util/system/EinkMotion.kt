@@ -1,8 +1,10 @@
 package eu.kanade.tachiyomi.util.system
 
 import android.app.Activity
+import android.content.Context
+import androidx.compose.runtime.ExperimentalComposeRuntimeApi
+import androidx.compose.runtime.Recomposer
 import androidx.compose.ui.MotionDurationScale
-import androidx.compose.ui.platform.windowRecomposer
 import eu.kanade.domain.ui.UiPreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -48,8 +50,9 @@ object EinkMotion {
         get() = if (isAnimationOff) 0f else 1f
 
     /**
-     * 把 Compose 动画总闸应用到 [activity] 的窗口 recomposer 上（App 的
-     * ActivityLifecycleCallbacks 在 PostCreated / Resumed 各调一次）。
+     * 把 Compose 动画总闸应用到**当前所有运行中的窗口 recomposer** 上（App 的
+     * ActivityLifecycleCallbacks 在 PostCreated / Resumed 各调一次，Resumed 里再
+     * post 一帧执行以避开 recomposer 注册进 [Recomposer.runningRecomposers] 的时序）。
      *
      * ## 为什么不是 `LocalMotionDurationScale` CompositionLocal
      *
@@ -58,9 +61,11 @@ object EinkMotion {
      * 1.10.1）里**根本不存在**（已解包 aar 逐个确认），那是更新的 androidx 才有的 API。
      * 本版本里 Compose 动画读时长倍率的唯一来源是 recomposer 协程上下文里的
      * [MotionDurationScale] 元素（`androidx.compose.ui.MotionDurationScale`，公开接口），
-     * 由 `WindowRecomposer` 在建窗口时用系统「动画时长倍率」初始化。
+     * 由 `WindowRecomposer` 在建窗口时用系统「动画时长倍率」初始化；而拿到 recomposer
+     * 实例的 `View.windowRecomposer()` 也是 internal。
      *
-     * 所以这里在拿到的实例上把 scale 写成目标值：
+     * 所以走公开的 [Recomposer.runningRecomposers]（所有活着的 recomposer，含 Dialog
+     * 窗口的），逐个把 scale 写成目标值：
      * - E-Ink 开 → **严格 0**（0 = Compose 视作动画已禁用，立即跳终值，不产生中间帧）；
      * - E-Ink 关 → 设回系统倍率（[animatorDurationScale]），与 Compose 自己的默认行为一致。
      *
@@ -71,16 +76,22 @@ object EinkMotion {
      * 系统倍率变化时 Compose 的 ContentObserver 会覆盖回系统值 —— 所以 Resumed 时
      * 重调本函数即可收敛。
      */
+    @OptIn(ExperimentalComposeRuntimeApi::class)
     fun applyComposeDurationScale(activity: Activity) {
         val target = if (isAnimationOff) 0f else activity.animatorDurationScale
         runCatching {
-            val decor = activity.window.peekDecorView() ?: return
-            val recomposer = decor.windowRecomposer()
-            val scale = recomposer.effectCoroutineContext[MotionDurationScale] ?: return
-            scale.javaClass
-                .getDeclaredMethod("setScaleFactor", Float::class.javaPrimitiveType)
-                .apply { isAccessible = true }
-                .invoke(scale, target)
+            // post 到主线程：PostCreated 时 recomposer 可能还没注册进 runningRecomposers
+            //（注册发生在 runRecomposeAndApplyChanges 启动后），推后一拍收敛。
+            activity.window.decorView.post {
+                for (recomposer in Recomposer.runningRecomposers) {
+                    val scale = recomposer.effectCoroutineContext[MotionDurationScale]
+                        ?: continue
+                    scale.javaClass
+                        .getDeclaredMethod("setScaleFactor", Float::class.javaPrimitiveType)
+                        .apply { isAccessible = true }
+                        .invoke(scale, target)
+                }
+            }
         }
     }
 }
