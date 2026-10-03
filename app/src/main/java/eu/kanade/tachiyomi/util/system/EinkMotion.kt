@@ -1,8 +1,8 @@
 package eu.kanade.tachiyomi.util.system
 
 import android.app.Activity
+import android.view.View
 import android.content.Context
-import androidx.compose.runtime.ExperimentalComposeRuntimeApi
 import androidx.compose.runtime.Recomposer
 import androidx.compose.ui.MotionDurationScale
 import eu.kanade.domain.ui.UiPreferences
@@ -50,9 +50,9 @@ object EinkMotion {
         get() = if (isAnimationOff) 0f else 1f
 
     /**
-     * 把 Compose 动画总闸应用到**当前所有运行中的窗口 recomposer** 上（App 的
+     * 把 Compose 动画总闸应用到 [activity] 窗口的 recomposer 上（App 的
      * ActivityLifecycleCallbacks 在 PostCreated / Resumed 各调一次，Resumed 里再
-     * post 一帧执行以避开 recomposer 注册进 [Recomposer.runningRecomposers] 的时序）。
+     * post 一拍执行以避开与 recomposer 创建的时序竞争）。
      *
      * ## 为什么不是 `LocalMotionDurationScale` CompositionLocal
      *
@@ -62,36 +62,52 @@ object EinkMotion {
      * 本版本里 Compose 动画读时长倍率的唯一来源是 recomposer 协程上下文里的
      * [MotionDurationScale] 元素（`androidx.compose.ui.MotionDurationScale`，公开接口），
      * 由 `WindowRecomposer` 在建窗口时用系统「动画时长倍率」初始化；而拿到 recomposer
-     * 实例的 `View.windowRecomposer()` 也是 internal。
+     * 实例的入口 `View.windowRecomposer()` 与 `Recomposer.runningRecomposers`
+     * （返回的是只有元数据的 `RecomposerInfo`）都拿不到上下文。
      *
-     * 所以走公开的 [Recomposer.runningRecomposers]（所有活着的 recomposer，含 Dialog
-     * 窗口的），逐个把 scale 写成目标值：
+     * 所以这里**按签名自发现**地反射调用 `WindowRecomposer_androidKt` 里
+     * `(View) -> Recomposer` 的静态方法（internal、且 internal 函数会被 Kotlin 做
+     * JVM 名修饰，按签名找比按名字找稳），再逐个把 scale 写成目标值：
      * - E-Ink 开 → **严格 0**（0 = Compose 视作动画已禁用，立即跳终值，不产生中间帧）；
      * - E-Ink 关 → 设回系统倍率（[animatorDurationScale]），与 Compose 自己的默认行为一致。
      *
      * 实例的类型是 ui 内部的 `MotionDurationScaleImpl`（`scaleFactor` 有公开读、私有写），
-     * 接口本身没有 setter，只能走反射写。这层脆弱性用 [runCatching] 兜住：反射失败 =
+     * 接口本身没有 setter，同样走反射写。两层脆弱性都用 [runCatching] 兜住：失败 =
      * Compose 动画保持系统倍率，其余两层（View / Coil）不受影响。
      *
      * 系统倍率变化时 Compose 的 ContentObserver 会覆盖回系统值 —— 所以 Resumed 时
      * 重调本函数即可收敛。
      */
-    @OptIn(ExperimentalComposeRuntimeApi::class)
     fun applyComposeDurationScale(activity: Activity) {
         val target = if (isAnimationOff) 0f else activity.animatorDurationScale
         runCatching {
-            // post 到主线程：PostCreated 时 recomposer 可能还没注册进 runningRecomposers
-            //（注册发生在 runRecomposeAndApplyChanges 启动后），推后一拍收敛。
+            // post 到主线程：PostCreated 时 recomposer 可能还没建好，推后一拍收敛。
             activity.window.decorView.post {
-                for (recomposer in Recomposer.runningRecomposers) {
-                    val scale = recomposer.effectCoroutineContext[MotionDurationScale]
-                        ?: continue
-                    scale.javaClass
-                        .getDeclaredMethod("setScaleFactor", Float::class.javaPrimitiveType)
-                        .apply { isAccessible = true }
-                        .invoke(scale, target)
-                }
+                val recomposer = runCatching { findWindowRecomposer(activity.window.decorView) }
+                    .getOrNull() ?: return@post
+                val scale = recomposer.effectCoroutineContext[MotionDurationScale]
+                    ?: return@post
+                scale.javaClass
+                    .getDeclaredMethod("setScaleFactor", Float::class.javaPrimitiveType)
+                    .apply { isAccessible = true }
+                    .invoke(scale, target)
             }
         }
+    }
+
+    /**
+     * 反射调用 `androidx.compose.ui.platform.WindowRecomposer_androidKt` 中签名
+     * `(View) -> Recomposer` 的方法（即 internal 的 `View.windowRecomposer()`）。
+     * 没建过窗口 recomposer 时它同时会创建一个 —— 这正是 setContent 的同款入口。
+     */
+    private fun findWindowRecomposer(rootView: View): Recomposer {
+        val ktClass = Class.forName("androidx.compose.ui.platform.WindowRecomposer_androidKt")
+        val method = ktClass.declaredMethods.firstOrNull {
+            it.parameterTypes.size == 1 &&
+                it.parameterTypes[0] == View::class.java &&
+                it.returnType == Recomposer::class.java
+        } ?: error("WindowRecomposer_androidKt: 未找到 (View) -> Recomposer 的方法")
+        method.isAccessible = true
+        return method.invoke(null, rootView) as Recomposer
     }
 }
