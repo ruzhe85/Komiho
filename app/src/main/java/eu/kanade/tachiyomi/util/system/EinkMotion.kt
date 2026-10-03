@@ -80,17 +80,24 @@ object EinkMotion {
      */
     fun applyComposeDurationScale(activity: Activity) {
         val target = if (isAnimationOff) 0f else activity.animatorDurationScale
-        runCatching {
-            // post 到主线程：PostCreated 时 recomposer 可能还没建好，推后一拍收敛。
-            activity.window.decorView.post {
-                val recomposer = runCatching { findWindowRecomposer(activity.window.decorView) }
-                    .getOrNull() ?: return@post
+        // post 到主线程：PostCreated 时 recomposer 可能还没建好，推后一拍收敛。
+        // ⚠️ lambda 在主线程**稍后**才跑，runCatching 必须包在 lambda 内部 ——
+        // 包在外面的话反射异常直接打进主线程 → 无限崩溃循环（真机踩过）。
+        activity.window.decorView.post {
+            runCatching {
+                val recomposer = findWindowRecomposer(activity.window.decorView)
                 val scale = recomposer.effectCoroutineContext[MotionDurationScale]
-                    ?: return@post
-                scale.javaClass
-                    .getDeclaredMethod("setScaleFactor", Float::class.javaPrimitiveType)
-                    .apply { isAccessible = true }
-                    .invoke(scale, target)
+                    ?: return@runCatching
+                // 不能按方法名找 `setScaleFactor`：release 包被 R8 改名（真机踩过，
+                // NoSuchMethodException）。按签名扫：单 float 参数、void 返回，
+                // 这个类里唯一的这种私有写方法就是 scaleFactor 的 setter。
+                val setter = scale.javaClass.declaredMethods.firstOrNull {
+                    it.parameterTypes.size == 1 &&
+                        it.parameterTypes[0] == Float::class.javaPrimitiveType &&
+                        it.returnType == Void.TYPE
+                } ?: return@runCatching
+                setter.isAccessible = true
+                setter.invoke(scale, target)
             }
         }
     }
