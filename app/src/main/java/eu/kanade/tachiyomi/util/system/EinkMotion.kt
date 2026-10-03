@@ -104,8 +104,23 @@ object EinkMotion {
                         it.returnType == Void.TYPE
                 } ?: return@runCatching bail("setter signature not found")
                 setter.isAccessible = true
-                setter.invoke(scale, target)
-                android.util.Log.i("EinkMotion", "compose durationScale → $target")
+                val getter = scale.javaClass.declaredMethods.firstOrNull {
+                    it.parameterTypes.isEmpty() && it.returnType == Float.TYPE
+                }
+                // ⚠️ 系统倍率监听是**懒启动**：第一次 get scaleFactor 才拉起，而 StateFlow
+                // 收集一启动就立刻把「系统当前值」覆盖回去 —— 直接设 0 会被这次初始发射
+                // 冲掉，表现就是「只有第一个动画瞬时，之后照旧」（真机踩过）。所以先主动
+                // 调一次 getter 让监听拉起、初始发射落地，再延迟两拍重写目标值赢下竞争。
+                runCatching { getter?.invoke(scale) }
+                val view = activity.window.decorView
+                listOf(300L, 1500L).forEach { delayMs ->
+                    view.postDelayed({
+                        runCatching {
+                            setter.invoke(scale, target)
+                            android.util.Log.i("EinkMotion", "compose durationScale → $target (+${delayMs}ms)")
+                        }
+                    }, delayMs)
+                }
             }
         }
     }
