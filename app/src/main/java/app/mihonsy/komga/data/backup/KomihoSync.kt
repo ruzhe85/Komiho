@@ -113,9 +113,12 @@ object KomihoSync {
     fun contentEnabled(prefs: PreferenceStore, key: String): Boolean =
         prefs.getStringSet(KEY_CONTENT, DEFAULT_CONTENT).get().contains(key)
 
-    /** 同步总开关（WebDAV 同步行行尾开关）：关闭后触发条件与手动同步全部停用，配置保留。 */
+    /**
+     * 同步总开关（WebDAV 同步行行尾开关）：关闭后触发条件与手动同步全部停用，配置保留。
+     * **缺省关闭** —— 未主动开启前不碰网络，也不会自动拉合远端快照。
+     */
     fun syncEnabled(prefs: PreferenceStore): Boolean =
-        prefs.getBoolean(KEY_ENABLED, true).get()
+        prefs.getBoolean(KEY_ENABLED, false).get()
 
     private val inFlight = AtomicBoolean(false)
     private val autoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

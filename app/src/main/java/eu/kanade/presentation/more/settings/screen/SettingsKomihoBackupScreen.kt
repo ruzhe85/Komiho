@@ -58,7 +58,8 @@ object SettingsKomihoBackupScreen : SearchableSettings {
 
         val triggersPref = remember { prefs.getStringSet(KomihoSync.KEY_TRIGGERS, emptySet()) }
         val contentPref = remember { prefs.getStringSet(KomihoSync.KEY_CONTENT, KomihoSync.DEFAULT_CONTENT) }
-        val enabledPref = remember { prefs.getBoolean(KomihoSync.KEY_ENABLED, true) }
+        // 同步默认关闭：未显式开启前开关显示为关（与 KomihoSync.syncEnabled 的缺省一致）。
+        val enabledPref = remember { prefs.getBoolean(KomihoSync.KEY_ENABLED, false) }
         val syncOn by enabledPref.collectAsState()
 
         var showExportPwd by remember { mutableStateOf(false) }
