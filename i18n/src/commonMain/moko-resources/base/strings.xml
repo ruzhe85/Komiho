@@ -135,7 +135,6 @@
     <string name="action_copy_link">Copy link</string>
     <!-- Do not translate "WebView" -->
     <string name="action_open_in_web_view">Open in WebView</string>
-    <string name="action_web_view" translatable="false">WebView</string>
     <string name="action_migrate">Migrate</string>
     <string name="action_display_mode">Display mode</string>
     <string name="action_display">Display</string>
@@ -741,7 +740,6 @@
     <string name="licenses">Open source licenses</string>
     <string name="privacy_policy">Privacy policy</string>
     <string name="check_for_updates">Check for updates</string>
-    <string name="updated_version">Updated to v%1$s</string>
 
     <!-- ACRA -->
     <string name="pref_enable_acra">Send crash reports</string>
@@ -880,7 +878,6 @@
     <string name="on_hold">On hold</string>
     <string name="paused">Paused</string>
     <string name="plan_to_read">Plan to read</string>
-    <string name="considering">Considering</string>
     <string name="repeating">Rereading</string>
     <string name="reading_list">Reading List</string>
     <string name="wish_list">Wish List</string>
@@ -973,9 +970,7 @@
     <string name="source_filter_empty_screen">No installed source found</string>
 
     <!-- Source migration screen -->
-    <string name="migration_help_guide">Source migration guide</string>
     <string name="migration_dialog_what_to_include">Select data to include</string>
-    <string name="migration_selection_prompt">Select a source to migrate from</string>
     <string name="migrate">Migrate</string>
     <!-- Make a copy (noun) when migrating. Don't use for copying to clipboard. -->
     <string name="copy">Copy</string>
@@ -1104,45 +1099,6 @@
     <!-- Notes screen -->
     <string name="notes_placeholder">Enjoyed the part where…</string>
 
-    <string name="migrationConfigScreen.selectedHeader">Selected</string>
-    <string name="migrationConfigScreen.availableHeader">Available</string>
-    <string name="migrationConfigScreen.selectAllLabel">Select all</string>
-    <string name="migrationConfigScreen.selectNoneLabel">Select none</string>
-    <string name="migrationConfigScreen.selectEnabledLabel">Select enabled sources</string>
-    <string name="migrationConfigScreen.selectPinnedLabel">Select pinned sources</string>
-    <string name="migrationConfigScreen.continueButtonText">Continue</string>
-    <string name="migrationConfigScreen.dataToMigrateHeader">Data to migrate</string>
-    <string name="migrationConfigScreen.removeDownloadsTitle">Delete downloads of current entry after migration</string>
-    <string name="migrationConfigScreen.additionalSearchQueryLabel">Additional keywords (optional)</string>
-    <string name="migrationConfigScreen.additionalSearchQuerySupportingText">Helps narrow down search results by adding additional keywords</string>
-    <string name="migrationConfigScreen.hideUnmatchedTitle">Hide entries without a match</string>
-    <string name="migrationConfigScreen.hideWithoutUpdatesTitle">Hide entries without newer chapters</string>
-    <string name="migrationConfigScreen.hideWithoutUpdatesSubtitle">Only show entry if the match has additional chapters</string>
-    <string name="migrationConfigScreen.enhancedOptionsWarning">These options are slow and dangerous and may lead to restrictions from sources</string>
-    <string name="migrationConfigScreen.deepSearchModeTitle">Advanced search mode</string>
-    <string name="migrationConfigScreen.deepSearchModeSubtitle">Breaks down the title into keywords for a wider search</string>
-    <string name="migrationConfigScreen.prioritizeByChaptersTitle">Match based on chapter number</string>
-    <string name="migrationConfigScreen.prioritizeByChaptersSubtitle">If enabled, chooses the match furthest ahead. Otherwise, picks the first match by source priority.</string>
-    <string name="migrationListScreenTitle">Migration</string>
-    <string name="migrationListScreenTitleWithProgress">Migration (%1$d/%2$d)</string>
-    <string name="migrationListScreen.copyActionLabel">Copy</string>
-    <string name="migrationListScreen.migrateActionLabel">Migrate</string>
-    <string name="migrationListScreen.noMatchFoundText">No alternatives found</string>
-    <string name="migrationListScreen.latestChapterLabel">Latest: %1$s</string>
-    <string name="migrationListScreen.unknownLatestChapter">Unknown</string>
-    <string name="migrationListScreen.searchManuallyActionLabel">Search manually</string>
-    <string name="migrationListScreen.skipActionLabel">Don\'t migrate</string>
-    <string name="migrationListScreen.migrateNowActionLabel">Migrate now</string>
-    <string name="migrationListScreen.copyNowActionLabel">Copy now</string>
-    <string name="migrationListScreen.copyNowActionLabel">Copy now</string>
-    <string name="migrationListScreen.exitDialogTitle">Stop migrating?</string>
-    <string name="migrationListScreen.exitDialog.stopLabel">Stop</string>
-    <string name="migrationListScreen.exitDialog.cancelLabel">Cancel</string>
-    <string name="migrationListScreen.migrateDialog.copyLabel">Copy</string>
-    <string name="migrationListScreen.migrateDialog.migrateLabel">Migrate</string>
-    <string name="migrationListScreen.migrateDialog.cancelLabel">Cancel</string>
-    <string name="migrationListScreen.progressDialog.cancelLabel">Cancel</string>
-    <string name="migrationListScreen.matchWithoutChapterToast">No chapters found, this entry cannot be used for migration</string>
 
     <!-- Komiho: 列表 / 分区 / 收藏 / 阅读列表 空态与加载错误 -->
     <string name="load_failed_error">Loading failed: %s</string>
