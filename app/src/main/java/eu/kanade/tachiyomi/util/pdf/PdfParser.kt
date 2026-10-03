@@ -41,6 +41,21 @@ class PdfParser(path: String) {
     val pageCount: Int get() = pageList.size
     fun isEncrypted(): Boolean = encryptRef != null
 
+    /**
+     * Komiho: `/Encrypt` 字典的 `/Filter` —— `Standard` 是密码型加密；`Adobe.PubSec` 之类是
+     * 证书型 DRM（要证书私钥，没有可输入的密码）。读不到返回 null，调用方按密码型处理（旧行为）。
+     *
+     * 刻意做成延迟解析：trailer 是在 xref 阶段逐个应用的，那时对象表可能还没建全（对象流里的
+     * 对象尚未展开）；本函数只在解析完成后被调用，此时 deref 才可靠。
+     */
+    fun encryptFilter(): String? {
+        val ref = encryptRef ?: return null
+        val num = deref(ref) ?: return null
+        val dict = dictOf(num) ?: return null
+        val raw = dict["/Filter"] ?: return null
+        return String(raw, ISO).trim().trimStart('/').trim().ifBlank { null }
+    }
+
     /** 解析是否成功完成（失败时降级到系统渲染兜底，而非抛异常）。 */
     var parseOk = true
         private set

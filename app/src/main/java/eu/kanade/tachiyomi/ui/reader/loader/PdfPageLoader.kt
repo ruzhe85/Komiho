@@ -16,8 +16,11 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import kotlin.math.min
 import android.os.Build
+import app.mihonsy.komga.data.withAppLanguage
 import mihon.core.common.archive.RandomAccessSource
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
+import tachiyomi.i18n.MR
 
 /**
  * 本地 / 远程 PDF 页加载器（方案 A：自写提取 + 系统渲染兜底）。
@@ -69,32 +72,53 @@ internal class PdfPageLoader private constructor(
         // 仍用运行时探测判定加密，保证加密 PDF 弹密码框。
         val fileSize = File(path).length()
         val probe = if (fileSize <= MAX_PARSER_FILE_BYTES) runCatching { PdfParser(path) }.getOrNull() else null
-        // 探测加密状态（不消耗密码尝试）。
-        // 解析器偶发漏判加密时，用系统渲染器运行时兜底探测：无密码构造加密 PDF 必抛 SecurityException。
-        var encrypted = probe?.parseOk == true && probe.isEncrypted()
-        if (!encrypted) {
-            encrypted = runCatching { PdfRenderFallback.isEncryptedPdf(path) }.getOrDefault(false)
-        }
+        // 文档里有没有 /Encrypt（离线判据，解析器偶发漏判）。
+        val hasEncrypt = probe?.parseOk == true && probe.isEncrypted()
+        // Komiho:「有 /Encrypt」≠「必须输密码」。权限型加密（只有所有者密码、**用户密码为空**，
+        // 出版方用来禁复制/打印）在正常阅读器里直接打得开，系统 PDFium 无密码构造也成功 ——
+        // 以前只看 /Encrypt 就弹框，会问一个根本不存在的密码，而同类书在别的阅读器都能开。
+        // 「无密码构造必抛 SecurityException」是 PDFium 的既定行为（现有 isEncryptedPdf 就是这么用的），
+        // 反过来正好当「是否真的要密码」的判据：
+        //   hasEncrypt=false + 探测=true  → 解析器漏判，仍按加密处理（弹框）
+        //   hasEncrypt=true  + 探测=false → 权限型，不弹框、直接整页渲染
+        // 探测本身失败（非 SecurityException）时沿用旧口径 = hasEncrypt。
+        val needsPassword = runCatching { PdfRenderFallback.isEncryptedPdf(path) }.getOrElse { hasEncrypt }
+        // 是否按加密文档处理 —— 决定能不能走「内嵌图直通」：加密文档的流是 RC4/AES 密文，
+        // 直通只会把密文当 JPEG 交下去，解出乱码。
+        val encrypted = hasEncrypt || needsPassword
 
         var effectivePassword: String? = null
 
         if (encrypted) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                // 低于 Android 15 无 setPassword 入口，无法渲染加密 PDF。
-                throw PdfPasswordException(unsupported = true)
+            // 证书型 DRM（/Encrypt 的 /Filter 非 Standard，如 Adobe.PubSec / Adobe Content Server）：
+            // 要的是证书私钥而不是密码，弹密码框只会让用户反复「密码错误」又退不出去 → 直接给专门提示。
+            val encryptFilter = if (hasEncrypt) probe?.encryptFilter() else null
+            if (encryptFilter != null && !encryptFilter.equals("Standard", ignoreCase = true)) {
+                Log.w(TAG, "PDF certificate DRM, filter=$encryptFilter")
+                throw Exception(context.withAppLanguage().stringResource(MR.strings.pdf_drm_certificate_error))
             }
-            val pw = PdfPasswordHolder.current
-            if (pw == null) {
-                // 缺密码 → 弹框输入。
-                throw PdfPasswordException()
+            if (needsPassword) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                    // 低于 Android 15 无 setPassword 入口，无法渲染需要密码的 PDF。
+                    throw PdfPasswordException(unsupported = true)
+                }
+                val pw = PdfPasswordHolder.current
+                if (pw == null) {
+                    // 缺密码 → 弹框输入。
+                    throw PdfPasswordException()
+                }
+                // 校验密码：错误则抛 wrongPassword。
+                val n = runCatching { PdfRenderFallback.getPageCount(path, pw) }
+                    .getOrElse { throw PdfPasswordException(wrongPassword = true) }
+                if (n <= 0) throw PdfPasswordException(wrongPassword = true)
+                effectivePassword = pw
+                Log.d(TAG, "PDF encrypted, render-only with password, pages=$n")
+            } else {
+                // 权限型加密：无密码渲染即可。currentPassword 保持 null —— 下面「SecurityException
+                // 转 wrongPassword」只在真给过密码时才成立，权限型的不该被报成「密码错误」。
+                Log.d(TAG, "PDF permission-only encryption, render-only without password")
             }
-            // 校验密码：错误则抛 wrongPassword。
-            val n = runCatching { PdfRenderFallback.getPageCount(path, pw) }
-                .getOrElse { throw PdfPasswordException(wrongPassword = true) }
-            if (n <= 0) throw PdfPasswordException(wrongPassword = true)
-            effectivePassword = pw
             renderOnly = true
-            Log.d(TAG, "PDF encrypted, render-only with password, pages=$n")
         } else if (probe != null && probe.parseOk && probe.pageCount > 0) {
             parser = probe
             renderOnly = false
