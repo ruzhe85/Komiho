@@ -215,7 +215,7 @@
     <string name="settings_eink_disable_animation">Disable animations</string>
     <string name="settings_eink_disable_animation_summary">Every animation forces a full-screen refresh, which leaves ghosting and drains battery</string>
     <string name="settings_eink_render_grayscale">Grayscale pages</string>
-    <string name="settings_eink_render_grayscale_summary">Quantize pages to the panel's real gray levels for cleaner gradients</string>
+    <string name="settings_eink_render_grayscale_summary">Quantize pages to the panel\'s real gray levels for cleaner gradients</string>
     <string name="settings_eink_keep_color_pages">Keep color pages in color</string>
     <string name="settings_eink_keep_color_pages_summary">Keeps color on color e-ink screens; no effect on monochrome ones</string>
     <string name="settings_eink_gray_levels">Gray levels</string>
