@@ -44,7 +44,12 @@ import tachiyomi.presentation.core.components.SettingsItemsPaddings
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 
-/** 非当前方式的副标题占位符 —— 纯符号，各语言一致，无需 i18n。 */
+/**
+ * 副标题占位符 —— 纯符号，各语言一致，无需 i18n。
+ *
+ * 只在**确实无值可显示**时用（目前只剩「NPU 一个可用模型都没有」这一种）。其余情况显示
+ * 该方式自己上次选的算法 / 模型。
+ */
 private const val PLACEHOLDER = "—"
 
 /** 二级详情页标识。就地切换，不进导航栈（见 [ImageEnhancementSection] 的说明）。 */
@@ -90,10 +95,27 @@ fun ImageEnhancementSection(
     }
 }
 
-/** 写增强档位：始终保持 [ReaderPreferences.enhancementLastMode] 与当前档位同步。 */
+/**
+ * 写增强档位。落在 CPU 档位时顺带记住它 —— 一级列表在「CPU 未选中」的行上要显示这个值。
+ */
 private fun setEnhancementMode(preferences: ReaderPreferences, mode: Int) {
-    preferences.enhancementLastMode.set(mode)
     preferences.enhancementMode.set(mode)
+    if (mode in 2..3) preferences.enhancementLastCpuMode.set(mode)
+}
+
+/**
+ * 写 AI 模型：**按后端**记住这次选择（Vulkan → GPU 记忆，HTP → NPU 记忆），并把档位切到 AI。
+ *
+ * 一处收口的价值：四个选模型的地方（GPU 详情 chips、NPU 详情 chips、一级的 GPU / NPU 行）
+ * 都走这里，不会出现「某条路径忘了记」导致该方式又退回占位符。
+ */
+private fun setEnhancementModel(preferences: ReaderPreferences, model: UpscaleModelSpec) {
+    preferences.aiModelId.set(model.id)
+    when (model.backend) {
+        UpscaleModelSpec.Backend.NCNN_VULKAN -> preferences.enhancementLastGpuModelId.set(model.id)
+        UpscaleModelSpec.Backend.QNN_HTP -> preferences.enhancementLastNpuModelId.set(model.id)
+    }
+    setEnhancementMode(preferences, 5)
 }
 
 /**
@@ -107,13 +129,30 @@ private fun EnhancementRootList(
     onOpen: (EnhancementDetail) -> Unit,
 ) {
     val mode by preferences.enhancementMode.collectAsState()
-    val lastMode by preferences.enhancementLastMode.collectAsState()
     val modelId by preferences.aiModelId.collectAsState()
     // findById() 把未知/已卸载的模型 id 归一化到默认值，所以选中态永远有确定答案。
     val activeModel = UpscaleModelRegistry.findById(modelId)
 
     val context = LocalContext.current
     val npuAvailable = Waifu2x.isCdspAvailable && Waifu2x.isQnnRuntimeAvailable
+
+    // 每个方式各自的「最后一次选择」：非当前方式的行也显示它们，而不是占位符
+    // （见 [EnhancementMethodRow] 的说明）。
+    val lastCpuMode by preferences.enhancementLastCpuMode.collectAsState()
+    val lastGpuModelId by preferences.enhancementLastGpuModelId.collectAsState()
+    val lastNpuModelId by preferences.enhancementLastNpuModelId.collectAsState()
+    // CPU 记忆存了非法值（老数据 / 手改）时回落 Lanczos3。
+    val cpuMemory = lastCpuMode
+        .takeIf { flag -> ReaderPreferences.CpuEnhancementModes.any { it.first == flag } } ?: 2
+    // GPU 记忆走 findById()：未知 / 已卸载的插件归一化到内置默认模型。
+    val gpuMemory = UpscaleModelRegistry.findById(lastGpuModelId)
+    // NPU 记忆必须在**本机可用列表**里找：findById() 对已卸载的插件会归一化到内置 Vulkan 模型，
+    // 那样 NPU 行会显示一个根本跑不了的模型名。找不到（含从未选过）回落到第一个可用。
+    // remember：扫描是幂等的，但没必要每次重组都查一遍 PackageManager。
+    val npuCompatible = remember(npuAvailable) {
+        if (npuAvailable) compatibleNpuModels(context) else emptyList()
+    }
+    val npuMemory = npuCompatible.firstOrNull { it.id == lastNpuModelId } ?: npuCompatible.firstOrNull()
 
     // Komiho: 降噪独立于增强档位（mode 0 也生效），常驻首行。
     val denoise by preferences.denoiseLevel.collectAsState()
@@ -135,17 +174,13 @@ private fun EnhancementRootList(
 
     // CPU：圆圈只切方式，整行则切方式 + 进详情（算法与倍率沿用上次的选择，详情页里可改）。
     val cpuActive = mode in 2..3
-    val activateCpu: () -> Unit = {
-        setEnhancementMode(preferences, if (lastMode in 2..3) lastMode else 2)
-    }
+    val activateCpu: () -> Unit = { setEnhancementMode(preferences, cpuMemory) }
     EnhancementMethodRow(
         label = stringResource(MR.strings.enhancement_group_cpu),
-        subtitle = if (cpuActive) {
-            ReaderPreferences.CpuEnhancementModes.firstOrNull { it.first == mode }
-                ?.let { stringResource(it.second) }
-        } else {
-            PLACEHOLDER
-        },
+        // 显示 CPU **自己**上次选的算法，而不是当前档位 —— 非选中行也有值可读。
+        subtitle = ReaderPreferences.CpuEnhancementModes
+            .firstOrNull { it.first == cpuMemory }
+            ?.let { stringResource(it.second) },
         selected = cpuActive,
         onClick = {
             activateCpu()
@@ -154,20 +189,15 @@ private fun EnhancementRootList(
         onSelect = activateCpu,
     )
 
-    // GPU：当前已是 Vulkan 模型则保持不变，否则回落到默认（OmniMiniV2）—— 不静默换掉用户
-    // 在另一个后端上选过的模型。
+    // GPU：切回时恢复**这个后端上次选的模型**（而不是当前档位上的模型）—— 不静默换掉用户在
+    // 另一个后端上选过的东西。
     val gpuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.NCNN_VULKAN
     val activateGpu: () -> Unit = {
-        if (!gpuActive) {
-            if (activeModel.backend != UpscaleModelSpec.Backend.NCNN_VULKAN) {
-                preferences.aiModelId.set(AiUpscaleModel.Default.id)
-            }
-            setEnhancementMode(preferences, 5)
-        }
+        if (!gpuActive) setEnhancementModel(preferences, gpuMemory)
     }
     EnhancementMethodRow(
         label = stringResource(MR.strings.enhancement_group_gpu),
-        subtitle = if (gpuActive) activeModel.displayLabel() else PLACEHOLDER,
+        subtitle = gpuMemory.displayLabel(),
         selected = gpuActive,
         onClick = {
             activateGpu()
@@ -181,15 +211,15 @@ private fun EnhancementRootList(
         val npuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP
         val activateNpu: () -> Unit = {
             if (!npuActive) {
-                compatibleNpuModels(context).firstOrNull()?.let { target ->
-                    preferences.aiModelId.set(target.id)
-                    setEnhancementMode(preferences, 5)
-                }
+                // 本机可用列表为空时再现场扫一次（装了新模型包后不必重启）。
+                val target = npuMemory ?: compatibleNpuModels(context).firstOrNull()
+                target?.let { setEnhancementModel(preferences, it) }
             }
         }
         EnhancementMethodRow(
             label = stringResource(MR.strings.enhancement_group_npu),
-            subtitle = if (npuActive) activeModel.displayLabel() else PLACEHOLDER,
+            // 只有「一个可用模型都没有」时才是占位符 —— 那时确实无值可显示。
+            subtitle = npuMemory?.displayLabel() ?: PLACEHOLDER,
             selected = npuActive,
             onClick = {
                 activateNpu()
@@ -312,10 +342,7 @@ private fun GpuDetail(
             .forEach { model ->
                 FilterChip(
                     selected = mode == 5 && activeModel == model,
-                    onClick = {
-                        preferences.aiModelId.set(model.id)
-                        setEnhancementMode(preferences, 5)
-                    },
+                    onClick = { setEnhancementModel(preferences, model) },
                     label = { Text(model.displayLabel()) },
                 )
             }
@@ -400,10 +427,7 @@ private fun NpuDetail(
                 series = series,
                 members = members,
                 activeModel = activeModel,
-                onSelect = { model ->
-                    preferences.aiModelId.set(model.id)
-                    setEnhancementMode(preferences, 5)
-                },
+                onSelect = { model -> setEnhancementModel(preferences, model) },
             )
         }
     }

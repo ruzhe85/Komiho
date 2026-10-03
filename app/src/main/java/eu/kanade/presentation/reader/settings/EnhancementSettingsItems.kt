@@ -47,8 +47,9 @@ import tachiyomi.presentation.core.util.collectAsState
  * 圆圈必须自己消费点击（`RadioButton.onClick` 传非空），否则事件会冒泡到整行的 clickable，
  * 把「选中」变成「跳转」。
  *
- * [subtitle] 只在**当前方式**下显示真实取值（算法名 / 模型名），其余行显示占位符 —— 否则四
- * 行会同时报出四个值，反而看不出哪个在生效。
+ * [subtitle] 显示**该方式自己上次选的取值**（算法名 / 模型名），与它此刻是否生效无关 ——
+ * 「切回去会得到什么」一眼可见。选中态由左侧 radio 表达，不靠副标题有无来区分
+ * （2026-10-03 之前是「非当前行一律显示占位符」，四个里三个是空的，读不出信息）。
  */
 @Composable
 internal fun EnhancementMethodRow(
