@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.Application
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -10,6 +11,7 @@ import okio.Path.Companion.toOkioPath
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Bundle
 import android.os.Looper
 import android.webkit.WebView
 import androidx.core.content.ContextCompat
@@ -201,6 +203,28 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 runCatching { Waifu2x.destroy() }
             }
             .launchIn(scope)
+
+        // Komiho: Compose 动画总闸逐窗口应用。Compose 动画读的是各自窗口 recomposer
+        // 里的 MotionDurationScale（见 EinkMotion.applyComposeDurationScale 的注释），
+        // 没有全 App 一处生效的入口，所以挂在生命周期回调上：PostCreated 兜住首次
+        // 进入，Resumed 兜住运行中切开关 / 系统倍率变化（ContentObserver 会覆盖回
+        // 系统值，靠这里收敛）。
+        registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityPostCreated(activity: Activity, savedInstanceState: Bundle?) {
+                EinkMotion.applyComposeDurationScale(activity)
+            }
+
+            override fun onActivityResumed(activity: Activity) {
+                EinkMotion.applyComposeDurationScale(activity)
+            }
+
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+            override fun onActivityStarted(activity: Activity) = Unit
+            override fun onActivityPaused(activity: Activity) = Unit
+            override fun onActivityStopped(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+            override fun onActivityDestroyed(activity: Activity) = Unit
+        })
 
         setAppCompatDelegateThemeMode(Injekt.get<UiPreferences>().themeMode.get())
 

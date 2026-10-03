@@ -5,10 +5,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.animation.core.LocalMotionDurationScale
 import app.mihonsy.komga.data.KomgaPreferences
 import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.presentation.theme.colorscheme.BaseColorScheme
@@ -36,10 +34,8 @@ import eu.kanade.tachiyomi.util.system.EinkMotion
  * 本组件随 Activity 重建重组、读取最新值 → 全局即时生效（无需重启应用）。
  * 明暗模式：SYSTEM 跟随系统；LIGHT/DARK 强制切换（isSystemInDarkTheme 对应修正）。
  *
- * Komiho（E-Ink 模式）：这里同时是**动画总闸**的落点。所有 Activity 的 `setContent`
- * 都包在本组件里（见 KomgaMainActivity / KomgaSeriesActivity 等），所以在这里提供
- * [LocalMotionDurationScale] = 0，一处就让全 App 的 Compose 过渡立即跳终值 ——
- * 菜单进出、对话框、加载指示器、交叉淡入全部归零。View 层（ViewPager 翻页、
+ * Komiho（E-Ink 模式）：Compose 动画总闸在 [EinkMotion.applyComposeDurationScale]
+ * （App 的 Activity 生命周期回调逐窗口应用，见该函数的注释）。View 层（ViewPager 翻页、
  * Webtoon 滚动、SSIV 双击缩放）与 Coil 的 crossfade 各自接入 [EinkMotion]。
  */
 @Composable
@@ -58,12 +54,7 @@ fun KomihoTheme(content: @Composable () -> Unit) {
     val colorScheme = remember(appTheme, isDark, amoled) {
         colorSchemeFor(context, appTheme, isDark, amoled)
     }
-    // E-Ink：0f = 立即跳终值（Compose 视作动画已禁用）；否则保留 Compose 自己的
-    // 链式缩放（它已含系统动画倍率），不要用 1f 覆盖。
-    val motionScale = if (EinkMotion.isAnimationOff) 0f else LocalMotionDurationScale.current
-    CompositionLocalProvider(LocalMotionDurationScale provides motionScale) {
-        MaterialTheme(colorScheme = colorScheme, content = content)
-    }
+    MaterialTheme(colorScheme = colorScheme, content = content)
 }
 
 /** AppTheme → Mihon colorscheme 映射（与 TachiyomiTheme.kt 的 colorSchemes 表一致）。 */
