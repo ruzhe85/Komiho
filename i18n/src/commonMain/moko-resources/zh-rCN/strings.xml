@@ -463,6 +463,7 @@
     <string name="action_display_show_tabs">显示分类标签</string>
     <string name="page_list_empty_error">没有图片</string>
     <string name="loader_epub_no_images_error">该 EPUB 没有图片页，请改用 Komga 服务器阅读。</string>
+    <string name="loader_epub_drm_error">该 EPUB 受 DRM 保护，无法在此阅读。请用购买它的应用打开，或改用无 DRM 的副本。</string>
     <string name="komga_book_profile_epub_unsupported">Komga 不为该 EPUB 提供图片页，请用其它阅读器或本地打开。</string>
     <string name="action_disable_all">全部关闭</string>
     <string name="action_enable_all">全部开启</string>

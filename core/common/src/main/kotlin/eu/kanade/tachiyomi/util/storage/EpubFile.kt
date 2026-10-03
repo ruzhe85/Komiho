@@ -6,6 +6,7 @@ import org.jsoup.nodes.Document
 import org.jsoup.parser.Parser
 import java.io.Closeable
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -65,7 +66,36 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
      * Returns the package document where all the files are listed.
      */
     fun getPackageDocument(ref: String): Document {
-        return getInputStream(ref)!!.use { Jsoup.parse(it, null, "", Parser.xmlParser()) }
+        // Komiho: 原来是 getInputStream(ref)!!。容器声明的路径拼不上（大小写/编码/DRM 包的
+        // 非常规写法）时抛 NPE，而 NPE 的 message 是空的，一路传到阅读器只剩
+        // 「Failed to load pages: null」。换成带上下文的报错，至少知道是哪个路径找不到。
+        val stream = getInputStream(ref)
+            ?: throw IOException("EPUB 包文档缺失: $ref（META-INF/container.xml 指向的路径在压缩包里不存在）")
+        return stream.use { Jsoup.parse(it, null, "", Parser.xmlParser()) }
+    }
+
+    /**
+     * Komiho: 是否受 DRM 保护（Adobe ADEPT / Readium LCP / FairPlay 等）。
+     *
+     * 只做字符串级判定、不解密 —— 本类只抽图片，够用且零成本。判据：
+     *  - `META-INF/rights.xml` 存在 → ADEPT 的版权文件，直接判定；
+     *  - `META-INF/encryption.xml` 里出现**非字体混淆**的 EncryptionMethod → DRM。
+     *    字体混淆（IDPF embedding / Adobe pdf enc#RC）是合法且极常见的：它只把字体字节做
+     *    XOR，不影响图片抽取，必须排除，否则会把一大批正常书误判成加密。
+     *
+     * 读不出 / 格式异常一律返回 false —— 宁可回落原来的「没有图片页」提示，也不误拦正常书。
+     */
+    fun isDrmProtected(): Boolean {
+        val rights = getInputStream(resolveZipPath("META-INF", "rights.xml"))
+        if (rights != null) {
+            rights.close()
+            return true
+        }
+        val enc = getInputStream(resolveZipPath("META-INF", "encryption.xml")) ?: return false
+        val xml = enc.use { it.readBytes().toString(Charsets.UTF_8) }
+        return ENCRYPTION_METHOD_ALGORITHM.findAll(xml)
+            .map { it.groupValues[2] }
+            .any { it !in FONT_OBFUSCATION_ALGORITHMS }
     }
 
     /**
@@ -178,4 +208,18 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
         val mediaType: String,
         val properties: String = "",
     )
+
+    private companion object {
+        /**
+         * 字体混淆算法 —— **不是** DRM。只对字体字节做 XOR，图片不受影响，因此不能因为
+         * encryption.xml 里有它就判成加密。
+         */
+        val FONT_OBFUSCATION_ALGORITHMS = setOf(
+            "http://www.idpf.org/2008/embedding",
+            "http://ns.adobe.com/pdf/enc#RC",
+        )
+
+        /** 抓 EncryptionMethod 的 Algorithm 属性（单/双引号都认），值在捕获组 2。 */
+        val ENCRYPTION_METHOD_ALGORITHM = Regex("""Algorithm\s*=\s*(["'])([^"']+)\1""")
+    }
 }

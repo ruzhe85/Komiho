@@ -28,6 +28,11 @@ internal class EpubPageLoader(
     override var isLocal: Boolean = true
 
     override suspend fun getPages(): List<ReaderPage> {
+        // Komiho: DRM 的书要和「纯文字书没有图片页」分开报 —— 两者都是抽到 0 张图，但 DRM 是
+        // 「读不了」：原来的提示让人「改用 Komga 服务器」也是错的（服务端同样解不开 DRM）。
+        if (epub.isDrmProtected()) {
+            throw Exception(context.withAppLanguage().stringResource(MR.strings.loader_epub_drm_error))
+        }
         val images = epub.getImagesFromPages()
         if (images.isEmpty()) {
             // withAppLanguage()：reader 的 context 来自 ReaderActivity（Mihon 的 BaseActivity），
