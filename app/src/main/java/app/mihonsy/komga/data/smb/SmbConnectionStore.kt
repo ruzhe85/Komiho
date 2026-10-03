@@ -177,18 +177,60 @@ object SmbConnectionStore {
     )
 
     /**
+     * 按章节 URL 取连接的公开信息（不含密码）。UI 路由（「打开文件位置」/启动续读/聚合页分桶）用。
+     */
+    fun matchConnection(chapterUrl: String): SmbConnection? = synchronized(lock) {
+        if (!chapterUrl.startsWith(CONN_URL_PREFIX)) return null
+        matchLocked(extractConnId(chapterUrl), extractRelPath(chapterUrl))?.toPublic()
+    }
+
+    /**
+     * 与 [matchConnection] 同规则，但用调用方一次性取好的连接快照 —— 列表逐行渲染时避免
+     * 每行都去读偏好 + 解析 JSON（与 [matchConnection] 共用 [pick] 的匹配顺序，不会分叉）。
+     */
+    fun matchIn(conns: List<SmbConnection>, chapterUrl: String): SmbConnection? {
+        if (!chapterUrl.startsWith(CONN_URL_PREFIX)) return null
+        return pick(conns, { it.id }, { it.path }, extractConnId(chapterUrl), extractRelPath(chapterUrl))
+    }
+
+    /**
      * 按章节 URL 解析出连接 + 相对路径 + 明文密码。
-     * 找不到连接（已删除）返回 null —— 调用方按「来源失效」提示，不崩溃。
+     * 找不到连接（已删除且无法按路径兜底）返回 null —— 调用方按「来源失效」提示，不崩溃。
      */
     fun resolve(chapterUrl: String): SmbTarget? = synchronized(lock) {
         if (!chapterUrl.startsWith(CONN_URL_PREFIX)) return null
-        val connId = extractConnId(chapterUrl)
-        val stored = loadLocked().firstOrNull { it.id == connId } ?: return null
+        val relPath = extractRelPath(chapterUrl)
+        val stored = matchLocked(extractConnId(chapterUrl), relPath) ?: return null
         SmbTarget(
             conn = stored.toPublic(),
-            relPath = extractRelPath(chapterUrl),
+            relPath = relPath,
             password = WebDavCredentialCrypto.decryptStored(stored.passEnc),
         )
+    }
+
+    /**
+     * 连接匹配（需持锁）：connId 精确优先；否则按「连接起始目录是 relPath 前缀」取最长者
+     * （relPath 已含起始目录）；再无匹配则仅当库里只有一个连接时使用它。
+     *
+     * 后两级是为了兜住**同步/恢复把连接 id 换掉**之后的存量历史：章节 URL 里内嵌的旧 connId
+     * 已不在库里，只按 id 查会让整批历史/书签全部失效。
+     */
+    private fun matchLocked(connId: String, relPath: String): StoredConnection? =
+        pick(loadLocked(), { it.id }, { it.path }, connId, relPath)
+
+    /** 三级匹配：connId 精确 → 起始目录是 relPath 前缀者取最长 → 库里唯一连接。 */
+    private fun <T> pick(
+        conns: List<T>,
+        id: (T) -> String,
+        path: (T) -> String,
+        connId: String,
+        relPath: String,
+    ): T? {
+        conns.firstOrNull { id(it) == connId }?.let { return it }
+        conns.filter { path(it).isEmpty() || relPath == path(it) || relPath.startsWith(path(it) + "/") }
+            .maxByOrNull { path(it).length }
+            ?.let { return it }
+        return conns.singleOrNull()
     }
 
     // ------------------------------------------------------------ 工具

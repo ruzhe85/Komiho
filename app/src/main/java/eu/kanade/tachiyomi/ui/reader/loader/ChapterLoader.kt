@@ -230,8 +230,8 @@ class ChapterLoader(
         remoteUrl.startsWith("webdav:") && remoteUrl.endsWith("/")
 
     private fun webDavDirectoryLoader(remoteUrl: String): WebDavDirectoryPageLoader {
-        val connId = remoteUrl.removePrefix("webdav://").substringBefore('/')
-        val conn = WebDavConnectionStore.all().firstOrNull { it.id == connId }
+        // 连接匹配走 store：connId 精确优先，失配按 baseUrl 兜底（兼容合并后嵌旧 id 的历史）。
+        val conn = WebDavConnectionStore.match(remoteUrl)
             ?: throw IOException("WebDAV 连接不存在（可能已删除）: $remoteUrl")
         val dirUrl = WebDavConnectionStore.extractFullUrl(remoteUrl)
             .let { if (it.endsWith('/')) it else "$it/" }

@@ -9,7 +9,9 @@ import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaCredentialCrypto
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.SourceVisibilityStore
+import app.mihonsy.komga.data.smb.SmbConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavConnection
+import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.source.KomgaSource
 import mihon.core.common.archive.WebDavRandomAccessSource
@@ -511,8 +513,10 @@ object KomihoBackup {
         // 2) SMB / WebDAV 连接
         // fileEncrypted=true 时 password 字段是明文（导出已解密），需重新加密；
         // fileEncrypted=false 时 password 字段是设备绑定的密文，原样写回。
-        restoreSmbConnections(payload.smbConnections, fileEncrypted)
-        restoreWebDavConnections(payload.webDavConnections, fileEncrypted)
+        // 返回值是「备份侧 connId → 本机 connId」的重映射（同路径连接合并时保留本机 id），
+        // 供第 5 步改写备份里内嵌旧 id 的章节/历史/书签 URL。
+        val smbIdRemap = restoreSmbConnections(payload.smbConnections, fileEncrypted)
+        val webdavIdRemap = restoreWebDavConnections(payload.webDavConnections, fileEncrypted)
 
         // 3) 来源显隐 / 排序
         restoreSourceVisibility(payload.sourceVisibility)
@@ -521,7 +525,7 @@ object KomihoBackup {
         restoreDashboard(payload.dashboard)
 
         // 5) 非 Komga 本地数据
-        return restoreLocalData(payload)
+        return restoreLocalData(payload, smbIdRemap, webdavIdRemap)
     }
 
     private fun restoreRawPrefs(context: Context, name: String, entries: List<PrefEntry>) {
@@ -543,11 +547,17 @@ object KomihoBackup {
     /**
      * 恢复 SMB 连接：**合并而非整表覆盖**。
      * - 本地多出来的来源保留（多机各自新增的来源互不丢失）；
-     * - host+port+share+path 相同视为同一台服务器，以备份版本为准——
-     *   恢复的进度/历史 URL 带备份侧连接 id，保留备份条目才能对得上；
+     * - host+port+share+path 相同视为同一台服务器，其余字段以备份版本为准，但
+     *   **保留本机连接 id** —— 本机既有章节 URL / 历史 / 书签都内嵌本机 id，
+     *   换成备份 id 会让它们全部指向不存在的连接（真机上表现为「SMB 历史全部失效」）；
+     * - 备份侧 URL 带备份 id，由 [restoreLocalData] 按返回的映射改写成本机 id。
      * - 同 id 的本地条目让位给备份版本（备份即权威快照）。
+     * @return 备份 connId → 本机 connId（仅两者不同时才有条目）
      */
-    private suspend fun restoreSmbConnections(conns: List<SmbConn>, payloadIsEncrypted: Boolean) {
+    private suspend fun restoreSmbConnections(
+        conns: List<SmbConn>,
+        payloadIsEncrypted: Boolean,
+    ): Map<String, String> {
         val backupList = conns.map { c ->
             SmbStored(
                 id = c.id, name = c.name, host = c.host, port = c.port,
@@ -561,20 +571,33 @@ object KomihoBackup {
 
         val merged = LinkedHashMap<String, SmbStored>()
         readSmbConnections().forEach { merged[keyOf(it)] = it }
+        val idRemap = mutableMapOf<String, String>()
         backupList.forEach { b ->
-            merged.entries.removeAll { it.value.id == b.id && it.key != keyOf(b) }
-            merged[keyOf(b)] = b
+            val key = keyOf(b)
+            val localId = merged[key]?.id
+            val target = if (localId != null) {
+                if (localId != b.id) idRemap[b.id] = localId
+                b.copy(id = localId)
+            } else {
+                b
+            }
+            merged.entries.removeAll { it.value.id == target.id && it.key != key }
+            merged[key] = target
         }
         val prefStore = Injekt.get<PreferenceStore>()
         prefStore.getString(Preference.appStateKey("smb_connections_v1"), "[]")
             .set(json.encodeToString(merged.values.toList()))
+        return idRemap
     }
 
     /**
-     * 恢复 WebDAV 连接：合并策略同 [restoreSmbConnections]（按 baseUrl 去重），
+     * 恢复 WebDAV 连接：合并策略同 [restoreSmbConnections]（按 baseUrl 去重、保留本机 id），
      * 并保留各连接的「忽略 HTTPS 证书校验」开关。
      */
-    private suspend fun restoreWebDavConnections(conns: List<WebDavConn>, payloadIsEncrypted: Boolean) {
+    private suspend fun restoreWebDavConnections(
+        conns: List<WebDavConn>,
+        payloadIsEncrypted: Boolean,
+    ): Map<String, String> {
         val backupList = conns.map { c ->
             WebDavStored(
                 id = c.id, name = c.name, baseUrl = c.baseUrl, user = c.user,
@@ -589,13 +612,23 @@ object KomihoBackup {
 
         val merged = LinkedHashMap<String, WebDavStored>()
         readWebDavConnections().forEach { merged[keyOf(it)] = it }
+        val idRemap = mutableMapOf<String, String>()
         backupList.forEach { b ->
-            merged.entries.removeAll { it.value.id == b.id && it.key != keyOf(b) }
-            merged[keyOf(b)] = b
+            val key = keyOf(b)
+            val localId = merged[key]?.id
+            val target = if (localId != null) {
+                if (localId != b.id) idRemap[b.id] = localId
+                b.copy(id = localId)
+            } else {
+                b
+            }
+            merged.entries.removeAll { it.value.id == target.id && it.key != key }
+            merged[key] = target
         }
         val prefStore = Injekt.get<PreferenceStore>()
         prefStore.getString(Preference.appStateKey("webdav_connections_v1"), "[]")
             .set(json.encodeToString(merged.values.toList()))
+        return idRemap
     }
 
     private fun restoreSourceVisibility(vis: SourceVisibilityBackup?) {
@@ -623,19 +656,48 @@ object KomihoBackup {
         verPref.set(verPref.get() + 1)
     }
 
-    private suspend fun restoreLocalData(payload: BackupPayload): BackupSummary {
+    private suspend fun restoreLocalData(
+        payload: BackupPayload,
+        smbIdRemap: Map<String, String>,
+        webdavIdRemap: Map<String, String>,
+    ): BackupSummary {
         val mangaRepo = Injekt.get<MangaRepository>()
         val chapterRepo = Injekt.get<ChapterRepository>()
         val db = Injekt.get<Database>()
 
+        // 连接合并时保留了本机 id，备份里的章节/书签 URL 仍带备份侧 connId —— 导入前统一改写，
+        // 否则这批记录会指向不存在的连接（历史/书签打不开）。未发生重映射时原样返回。
+        fun remapUrl(url: String): String {
+            if (url.startsWith(SmbConnectionStore.CONN_URL_PREFIX)) {
+                val newId = smbIdRemap[SmbConnectionStore.extractConnId(url)] ?: return url
+                return SmbConnectionStore.toChapterUrl(newId, SmbConnectionStore.extractRelPath(url))
+            }
+            if (url.startsWith(WebDavConnectionStore.CONN_URL_PREFIX)) {
+                val oldId = url.removePrefix(WebDavConnectionStore.CONN_URL_PREFIX).substringBefore('/')
+                val newId = webdavIdRemap[oldId] ?: return url
+                return WebDavConnectionStore.toChapterUrl(newId, WebDavConnectionStore.extractFullUrl(url))
+            }
+            return url
+        }
+        val mangas = payload.localMangas.map { it.copy(url = remapUrl(it.url)) }
+        val chapters = payload.localChapters.map {
+            it.copy(url = remapUrl(it.url), mangaUrl = remapUrl(it.mangaUrl))
+        }
+        val history = payload.localHistory.map {
+            it.copy(mangaUrl = remapUrl(it.mangaUrl), chapterUrl = remapUrl(it.chapterUrl))
+        }
+        val bookmarks = payload.localBookmarks.map {
+            it.copy(mangaUrl = remapUrl(it.mangaUrl), chapterUrl = remapUrl(it.chapterUrl))
+        }
+
         val mangaIdByUrl = mutableMapOf<String, Long>()
-        for (b in payload.localMangas) {
+        for (b in mangas) {
             val inserted = mangaRepo.insertNetworkManga(listOf(buildManga(b))).firstOrNull() ?: continue
             mangaIdByUrl[b.url] = inserted.id
         }
 
         val chapterIdByKey = mutableMapOf<Pair<String, String>, Long>()
-        for (b in payload.localChapters) {
+        for (b in chapters) {
             val mangaId = mangaIdByUrl[b.mangaUrl] ?: continue
             val existing = chapterRepo.getChapterByUrlAndMangaId(b.url, mangaId)
             // SY --> Komiho: 较新胜——备份进度更新时间晚于本地最后修改才覆盖进度字段
@@ -662,7 +724,7 @@ object KomihoBackup {
         var historyCount = 0
         var bookmarkCount = 0
         db.transaction {
-            for (h in payload.localHistory) {
+            for (h in history) {
                 val chId = chapterIdByKey[h.mangaUrl to h.chapterUrl] ?: continue
                 // SY --> Komiho: 较新胜——仅当备份阅读时间不早于本地时才覆盖
                 val backupLast = h.lastRead ?: 0L
@@ -677,7 +739,7 @@ object KomihoBackup {
                     historyCount++
                 }
             }
-            for (bk in payload.localBookmarks) {
+            for (bk in bookmarks) {
                 val chId = chapterIdByKey[bk.mangaUrl to bk.chapterUrl] ?: continue
                 if (db.bookmarksQueries.countByChapterAndPage(chId, bk.page).awaitAsOne() == 0L) {
                     db.bookmarksQueries.insert(chId, bk.page, bk.createdAt)
@@ -694,7 +756,7 @@ object KomihoBackup {
                 oldToNew[c.id] = newId
             }
 
-            val linksByManga = payload.categoryLinks.groupBy { it.mangaUrl }
+            val linksByManga = payload.categoryLinks.groupBy { remapUrl(it.mangaUrl) }
             for ((mangaUrl, links) in linksByManga) {
                 val mangaId = mangaIdByUrl[mangaUrl] ?: continue
                 val catIds = links.mapNotNull { oldToNew[it.categoryId] }.distinct()

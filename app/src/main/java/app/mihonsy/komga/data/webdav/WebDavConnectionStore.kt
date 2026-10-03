@@ -150,21 +150,45 @@ object WebDavConnectionStore {
         resolveConnLocked(chapterUrl)?.insecureTls ?: false
     }
 
-    /** 按「新格式 connId 精确 / 旧格式 baseUrl 最长前缀」解析连接；无任何连接返回 null。 */
+    /** 按章节 URL 取连接的公开信息（不含密码）：UI 路由（「打开文件位置」/启动续读/聚合页分桶）用。 */
+    fun match(chapterUrl: String): WebDavConnection? = synchronized(lock) {
+        if (!chapterUrl.startsWith("webdav:")) return null
+        resolveConnLocked(chapterUrl)?.toPublic()
+    }
+
+    /**
+     * 与 [match] 同规则，但用调用方一次性取好的连接快照 —— 列表逐行渲染时避免每行都去
+     * 读偏好 + 解析 JSON。
+     */
+    fun matchIn(conns: List<WebDavConnection>, chapterUrl: String): WebDavConnection? =
+        pickConn(conns, { it.id }, { it.baseUrl }, chapterUrl)
+
     private fun resolveConnLocked(chapterUrl: String): StoredConnection? {
         migrateLegacyIfNeededLocked()
-        val list = loadLocked()
-        if (list.isEmpty()) return null
-        return if (chapterUrl.startsWith(CONN_URL_PREFIX)) {
+        return pickConn(loadLocked(), { it.id }, { it.baseUrl }, chapterUrl)
+    }
+
+    /**
+     * 按「新格式 connId 精确 / 完整 URL 的 baseUrl 最长前缀 / 第一个连接」解析连接；无连接返回 null。
+     *
+     * connId 失配时按 baseUrl 兜底，是为了兼容**同步/恢复把连接 id 换掉**之后的存量历史：
+     * 章节 URL 里内嵌的旧 connId 已不在库里，旧实现会直接落到 `list.first()` → 凭据错 → 401。
+     */
+    private fun <T> pickConn(
+        conns: List<T>,
+        id: (T) -> String,
+        baseUrl: (T) -> String,
+        chapterUrl: String,
+    ): T? {
+        if (conns.isEmpty()) return null
+        if (chapterUrl.startsWith(CONN_URL_PREFIX)) {
             val connId = chapterUrl.removePrefix(CONN_URL_PREFIX).substringBefore('/')
-            list.firstOrNull { it.id == connId } ?: list.first()
-        } else {
-            // 旧格式：最长 baseUrl 前缀优先，兜底第一个
-            val fullUrl = extractFullUrl(chapterUrl)
-            list.filter { fullUrl.startsWith(it.baseUrl) }
-                .maxByOrNull { it.baseUrl.length }
-                ?: list.first()
+            conns.firstOrNull { id(it) == connId }?.let { return it }
         }
+        val fullUrl = extractFullUrl(chapterUrl)
+        return conns.filter { fullUrl.startsWith(baseUrl(it)) }
+            .maxByOrNull { baseUrl(it).length }
+            ?: conns.firstOrNull()
     }
 
     /** 把手输的文件路径解析成完整 URL：绝对 http(s) 原样；`/` 开头或裸路径拼到 base 后。 */

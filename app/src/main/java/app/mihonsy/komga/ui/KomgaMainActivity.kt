@@ -856,25 +856,17 @@ private fun KomgaMainScreen(
     // 注意声明位置在启动续读 effect 之前（local fun 不可前向引用）。
     fun openLocationInApp(chapterUrl: String) {
         if (chapterUrl.startsWith("webdav:")) {
-            val conn = if (chapterUrl.startsWith("webdav://")) {
-                // 新格式 webdav://<connId>/<URL>：connId 精确匹配
-                val connId = chapterUrl.removePrefix("webdav://").substringBefore('/')
-                WebDavConnectionStore.all().firstOrNull { it.id == connId }
-            } else {
-                // 旧格式 webdav:<URL>：baseUrl 最长前缀匹配
-                val fullUrl = WebDavConnectionStore.extractFullUrl(chapterUrl)
-                WebDavConnectionStore.all()
-                    .filter { fullUrl.startsWith(it.baseUrl) }
-                    .maxByOrNull { it.baseUrl.length }
-            } ?: return
+            // 新格式 connId 精确 / 旧格式 baseUrl 最长前缀；connId 失配时按 baseUrl 兜底 ——
+            // 同步合并会保留本机连接 id，备份侧旧 id 的存量历史只能靠 baseUrl 找回。
+            val conn = WebDavConnectionStore.match(chapterUrl) ?: return
             // 定位目标 = 文件所在目录的完整 URL，由 WebDavBrowsePane 从 baseUrl 逐段重建路径栈。
             webdavBrowseNavRequest = WebDavConnectionStore.extractFullUrl(chapterUrl).substringBeforeLast('/')
             selectSource(SourceEntry(SOURCE_ID_WEBDAV_PREFIX + conn.id, SourceKind.WebDav, conn.displayName()))
         } else if (chapterUrl.startsWith("smb://")) {
             // SY --> Komiho Phase7: SMB 条目 → 对应连接浏览 tab 定位所在目录。
             // 章节 url = smb://<connId>/<relPath>；定位目标 = 文件所在目录的共享内相对路径。
-            val connId = SmbConnectionStore.extractConnId(chapterUrl)
-            val conn = SmbConnectionStore.all().firstOrNull { it.id == connId } ?: return
+            // 连接匹配同 WebDAV：connId 优先，失配按 relPath 与连接起始目录兜底。
+            val conn = SmbConnectionStore.matchConnection(chapterUrl) ?: return
             smbBrowseNavRequest = SmbConnectionStore.extractRelPath(chapterUrl).substringBeforeLast('/')
             selectSource(SourceEntry(SOURCE_ID_SMB_PREFIX + conn.id, SourceKind.Smb, conn.displayName()))
             // SY <--
@@ -905,10 +897,11 @@ private fun KomgaMainScreen(
                 SOURCE_ID_KOMGA_PREFIX + prefs.connection().id
             }
         }
+        // 连接匹配交给 store（connId 精确 → 路径/baseUrl 兜底），URL 里的旧 connId 不再直接当 id 用。
         url.startsWith("smb://") ->
-            SOURCE_ID_SMB_PREFIX + url.removePrefix("smb://").substringBefore('/')
+            SmbConnectionStore.matchConnection(url)?.let { SOURCE_ID_SMB_PREFIX + it.id }
         url.startsWith("webdav://") ->
-            SOURCE_ID_WEBDAV_PREFIX + url.removePrefix("webdav://").substringBefore('/')
+            WebDavConnectionStore.match(url)?.let { SOURCE_ID_WEBDAV_PREFIX + it.id }
         // 旧格式 webdav:<URL>（Phase3 遗留）：无法从 url 反查连接，放弃（回落到「最近」页）。
         url.startsWith("webdav:") -> null
         else -> SOURCE_ID_LOCAL
@@ -7271,23 +7264,12 @@ private fun chapterSourceLabel(
     webDavConns: List<WebDavConnection>,
     smbConns: List<SmbConnection> = emptyList(),
 ): String = when {
-    chapterUrl.startsWith(WebDavConnectionStore.CONN_URL_PREFIX) -> {
-        // 新格式 webdav://<connId>/<URL>：connId 精确匹配
-        val connId = chapterUrl.removePrefix(WebDavConnectionStore.CONN_URL_PREFIX).substringBefore('/')
-        webDavConns.firstOrNull { it.id == connId }?.displayName() ?: "WebDAV"
-    }
-    chapterUrl.startsWith("webdav:") -> {
-        // 旧格式 webdav:<URL>：baseUrl 最长前缀匹配
-        val fullUrl = WebDavConnectionStore.extractFullUrl(chapterUrl)
-        webDavConns.filter { fullUrl.startsWith(it.baseUrl) }
-            .maxByOrNull { it.baseUrl.length }
-            ?.displayName() ?: "WebDAV"
-    }
-    // SY --> Komiho Phase7: SMB 条目显示连接名（smb://<connId>/<relPath> 精确匹配）。
-    chapterUrl.startsWith(SmbConnectionStore.CONN_URL_PREFIX) -> {
-        val connId = chapterUrl.removePrefix(SmbConnectionStore.CONN_URL_PREFIX).substringBefore('/')
-        smbConns.firstOrNull { it.id == connId }?.displayName() ?: "SMB"
-    }
+    // 新格式 connId 精确 / 旧格式 baseUrl 最长前缀（与 store 同规则，URL 里的旧 connId 能兜回来）。
+    chapterUrl.startsWith("webdav:") ->
+        WebDavConnectionStore.matchIn(webDavConns, chapterUrl)?.displayName() ?: "WebDAV"
+    // SY --> Komiho Phase7: SMB 条目显示连接名（connId 精确，失配按起始目录兜底）。
+    chapterUrl.startsWith(SmbConnectionStore.CONN_URL_PREFIX) ->
+        SmbConnectionStore.matchIn(smbConns, chapterUrl)?.displayName() ?: "SMB"
     // SY <--
     chapterUrl.startsWith("smb:") -> "SMB"
     else -> composeStringResource(R.string.source_local)
@@ -8556,10 +8538,16 @@ private fun SourceDashboardPane(
             runCatching { repo.getHistoryBySourceDetailed(LocalSource.ID).first() }.getOrDefault(emptyList()).forEach { item ->
                 val url = item.chapterUrl
                 when {
+                    // 分桶键必须是**当前连接 id**：URL 里可能是合并前的旧 connId，直接用会让
+                    // 这批历史落进永不匹配的桶（聚合页/仪表盘看不到）。
                     url.startsWith("smb://") ->
-                        smb.getOrPut(SOURCE_ID_SMB_PREFIX + url.removePrefix("smb://").substringBefore('/')) { Agg() }.add(item)
+                        SmbConnectionStore.matchConnection(url)?.let {
+                            smb.getOrPut(SOURCE_ID_SMB_PREFIX + it.id) { Agg() }.add(item)
+                        }
                     url.startsWith("webdav://") ->
-                        webdav.getOrPut("webdav:" + url.removePrefix("webdav://").substringBefore('/')) { Agg() }.add(item)
+                        WebDavConnectionStore.match(url)?.let {
+                            webdav.getOrPut("webdav:" + it.id) { Agg() }.add(item)
+                        }
                     url.startsWith("webdav:") -> {
                         // 旧格式 webdav:<URL>（Phase3）：baseUrl 最长前缀匹配连接。
                         val full = WebDavConnectionStore.extractFullUrl(url)
