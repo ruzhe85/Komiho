@@ -1110,4 +1110,7 @@
     <string name="komiho_sync_content_source">来源配置</string>
     <string name="komiho_sync_content_webdav">WebDAV 阅读历史/书签</string>
     <string name="komiho_sync_content_smb">SMB 阅读历史/书签</string>
+    <string name="komiho_sync_content_display">外观与语言</string>
+    <string name="komiho_sync_content_komga_home">Komga 主页</string>
+    <string name="komiho_sync_content_reader">阅读设置</string>
 </resources>

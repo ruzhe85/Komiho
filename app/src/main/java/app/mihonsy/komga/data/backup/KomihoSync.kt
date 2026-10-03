@@ -66,10 +66,48 @@ object KomihoSync {
         TRIGGER_FOREGROUND,
     )
 
-    /** 同步内容选择（多选）：键集合，缺省全开。 */
+    /** 同步内容选择（多选）：键集合。缺省 = 来源配置 + 两条阅读历史；外观/语言默认**关**。 */
     const val CONTENT_SOURCE_CONFIG = "source_config"
     const val CONTENT_WEBDAV_HISTORY = "webdav_history"
     const val CONTENT_SMB_HISTORY = "smb_history"
+
+    /**
+     * Komiho: 外观与语言（主题 / 明暗模式 / AMOLED / 应用语言 / 导航栏位置）。
+     *
+     * 这些键和连接数据挤在同一个 `komga_connection` SharedPreferences 里，早期实现由
+     * [CONTENT_SOURCE_CONFIG] 一把打包进备份。于是每次同步（拉远端 → 导入 → 推送）都会把本地
+     * 主题改回远端旧值；又因为**先导入后推送**，本地改动永远赢不了、远端永远保持旧值 ——
+     * 自我固化。表现为「每次进外观页，主题/模式都回到默认」。
+     *
+     * 它们是设备本地口味，缺省**不开**（见 [DEFAULT_CONTENT]）。勾上才会纳入同步——
+     * 那时就要接受「被远端覆盖」，这是同一个开关的两面。
+     *
+     * 具体键集合见 `KomgaPreferences.DISPLAY_PREF_KEYS`。
+     */
+    const val CONTENT_DISPLAY_PREFS = "display_prefs"
+
+    /**
+     * Komga 界面显示（首页区块；书库 / 书籍两级书架的显示模式、排序、列数；最后访问的库）。
+     * 设备本地口味，缺省**不开**。键集合见 `KomgaPreferences.KOMGA_UI_PREF_KEYS`。
+     *
+     * 本地 / WebDAV / SMB 的浏览显示模式不在其中——它们存在 Mihon 的 `StoragePreferences`，
+     * 本就不进这份备份。
+     */
+    const val CONTENT_KOMGA_HOME = "komga_home"
+
+    /**
+     * Komga 阅读设置（双页 / 阅读模式 / 进度气泡缩略图）。
+     * 设备本地口味，缺省**不开**。键集合见 `KomgaPreferences.READER_PREF_KEYS`。
+     */
+    const val CONTENT_READER_SETTINGS = "reader_settings"
+
+    /**
+     * 缺省勾选：来源配置 + 两条阅读历史。
+     *
+     * 外观与语言 / Komga 主页 / 阅读设置 都是**设备本地显示偏好**，缺省一律不勾 ——
+     * 它们以前被「来源配置」一把打包，导致每次同步把本地改回远端旧值（自我固化）。
+     * 勾上就表示接受「被远端覆盖」——这是同一个开关的两面。
+     */
     val DEFAULT_CONTENT = setOf(CONTENT_SOURCE_CONFIG, CONTENT_WEBDAV_HISTORY, CONTENT_SMB_HISTORY)
 
     fun contentEnabled(prefs: PreferenceStore, key: String): Boolean =

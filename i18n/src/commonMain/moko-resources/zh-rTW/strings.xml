@@ -1097,4 +1097,7 @@
     <string name="komiho_sync_content_source">來源設定</string>
     <string name="komiho_sync_content_webdav">WebDAV 閱讀歷史/書籤</string>
     <string name="komiho_sync_content_smb">SMB 閱讀歷史/書籤</string>
+    <string name="komiho_sync_content_display">外觀與語言</string>
+    <string name="komiho_sync_content_komga_home">Komga 主頁</string>
+    <string name="komiho_sync_content_reader">閱讀設定</string>
 </resources>

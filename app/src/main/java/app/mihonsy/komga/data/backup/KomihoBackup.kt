@@ -253,10 +253,32 @@ object KomihoBackup {
 
     // ---------------------------------------------------------------- 导出
 
+    /**
+     * `komga_connection` 里的某个键是否参与本次导出/导入 —— 由「内容选择」的开关分别管辖：
+     * 外观与语言 / Komga 主页（界面显示）/ 阅读设置 各一组，其余（即连接数据）跟随「来源配置」。
+     *
+     * 另有 [KomgaPreferences.NEVER_SYNC_PREF_KEYS] 无条件排除（纯设备状态）。
+     *
+     * 导出与导入**共用这一个判据**：只在导出端过滤挡不住「远端旧快照把本地改回去」——
+     * 旧备份里是带这些键的，导入端必须同样跳过。以后加分组只改这里。
+     */
+    private fun includesInKomgaPrefs(key: String, prefStore: PreferenceStore): Boolean = when {
+        key in KomgaPreferences.NEVER_SYNC_PREF_KEYS -> false
+        key in KomgaPreferences.DISPLAY_PREF_KEYS ->
+            KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_DISPLAY_PREFS)
+        key in KomgaPreferences.KOMGA_UI_PREF_KEYS ->
+            KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_KOMGA_HOME)
+        key in KomgaPreferences.READER_PREF_KEYS ->
+            KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_READER_SETTINGS)
+        else -> KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_SOURCE_CONFIG)
+    }
+
     private suspend fun buildPayload(context: Context): BackupPayload {
         val prefStore = Injekt.get<PreferenceStore>()
 
-        // Komiho: 同步内容选择（设置 → 同步 → 内容选择），三项默认全开。
+        // Komiho: 同步内容选择（设置 → 同步 → 内容选择）。
+        // 外观/主页/阅读 三项显示偏好缺省关（见 KomihoSync.DEFAULT_CONTENT），
+        // 否则远端旧快照会把本地改回去。
         val includeSourceConfig = KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_SOURCE_CONFIG)
         val includeWebdavHistory = KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_WEBDAV_HISTORY)
         val includeSmbHistory = KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_SMB_HISTORY)
@@ -264,15 +286,14 @@ object KomihoBackup {
             (includeWebdavHistory && url.startsWith("webdav:")) ||
                 (includeSmbHistory && url.startsWith("smb://"))
 
-        // 1) Komga 个性化设置（整个 komga_connection SharedPreferences）
+        // 1) Komga 设置（komga_connection 是个大杂烩：连接数据 + 各类偏好）。
+        //    各内容开关各管一组键，互不牵连（见 [includesInKomgaPrefs]）。
         //    先触发旧版明文凭据迁移（确保 connections 键存在且为加密形态），
         //    再取出并解密其中的敏感字段，使 payload 内为明文（由备份密码统一保护）。
         KomgaPreferences(context).connections()
-        val komgaPrefs = if (includeSourceConfig) {
-            withKomgaCredsDecrypted(readRawPrefs(context, "komga_connection"))
-        } else {
-            emptyList()
-        }
+        val komgaPrefs = readRawPrefs(context, "komga_connection")
+            .filter { includesInKomgaPrefs(it.k, prefStore) }
+            .let { withKomgaCredsDecrypted(it) }
 
         // 2) SMB / WebDAV 连接（含凭据解密）
         val smbConns = if (includeSourceConfig) {
@@ -478,10 +499,14 @@ object KomihoBackup {
     // ---------------------------------------------------------------- 导入
 
     private suspend fun restorePayload(context: Context, payload: BackupPayload, fileEncrypted: Boolean): BackupSummary {
-        // 1) Komga 个性化设置
+        // 1) Komga 设置
+        //    **导入端必须按同一判据过滤**：旧备份（以及远端已存在的快照）里带着显示偏好键，
+        //    只在导出端过滤挡不住「远端旧快照把本地改回去」——那正是主题每次回跳默认的根因。
         //    fileEncrypted=true 时 payload 内 Komga 凭据为明文（导出已解密），需重新加密落设备密钥；
         //    fileEncrypted=false 时按原样写回（明文，仅同机可恢复，与 SMB/WebDAV 同策略）。
-        restoreRawPrefs(context, "komga_connection", withKomgaCredsReEncrypted(payload.komgaPrefs, fileEncrypted))
+        val prefStore = Injekt.get<PreferenceStore>()
+        val komgaPrefs = payload.komgaPrefs.filter { includesInKomgaPrefs(it.k, prefStore) }
+        restoreRawPrefs(context, "komga_connection", withKomgaCredsReEncrypted(komgaPrefs, fileEncrypted))
 
         // 2) SMB / WebDAV 连接
         // fileEncrypted=true 时 password 字段是明文（导出已解密），需重新加密；

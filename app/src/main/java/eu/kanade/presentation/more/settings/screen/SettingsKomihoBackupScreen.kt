@@ -230,6 +230,15 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                         entries = mapOf(
                             KomihoSync.CONTENT_SOURCE_CONFIG to
                                 stringResource(MR.strings.komiho_sync_content_source),
+                            // Komiho: 外观/主页/阅读 三项显示偏好独立成项。以前它们被「来源配置」
+                            // 一把打包进同步，于是每次同步都会把本地改回远端旧值（主题每次回跳默认）。
+                            // 默认不勾：设备本地口味不出本机。
+                            KomihoSync.CONTENT_DISPLAY_PREFS to
+                                stringResource(MR.strings.komiho_sync_content_display),
+                            KomihoSync.CONTENT_KOMGA_HOME to
+                                stringResource(MR.strings.komiho_sync_content_komga_home),
+                            KomihoSync.CONTENT_READER_SETTINGS to
+                                stringResource(MR.strings.komiho_sync_content_reader),
                             KomihoSync.CONTENT_WEBDAV_HISTORY to
                                 stringResource(MR.strings.komiho_sync_content_webdav),
                             KomihoSync.CONTENT_SMB_HISTORY to
@@ -238,7 +247,9 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                         title = stringResource(MR.strings.komiho_sync_content),
                         subtitle = null,
                         subtitleProvider = { _, _ -> null },
-                        enabled = configured && syncOn,
+                        // Komiho: 这里刻意**不传 enabled** —— StatusWrapper 是
+                        // AnimatedVisibility(visible = item.enabled)，传 false 会把整行隐藏掉。
+                        // 内容是「配置」不是动作：同步开关关着也得能先把选项配好。
                     ),
                     Preference.PreferenceItem.MultiSelectListPreference(
                         preference = triggersPref,
@@ -256,7 +267,7 @@ object SettingsKomihoBackupScreen : SearchableSettings {
                         // 设计约定：条目下方不显示已选项（状态/取值以外不放小字）。
                         subtitle = null,
                         subtitleProvider = { _, _ -> null },
-                        enabled = configured && syncOn,
+                        // Komiho: 同「内容选择」——触发条件也是配置，不随同步开关隐藏。
                     ),
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.komiho_sync_push_now),

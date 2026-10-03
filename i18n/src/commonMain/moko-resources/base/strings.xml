@@ -1243,4 +1243,7 @@
     <string name="komiho_sync_content_source">Source config</string>
     <string name="komiho_sync_content_webdav">WebDAV reading history/bookmarks</string>
     <string name="komiho_sync_content_smb">SMB reading history/bookmarks</string>
+    <string name="komiho_sync_content_display">Appearance &amp; language</string>
+    <string name="komiho_sync_content_komga_home">Komga home</string>
+    <string name="komiho_sync_content_reader">Reader settings</string>
 </resources>

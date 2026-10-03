@@ -326,7 +326,71 @@ class KomgaPreferences(context: Context) {
         prefs.edit().clear().apply()
     }
 
-    private companion object {
+    companion object {
+        /**
+         * 设备本地「外观与语言」偏好键——主题 / 明暗模式 / AMOLED / 应用语言 / 导航栏位置。
+         *
+         * 这些偏好和连接数据挤在同一个 `komga_connection` 里，但语义上属于**本机口味**：
+         * 备份/同步默认**不带**它们（见 `KomihoSync.CONTENT_DISPLAY_PREFS`），否则远端旧快照
+         * 会在每次同步时把本地主题改回去（「每次进外观页主题都回到默认」的根因）。
+         *
+         * 需要纳入更多本地键时往这里加即可，导出与导入两端都读这一个集合。
+         */
+        val DISPLAY_PREF_KEYS: Set<String> = setOf(
+            KEY_THEME_MODE,
+            KEY_APP_THEME,
+            KEY_THEME_DARK_AMOLED,
+            KEY_APP_LANGUAGE,
+            KEY_NAV_BAR_POSITION,
+        )
+
+        /**
+         * Komga **界面**显示键——「内容选择 → Komga 主页」那一项管辖的全部键。
+         *
+         * 除首页自身（区块数量 / 每行列数 / 卡片密度 / 区块顺序与布局）外，还含书库与书籍两级的
+         * 书架显示模式、排序、网格列数，以及「最后访问的库」记忆 —— 这些读写全部落在
+         * `app.mihonsy.komga.ui` 包内，都是 Komga 专属（库 / 收藏 / 阅读列表是 Komga 服务端概念）。
+         *
+         * 注意：**本地 / WebDAV / SMB 的浏览显示模式不在这里**，它们存在 Mihon 的
+         * `StoragePreferences.localBrowseDisplayMode`，本就不进这份备份。
+         *
+         * 设备本地口味，缺省不勾（见 `KomihoSync.CONTENT_KOMGA_HOME`）。
+         */
+        val KOMGA_UI_PREF_KEYS: Set<String> = setOf(
+            // 首页
+            KEY_HOME_SECTION_LIMIT,
+            KEY_HOME_GRID_COLUMNS,
+            KEY_HOME_DISPLAY_MODE,
+            KEY_HOME_SECTION_ORDER,
+            KEY_HOME_SECTION_LAYOUT,
+            // 书库 / 书籍两级书架
+            KEY_LIBRARY_DISPLAY_MODE,
+            KEY_BOOK_DISPLAY_MODE,
+            KEY_LIBRARY_SORT,
+            KEY_BOOK_SORT,
+            KEY_LIBRARY_PORTRAIT_COLUMNS,
+            KEY_LIBRARY_LANDSCAPE_COLUMNS,
+            KEY_LAST_LIBRARY_ID,
+        )
+
+        /**
+         * **永不参与备份/同步**的键：纯设备状态，跨机无意义甚至有害。
+         *
+         * 目前只有 `last_seen_version_code`（升级后弹一次更新日志的判据）。把它同步过去，
+         * 只会让另一台机器在远端值恰好等于自身 versionCode 时**不弹**更新日志。
+         */
+        val NEVER_SYNC_PREF_KEYS: Set<String> = setOf(KEY_LAST_SEEN_VERSION_CODE)
+
+        /**
+         * Komga 阅读设置键（双页 / 阅读模式 / 进度气泡缩略图）。
+         * 由「内容选择 → 阅读设置」单独控制（缺省不勾）。
+         */
+        val READER_PREF_KEYS: Set<String> = setOf(
+            KEY_READER_DOUBLE_PAGE,
+            KEY_READER_MODE,
+            KEY_READER_PROGRESS_BUBBLE_ENABLED,
+        )
+
         const val KEY_BASE_URL = "base_url"
         const val KEY_CONNECTIONS = "connections"
         const val KEY_ACTIVE_CONNECTION_ID = "active_connection_id"
