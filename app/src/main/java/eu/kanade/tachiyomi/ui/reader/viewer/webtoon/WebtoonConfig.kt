@@ -166,12 +166,16 @@ class WebtoonConfig(
         readerPreferences.cropBordersContinuousVertical
             .register({ continuousCropBorders = it }, { imagePropertyChangedListener?.invoke() })
 
+        // Komiho (2026-10-03): 与 page 模式同一处理（上游 5e48d6b 只改了 PagerConfig）——
+        // 两个动画开关都只在滚动时现读（WebtoonViewer 的 scrollUp/scrollDownBy/tapScroll），
+        // 不改任何位图输出；接 imagePropertyChangedListener 只会白白重建 adapter、清
+        // preparedCache，让可见页重新解码并重跑 AI 增强。
         readerPreferences.pageTransitionsWebtoon
-            .register({ usePageTransitions = it }, { imagePropertyChangedListener?.invoke() })
+            .register({ usePageTransitions = it })
 
-        // Komiho: v2 动画开关（切到 v2 不需要重排页面，但仍走同一回调保持一致）
+        // Komiho: v2 动画开关（切到 v2 不需要重排页面，因此同样不触发重建）
         readerPreferences.pageTransitionsWebtoonV2
-            .register({ usePageTransitionsV2 = it }, { imagePropertyChangedListener?.invoke() })
+            .register({ usePageTransitionsV2 = it })
 
         readerPreferences.pageTransitionsV2Speed
             .register(
@@ -235,8 +239,7 @@ class WebtoonConfig(
         append('|').append(readerPreferences.dualPageRotateToFitWebtoon.get())
         append('|').append(readerPreferences.dualPageRotateToFitInvertWebtoon.get())
         append('|').append(readerPreferences.cropBordersContinuousVertical.get())
-        append('|').append(readerPreferences.pageTransitionsWebtoon.get())
-        append('|').append(readerPreferences.pageTransitionsWebtoonV2.get())
+        // Komiho: 两个动画开关不改位图输出（见 init 里对应注释），不进指纹。
         append('|').append(readerPreferences.webtoonOriginalSize.get())
     }
 
