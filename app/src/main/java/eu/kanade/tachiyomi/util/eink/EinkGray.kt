@@ -168,7 +168,10 @@ object EinkGray {
                     // 不可接受）；它与 L* 的差异主要在暗部偏暗，正好被曲线的黑点抬升吸收。
                     val yValue = curve[(77 * ((p shr 16) and 0xFF) + 150 * ((p shr 8) and 0xFF) + 29 * (p and 0xFF)) shr 8]
 
-                    var value = yValue
+                    // 抖动项是 Float（阈值 × 半步长比例），所以量化输入用 Float 承载；
+                    // 不抖动的热路径上 toFloat() 会被 JIT/ART 淡化，且 Int/Float 除法
+                    // 在这里语义一致（step 本来就是 Float）。
+                    var value = yValue.toFloat()
                     if (bayer != null && abs(yValue - prevRow[x]) <= FLAT_GRADIENT_LIMIT) {
                         val threshold = bayer[bayerRow or (x and 7)] - 128
                         value += threshold * DITHER_STRENGTH * step / 128f
