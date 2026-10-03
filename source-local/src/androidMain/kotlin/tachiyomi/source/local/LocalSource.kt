@@ -3,6 +3,8 @@ package tachiyomi.source.local
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
+import android.os.Build
+import android.os.Environment
 import android.os.ParcelFileDescriptor
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
@@ -454,13 +456,37 @@ actual class LocalSource(
         try {
             // SY --> Komiho: chapter.url 已是真实绝对路径，直接映射到当前根下的 UniFile。
             val file = fileSystem.resolveUnderBase(chapter.url)
-                ?: throw Exception(context.stringResource(MR.strings.chapter_not_found))
+                ?: throw Exception(
+                    context.stringResource(MR.strings.chapter_not_found) + " " + describeResolveFailure(chapter.url),
+                )
             return Format.valueOf(file)
         } catch (e: Format.UnknownFormatException) {
             throw Exception(context.stringResource(MR.strings.local_invalid_format))
         } catch (e: Exception) {
             throw e
         }
+    }
+
+    /**
+     * Komiho: 把「找不到该章节」的全部判据压成一行。起因是「打开 EPUB 闪退回浏览器」——
+     * 阅读器 init 失败只留一句 chapter_not_found，而下面四种成因的修法完全不同，用这四个值
+     * 就能一次性区分（以后不必再让对方导出诊断日志）：
+     *
+     *  - manage=false：没拿到「所有文件访问」，浏览根退化成 SAF tree。MIUI 在系统更新 / 关过
+     *    MIUI 优化之后会重置该权限，是「同一台机器昨天能开今天不能」最常见的原因。
+     *  - base=null：浏览根本身就解不出真实路径 → 授权用的 provider 的 doc id 不是 <卷>:<相对路径>。
+     *  - exists=false：记录的绝对路径在文件系统上不存在 → 那个 doc id 解码出的路径是拼出来的。
+     *  - 三项都正常仍解析不到 → 前缀不匹配（换过卷根 / 挂载点 canonicalPath 差异）。
+     *
+     * 这一整行会随异常 message 同时进入 toast 与诊断日志（ReaderInit 的 init 失败堆栈）。
+     */
+    private fun describeResolveFailure(url: String): String {
+        val manage = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            runCatching { Environment.isExternalStorageManager() }.getOrDefault(false)
+        val base = runCatching { fileSystem.getBaseDirectory()?.let { fileSystem.realPathOf(it) } }.getOrNull()
+        val baseUri = runCatching { fileSystem.getBaseDirectory()?.uri?.toString() }.getOrNull()
+        val exists = runCatching { File(url).exists() }.getOrDefault(false)
+        return "(url=$url base=$base baseUri=$baseUri manage=$manage exists=$exists)"
     }
 
     private fun updateCover(chapter: SChapter, manga: SManga): UniFile? {
