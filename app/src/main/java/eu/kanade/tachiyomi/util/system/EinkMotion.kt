@@ -105,7 +105,7 @@ object EinkMotion {
                 } ?: return@runCatching bail("setter signature not found")
                 setter.isAccessible = true
                 val getter = scale.javaClass.declaredMethods.firstOrNull {
-                    it.parameterTypes.isEmpty() && it.returnType == Float.TYPE
+                    it.parameterTypes.isEmpty() && it.returnType == Float::class.javaPrimitiveType
                 }
                 // ⚠️ 系统倍率监听是**懒启动**：第一次 get scaleFactor 才拉起，而 StateFlow
                 // 收集一启动就立刻把「系统当前值」覆盖回去 —— 直接设 0 会被这次初始发射
