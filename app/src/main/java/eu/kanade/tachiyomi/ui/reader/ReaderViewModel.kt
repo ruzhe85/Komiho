@@ -1111,6 +1111,10 @@ class ReaderViewModel @JvmOverloads constructor(
                 ChapterUpdate(
                     id = readerChapter.chapter.id!!,
                     read = readerChapter.chapter.read,
+                    // Komiho: 进度必须一并落库 —— 这行曾在批量清理同步代码时被误删，导致
+                    // chapters.last_page_read 永远停在 0，历史进度与「继续阅读」永远回到第一页
+                    // （本地 / SMB / WebDAV 全中招，编译与运行期都没有任何信号）。别再精简掉。
+                    lastPageRead = readerChapter.chapter.last_page_read.toLong(),
                 ),
             )
 
