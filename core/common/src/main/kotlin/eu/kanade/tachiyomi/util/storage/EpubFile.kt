@@ -1,5 +1,7 @@
 package eu.kanade.tachiyomi.util.storage
 
+import android.os.SystemClock
+import logcat.LogPriority
 import mihon.core.common.archive.ArchiveHandle
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -8,6 +10,7 @@ import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import tachiyomi.core.common.util.system.logcat
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
@@ -41,10 +44,21 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
      * Returns the path of all the images found in the epub file.
      */
     fun getImagesFromPages(): List<String> {
+        val startedAt = SystemClock.elapsedRealtime()
         val ref = getPackageHref()
         val doc = getPackageDocument(ref)
         val pages = getPagesFromDocument(doc)
-        return getImagesFromPages(pages, ref)
+        // Komiho (2026-10-04): 分阶段计时。这一段是整本书最慢的部分（每页都要在归档里做一次
+        // 「从头扫到目标条目」的查找），「打不开」的报告就靠这几行判断卡在哪一级。
+        logcat(tag = "EpubParse") {
+            "包文档解析完成: opf=$ref, spine=${pages.size} 页, 耗时=${SystemClock.elapsedRealtime() - startedAt}ms"
+        }
+        val images = getImagesFromPages(pages, ref)
+        logcat(tag = "EpubParse") {
+            "图片抽取完成: spine=${pages.size} 页 → 图片 ${images.size} 张, " +
+                "总耗时=${SystemClock.elapsedRealtime() - startedAt}ms"
+        }
+        return images
     }
 
     /**
@@ -127,17 +141,33 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
      */
     private fun getImagesFromPages(pages: List<ManifestItem>, packageHref: String): List<String> {
         if (pages.isEmpty()) return emptyList()
+        val startedAt = SystemClock.elapsedRealtime()
         val basePath = getParentDirectory(packageHref)
         val result = ArrayList<String>(pages.size)
-        pages.forEach { page ->
+        var missingPages = 0
+        pages.forEachIndexed { index, page ->
+            // Komiho (2026-10-04): 每 N 页一条进度 —— 这是「进程没了」时唯一能区分
+            // 「在走但慢」和「已经卡死」的依据（进度在动说明是性能问题，不动才是卡住）。
+            if (index > 0 && index % PAGE_PROGRESS_STEP == 0) {
+                logcat(tag = "EpubParse") {
+                    "解析进度 $index/${pages.size} 页, 已找到 ${result.size} 张图, " +
+                        "耗时=${SystemClock.elapsedRealtime() - startedAt}ms"
+                }
+            }
             val entryPath = resolveZipPath(basePath, decodePathHref(page.href))
             // 图片型 EPUB：spine 项本身就是一整页图，直接采用。
             if (page.mediaType.startsWith("image/", ignoreCase = true)) {
                 result += entryPath
-                return@forEach
+                return@forEachIndexed
             }
 
-            val document = getInputStream(entryPath)?.use { Jsoup.parse(it, null, "") } ?: return@forEach
+            val stream = getInputStream(entryPath)
+            if (stream == null) {
+                missingPages++
+                logcat(priority = LogPriority.WARN, tag = "EpubParse") { "页面条目缺失(跳过): $entryPath" }
+                return@forEachIndexed
+            }
+            val document = stream.use { Jsoup.parse(it, null, "") }
             val imageBasePath = getParentDirectory(entryPath)
             val imagePaths = buildList {
                 document.allElements.forEach {
@@ -150,6 +180,11 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
                 .map { resolveZipPath(imageBasePath, decodePathHref(it)) }
                 .distinct()
             result += imagePaths
+        }
+        if (missingPages > 0) {
+            logcat(priority = LogPriority.WARN, tag = "EpubParse") {
+                "有 $missingPages 个页面条目在压缩包里找不到（已跳过）"
+            }
         }
         return result.distinct()
     }
@@ -210,6 +245,9 @@ class EpubFile(private val reader: ArchiveHandle) : Closeable by reader {
     )
 
     private companion object {
+        /** 每解析这么多页打一条进度日志（见 [getImagesFromPages]）。 */
+        const val PAGE_PROGRESS_STEP = 25
+
         /**
          * 字体混淆算法 —— **不是** DRM。只对字体字节做 XOR，图片不受影响，因此不能因为
          * encryption.xml 里有它就判成加密。

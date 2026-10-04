@@ -1,5 +1,6 @@
 package app.mihonsy.komga.ui
 
+import android.app.ActivityManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -4189,6 +4190,18 @@ private fun SettingsTab(
                                     append("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE}, ${BuildConfig.VERSION_CODE})\n")
                                     append("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})\n")
                                     append("Device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
+                                    // Komiho (2026-10-04): 导出瞬间的内存状态。判断「是否被系统内存回收」
+                                    // 先看这里的 total（机型物理内存）；死亡瞬间的 pss/rss 见日志里的
+                                    // ProcessExit 行。
+                                    val memInfo = ActivityManager.MemoryInfo()
+                                    (context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)
+                                        ?.getMemoryInfo(memInfo)
+                                    append(
+                                        "Memory: total=${memInfo.totalMem / 1048576}MB, " +
+                                            "avail=${memInfo.availMem / 1048576}MB, " +
+                                            "lowMemory=${memInfo.lowMemory}, " +
+                                            "threshold=${memInfo.threshold / 1048576}MB\n",
+                                    )
                                     append("Log lines: ${logs.lineSequence().count()} (persisted to disk, may span the last app restart)\n\n")
                                 }
                                 file.writeText(header + logs)

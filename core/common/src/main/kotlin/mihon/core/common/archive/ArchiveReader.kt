@@ -2,15 +2,19 @@ package mihon.core.common.archive
 
 import android.content.Context
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
+import logcat.LogPriority
 import me.zhanghai.android.libarchive.ArchiveException
 import tachiyomi.core.common.storage.openFileDescriptor
+import tachiyomi.core.common.util.system.logcat
 import java.io.Closeable
 import java.io.File
 import java.io.InputStream
+import java.util.concurrent.atomic.AtomicLong
 
 // SY --> Phase3: 实现 ArchiveHandle 窄接口，与 RemoteZipReader（远程 ZIP 直读路径）共用 ArchivePageLoader
 class ArchiveReader : ArchiveHandle {
@@ -53,17 +57,27 @@ class ArchiveReader : ArchiveHandle {
         newStream(encrypted).use { block(generateSequence { it.getNextEntry() }) }
 
     override fun getInputStream(entryName: String): InputStream? {
+        val startedAt = SystemClock.elapsedRealtime()
+        var scanned = 0L
+        var hit = false
         val archive = newStream(encrypted)
         try {
             while (true) {
                 val entry = archive.getNextEntry() ?: break
+                scanned++
                 if (entry.name == entryName) {
+                    hit = true
                     return archive
                 }
             }
         } catch (e: ArchiveException) {
             archive.close()
             throw e
+        } finally {
+            // Komiho (2026-10-04): 缓存本次查找成本。每次都从头扫 → 整本书解析是
+            // O(页数 × 条目数)，小样本无感、整卷在大屏低端机上可能几十秒。
+            // [recordLookup] 只打日志、不改行为。
+            recordLookup(entryName, scanned, hit, SystemClock.elapsedRealtime() - startedAt)
         }
         archive.close()
         return null
@@ -71,22 +85,31 @@ class ArchiveReader : ArchiveHandle {
 
     // SY -->
     private fun checkEncryptionStatus() {
+        val startedAt = SystemClock.elapsedRealtime()
+        var scanned = 0L
         val archive = newStream(false)
         try {
             while (true) {
                 val entry = archive.getNextEntry() ?: break
-            if (entry.isEncrypted) {
-                encrypted = true
-                // SY: 仅在已设置全局密码时才校验对错，否则交由上层弹密码框（避免无密码时空抛）
-                if (CbzCrypto.isPasswordSet()) {
-                    isPasswordIncorrect(entry.name)
+                scanned++
+                if (entry.isEncrypted) {
+                    encrypted = true
+                    // SY: 仅在已设置全局密码时才校验对错，否则交由上层弹密码框（避免无密码时空抛）
+                    if (CbzCrypto.isPasswordSet()) {
+                        isPasswordIncorrect(entry.name)
+                    }
+                    break
                 }
-                break
-            }
             }
         } catch (e: ArchiveException) {
             archive.close()
             throw e
+        } finally {
+            // Komiho (2026-10-04): 构造 ArchiveReader 时的整包初扫 —— 打开本地大
+            // epub/cbz 卡顿的第一站，先把它的代价量出来。
+            logcat(tag = TAG) {
+                "初始化扫描: 已读 $scanned 条, 耗时=${SystemClock.elapsedRealtime() - startedAt}ms"
+            }
         }
         archive.close()
     }
@@ -111,6 +134,49 @@ class ArchiveReader : ArchiveHandle {
         if (address != null) Os.munmap(address, size)
         source?.close()
     }
+
+    // SY --> Komiho (2026-10-04): 条目查找成本统计（仅诊断，不影响行为）
+    /** 查找次数 / 累计扫描条目数 / 累计耗时 / 慢查数 / 未命中数。 */
+    private val lookupCount = AtomicLong()
+    private val lookupScanned = AtomicLong()
+    private val lookupMillis = AtomicLong()
+    private val lookupSlow = AtomicLong()
+    private val lookupMiss = AtomicLong()
+
+    /**
+     * 记录一次条目查找的成本（只打日志、零行为影响）。
+     *
+     * 动机：[getInputStream] 每次查找都要新建归档流并**从第一个条目扫到目标**，
+     * 整本书解析因此是 O(页数 × 条目数)。累计扫描条目数是这条曲线的直接证据：
+     * 它会随查找次数近似平方增长 —— 拿真机数据就能证明/排除「解析太慢」这个假设。
+     *
+     * 未命中（扫全包）与单次慢查必记；常规查找每 [LOOKUP_LOG_EVERY] 次记一条累计。
+     */
+    private fun recordLookup(entryName: String, scanned: Long, hit: Boolean, elapsedMs: Long) {
+        val count = lookupCount.incrementAndGet()
+        val totalScanned = lookupScanned.addAndGet(scanned)
+        val totalMs = lookupMillis.addAndGet(elapsedMs)
+        if (!hit) lookupMiss.incrementAndGet()
+        val slow = elapsedMs >= SLOW_LOOKUP_MS
+        if (slow) lookupSlow.incrementAndGet()
+        if (hit && !slow && count % LOOKUP_LOG_EVERY != 0L) return
+        logcat(priority = if (hit) LogPriority.DEBUG else LogPriority.WARN, tag = TAG) {
+            "条目查找 #$count ${if (hit) "命中" else "未命中(扫全包)"} entry=$entryName " +
+                "本次扫描=$scanned 条/耗时=${elapsedMs}ms | 累计: 查找=$count 次, 扫描=$totalScanned 条, " +
+                "耗时=${totalMs}ms, 慢查(≥${SLOW_LOOKUP_MS}ms)=${lookupSlow.get()}, 未命中=${lookupMiss.get()}"
+        }
+    }
+
+    private companion object {
+        private const val TAG = "ArchiveLookup"
+
+        /** 单次查找达到它就单独记一条（看清单次代价）。 */
+        private const val SLOW_LOOKUP_MS = 300L
+
+        /** 常规查找每 N 次记一条累计（避免日志过载）。 */
+        private const val LOOKUP_LOG_EVERY = 25L
+    }
+    // SY <--
 }
 
 fun UniFile.archiveReader(context: Context): ArchiveReader {

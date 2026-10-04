@@ -73,6 +73,7 @@ import eu.kanade.tachiyomi.util.system.cancelNotification
 import eu.kanade.tachiyomi.util.system.notify
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import eu.kanade.tachiyomi.diagnostic.DiagnosticLogBuffer
+import eu.kanade.tachiyomi.diagnostic.ProcessExitDiagnostics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
@@ -150,6 +151,15 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
         LogcatLogger.install()
         DiagnosticLogBuffer.install(this) // SY 落盘缓冲所有 logcat（崩溃自动重启后仍可导出）
+
+        // Komiho (2026-10-04): 记录上一次进程是**怎么结束**的（native 崩溃 / 低内存被杀 /
+        // ANR / 用户自己划掉）。这条信息只有系统知道，**不经过 Java 异常通道**，
+        // 而 EPUB「打不开」的报告正是缺它才无法判断责任在应用还是设备。
+        // 独立线程：内部是 binder 调用，不占主线程；必须在 install 之后，否则写不进落盘缓冲。
+        Thread(
+            { ProcessExitDiagnostics.logRecentExitReasons(applicationContext) },
+            "process-exit-diag",
+        ).start()
 
         setupNotificationChannels()
 

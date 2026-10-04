@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
 import android.content.Context
+import android.os.SystemClock
 import java.io.File
 import java.io.IOException
 import eu.kanade.tachiyomi.data.download.DownloadManager
@@ -68,6 +69,9 @@ class ChapterLoader(
 
         chapter.state = ReaderChapter.State.Loading
         withIOContext {
+            // Komiho (2026-10-04): 计时起点。判断「打开了却什么都没发生」时，只有起始行、
+            // 没有完成行 = 死在加载里；两行都有 = 死在更后面的渲染/解码。
+            val startedAt = SystemClock.elapsedRealtime()
             // SY --> Komiho: 补章节 URL（含扩展名，如 .epub/.cbz）与加载器类型，便于在导出诊断
             // 日志里按文件名/格式检索（章节名不带扩展名，按 "epub" 搜不到）。
             logcat { "Loading pages for ${chapter.chapter.name} url=${chapter.chapter.url}" }
@@ -101,8 +105,18 @@ class ChapterLoader(
                 }
 
                 chapter.state = ReaderChapter.State.Loaded(pages)
+                // Komiho (2026-10-04): 完成行（页数 + 耗时 + 起始页）—— 与上面的
+                // "Loading pages for" 配对。日志里只有起始行 = 加载中途进程没了。
+                logcat {
+                    "页列表加载完成: ${pages.size} 页, 耗时=${SystemClock.elapsedRealtime() - startedAt}ms, " +
+                        "requestedPage=${chapter.requestedPage}, loader=${loader::class.simpleName}"
+                }
             } catch (e: Throwable) {
                 chapter.state = ReaderChapter.State.Error(e)
+                logcat(priority = LogPriority.ERROR, throwable = e) {
+                    "页列表加载失败(耗时=${SystemClock.elapsedRealtime() - startedAt}ms): " +
+                        "${chapter.chapter.name} url=${chapter.chapter.url}"
+                }
                 throw e
             }
         }
