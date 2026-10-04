@@ -31,13 +31,11 @@ import coil3.request.crossfade
 import coil3.util.DebugLogger
 // SY --> Komiho: 进程启动时把「应用语言」对齐到平台 per-app locale（阅读器走 AppCompat 的那条路）
 import app.mihonsy.komga.applyAppLanguageToPlatform
-import app.mihonsy.komga.data.KomgaPreferences
 // SY <--
 import eu.kanade.domain.DomainModule
 import eu.kanade.domain.SYDomainModule
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.ui.UiPreferences
-import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode
 import eu.kanade.tachiyomi.core.security.PrivacyPreferences
 import eu.kanade.tachiyomi.crash.CrashActivity
@@ -134,20 +132,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         InjektKoinBridge.startKoin(this)
         initExpensiveComponents(this)
         // SY <--
-
-        // Komiho: E-Ink 功能已下线（设置入口与 EINK 皮肤项都已隐藏）。做一次性收敛 ——
-        // 老设备可能还开着 einkMode，而界面上已经没有开关可关，不清掉就会一直吃灰阶渲染
-        // 与全局关动画。皮肤一并回退到 DEFAULT（「黑白/灰阶皮肤」不该在功能下线后还留着）。
-        runCatching {
-            val uiPrefs = Injekt.get<UiPreferences>()
-            if (uiPrefs.einkMode.get()) uiPrefs.einkMode.set(false)
-            if (uiPrefs.appTheme.get() == AppTheme.EINK) uiPrefs.appTheme.set(AppTheme.DEFAULT)
-        }
-        // Komga 侧皮肤是另一份存储（KomgaPreferences.appTheme，String），单独收敛。
-        runCatching {
-            val komgaPrefs = KomgaPreferences(this)
-            if (komgaPrefs.appTheme == AppTheme.EINK.name) komgaPrefs.appTheme = AppTheme.DEFAULT.name
-        }
 
         LogcatLogger.install()
         DiagnosticLogBuffer.install(this) // SY 落盘缓冲所有 logcat（崩溃自动重启后仍可导出）

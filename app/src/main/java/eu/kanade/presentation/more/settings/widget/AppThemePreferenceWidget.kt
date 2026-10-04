@@ -74,12 +74,7 @@ private fun AppThemesList(
     val context = LocalContext.current
     val appThemes = remember {
         AppTheme.entries
-            // Komiho: E-Ink 皮肤随 E-Ink 功能一起下线，不出现在皮肤列表里（见 App 启动时的强制收敛）。
-            .filterNot {
-                it.titleRes == null ||
-                    it == AppTheme.EINK ||
-                    (it == AppTheme.MONET && !DeviceUtil.isDynamicColorAvailable)
-            }
+            .filterNot { it.titleRes == null || (it == AppTheme.MONET && !DeviceUtil.isDynamicColorAvailable) }
     }
     LazyRow(
         contentPadding = PaddingValues(horizontal = PrefsHorizontalPadding),

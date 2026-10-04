@@ -11,6 +11,7 @@ import app.mihonsy.komga.data.KomgaPreferences
 import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.presentation.theme.colorscheme.BaseColorScheme
 import eu.kanade.presentation.theme.colorscheme.CatppuccinColorScheme
+import eu.kanade.presentation.theme.colorscheme.EinkColorScheme
 import eu.kanade.presentation.theme.colorscheme.GreenAppleColorScheme
 import eu.kanade.presentation.theme.colorscheme.LavenderColorScheme
 import eu.kanade.presentation.theme.colorscheme.MidnightDuskColorScheme
@@ -70,6 +71,8 @@ private fun colorSchemeFor(
         AppTheme.LAVENDER -> LavenderColorScheme
         AppTheme.MIDNIGHT_DUSK -> MidnightDuskColorScheme
         AppTheme.MONOCHROME -> MonochromeColorScheme
+        // Komiho: E-Ink 专用皮肤（色值对齐面板 16 级真实档位，层级用描边表达）
+        AppTheme.EINK -> EinkColorScheme
         AppTheme.NORD -> NordColorScheme
         AppTheme.STRAWBERRY_DAIQUIRI -> StrawberryColorScheme
         AppTheme.TAKO -> TakoColorScheme

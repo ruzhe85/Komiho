@@ -263,6 +263,7 @@ import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.domain.ui.model.AppTheme
 // SY --> Komiho: E-Ink 模式（应用级设置入口）
+import eu.kanade.domain.ui.UiPreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 // SY <--
@@ -4579,6 +4580,16 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
     var showNavBarPos by remember { mutableStateOf(false) }
     // SY <--
 
+    // SY --> Komiho: E-Ink 模式。应用级设置，不在阅读器设置里。
+    // 皮肤那部分在开启时一次性切到 AppTheme.EINK（见下方 item）。
+    val uiPrefs = remember { Injekt.get<UiPreferences>() }
+    var einkModeSel by remember { mutableStateOf(uiPrefs.einkMode.get()) }
+    var einkDisableAnimSel by remember { mutableStateOf(uiPrefs.einkDisableAnimation.get()) }
+    var einkGrayRenderSel by remember { mutableStateOf(uiPrefs.einkRenderGrayscale.get()) }
+    var einkKeepColorSel by remember { mutableStateOf(uiPrefs.einkKeepColorPages.get()) }
+    var einkLevelsSel by remember { mutableStateOf(uiPrefs.einkGrayLevelsOrDefault()) }
+    var showEinkLevels by remember { mutableStateOf(false) }
+
     val currentLangLabel = when (prefs.appLanguage) {
         "zh-CN" -> composeStringResource(R.string.lang_zh_cn)
         "zh-TW" -> composeStringResource(R.string.lang_zh_tw)
@@ -4608,21 +4619,91 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                 },
             )
         }
+        // SY --> Komiho: E-Ink 模式下隐藏 AMOLED 项。反射式墨水屏没有 OLED 的省电优势，
+        // AMOLED 纯黑反而更像"脏灰"；这里只是在 UI 上藏起来，**不写它的值**，所以关掉
+        // 模式后用户原来的设置原样还在。
+        if (!einkModeSel) {
+            item {
+                TextPreferenceWidget(
+                    title = composeStringResource(R.string.settings_amoled),
+                    widget = {
+                        Switch(
+                            checked = amoledSel,
+                            onCheckedChange = {
+                                amoledSel = it
+                                prefs.themeDarkAmoled = it
+                                activity?.recreate()
+                            },
+                        )
+                    },
+                )
+            }
+        }
+        // SY <--
+        // SY --> Komiho: E-Ink 模式。放在主题分组末尾。
         item {
-            TextPreferenceWidget(
-                title = composeStringResource(R.string.settings_amoled),
-                widget = {
-                    Switch(
-                        checked = amoledSel,
-                        onCheckedChange = {
-                            amoledSel = it
-                            prefs.themeDarkAmoled = it
-                            activity?.recreate()
-                        },
-                    )
+            SwitchPreferenceWidget(
+                title = composeStringResource(R.string.settings_eink_mode),
+                subtitle = composeStringResource(R.string.settings_eink_mode_summary),
+                checked = einkModeSel,
+                onCheckedChanged = { enabled ->
+                    einkModeSel = enabled
+                    uiPrefs.einkMode.set(enabled)
+                    if (enabled && appThemeSel != AppTheme.EINK) {
+                        // 现成的 AppTheme.MONOCHROME 把五个 surfaceContainer 全设成同色，
+                        // 层级只靠 tonal elevation —— 那在 16 级面板上会量化进同一级，
+                        // 卡片与对话框糊成一片。EinkColorScheme 才是对齐真实档位的版本。
+                        prefs.appTheme = AppTheme.EINK.name
+                        appThemeSel = AppTheme.EINK
+                    }
+                    // AMOLED 项在开启时隐藏（见上），关掉模式后用户的原值还在。
+                    activity?.recreate()
                 },
             )
         }
+        if (einkModeSel) {
+            item {
+                SwitchPreferenceWidget(
+                    title = composeStringResource(R.string.settings_eink_disable_animation),
+                    subtitle = composeStringResource(R.string.settings_eink_disable_animation_summary),
+                    checked = einkDisableAnimSel,
+                    onCheckedChanged = {
+                        einkDisableAnimSel = it
+                        uiPrefs.einkDisableAnimation.set(it)
+                    },
+                )
+            }
+            item {
+                SwitchPreferenceWidget(
+                    title = composeStringResource(R.string.settings_eink_render_grayscale),
+                    subtitle = composeStringResource(R.string.settings_eink_render_grayscale_summary),
+                    checked = einkGrayRenderSel,
+                    onCheckedChanged = {
+                        einkGrayRenderSel = it
+                        uiPrefs.einkRenderGrayscale.set(it)
+                    },
+                )
+            }
+            item {
+                SwitchPreferenceWidget(
+                    title = composeStringResource(R.string.settings_eink_keep_color_pages),
+                    subtitle = composeStringResource(R.string.settings_eink_keep_color_pages_summary),
+                    checked = einkKeepColorSel,
+                    onCheckedChanged = {
+                        einkKeepColorSel = it
+                        uiPrefs.einkKeepColorPages.set(it)
+                    },
+                )
+            }
+            item {
+                TextPreferenceWidget(
+                    title = composeStringResource(R.string.settings_eink_gray_levels),
+                    subtitle = "$einkLevelsSel",
+                    onPreferenceClick = { showEinkLevels = true },
+                )
+            }
+        }
+        // SY <--
         item { PreferenceGroupHeader(composeStringResource(R.string.settings_group_display)) }
         item {
             TextPreferenceWidget(
@@ -4723,6 +4804,43 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                         ) {
                             Text(label, modifier = Modifier.weight(1f))
                             if (prefs.navBarPosition == value) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+    // SY <--
+
+    // SY --> Komiho: 灰阶级数。16 是主流墨水屏的真实级数 —— KCC 的 Palette16 步长就是 17
+    // （0x00,0x11,…,0xFF），KoReader 移植文档亦实测「小于 0x11 的值都显示为纯黑」。
+    if (showEinkLevels) {
+        AlertDialog(
+            onDismissRequest = { showEinkLevels = false },
+            title = { Text(composeStringResource(R.string.settings_eink_gray_levels)) },
+            text = {
+                Column {
+                    UiPreferences.EINK_GRAY_LEVELS.forEach { level ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    einkLevelsSel = level
+                                    uiPrefs.einkGrayLevels.set(level)
+                                    showEinkLevels = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("$level", modifier = Modifier.weight(1f))
+                            if (einkLevelsSel == level) {
                                 Icon(
                                     imageVector = Icons.Filled.Check,
                                     contentDescription = null,
