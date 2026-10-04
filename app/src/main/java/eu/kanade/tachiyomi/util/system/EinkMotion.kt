@@ -19,9 +19,9 @@ import uy.kohesive.injekt.api.get
  * - **Compose**：[applyComposeDurationScale]（见其注释 —— 为什么不是 CompositionLocal）。
  * - **窗口**：[applyWindowAnimations] / [transitionRes] —— Activity 之间的切换走的是
  *   主题窗口动画，完全不经过 Compose，是「关不掉动画」最容易漏的一层。
- * - **View**：[duration] 严格返回 **0**，不要用系统动画倍率折算 —— 现有的
- *   `Int.getSystemScaledDuration()` 带 `coerceAtLeast(1)`，1ms 仍会触发一次
- *   invalidate，在墨水屏上就是**一帧残影**，等于没关。
+ * - **View**：[duration] 返回 **0**（仅限 ValueAnimator 这类平台动画）—— 平台动画在
+ *   duration=0 时把插值直接算成终值，不会画出中间帧；用系统动画倍率折算则会留 1ms 级长尾。
+ *   **手写缓动的第三方视图不能给 0**（会算出 NaN 并把视图写坏），见 [duration] 的说明。
  * - **Coil**：`App` 里全局 `crossfade(300 * animatorDurationScale)` 改 `false`。
  *   页面级请求本来就都是 `crossfade(false)`，只有 App 级的那个还开着。
  *
@@ -39,10 +39,17 @@ object EinkMotion {
         get() = Injekt.get<UiPreferences>().isEinkAnimationOff
 
     /**
-     * View 层动画时长（ms）。E-Ink 下严格 0，否则用调用方给的常规值。
+     * View 层动画时长（ms）。E-Ink 下返回 0（无动画），否则用调用方给的常规值。
      *
-     * SSIV 的 `setDoubleTapZoomDuration(0)` 与 PhotoView 的
-     * `setZoomTransitionDuration(0)` 都是合法的"无动画"用法。
+     * **0 只对 ValueAnimator / ObjectAnimator / ViewPropertyAnimator 这类平台动画安全**：
+     * 它们内部有 `scaledDuration == 0 → fraction = 1f` 的兜底，等于直接跳终值、不画中间帧。
+     *
+     * 手写缓动的第三方视图**必须给 ≥1ms**（本 App「双击动画时长」的原生"无动画"档位就是 1）。
+     * 反例：SubsamplingScaleImageView 的 `setDoubleTapZoomDuration(0)` —— 它的
+     * `easeInOutQuad` 是 `time / (duration / 2f)`，duration=0 时 `0 / 0f` = **NaN**，
+     * `scale` 被写成 NaN、双击缩放彻底坏掉，且 `finished = elapsed > 0` 还会把动画判成
+     * 已完成（丢掉动画对象），重试也救不回来。阅读器那条路走
+     * `ReaderPageImageView.getSystemScaledDuration()`，那里 E-Ink 取 1，不要改成 0。
      */
     fun duration(context: Context, normalMillis: Int): Int =
         if (isAnimationOff) 0 else normalMillis

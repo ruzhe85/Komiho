@@ -599,10 +599,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     private fun Int.getSystemScaledDuration(): Int {
-        // Komiho: E-Ink 模式下严格 0。下面的 coerceAtLeast(1) 在系统动画关掉时会算出
-        // 1ms —— 但 1ms 仍会触发一次 invalidate，在墨水屏上就是一帧残影，等于没关。
-        // 覆盖 SSIV 的双击缩放与 PhotoView 的缩放过渡两处调用。
-        if (EinkMotion.isAnimationOff) return 0
+        // Komiho: E-Ink 下取 **1ms**（= 阅读器「双击动画时长」里那个"无动画"档位），
+        // **不能给 0** —— 这条时长会喂给 SSIV 的双击缩放动画，而它的缓动是手写的：
+        // `easeInOutQuad(time, from, change, duration)` 里 `timeF = time / (duration / 2f)`，
+        // duration=0 时 `0 / 0f` = NaN → `scale` 被写成 NaN（图画不出来、缩放失效），
+        // 而且 `finished = scaleElapsed > 0` 会立刻判成动画已完成、把动画对象丢掉，
+        // 之后再双击也回不到正常值，只能换页 / 重开阅读器重建视图（真机上复现）。
+        // 1ms 时首帧取起始值（画面与当前完全一致）、次帧直接到终值，观感等同瞬时。
+        // 这里同时覆盖 PhotoView 的 `setZoomTransitionDuration`。
+        if (EinkMotion.isAnimationOff) return 1
         return (this * context.animatorDurationScale).toInt().coerceAtLeast(1)
     }
 
