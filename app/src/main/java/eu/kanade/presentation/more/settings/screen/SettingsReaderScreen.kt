@@ -88,12 +88,6 @@ object SettingsReaderScreen : SearchableSettings {
     @Composable
     private fun getDisplayGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
         val fullscreen by readerPreferences.fullscreen.collectAsState()
-        // Komiho (2026-10-04): E-Ink 生效时阅读器不播翻页动画（`EinkReaderDefaults` 已把它写成
-        // 关闭），开关在这里置灰而不是隐藏 —— 避免「改了却没效果」的错位。
-        val uiPreferences = remember { Injekt.get<UiPreferences>() }
-        val einkMode by uiPreferences.einkMode.collectAsState()
-        val einkDisableAnimation by uiPreferences.einkDisableAnimation.collectAsState()
-        val einkAnimationOff = einkMode && einkDisableAnimation
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_category_display),
             preferenceItems = listOf(
@@ -212,6 +206,13 @@ object SettingsReaderScreen : SearchableSettings {
 
     @Composable
     private fun getPagedGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
+        // Komiho (2026-10-04): E-Ink 生效时阅读器不播翻页动画（`EinkReaderDefaults` 已把它写成
+        // 关闭），开关在这里置灰而不是隐藏 —— 避免「改了却没效果」的错位。
+        val uiPreferences = remember { Injekt.get<UiPreferences>() }
+        val einkMode by uiPreferences.einkMode.collectAsState()
+        val einkDisableAnimation by uiPreferences.einkDisableAnimation.collectAsState()
+        val einkAnimationOff = einkMode && einkDisableAnimation
+
         val navModePref = readerPreferences.navigationModePager
         val imageScaleTypePref = readerPreferences.imageScaleType
         val dualPageSplitPref = readerPreferences.dualPageSplitPaged
