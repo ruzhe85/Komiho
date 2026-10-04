@@ -100,7 +100,6 @@ object ProcessExitDiagnostics {
         ApplicationExitInfo.REASON_ANR,
         ApplicationExitInfo.REASON_CRASH,
         ApplicationExitInfo.REASON_CRASH_NATIVE,
-        ApplicationExitInfo.REASON_DEADLOCK,
         ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
         ApplicationExitInfo.REASON_INITIALIZATION_FAILURE,
         ApplicationExitInfo.REASON_LOW_MEMORY,
@@ -113,7 +112,6 @@ object ProcessExitDiagnostics {
         ApplicationExitInfo.REASON_ANR -> "ANR(卡死被杀)"
         ApplicationExitInfo.REASON_CRASH -> "CRASH(Java 未捕获异常)"
         ApplicationExitInfo.REASON_CRASH_NATIVE -> "CRASH_NATIVE(native 崩溃)"
-        ApplicationExitInfo.REASON_DEADLOCK -> "DEADLOCK(死锁)"
         ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "EXCESSIVE_RESOURCE_USAGE(资源超限)"
         ApplicationExitInfo.REASON_EXIT_SELF -> "EXIT_SELF(正常退出)"
         ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "INITIALIZATION_FAILURE(启动失败)"
