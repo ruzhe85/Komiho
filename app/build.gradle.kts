@@ -20,6 +20,10 @@ plugins {
 
 // MihonSY: this fork does not ship Firebase telemetry (no google-services.json), so the
 // Google services / Crashlytics plugins are intentionally not applied, even for Release builds.
+// Komiho (2026-10-04): 依赖本身也一并删除了。原先只去掉插件、保留了 firebase-analytics /
+// firebase-crashlytics，结果它们成了 APK 里**唯一**的 Google Play 服务来源 —— 无 GMS 的墨水屏
+// 设备启动后会收到「需要 Google Play 服务」的系统通知。配置入口 `mihon.core.firebase.FirebaseConfig`
+// 现在是 main 源集里的空实现（release/foss/debug 三份变体副本已删）。
 // MihonSY <--
 
 android {
@@ -388,10 +392,8 @@ dependencies {
     // Logging
     implementation(libs.logcat)
 
-    // Crash reports/analytics
-//    "standardImplementation"(platform(libs.firebase.bom))
-//    "standardImplementation"(libs.firebase.analytics)
-//    "standardImplementation"(libs.firebase.crashlytics)
+    // Crash reports/analytics: 已移除 —— 上游 Mihon 这条走 standard 变体的三个 firebase 依赖，
+    // 本仓库不发布遥测（见文件顶部说明），依赖已整体删除。
 
     // Shizuku
     implementation(libs.bundles.shizuku)
@@ -410,10 +412,10 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
 
     // SY -->
-    // Firebase (EH)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.analytics)
-    implementation(libs.firebase.crashlytics)
+    // Firebase (EH): 已移除 —— 本仓库没有 google-services.json，这套遥测从未真正工作，
+    // 却把 Google Play 服务的类/权限一起打进 APK（无 GMS 的墨水屏设备启动后会收到
+    // 「需要 Google Play 服务」的系统通知）。配置入口保留为 `mihon.core.firebase.FirebaseConfig`
+    // 的空实现，`App` 里的调用点不动。
 
     // Better logging (EH)
 
