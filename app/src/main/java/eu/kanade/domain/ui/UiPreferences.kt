@@ -78,6 +78,30 @@ class UiPreferences(
     /** 灰阶量化级数：4 / 8 / 16。16 是各家的通用档（KCC 的 Palette16、KoReader 移植文档同）。 */
     val einkGrayLevels: Preference<Int> = preferenceStore.getInt("pref_eink_gray_levels", 16)
 
+    // Komiho (2026-10-04): E-Ink 收敛前的**用户原值**备份。
+    //
+    // E-Ink 模式要把阅读器调成墨水屏友好的样子（白底 + 无翻页动画），但用户原来的选择不能丢：
+    // 开启时先把当前值快照到这里，关闭 E-Ink 时原样写回并清掉（见 `EinkReaderDefaults.sync`）。
+    // 判据是 `isSet()` —— 备份存在即代表这一项**当前正被 E-Ink 改写**，此时 sync 只保证 E-Ink
+    // 的目标值仍然生效、**不会更新备份**，所以用户在 E-Ink 期间手改的值不会污染「原值」。
+    //
+    // 注意：这四个只是 E-Ink 的现场快照，不是业务偏好，别当垃圾数据清理。
+
+    /** E-Ink 前的阅读器背景（`ReaderPreferences.readerTheme`：0 白 / 1 黑 / 2 灰 / 3 自动）。 */
+    val einkBackupReaderTheme: Preference<Int> = preferenceStore.getInt("pref_eink_backup_reader_theme", 0)
+
+    /** E-Ink 前的页模式「翻页动画」（`ReaderPreferences.pageTransitionsPager`）。 */
+    val einkBackupPageTransitionsPager: Preference<Boolean> =
+        preferenceStore.getBoolean("pref_eink_backup_page_transitions_pager", true)
+
+    /** E-Ink 前的条漫「翻页动画」v1（`ReaderPreferences.pageTransitionsWebtoon`）。 */
+    val einkBackupPageTransitionsWebtoon: Preference<Boolean> =
+        preferenceStore.getBoolean("pref_eink_backup_page_transitions_webtoon", true)
+
+    /** E-Ink 前的条漫「翻页动画」v2（`ReaderPreferences.pageTransitionsWebtoonV2`）。 */
+    val einkBackupPageTransitionsWebtoonV2: Preference<Boolean> =
+        preferenceStore.getBoolean("pref_eink_backup_page_transitions_webtoon_v2", false)
+
     /**
      * E-Ink 模式是否**应当生效**。动画链路与 Coil 请求会高频读它，所以放一个派生属性
      * 免得每处都写两个条件的与。

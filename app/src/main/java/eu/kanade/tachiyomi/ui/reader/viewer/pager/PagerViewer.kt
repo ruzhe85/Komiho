@@ -185,6 +185,19 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             }
             false
         }
+        // Komiho (2026-10-04): E-Ink「不跟手翻页」——滑动只在抬手时结算一次，按位移主轴分派到
+        // 现成的 moveRight/moveLeft（横向）或 moveDown/moveUp（纵向）：边界判断、navigateToPan
+        // （放大后平移优先）全部沿用，不另写一套。换页本身经 moveXxx → setCurrentItem(
+        // …, config.pageSlideAnimationsEnabled)，而它在 E-Ink 下恒为 false → 瞬时换页、无中间帧。
+        pager.swipePageListener = swipe@{ dx, dy ->
+            val horizontal = abs(dx) >= abs(dy)
+            when {
+                horizontal && dx < 0 -> moveRight()
+                horizontal && dx > 0 -> moveLeft()
+                !horizontal && dy < 0 -> moveDown()
+                !horizontal && dy > 0 -> moveUp()
+            }
+        }
 
         config.dualPageSplitChangedListener = { enabled ->
             if (!enabled) {

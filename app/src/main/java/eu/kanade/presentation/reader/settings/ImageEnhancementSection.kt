@@ -30,6 +30,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.icerock.moko.resources.StringResource
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.waifu2x.AiUpscaleModel
@@ -43,6 +44,8 @@ import tachiyomi.presentation.core.components.SettingsChipRow
 import tachiyomi.presentation.core.components.SettingsItemsPaddings
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 /**
  * 副标题占位符 —— 纯符号，各语言一致，无需 i18n。
@@ -83,6 +86,15 @@ fun ImageEnhancementSection(
     // 普通 remember（非 rememberSaveable），与备份页的子屏状态一致：二级页是瞬时 UI 状态，
     // 不该跨进程恢复（否则重建后停在详情页会让用户失去上下文）。
     var detail by remember { mutableStateOf<EnhancementDetail?>(null) }
+    // Komiho (2026-10-04): E-Ink 下 GPU / NPU 两条路都不可用（墨水屏上 AI 超分是负收益，运行时
+    // 已被 MihonSyEnhancer.effectiveMode 收敛到 CPU），入口随之一并隐藏；若用户是在别的模式下
+    // 点进详情页的，这里把层级退回一级，别停在一个已经没有入口的页面上。
+    val einkActive = einkModeActive()
+    LaunchedEffect(einkActive) {
+        if (einkActive && (detail == EnhancementDetail.GPU || detail == EnhancementDetail.NPU)) {
+            detail = null
+        }
+    }
     BackHandler(enabled = detail != null) { detail = null }
 
     Column(modifier) {
@@ -93,6 +105,19 @@ fun ImageEnhancementSection(
             EnhancementDetail.NPU -> NpuDetail(preferences = preferences, onBack = { detail = null })
         }
     }
+}
+
+/**
+ * Komiho (2026-10-04): E-Ink 模式是否生效。
+ *
+ * 生效时「图像增强」只保留 关闭 / CPU —— GPU（Vulkan）与 NPU（HTP）在墨水屏上要么跑不动、
+ * 要么画质是负收益（AI 补出的高频网点会被 16 级量化成脏点），运行时也已收敛到 CPU 档。
+ */
+@Composable
+private fun einkModeActive(): Boolean {
+    val uiPreferences = remember { Injekt.get<UiPreferences>() }
+    val einkMode by uiPreferences.einkMode.collectAsState()
+    return einkMode
 }
 
 /**
@@ -173,7 +198,10 @@ private fun EnhancementRootList(
     )
 
     // CPU：圆圈只切方式，整行则切方式 + 进详情（算法与倍率沿用上次的选择，详情页里可改）。
-    val cpuActive = mode in 2..3
+    // Komiho (2026-10-04): E-Ink 下 AI 档运行时会落到 CPU（MihonSyEnhancer.effectiveMode），
+    // 但偏好里仍是 5 —— 这里按**实际生效**的档位显示选中，避免"看着是 GPU、其实在跑 CPU"。
+    // 只影响显示，不改偏好：关掉 E-Ink 后 GPU / NPU 的档位与记忆原样回来。
+    val cpuActive = mode in 2..3 || (einkModeActive() && mode == 5)
     val activateCpu: () -> Unit = { setEnhancementMode(preferences, cpuMemory) }
     EnhancementMethodRow(
         label = stringResource(MR.strings.enhancement_group_cpu),
@@ -189,44 +217,48 @@ private fun EnhancementRootList(
         onSelect = activateCpu,
     )
 
-    // GPU：切回时恢复**这个后端上次选的模型**（而不是当前档位上的模型）—— 不静默换掉用户在
-    // 另一个后端上选过的东西。
-    val gpuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.NCNN_VULKAN
-    val activateGpu: () -> Unit = {
-        if (!gpuActive) setEnhancementModel(preferences, gpuMemory)
-    }
-    EnhancementMethodRow(
-        label = stringResource(MR.strings.enhancement_group_gpu),
-        subtitle = gpuMemory.displayLabel(),
-        selected = gpuActive,
-        onClick = {
-            activateGpu()
-            onOpen(EnhancementDetail.GPU)
-        },
-        onSelect = activateGpu,
-    )
-
-    // NPU：门控与详情页共用同一条件（CDSP 优先）。没有可用模型时不改设置，只进详情页看提示。
-    if (npuAvailable) {
-        val npuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP
-        val activateNpu: () -> Unit = {
-            if (!npuActive) {
-                // 本机可用列表为空时再现场扫一次（装了新模型包后不必重启）。
-                val target = npuMemory ?: compatibleNpuModels(context).firstOrNull()
-                target?.let { setEnhancementModel(preferences, it) }
-            }
+    // Komiho (2026-10-04): E-Ink 下整块隐藏 GPU / NPU 两行 —— 墨水屏上两者都不可用
+    // （见 [einkModeActive]），一级列表只剩 降噪 + 关闭/CPU。
+    if (!einkModeActive()) {
+        // GPU：切回时恢复**这个后端上次选的模型**（而不是当前档位上的模型）—— 不静默换掉用户在
+        // 另一个后端上选过的东西。
+        val gpuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.NCNN_VULKAN
+        val activateGpu: () -> Unit = {
+            if (!gpuActive) setEnhancementModel(preferences, gpuMemory)
         }
         EnhancementMethodRow(
-            label = stringResource(MR.strings.enhancement_group_npu),
-            // 只有「一个可用模型都没有」时才是占位符 —— 那时确实无值可显示。
-            subtitle = npuMemory?.displayLabel() ?: PLACEHOLDER,
-            selected = npuActive,
+            label = stringResource(MR.strings.enhancement_group_gpu),
+            subtitle = gpuMemory.displayLabel(),
+            selected = gpuActive,
             onClick = {
-                activateNpu()
-                onOpen(EnhancementDetail.NPU)
+                activateGpu()
+                onOpen(EnhancementDetail.GPU)
             },
-            onSelect = activateNpu,
+            onSelect = activateGpu,
         )
+
+        // NPU：门控与详情页共用同一条件（CDSP 优先）。没有可用模型时不改设置，只进详情页看提示。
+        if (npuAvailable) {
+            val npuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP
+            val activateNpu: () -> Unit = {
+                if (!npuActive) {
+                    // 本机可用列表为空时再现场扫一次（装了新模型包后不必重启）。
+                    val target = npuMemory ?: compatibleNpuModels(context).firstOrNull()
+                    target?.let { setEnhancementModel(preferences, it) }
+                }
+            }
+            EnhancementMethodRow(
+                label = stringResource(MR.strings.enhancement_group_npu),
+                // 只有「一个可用模型都没有」时才是占位符 —— 那时确实无值可显示。
+                subtitle = npuMemory?.displayLabel() ?: PLACEHOLDER,
+                selected = npuActive,
+                onClick = {
+                    activateNpu()
+                    onOpen(EnhancementDetail.NPU)
+                },
+                onSelect = activateNpu,
+            )
+        }
     }
 
     // Komiho: 显示增强状态角标。与降噪同属「独立开关」，一级常驻 —— 关闭增强时不再一起消失。

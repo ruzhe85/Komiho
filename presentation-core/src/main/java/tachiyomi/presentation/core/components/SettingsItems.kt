@@ -136,23 +136,26 @@ fun BaseSortItem(label: String, icon: ImageVector?, onClick: () -> Unit) {
 }
 
 @Composable
-fun CheckboxItem(label: String, pref: Preference<Boolean>) {
+fun CheckboxItem(label: String, pref: Preference<Boolean>, enabled: Boolean = true) {
     val checked by pref.collectAsState()
     CheckboxItem(
         label = label,
         checked = checked,
         onClick = { pref.toggle() },
+        enabled = enabled,
     )
 }
 
 @Composable
-fun CheckboxItem(label: String, checked: Boolean, onClick: () -> Unit) {
+fun CheckboxItem(label: String, checked: Boolean, onClick: () -> Unit, enabled: Boolean = true) {
     BaseSettingsItem(
         label = label,
+        enabled = enabled,
         widget = {
             Checkbox(
                 checked = checked,
                 onCheckedChange = null,
+                enabled = enabled,
             )
         },
         onClick = onClick,
@@ -469,10 +472,11 @@ private fun BaseSettingsItem(
     label: String,
     widget: @Composable RowScope.() -> Unit,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .fillMaxWidth()
             .padding(
                 horizontal = SettingsItemsPaddings.Horizontal,
@@ -485,6 +489,9 @@ private fun BaseSettingsItem(
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(
+                alpha = if (enabled) 1f else DISABLED_ALPHA,
+            ),
         )
     }
 }

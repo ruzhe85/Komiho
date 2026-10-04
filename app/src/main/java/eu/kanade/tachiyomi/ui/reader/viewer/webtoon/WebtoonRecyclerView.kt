@@ -233,6 +233,19 @@ class WebtoonRecyclerView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Komiho (2026-10-04): E-Ink 关动画时不给惯性。
+     *
+     * 手指拖动本身是 1:1 直滚（没有「动画」可言），动画只发生在松手后的滑行 —— 而
+     * ViewFlinger 是连续小步重绘，墨水屏上会叠出一层浅灰影。这里直接不启动它（返回 false
+     * 表示没有消费该速度，列表就地停住）。自定义的捏合 / 双击缩放走 [zoom] / `zoomFling`，
+     * 与 fling 无关，不受影响。
+     */
+    override fun fling(velocityX: Int, velocityY: Int): Boolean {
+        if (EinkMotion.isAnimationOff) return false
+        return super.fling(velocityX, velocityY)
+    }
+
     fun onManualScroll() {
         isManuallyScrolling = true
     }

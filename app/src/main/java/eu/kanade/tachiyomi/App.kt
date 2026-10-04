@@ -64,6 +64,7 @@ import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegate
 import eu.kanade.tachiyomi.util.system.DeviceUtil
 import eu.kanade.tachiyomi.util.system.EinkMotion
+import eu.kanade.tachiyomi.util.system.EinkReaderDefaults
 import eu.kanade.tachiyomi.util.system.GLUtil
 import eu.kanade.tachiyomi.util.system.WebViewUtil
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
@@ -132,6 +133,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         InjektKoinBridge.startKoin(this)
         initExpensiveComponents(this)
         // SY <--
+
+        // Komiho (2026-10-04): E-Ink 模式下阅读器的「墨水屏默认值」（白底 / 无翻页动画）在这里收敛，
+        // 并成对备份用户原值（关闭 E-Ink 时还原）。放在 onCreate 是为了让**升级前就已经开着
+        // E-Ink** 的用户首启即自愈，不必再去外观设置里拨一次开关。
+        EinkReaderDefaults.sync()
 
         LogcatLogger.install()
         DiagnosticLogBuffer.install(this) // SY 落盘缓冲所有 logcat（崩溃自动重启后仍可导出）

@@ -127,6 +127,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.tachiyomi.util.system.EinkMotion
+import eu.kanade.tachiyomi.util.system.EinkReaderDefaults
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
 import tachiyomi.presentation.core.components.SliderItem
@@ -4656,6 +4657,10 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                         prefs.appTheme = AppTheme.EINK.name
                         appThemeSel = AppTheme.EINK
                     }
+                    // Komiho (2026-10-04): 阅读器的白底 / 无翻页动画由 E-Ink 开关负责调好
+                    // （用户原值已备份，关闭 E-Ink 时还原）。必须在 recreate 之前落库，
+                    // 否则重组后设置项读到的还是旧值，会出现「显示开着、实际不生效」的错位。
+                    EinkReaderDefaults.sync()
                     // AMOLED 项在开启时隐藏（见上），关掉模式后用户的原值还在。
                     activity?.recreate()
                 },
@@ -4670,6 +4675,9 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                     onCheckedChanged = {
                         einkDisableAnimSel = it
                         uiPrefs.einkDisableAnimation.set(it)
+                        // Komiho (2026-10-04): 子项一变，阅读器那几项「翻页动画」的收敛/还原
+                        // 口径也跟着变（见 EinkReaderDefaults）。
+                        EinkReaderDefaults.sync()
                     },
                 )
             }

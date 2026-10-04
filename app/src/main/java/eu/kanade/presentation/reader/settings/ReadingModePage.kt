@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import eu.kanade.domain.manga.model.readerOrientation
 import eu.kanade.domain.manga.model.readingMode
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
@@ -24,6 +25,8 @@ import tachiyomi.presentation.core.components.SettingsChipRow
 import tachiyomi.presentation.core.components.SliderItem
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.text.NumberFormat
 
 @Composable
@@ -62,6 +65,20 @@ internal fun ColumnScope.ReadingModePage(screenModel: ReaderSettingsScreenModel)
     } else {
         PagerViewerSettings(screenModel)
     }
+}
+
+/**
+ * Komiho (2026-10-04): E-Ink 生效期间阅读器不播翻页动画。
+ *
+ * 此时 [eu.kanade.tachiyomi.util.system.EinkReaderDefaults] 已经把这几项写成关闭，
+ * 这里据此把开关置灰 —— 与其「改了却没效果」，不如一眼看出当前由 E-Ink 接管。
+ */
+@Composable
+private fun einkAnimationOff(): Boolean {
+    val uiPreferences = remember { Injekt.get<UiPreferences>() }
+    val einkMode by uiPreferences.einkMode.collectAsState()
+    val einkDisableAnimation by uiPreferences.einkDisableAnimation.collectAsState()
+    return einkMode && einkDisableAnimation
 }
 
 
@@ -167,9 +184,12 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
     }
 
     // SY -->
+    // Komiho (2026-10-04): E-Ink 生效时翻页动画由 E-Ink 接管（已被写成关闭），开关置灰。
+    val pageTransitionsLocked = einkAnimationOff()
     CheckboxItem(
         label = stringResource(MR.strings.pref_page_transitions),
         pref = screenModel.preferences.pageTransitionsPager,
+        enabled = !pageTransitionsLocked,
     )
 
     CheckboxItem(
@@ -276,9 +296,12 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
     )
 
     // Komiho: v1 / v2 互斥 —— 勾一个自动取消另一个（v1 匀速固定时长，v2 三次方缓出 + 时长按距离算）。
+    // Komiho (2026-10-04): E-Ink 生效时条漫的点击滚屏动画同样由 E-Ink 接管（已写成关闭），置灰。
+    val webtoonTransitionsLocked = einkAnimationOff()
     CheckboxItem(
         label = stringResource(SYMR.strings.pref_page_transitions_linear),
         checked = pageTransitionsWebtoon,
+        enabled = !webtoonTransitionsLocked,
         onClick = {
             val next = !pageTransitionsWebtoon
             screenModel.preferences.pageTransitionsWebtoon.set(next)
@@ -289,6 +312,7 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
     CheckboxItem(
         label = stringResource(SYMR.strings.pref_page_transitions_v2),
         checked = pageTransitionsWebtoonV2,
+        enabled = !webtoonTransitionsLocked,
         onClick = {
             val next = !pageTransitionsWebtoonV2
             screenModel.preferences.pageTransitionsWebtoonV2.set(next)
