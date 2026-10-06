@@ -47,6 +47,10 @@ class PagerConfig(
     var imageCropBorders = false
         private set
 
+    /** Komiho: 加强切白边（只与 [imageCropBorders] 同开时生效，见 TachiyomiImageDecoder）。 */
+    var imageCropBordersAggressive = false
+        private set
+
     var navigateToPan = false
         private set
 
@@ -114,6 +118,10 @@ class PagerConfig(
 
         readerPreferences.cropBorders
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })
+
+        // Komiho: 加强切白边 —— 与裁边同属图像配置，变更立刻重载当前页。
+        readerPreferences.cropBordersAggressive
+            .register({ imageCropBordersAggressive = it }, { imagePropertyChangedListener?.invoke() })
 
         // Komiho (2026-09-19): 增强设置同样属于「图像配置」，变更必须立刻重渲染 —— 否则
         // preparedCache 与 holder 的「同一对页已渲染」守卫都还认旧设置，用户得退出重进或

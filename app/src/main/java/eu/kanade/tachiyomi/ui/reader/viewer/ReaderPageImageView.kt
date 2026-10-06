@@ -445,7 +445,13 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 // (encrypted or raw archives) can yield non-image streams; feeding
                 // those to the enhancement decoder crashed the reader. Non-standard
                 // streams fall back to the original SSIV direct-decode path.
-                val enhancementOn = (preferences.enhancementMode.get() != 0 || einkGrayOn) &&
+                // Komiho: 加强切白边开启时也必须走这条链 —— SSIV 直解路径带不上
+                // aggressiveCrop 参数（它内部按纯白边算法裁边），会退回标准裁切。
+                val enhancementOn = (
+                    preferences.enhancementMode.get() != 0 ||
+                        einkGrayOn ||
+                        config.cropBordersAggressive
+                    ) &&
                     isStandardImageStream(data)
                 if (!enhancementOn) {
                     setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
@@ -518,6 +524,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .size(ViewSizeResolver(this@ReaderPageImageView))
                     .precision(Precision.INEXACT)
                     .cropBorders(config.cropBorders)
+                    .cropBordersAggressive(config.cropBordersAggressive)
                     .crossfade(false)
                     .build()
                     .let(context.imageLoader::enqueue)
@@ -618,6 +625,8 @@ open class ReaderPageImageView @JvmOverloads constructor(
         val zoomDuration: Int,
         val minimumScaleType: Int = SCALE_TYPE_CENTER_INSIDE,
         val cropBorders: Boolean = false,
+        // Komiho: 加强切白边；单独为 true 无效果，解码器按 cropBorders && cropBordersAggressive 消费。
+        val cropBordersAggressive: Boolean = false,
         val zoomStartPosition: ZoomStartPosition = ZoomStartPosition.CENTER,
         val landscapeZoom: Boolean = false,
     )

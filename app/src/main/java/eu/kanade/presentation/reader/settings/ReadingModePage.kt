@@ -147,6 +147,12 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
         pref = screenModel.preferences.cropBorders,
     )
 
+    // Komiho: 加强切白边 —— 全局开关，跟随各裁边开关生效。
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_crop_borders_aggressive),
+        pref = screenModel.preferences.cropBordersAggressive,
+    )
+
     CheckboxItem(
         label = stringResource(MR.strings.pref_landscape_zoom),
         pref = screenModel.preferences.landscapeZoom,
