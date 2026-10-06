@@ -358,7 +358,7 @@ object PagerPagePreparer {
                 .size(width, height)
                 .precision(Precision.INEXACT)
                 .cropBorders(cropBorders)
-                // Komiho: 加强切白边 —— 与 holder 侧请求同参，否则预解码位图与实时解码不一致。
+                // Komiho: 深度裁剪边缘 —— 与 holder 侧请求同参，否则预解码位图与实时解码不一致。
                 .cropBordersAggressive(viewer.config.imageCropBordersAggressive)
                 .crossfade(false)
                 .build()

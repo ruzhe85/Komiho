@@ -54,7 +54,7 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         }
         val decoder = resources.sourceOrNull()?.use {
             coverStream.use { coverStream ->
-                // Komiho: 加强切白边 —— 只在裁边开启时把 aggressiveCrop 传给 fork 的
+                // Komiho: 深度裁剪边缘 —— 只在裁边开启时把 aggressiveCrop 传给 fork 的
                 // image-decoder（容差 0.125% → 10%，水印/页码不再挡住裁边）。
                 ImageDecoder.newInstance(
                     coverStream ?: it.inputStream(),

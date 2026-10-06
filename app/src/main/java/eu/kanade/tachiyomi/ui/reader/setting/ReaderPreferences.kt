@@ -112,7 +112,7 @@ class ReaderPreferences(
     val cropBordersWebtoon: Preference<Boolean> = preferenceStore.getBoolean("crop_borders_webtoon", false)
 
     /**
-     * Komiho (2026-10-06): 加强切白边 —— 全局开关，跟随上面三个裁边开关生效。
+     * Komiho (2026-10-06): 深度裁剪边缘 —— 全局开关，跟随上面三个裁边开关生效。
      * image-decoder 的裁边按整行/列扫描、容差极低（0.125%），角落一个小水印/页码就足够
      * 让整条边放弃裁切；加强模式把「这条线算有内容」的占比阈值提到 10%（见 fork 的
      * aggressiveFilledRatioLimit），边界穿过水印笔画落到真正的面板边框线上。
@@ -375,7 +375,7 @@ class ReaderPreferences(
         append('|').append(aiAreaDownscaleStrength.get())
         append('|').append(cropBorders.get())
         append('|').append(cropBordersWebtoon.get())
-        // Komiho: 加强切白边改变裁切结果（像素），必须进指纹。
+        // Komiho: 深度裁剪边缘改变裁切结果（像素），必须进指纹。
         append('|').append(cropBordersAggressive.get())
         // Komiho: E-Ink 灰阶化会改变**像素**，所以必须进指纹 —— 否则改了灰阶设置后，
         // pager 的 prepared pages 与 holder 的「这一对页已渲染」守卫都还认旧设置，

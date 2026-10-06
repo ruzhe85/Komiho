@@ -263,7 +263,7 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.cropBorders,
                     title = stringResource(MR.strings.pref_crop_borders),
                 ),
-                // Komiho: 加强切白边 —— 全局开关，跟随上面（及条漫组）的裁边开关生效。
+                // Komiho: 深度裁剪边缘 —— 全局开关，跟随上面（及条漫组）的裁边开关生效。
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.cropBordersAggressive,
                     title = stringResource(MR.strings.pref_crop_borders_aggressive),
