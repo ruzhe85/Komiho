@@ -39,6 +39,7 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_OUT_QU
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
 import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
+import eu.kanade.tachiyomi.data.coil.cropBordersAggressive
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.data.coil.originalSizeDisplay

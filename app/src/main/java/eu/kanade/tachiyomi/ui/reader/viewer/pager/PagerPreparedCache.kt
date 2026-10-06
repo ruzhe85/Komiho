@@ -10,6 +10,7 @@ import coil3.request.SuccessResult
 import coil3.request.crossfade
 import coil3.size.Precision
 import eu.kanade.tachiyomi.data.coil.cropBorders
+import eu.kanade.tachiyomi.data.coil.cropBordersAggressive
 import eu.kanade.tachiyomi.data.coil.customDecoder
 import eu.kanade.tachiyomi.data.coil.enhanced
 import eu.kanade.tachiyomi.data.coil.pageIndex
