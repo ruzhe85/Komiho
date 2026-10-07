@@ -35,7 +35,10 @@ conscrypt = "2.6.0"
 directionalViewPager = "1.0.0"
 diskLruCache = "2.0.2"
 flexibleAdapter = "c8013533"
-image-decoder = "0060d44"
+# 深度裁剪边缘（aggressiveCrop）只在 ruzhe85 fork 里有；该 rev 必须保留上游 3 参
+# newInstance(InputStream, Boolean, ByteArray?) 的二进制兼容入口，否则 SSIV 分块解码会抛
+# NoSuchMethodError（0b61f3e 起已在 fork 里补回）。
+image-decoder = "0b61f3e"
 injekt = "ee267b2e27"
 jsoup = "1.22.2"
 junit = "6.1.2"
