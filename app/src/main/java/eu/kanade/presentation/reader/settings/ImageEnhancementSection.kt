@@ -215,7 +215,7 @@ private fun EnhancementRootList(
         // 选中时显示**当前生效**的算法（E-Ink 覆盖态下运行时已收敛到 CPU，取 cpuMemory），
         // 未选中时显示 CPU 自己上次选的 —— 非选中行也有值可读，选中行的值永远等于实际在跑的。
         subtitle = ReaderPreferences.CpuEnhancementModes
-            .firstOrNull { it.first = if (cpuActive && mode in 2..3) mode else cpuMemory }
+            .firstOrNull { it.first == if (cpuActive && mode in 2..3) mode else cpuMemory }
             ?.let { stringResource(it.second) },
         selected = cpuActive,
         onClick = {
