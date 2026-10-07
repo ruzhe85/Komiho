@@ -6,7 +6,6 @@ import android.graphics.BitmapFactory
 import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
 import eu.kanade.tachiyomi.util.mobi.MobiExtractor
-import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import eu.kanade.tachiyomi.util.pickCoverFirstImage
 import tachiyomi.source.local.io.Format
 // SY: 散图目录封面需在后台上列目录（SmbBrowse.list 为 suspend）。
@@ -24,7 +23,6 @@ import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlin.concurrent.thread
@@ -196,7 +194,7 @@ object SmbCoverCache {
             MobiExtractor.extractImages(tmp, File(dir, "pages_" + sha256("${conn.id};$relPath")))
         }.getOrNull() ?: return
         val img = book.coverFile ?: book.imageFiles.firstOrNull() ?: return
-        val bmp = decodeSampled({ FileInputStream(img) }, MAX_PX) ?: return
+        val bmp = decodeSampled({ ByteArrayInputStream(img.readBytes()) }, MAX_PX) ?: return
         writeCover(bmp, target)
     }
 

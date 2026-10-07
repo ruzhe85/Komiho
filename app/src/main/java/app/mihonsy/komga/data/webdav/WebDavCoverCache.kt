@@ -28,7 +28,6 @@ import uy.kohesive.injekt.api.get
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlin.concurrent.thread
@@ -372,7 +371,7 @@ object WebDavCoverCache {
             MobiExtractor.extractImages(tmp, File(dir, "pages_" + sha256(fullUrl)))
         }.getOrNull() ?: return
         val img = book.coverFile ?: book.imageFiles.firstOrNull() ?: return
-        val bmp = decodeSampled({ FileInputStream(img) }, MAX_PX) ?: return
+        val bmp = decodeSampled({ ByteArrayInputStream(img.readBytes()) }, MAX_PX) ?: return
         writeCover(bmp, target)
     }
 
