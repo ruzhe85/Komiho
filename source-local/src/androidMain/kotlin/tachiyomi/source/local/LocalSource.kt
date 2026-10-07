@@ -380,7 +380,7 @@ actual class LocalSource(
         val chapterFiles = fileSystem.getFilesInMangaDirectory(manga.url)
             // Only keep supported formats
             .filterNot { it.name.orEmpty().startsWith('.') }
-            .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) || it.extension.equals("pdf", true) || it.extension.lowercase() in Format.MOBI_EXTENSIONS }
+            .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) || it.extension.equals("pdf", true) || it.extension?.lowercase() in Format.MOBI_EXTENSIONS }
             // Komiho: 先按文件名自然序排好，章节号才能按这个顺序兜底（见 ChapterNumbering）。
             .sortedWith { a, b ->
                 a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
@@ -680,7 +680,7 @@ private fun mobiCoverStream(context: Context, file: UniFile): InputStream? {
                 val type = u32(r0, p)
                 val len = u32(r0, p + 4).toInt()
                 if (len < 8) break
-                if (type == 201 && len >= 12) { // EXTH_COVEROFFSET
+                if (type == 201L && len >= 12) { // EXTH_COVEROFFSET
                     coverOffset = u32(r0, p + 8)
                     break
                 }

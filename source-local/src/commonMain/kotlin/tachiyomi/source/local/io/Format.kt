@@ -40,7 +40,7 @@ sealed interface Format {
             file.extension.equals("epub", true) -> Epub(file)
             // SY --> Komiho: PDF 在 archive 之前判定，避免被误当归档处理（pdf 通常不在归档列表，靠前更稳）。
             file.extension.equals("pdf", true) -> Pdf(file)
-            file.extension.lowercase() in MOBI_EXTENSIONS -> Mobi(file)
+            file.extension?.lowercase() in MOBI_EXTENSIONS -> Mobi(file)
             // SY <--
             isArchiveSupported(file) -> Archive(file)
             else -> throw UnknownFormatException()

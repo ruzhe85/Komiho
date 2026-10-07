@@ -5754,7 +5754,7 @@ private fun UniFile.isLocalBook(): Boolean =
     !isDirectory &&
         (
             Archive.isSupported(this) || extension.equals("epub", true) ||
-                extension.equals("pdf", true) || extension.lowercase() in Format.MOBI_EXTENSIONS
+                extension.equals("pdf", true) || extension?.lowercase() in Format.MOBI_EXTENSIONS
         )
 
 private fun fileIcon(entry: LocalEntry): ImageVector =
