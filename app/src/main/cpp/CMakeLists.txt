@@ -20,6 +20,50 @@ target_link_libraries(mihonsy-enhance
 )
 
 # =====================================================================================
+# 1.5) libmobi — MOBI/AZW3/AZW 解析（LGPL3，vendored 在 mobi/，见 mobi/VENDOR.md）。
+#
+# 按上游 CMake 默认开启项给宏定义（USE_ENCRYPTION/USE_XMLWRITER/HAVE_*），zlib 直接
+# 链 NDK 自带 libz；miniz 照上游编成 OBJECT 库并带 MINIZ_* 宏，避免 zlib 兼容名泄漏。
+# libmobi 独立 .so + 薄包装 libmobi-jni.so（LGPL 动态链接，Kotlin 侧 MobiExtractor）。
+# =====================================================================================
+add_library(mobi-miniz OBJECT
+    mobi/miniz.c
+)
+target_compile_definitions(mobi-miniz PRIVATE
+    MINIZ_NO_STDIO
+    MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+    MINIZ_NO_TIME
+    MINIZ_NO_ARCHIVE_APIS
+    MINIZ_NO_ARCHIVE_WRITING_APIS
+    _POSIX_C_SOURCE=200112L
+)
+
+file(GLOB KOMIHO_MOBI_SOURCES mobi/*.c)
+list(FILTER KOMIHO_MOBI_SOURCES EXCLUDE REGEX "miniz\\.c$")
+add_library(mobi SHARED ${KOMIHO_MOBI_SOURCES})
+target_compile_definitions(mobi PRIVATE
+    USE_ENCRYPTION
+    USE_XMLWRITER
+    HAVE_UNISTD_H
+    HAVE_GETOPT
+    HAVE_STRDUP
+    HAVE_SYS_RESOURCE_H
+    MOBI_INLINE=inline
+    HAVE_ATTRIBUTE_NORETURN
+)
+target_include_directories(mobi PRIVATE mobi)
+target_link_libraries(mobi PRIVATE log z mobi-miniz)
+
+add_library(mobi-jni SHARED
+    mobi_jni.cpp
+)
+target_include_directories(mobi-jni PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(mobi-jni
+    mobi
+    log
+)
+
+# =====================================================================================
 # 2) GPU upscaler — ncnn + Vulkan, optional.
 #
 # Kept as a SEPARATE shared library on purpose: ncnn's CMake package exports

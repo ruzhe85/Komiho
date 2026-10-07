@@ -943,6 +943,8 @@
     <string name="loader_epub_no_images_error">This EPUB has no image pages. Please open it via your Komga server.</string>
     <string name="loader_epub_drm_error">This EPUB is DRM-protected, so it can\'t be read here. Please open it in the app it was purchased from, or use a DRM-free copy.</string>
     <string name="pdf_drm_certificate_error">This PDF is protected by certificate-based DRM (e.g. Adobe Content Server), which needs a key rather than a password, so it can\'t be opened here. Please use the app that issued it.</string>
+    <string name="mobi_drm_error">This MOBI/AZW3 file is DRM-protected, so it can\'t be read here. Please use a DRM-free copy.</string>
+    <string name="mobi_no_images_error">This MOBI/AZW3 file has no embedded images and can\'t be shown as pages.</string>
     <string name="komga_book_profile_epub_unsupported">Komga does not provide image pages for this EPUB. Please use another reader or open it locally.</string>
     <string name="loader_not_implemented_error">Source not found</string>
 

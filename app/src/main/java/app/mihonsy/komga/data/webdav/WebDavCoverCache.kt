@@ -8,6 +8,9 @@ import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
 // SY <--
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import eu.kanade.tachiyomi.util.mobi.MobiExtractor
+import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
+import tachiyomi.source.local.io.Format
 import kotlinx.coroutines.flow.MutableStateFlow
 // SY: 散图目录封面需在后台上拉目录（PROPFIND 为 suspend）。
 import kotlinx.coroutines.runBlocking
@@ -22,10 +25,10 @@ import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.domain.storage.service.StoragePreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlin.concurrent.thread
@@ -226,6 +229,13 @@ object WebDavCoverCache {
             generateFromPdf(context, fullUrl, credentials, target, insecureTls)
             return
         }
+        // SY --> Komiho: MOBI/AZW3/AZW 章节封面 = 整本落临时文件，libmobi 抽封面/首图
+        //（与 MobiPageLoader 同引擎）。DRM/纯文字书抽不出 → 放弃（无封面，失败退避兜住频率）。
+        if (fullUrl.substringBefore('?').substringAfterLast('.', "").lowercase() in Format.MOBI_EXTENSIONS) {
+            generateFromMobi(context, fullUrl, credentials, target, insecureTls)
+            return
+        }
+        // SY <--
         // 独立连接（不复用阅读器的 ArchivePageLoader 句柄，避免生命周期竞争）；
         // 与阅读器同一 fallback 目录，服务器不支持 Range 整本缓存时通常可命中已有文件。
         val source = WebDavRandomAccessSource(
@@ -318,6 +328,51 @@ object WebDavCoverCache {
             }.getOrNull() ?: return
         }
         val bmp = PdfRenderFallback.renderPageBitmap(tmp.absolutePath, 0, MAX_PX) ?: return
+        writeCover(bmp, target)
+    }
+
+    /**
+     * Komiho: MOBI/AZW3/AZW 章节封面 —— 整本落本地临时文件，libmobi 抽图后取封面/首图
+     * （与阅读器 MobiPageLoader 同引擎）。DRM（MobiDrmException）/纯文字书抽不出图 → 无封面。
+     */
+    private fun generateFromMobi(
+        context: Context,
+        fullUrl: String,
+        credentials: Pair<String, String>?,
+        target: File,
+        insecureTls: Boolean,
+    ) {
+        val dir = File(context.cacheDir, "komiho_webdav_mobi_cover").apply { mkdirs() }
+        val tmp = File(dir, sha256(fullUrl) + ".mobi")
+        if (!tmp.exists() || tmp.length() == 0L) {
+            runCatching {
+                val src = WebDavRandomAccessSource(
+                    url = fullUrl,
+                    username = credentials?.first?.ifBlank { null },
+                    password = credentials?.second?.ifBlank { null },
+                    insecureTls = insecureTls,
+                    fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
+                    cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+                )
+                src.use { s ->
+                    val len = s.size
+                    FileOutputStream(tmp).use { out ->
+                        var offset = 0L
+                        while (offset < len) {
+                            val buf = s.read(offset, min(1 shl 20, (len - offset).toInt()))
+                            if (buf.isEmpty()) break
+                            out.write(buf)
+                            offset += buf.size
+                        }
+                    }
+                }
+            }.getOrNull() ?: return
+        }
+        val book = runCatching {
+            MobiExtractor.extractImages(tmp, File(dir, "pages_" + sha256(fullUrl)))
+        }.getOrNull() ?: return
+        val img = book.coverFile ?: book.imageFiles.firstOrNull() ?: return
+        val bmp = decodeSampled({ FileInputStream(img) }, MAX_PX) ?: return
         writeCover(bmp, target)
     }
 

@@ -303,6 +303,7 @@ import eu.kanade.presentation.more.settings.screen.SettingsKomihoBackupScreen
 import eu.kanade.presentation.more.settings.PreferenceScreen
 import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.source.local.io.Archive
+import tachiyomi.source.local.io.Format
 import tachiyomi.source.local.io.LocalSourceFileSystem
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.source.local.LocalSource
@@ -5504,8 +5505,8 @@ private data class LocalEntry(
     val isImage: Boolean = ImageUtil.isImage(name)
 }
 
-/** 与 Archive.isSupported 对齐的归档扩展名（含 epub，因阅读器也支持）。 */
-private val LOCAL_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "tar", "cbt", "epub", "pdf")
+/** 与 Archive.isSupported 对齐的归档扩展名（含 epub，因阅读器也支持；pdf/mobi 系非归档但同属可打开白名单）。 */
+private val LOCAL_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "tar", "cbt", "epub", "pdf", "mobi", "azw3", "azw")
 
 /**
  * Komiho: 从远程（WebDAV/SMB）文件 URL/路径里取文件名，用于自然序比较与章节号兜底
@@ -5746,11 +5747,15 @@ private suspend fun searchWebDavRecursive(
 private fun UniFile.isLocalArchive(): Boolean =
     !isDirectory && (Archive.isSupported(this) || extension.equals("epub", true))
 
-// SY --> Komiho: 本地可独立打开的「书」：归档/epub/pdf 都按单文件章节处理（章节名取文件名）。
-// 注意与 LocalEntry.isArchive（LOCAL_ARCHIVE_EXTS 含 pdf）对齐——openLocalFile 内部若只用
-// isLocalArchive() 会漏掉 pdf，使 pdf 误入散图目录分支、章节名被错置成父文件夹名。
+// SY --> Komiho: 本地可独立打开的「书」：归档/epub/pdf/mobi 系都按单文件章节处理（章节名取文件名）。
+// 注意与 LocalEntry.isArchive（LOCAL_ARCHIVE_EXTS 含 pdf/mobi 系）对齐——openLocalFile 内部若只用
+// isLocalArchive() 会漏掉 pdf/mobi，使其误入散图目录分支、章节名被错置成父文件夹名。
 private fun UniFile.isLocalBook(): Boolean =
-    !isDirectory && (Archive.isSupported(this) || extension.equals("epub", true) || extension.equals("pdf", true))
+    !isDirectory &&
+        (
+            Archive.isSupported(this) || extension.equals("epub", true) ||
+                extension.equals("pdf", true) || extension.lowercase() in Format.MOBI_EXTENSIONS
+        )
 
 private fun fileIcon(entry: LocalEntry): ImageVector =
     fileKindIcon(entry.isDirectory, entry.isArchive, entry.isImage)

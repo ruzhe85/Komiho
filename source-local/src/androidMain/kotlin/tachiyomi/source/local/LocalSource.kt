@@ -6,6 +6,8 @@ import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.system.ErrnoException
+import android.system.Os
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.UnmeteredSource
@@ -378,7 +380,7 @@ actual class LocalSource(
         val chapterFiles = fileSystem.getFilesInMangaDirectory(manga.url)
             // Only keep supported formats
             .filterNot { it.name.orEmpty().startsWith('.') }
-            .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) || it.extension.equals("pdf", true) }
+            .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) || it.extension.equals("pdf", true) || it.extension.lowercase() in Format.MOBI_EXTENSIONS }
             // Komiho: 先按文件名自然序排好，章节号才能按这个顺序兜底（见 ChapterNumbering）。
             .sortedWith { a, b ->
                 a.name.orEmpty().compareToCaseInsensitiveNaturalOrder(b.name.orEmpty())
@@ -450,6 +452,12 @@ actual class LocalSource(
             if (chapter.url.substringBefore('?').lowercase().endsWith(".pdf")) {
                 return Format.RemotePdf(chapter.url)
             }
+            // SY --> Komiho: 远程 MOBI/AZW3/AZW 同走专用变体（libmobi 不认 zip，必须落缓存单独解析）。
+            val ext = chapter.url.substringBefore('?').substringAfterLast('.').lowercase()
+            if (ext in Format.MOBI_EXTENSIONS) {
+                return Format.RemoteMobi(chapter.url)
+            }
+            // SY <--
             return Format.RemoteArchive(chapter.url)
         }
         // SY <--
@@ -529,10 +537,18 @@ actual class LocalSource(
                     pdfCoverStream(context, format.file)?.let { coverManager.update(manga, it, false) }
                 }
                 // SY <--
+                // SY --> Komiho: 本地 MOBI/AZW3/AZW 封面 = 最小 PDB/MOBI/EXTH 头读取（source-local
+                // 看不到 app 模块的 libmobi 抽图，此处自持一份只读封面的轻量解析，同 pdfCoverStream 先例）。
+                is Format.Mobi -> {
+                    mobiCoverStream(context, format.file)?.let { coverManager.update(manga, it, false) }
+                }
+                // SY <--
                 // SY --> Komiho Phase3: 远程封面 Phase 4 再做（不为封面拉远程数据）
                 is Format.RemoteArchive -> null
                 // SY --> Komiho Phase3/Phase7: 远程 PDF 封面同样不拉远程数据（与 RemoteArchive 同口径）。
                 is Format.RemotePdf -> null
+                // SY --> Komiho: 远程 MOBI 封面同口径（打开章节时由 WebDav/SmbCoverCache 顺便生成）。
+                is Format.RemoteMobi -> null
                 // SY <--
             }
         } catch (e: Throwable) {
@@ -590,6 +606,102 @@ private fun pdfCoverStream(context: Context, file: UniFile): InputStream? {
     } finally {
         renderer.close()
         pfd.close()
+    }
+}
+// SY <--
+
+// SY --> Komiho: 本地 MOBI/AZW3/AZW 封面 —— source-local 看不到 app 模块的 libmobi 抽图，
+// 此处自持一份只读封面的最小 PDB/MOBI/EXTH 头解析（同 pdfCoverStream 先例）。图片记录
+// 本身不压缩，无需 PalmDOC 解压：PDB 记录表 → record0 的 MOBI 头取 firstImageIndex、
+// EXTH 201 取 coveroffset → 封面记录 = firstImageIndex + coveroffset，读出后按魔数校验
+// （与 libmobi mobi_determine_resource_type 同口径），任何一步不合预期就返回 null 无封面。
+private fun mobiCoverStream(context: Context, file: UniFile): InputStream? {
+    val pfd = if (file.uri?.scheme == "file" && file.filePath != null) {
+        ParcelFileDescriptor.open(File(file.filePath!!), ParcelFileDescriptor.MODE_READ_ONLY)
+    } else {
+        context.contentResolver.openFileDescriptor(file.uri, "r") ?: return null
+    }
+    pfd.use { fd ->
+        val fileSize = fd.statSize
+        if (fileSize < 78L + 8L) return null
+
+        fun readAt(offset: Long, len: Int): ByteArray? {
+            val bb = java.nio.ByteBuffer.allocate(len)
+            var pos = offset
+            while (bb.hasRemaining()) {
+                val n = try {
+                    Os.pread(fd.fileDescriptor, bb, pos)
+                } catch (e: ErrnoException) {
+                    return null
+                }
+                if (n <= 0) return null
+                pos += n
+            }
+            return bb.array()
+        }
+
+        fun u16(b: ByteArray, off: Int) = ((b[off].toInt() and 0xFF) shl 8) or (b[off + 1].toInt() and 0xFF)
+        fun u32(b: ByteArray, off: Int) =
+            ((b[off].toLong() and 0xFF) shl 24) or ((b[off + 1].toLong() and 0xFF) shl 16) or
+                ((b[off + 2].toLong() and 0xFF) shl 8) or (b[off + 3].toLong() and 0xFF)
+
+        val head = readAt(0, 78) ?: return null
+        val numRecords = u16(head, 76)
+        if (numRecords !in 1..16384) return null
+        // PDB attributes 的加密位 —— 置位即 DRM，读出的封面记录也是密文。
+        if (u16(head, 32) and 0x0002 != 0) return null
+
+        val list = readAt(78, numRecords * 8) ?: return null
+        val offsets = IntArray(numRecords) { u32(list, it * 8).toInt() }
+
+        val r0Len = (if (numRecords > 1) offsets[1] else fileSize.toInt()) - offsets[0]
+        if (r0Len <= 0) return null
+        val r0 = readAt(offsets[0].toLong(), minOf(r0Len, 8192)) ?: return null
+        // PalmDOC 头的 encryption type（0 = 无加密）+ "MOBI" 魔数。
+        if (u16(r0, 12) != 0) return null
+        if (r0.size < 112 || r0[16] != 'M'.code.toByte() || r0[17] != 'O'.code.toByte() ||
+            r0[18] != 'B'.code.toByte() || r0[19] != 'I'.code.toByte()
+        ) {
+            return null
+        }
+        val firstImageIndex = u32(r0, 108)
+        if (firstImageIndex <= 0L || firstImageIndex >= numRecords) return null
+
+        var coverOffset = -1L
+        val mobiHeaderLen = u32(r0, 20).toInt()
+        val exthOff = 16 + mobiHeaderLen
+        if (mobiHeaderLen in 16..r0.size - 12 && r0[exthOff] == 'E'.code.toByte() &&
+            r0[exthOff + 1] == 'X'.code.toByte() && r0[exthOff + 2] == 'T'.code.toByte() &&
+            r0[exthOff + 3] == 'H'.code.toByte()
+        ) {
+            val exthEnd = exthOff + u32(r0, exthOff + 4).toInt()
+            var p = exthOff + 12
+            while (p + 8 <= exthEnd && p + 8 <= r0.size) {
+                val type = u32(r0, p)
+                val len = u32(r0, p + 4).toInt()
+                if (len < 8) break
+                if (type == 201 && len >= 12) { // EXTH_COVEROFFSET
+                    coverOffset = u32(r0, p + 8)
+                    break
+                }
+                p += len
+            }
+        }
+        if (coverOffset < 0) return null
+
+        val coverIndex = firstImageIndex + coverOffset
+        if (coverIndex >= numRecords) return null
+        val coverLen =
+            ((if (coverIndex + 1 < numRecords) offsets[(coverIndex + 1).toInt()] else fileSize.toInt()) - offsets[coverIndex.toInt()])
+        if (coverLen <= 0 || coverLen > 20_000_000) return null
+        val img = readAt(offsets[coverIndex.toInt()].toLong(), coverLen) ?: return null
+
+        val isJpeg = img.size >= 3 && img[0] == 0xFF.toByte() && img[1] == 0xD8.toByte() && img[2] == 0xFF.toByte()
+        val isGif = img.size >= 4 && img[0] == 0x47.toByte() && img[1] == 0x49.toByte() && img[2] == 0x46.toByte() && img[3] == 0x38.toByte()
+        val isPng = img.size >= 8 && img[0] == 0x89.toByte() && img[1] == 0x50.toByte() && img[2] == 0x4E.toByte() && img[3] == 0x47.toByte()
+        val isBmp = img.size >= 6 && img[0] == 0x42.toByte() && img[1] == 0x4D.toByte()
+        if (!isJpeg && !isGif && !isPng && !isBmp) return null
+        return ByteArrayInputStream(img)
     }
 }
 // SY <--

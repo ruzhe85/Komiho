@@ -42,8 +42,9 @@ data class SmbEntry(
         !isDir && name.substringAfterLast('.', "").lowercase() == "pdf"
 }
 
-/** 支持的归档扩展名（浏览过滤与条目判定共用）。epub 同为 zip 容器，阅读器有专门分支。 */
-internal val SMB_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "epub", "pdf")
+/** 支持的归档扩展名（浏览过滤与条目判定共用）。epub 同为 zip 容器，阅读器有专门分支。
+ *  pdf / mobi 系非归档，但同属「阅读器可打开」白名单（各自有专门解析分支）。 */
+internal val SMB_ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7", "epub", "pdf", "mobi", "azw3", "azw")
 
 /** 支持的图片扩展名（散图目录成员；与阅读器解码口径一致）。 */
 internal val SMB_IMAGE_EXTS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "heic", "heif")

@@ -12,6 +12,10 @@ sealed interface Format {
     // PdfPageLoader；本文件在 commonMain，不能引用任何 Android 专用类。
     data class Pdf(val file: UniFile) : Format
     // SY <--
+    // SY --> Komiho: 本地 MOBI/AZW3/AZW（Kindle 容器，libmobi 纯抽图）。仅承载数据，
+    // 真正解析在 app 模块的 MobiPageLoader；本文件在 commonMain，不能引用 Android 专用类。
+    data class Mobi(val file: UniFile) : Format
+    // SY <--
     // SY --> Komiho Phase3: 远程归档（WebDAV；后续 SMB 同走此变体）。
     // 存原始章节 url（`webdav:https://...`）而非 source 实例：本文件在 commonMain，
     // 看不到 core.common 的 RandomAccessSource，由 ChapterLoader 构造 WebDavRandomAccessSource。
@@ -21,16 +25,22 @@ sealed interface Format {
     // 解析/渲染复用本地 PdfPageLoader（首次取页时整本落本地缓存，再走本地解析）。
     data class RemotePdf(val remoteUrl: String) : Format
     // SY <--
+    // SY --> Komiho: 远程 MOBI/AZW3/AZW（WebDAV/SMB），同 RemotePdf 模式：整本落缓存复用本地解析。
+    data class RemoteMobi(val remoteUrl: String) : Format
+    // SY <--
 
     class UnknownFormatException : Exception()
 
     companion object {
+
+        val MOBI_EXTENSIONS = setOf("mobi", "azw3", "azw")
 
         fun valueOf(file: UniFile) = when {
             file.isDirectory -> Directory(file)
             file.extension.equals("epub", true) -> Epub(file)
             // SY --> Komiho: PDF 在 archive 之前判定，避免被误当归档处理（pdf 通常不在归档列表，靠前更稳）。
             file.extension.equals("pdf", true) -> Pdf(file)
+            file.extension.lowercase() in MOBI_EXTENSIONS -> Mobi(file)
             // SY <--
             isArchiveSupported(file) -> Archive(file)
             else -> throw UnknownFormatException()

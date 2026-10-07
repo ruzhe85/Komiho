@@ -157,6 +157,8 @@ class ChapterLoader(
                     is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
                     // SY --> Komiho: 本地 PDF（彩色扫描漫画常见）—— 自写提取内嵌图 + 系统渲染兜底。
                     is Format.Pdf -> PdfPageLoader(format.file, context)
+                    // SY --> Komiho: 本地 MOBI/AZW3/AZW —— libmobi 纯抽图（文字书报无图片，同 EPUB）。
+                    is Format.Mobi -> MobiPageLoader(format.file, context)
                     // SY --> Komiho Phase3/Phase7: 远程 PDF（WebDAV/SMB）—— 整本落缓存后复用本地解析。
                     is Format.RemotePdf -> {
                         // SY --> Komiho Phase7: 打开远程 PDF 时顺便生成历史/书签封面（SMB/WebDAV 各自缓存）。
@@ -167,6 +169,16 @@ class ChapterLoader(
                         }
                         // SY <--
                         PdfPageLoader(format.remoteUrl, context)
+                    }
+                    // SY <--
+                    // SY --> Komiho: 远程 MOBI/AZW3/AZW（WebDAV/SMB）—— 同远程 PDF：整本落缓存 + 顺便生成封面。
+                    is Format.RemoteMobi -> {
+                        if (RemoteScheme.isSmb(format.remoteUrl)) {
+                            SmbCoverCache.generateAsync(context, format.remoteUrl)
+                        } else {
+                            WebDavCoverCache.generateAsync(context, format.remoteUrl)
+                        }
+                        MobiPageLoader(format.remoteUrl, context)
                     }
                     // SY <--
                     // SY --> Komiho Phase3/Phase7: 远程随机访问（WebDAV=HTTP Range，SMB=原生 offset 读）

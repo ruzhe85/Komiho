@@ -5,7 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
+import eu.kanade.tachiyomi.util.mobi.MobiExtractor
+import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import eu.kanade.tachiyomi.util.pickCoverFirstImage
+import tachiyomi.source.local.io.Format
 // SY: 散图目录封面需在后台上列目录（SmbBrowse.list 为 suspend）。
 import kotlinx.coroutines.runBlocking
 import logcat.LogPriority
@@ -21,6 +24,7 @@ import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlin.concurrent.thread
@@ -91,6 +95,13 @@ object SmbCoverCache {
             generateFromPdf(context, resolved.conn, resolved.password, resolved.relPath, target)
             return
         }
+        // SY --> Komiho: MOBI/AZW3/AZW 章节封面 = 整本落临时文件，libmobi 抽封面/首图
+        //（与 MobiPageLoader 同引擎）。DRM/纯文字书抽不出 → 放弃（无封面，下次重试）。
+        if (resolved.relPath.substringAfterLast('.', "").lowercase() in Format.MOBI_EXTENSIONS) {
+            generateFromMobi(context, resolved.conn, resolved.password, resolved.relPath, target)
+            return
+        }
+        // SY <--
         // 独立 source（不复用阅读器的 ArchivePageLoader 句柄，避免生命周期竞争）。
         val source = SmbRandomAccessSource(resolved.conn, resolved.password, resolved.relPath)
         val delegate: ArchiveHandle = try {
@@ -156,6 +167,36 @@ object SmbCoverCache {
             }.getOrNull() ?: return
         }
         val bmp = PdfRenderFallback.renderPageBitmap(tmp.absolutePath, 0, MAX_PX) ?: return
+        writeCover(bmp, target)
+    }
+
+    /**
+     * Komiho: MOBI/AZW3/AZW 章节封面 —— 整本落本地临时文件，libmobi 抽图后取封面/首图
+     * （与阅读器 MobiPageLoader 同引擎）。DRM（MobiDrmException）/纯文字书抽不出图 → 无封面。
+     */
+    private fun generateFromMobi(
+        context: Context,
+        conn: SmbConnection,
+        password: String,
+        relPath: String,
+        target: File,
+    ) {
+        val dir = File(context.cacheDir, "komiho_smb_mobi_cover").apply { mkdirs() }
+        val tmp = File(dir, sha256("${conn.id};$relPath") + ".mobi")
+        if (!tmp.exists() || tmp.length() == 0L) {
+            runCatching {
+                SmbSessionManager.openFile(conn, password, relPath).use { f ->
+                    f.getInputStream().buffered().use { input ->
+                        FileOutputStream(tmp).use { input.copyTo(it) }
+                    }
+                }
+            }.getOrNull() ?: return
+        }
+        val book = runCatching {
+            MobiExtractor.extractImages(tmp, File(dir, "pages_" + sha256("${conn.id};$relPath")))
+        }.getOrNull() ?: return
+        val img = book.coverFile ?: book.imageFiles.firstOrNull() ?: return
+        val bmp = decodeSampled({ FileInputStream(img) }, MAX_PX) ?: return
         writeCover(bmp, target)
     }
 
