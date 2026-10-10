@@ -111,8 +111,17 @@ class UiPreferences(
     /** E-Ink 模式下动画是否应归零。 */
     val isEinkAnimationOff: Boolean get() = einkMode.get() && einkDisableAnimation.get()
 
-    /** E-Ink 模式下阅读器是否应做灰阶渲染。 */
-    val isEinkGrayscaleActive: Boolean get() = einkMode.get() && einkRenderGrayscale.get()
+    /**
+     * 阅读器是否应做灰阶渲染。
+     *
+     * Komiho (2026-10-10): 与 E-Ink 模式**解耦**。它现在是一个独立的滤镜开关（设置 → 滤镜），
+     * 普通模式也能开；E-Ink 主开关只做**双向联动**（开时自动勾上、关时自动关闭，见 `App.onCreate`
+     * 对 `einkMode` 的订阅），用户之后可以自行改回去，改动不会被覆盖。
+     *
+     * 为什么不再强制：灰阶化是**主观**的（量化必然让画面变糙），和「关动画」那种纯收益不同，
+     * 所以 E-Ink 激活期间允许用户把它关掉 —— 此时画面交给面板自身去色，不做曲线与量化优化。
+     */
+    val isEinkGrayscaleActive: Boolean get() = einkRenderGrayscale.get()
 
     /** E-Ink 模式下允许的灰阶级数（收敛到合法档位，避免脏值写进量化表）。 */
     fun einkGrayLevelsOrDefault(): Int = einkGrayLevels.get().takeIf { it in EINK_GRAY_LEVELS } ?: 16

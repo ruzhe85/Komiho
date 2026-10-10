@@ -382,6 +382,10 @@ class ReaderPreferences(
         // 用户得退出重进或一直划动才看到变化（与上面几个 AI 档位是同一个道理）。
         val einkPrefs = Injekt.get<UiPreferences>()
         append('|').append(if (einkPrefs.isEinkGrayscaleActive) 1 else 0)
+        // Komiho (2026-10-10): 灰阶化解耦成独立滤镜后，「级数」与「彩色页保持彩色」也是
+        // 用户可调的像素级设置 —— 漏进指纹就会出现「改了级数、画面没变」。
+        append('|').append(einkPrefs.einkGrayLevelsOrDefault())
+        append('|').append(if (einkPrefs.einkKeepColorPages.get()) 1 else 0)
         append('|').append(einkPrefs.einkGrayLevelsOrDefault())
         append('|').append(if (einkPrefs.einkKeepColorPages.get()) 1 else 0)
     }

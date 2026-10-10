@@ -6,10 +6,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.core.graphics.alpha
 import androidx.core.graphics.blue
 import androidx.core.graphics.green
 import androidx.core.graphics.red
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences.Companion.ColorFilterMode
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import tachiyomi.core.common.preference.getAndSet
@@ -19,6 +21,8 @@ import tachiyomi.presentation.core.components.SettingsChipRow
 import tachiyomi.presentation.core.components.SliderItem
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 @Composable
 internal fun ColumnScope.ColorFilterPage(screenModel: ReaderSettingsScreenModel) {
@@ -122,7 +126,46 @@ internal fun ColumnScope.ColorFilterPage(screenModel: ReaderSettingsScreenModel)
         label = stringResource(MR.strings.pref_inverted_colors),
         pref = screenModel.preferences.invertedColors,
     )
+
+    // Komiho (2026-10-10): E-Ink 灰阶化从「E-Ink 模式专属」解耦成这里的独立滤镜 ——
+    // 它是纯像素处理（去色 + 曲线重构 + 量化到 N 级，见 EinkGray），普通模式同样能用。
+    // E-Ink 主开关只做双向联动（开则自动勾上、关则自动关闭），用户之后可自行改回去。
+    //
+    // 与上面的「灰度」不是一回事：那只是 ColorMatrix 丢饱和度（GPU layer、零成本），
+    // 这里走 CPU 逐像素，会改变明暗层次，代价约 1.5MP 几 ms。
+    val uiPreferences = remember { Injekt.get<UiPreferences>() }
+    val einkGrayEnabled by uiPreferences.einkRenderGrayscale.collectAsState()
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_eink_render_grayscale),
+        pref = uiPreferences.einkRenderGrayscale,
+    )
+    if (einkGrayEnabled) {
+        val grayLevels by uiPreferences.einkGrayLevels.collectAsState()
+        SettingsChipRow(MR.strings.pref_eink_gray_levels) {
+            EINK_GRAY_LEVEL_ORDER.forEach { level ->
+                FilterChip(
+                    selected = grayLevels == level,
+                    onClick = { uiPreferences.einkGrayLevels.set(level) },
+                    label = { Text("$level") },
+                )
+            }
+        }
+        // 不灰阶化就无所谓「保彩」，所以它跟着开关嵌套显示，不做成独立项。
+        CheckboxItem(
+            label = stringResource(MR.strings.pref_eink_keep_color_pages),
+            pref = uiPreferences.einkKeepColorPages,
+        )
+    }
 }
+
+/**
+ * 灰阶级数的显示顺序：由粗到细（16 / 8 / 4）。
+ *
+ * 与 [UiPreferences.EINK_GRAY_LEVELS]（合法档位的集合，升序）刻意分开：那个用于校验，
+ * 顺序无关；这里是展示顺序，顺序就是语义（越靠前色阶越平、刷新越快）。默认 16 见
+ * [UiPreferences.einkGrayLevels]。
+ */
+private val EINK_GRAY_LEVEL_ORDER = listOf(16, 8, 4)
 
 private fun getColorValue(currentColor: Int, color: Int, mask: Long, bitShift: Int): Int {
     return (color shl bitShift) or (currentColor and mask.inv().toInt())
