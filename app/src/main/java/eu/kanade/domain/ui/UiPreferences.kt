@@ -66,8 +66,15 @@ class UiPreferences(
      */
     val einkDisableAnimation: Preference<Boolean> = preferenceStore.getBoolean("pref_eink_disable_animation", true)
 
-    /** 阅读器是否按墨水屏灰阶渲染漫画位图。仅影响位图链路，App UI 不受影响。 */
-    val einkRenderGrayscale: Preference<Boolean> = preferenceStore.getBoolean("pref_eink_render_grayscale", true)
+    /**
+     * 阅读器是否按墨水屏灰阶渲染漫画位图。仅影响位图链路，App UI 不受影响。
+     *
+     * Komiho (2026-10-10): **默认关**。解耦后它不再是「E-Ink 模式的子项」而是独立滤镜
+     * （见 [isEinkGrayscaleActive]），沿用 `true` 会让**普通模式**的用户也默认被灰阶化 ——
+     * 那是回归。开 E-Ink 模式时由 `App.onCreate` 的联动自动勾上；存量 E-Ink 用户由那里的
+     * 幂等对齐补一次。
+     */
+    val einkRenderGrayscale: Preference<Boolean> = preferenceStore.getBoolean("pref_eink_render_grayscale", false)
 
     /**
      * 彩色页是否保持彩色。彩色墨水屏（Spectra 6 一类）上这是更好的选择；

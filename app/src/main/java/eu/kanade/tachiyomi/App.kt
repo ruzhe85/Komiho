@@ -272,6 +272,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             prefs.einkMode.changes().drop(1)
                 .onEach { enabled -> prefs.einkRenderGrayscale.set(enabled) }
                 .launchIn(scope)
+            // 存量用户对齐（幂等）：E-Ink 模式开着、而滤镜从未被显式设置过 —— 说明这是
+            // 「灰阶化还是 E-Ink 子项」时期的老配置（那时默认 true）。按旧行为补一次 true；
+            // 之后由上面的联动与用户自己的选择接管。放在这里而不是只在 onCreate 跑一次，
+            // 是为了让它在重入时也能收敛（与 EinkReaderDefaults.sync 同款思路）。
+            if (prefs.einkMode.get() && !prefs.einkRenderGrayscale.isSet()) {
+                prefs.einkRenderGrayscale.set(true)
+            }
         }
 
         setAppCompatDelegateThemeMode(Injekt.get<UiPreferences>().themeMode.get())
