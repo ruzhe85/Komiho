@@ -225,6 +225,11 @@
     <string name="settings_eink_mode_summary">关动画 · 黑白皮肤 · 墨水屏灰阶渲染</string>
     <string name="settings_eink_disable_animation">关闭全局动画</string>
     <string name="settings_eink_disable_animation_summary">墨水屏每次动画都要全屏刷新，既留残影又耗电</string>
+    <string name="settings_eink_render_grayscale">阅读器灰阶渲染</string>
+    <string name="settings_eink_render_grayscale_summary">按面板真实灰阶量化漫画，色阶过渡更干净</string>
+    <string name="settings_eink_keep_color_pages">彩色页保持彩色</string>
+    <string name="settings_eink_keep_color_pages_summary">彩色墨水屏上保留彩色；黑白屏不影响</string>
+    <string name="settings_eink_gray_levels">灰阶级数</string>
     <string name="settings_group_display">显示</string>
 
     <!-- 设置：阅读 -->

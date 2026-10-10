@@ -566,9 +566,6 @@
     <string name="pref_reader_actions">操作菜单</string>
     <string name="rotation_type">屏幕方向</string>
     <string name="pref_grayscale">灰度</string>
-    <string name="pref_eink_render_grayscale">E-Ink 灰阶</string>
-    <string name="pref_eink_keep_color_pages">彩色页保持彩色</string>
-    <string name="pref_eink_gray_levels">灰阶级数</string>
     <string name="notification_incognito_text">关闭无痕模式</string>
     <string name="automatic_background">自动</string>
     <string name="cancel_all_for_series">取消此作品</string>

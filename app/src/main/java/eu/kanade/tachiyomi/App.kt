@@ -263,22 +263,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             prefs.einkDisableAnimation.changes().drop(1)
                 .onEach { reapplyEinkMotion(resumedActivity ?: return@onEach) }
                 .launchIn(scope)
-            // Komiho (2026-10-10): E-Ink 主开关与灰阶滤镜**双向联动** —— 开则自动勾上、
-            // 关则自动关闭。灰阶化已与 E-Ink 模式解耦（见 `UiPreferences.isEinkGrayscaleActive`），
-            // 用户可以单独关掉它而不影响其它 E-Ink 优化（白底、关动画）。
-            // 不放进 EinkReaderDefaults 是因为语义不同：那套是「备份 + 还原」（保住开启 E-Ink 之前
-            // 的选择），这里要的就是「关了就是关了」。用户之后仍可自行修改 —— 只有 einkMode
-            // 变化时才会被重新同步；drop(1) 跳过启动时的当前值，避免覆盖用户已有的选择。
-            prefs.einkMode.changes().drop(1)
-                .onEach { enabled -> prefs.einkRenderGrayscale.set(enabled) }
-                .launchIn(scope)
-            // 存量用户对齐（幂等）：E-Ink 模式开着、而滤镜从未被显式设置过 —— 说明这是
-            // 「灰阶化还是 E-Ink 子项」时期的老配置（那时默认 true）。按旧行为补一次 true；
-            // 之后由上面的联动与用户自己的选择接管。放在这里而不是只在 onCreate 跑一次，
-            // 是为了让它在重入时也能收敛（与 EinkReaderDefaults.sync 同款思路）。
-            if (prefs.einkMode.get() && !prefs.einkRenderGrayscale.isSet()) {
-                prefs.einkRenderGrayscale.set(true)
-            }
         }
 
         setAppCompatDelegateThemeMode(Injekt.get<UiPreferences>().themeMode.get())

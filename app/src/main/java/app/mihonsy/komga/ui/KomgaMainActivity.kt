@@ -4587,6 +4587,10 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
     val uiPrefs = remember { Injekt.get<UiPreferences>() }
     var einkModeSel by remember { mutableStateOf(uiPrefs.einkMode.get()) }
     var einkDisableAnimSel by remember { mutableStateOf(uiPrefs.einkDisableAnimation.get()) }
+    var einkGrayRenderSel by remember { mutableStateOf(uiPrefs.einkRenderGrayscale.get()) }
+    var einkKeepColorSel by remember { mutableStateOf(uiPrefs.einkKeepColorPages.get()) }
+    var einkLevelsSel by remember { mutableStateOf(uiPrefs.einkGrayLevelsOrDefault()) }
+    var showEinkLevels by remember { mutableStateOf(false) }
 
     val currentLangLabel = when (prefs.appLanguage) {
         "zh-CN" -> composeStringResource(R.string.lang_zh_cn)
@@ -4678,9 +4682,35 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                     },
                 )
             }
-            // Komiho (2026-10-10): 「渲染灰阶 / 彩色页保持彩色 / 灰阶级数」三项已搬到
-            // 阅读器设置 → 滤镜页。灰阶化本质是一个滤镜（普通模式也能开），不该锁在
-            // E-Ink 模式下面；这里只保留总开关与它那类纯物理约束项（关动画）。
+            item {
+                SwitchPreferenceWidget(
+                    title = composeStringResource(R.string.settings_eink_render_grayscale),
+                    subtitle = composeStringResource(R.string.settings_eink_render_grayscale_summary),
+                    checked = einkGrayRenderSel,
+                    onCheckedChanged = {
+                        einkGrayRenderSel = it
+                        uiPrefs.einkRenderGrayscale.set(it)
+                    },
+                )
+            }
+            item {
+                SwitchPreferenceWidget(
+                    title = composeStringResource(R.string.settings_eink_keep_color_pages),
+                    subtitle = composeStringResource(R.string.settings_eink_keep_color_pages_summary),
+                    checked = einkKeepColorSel,
+                    onCheckedChanged = {
+                        einkKeepColorSel = it
+                        uiPrefs.einkKeepColorPages.set(it)
+                    },
+                )
+            }
+            item {
+                TextPreferenceWidget(
+                    title = composeStringResource(R.string.settings_eink_gray_levels),
+                    subtitle = "$einkLevelsSel",
+                    onPreferenceClick = { showEinkLevels = true },
+                )
+            }
         }
         // SY <--
         item { PreferenceGroupHeader(composeStringResource(R.string.settings_group_display)) }
@@ -4783,6 +4813,43 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                         ) {
                             Text(label, modifier = Modifier.weight(1f))
                             if (prefs.navBarPosition == value) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+    // SY <--
+
+    // SY --> Komiho: 灰阶级数。16 是主流墨水屏的真实级数 —— KCC 的 Palette16 步长就是 17
+    // （0x00,0x11,…,0xFF），KoReader 移植文档亦实测「小于 0x11 的值都显示为纯黑」。
+    if (showEinkLevels) {
+        AlertDialog(
+            onDismissRequest = { showEinkLevels = false },
+            title = { Text(composeStringResource(R.string.settings_eink_gray_levels)) },
+            text = {
+                Column {
+                    UiPreferences.EINK_GRAY_LEVELS.forEach { level ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    einkLevelsSel = level
+                                    uiPrefs.einkGrayLevels.set(level)
+                                    showEinkLevels = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("$level", modifier = Modifier.weight(1f))
+                            if (einkLevelsSel == level) {
                                 Icon(
                                     imageVector = Icons.Filled.Check,
                                     contentDescription = null,

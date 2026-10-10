@@ -212,6 +212,11 @@
     <string name="settings_eink_mode_summary">關動畫 · 黑白皮膚 · 墨水屏灰階渲染</string>
     <string name="settings_eink_disable_animation">關閉全域動畫</string>
     <string name="settings_eink_disable_animation_summary">墨水屏每次動畫都要全螢幕更新，既留殘影又耗電</string>
+    <string name="settings_eink_render_grayscale">閱讀器灰階渲染</string>
+    <string name="settings_eink_render_grayscale_summary">依面板真實灰階量化漫畫，色階過渡更乾淨</string>
+    <string name="settings_eink_keep_color_pages">彩色頁保持彩色</string>
+    <string name="settings_eink_keep_color_pages_summary">彩色墨水屏上保留彩色；黑白屏不影響</string>
+    <string name="settings_eink_gray_levels">灰階級數</string>
     <string name="settings_group_display">顯示</string>
 
     <!-- 設定：閱讀 -->
