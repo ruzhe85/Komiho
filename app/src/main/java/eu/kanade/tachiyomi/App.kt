@@ -239,7 +239,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             .drop(1) // 首发是当前值，不是"刚被打开"
             .onEach { enabled ->
                 if (!enabled) return@onEach
-                runCatching { Waifu2x.abortProcessing() }
+                // Komiho (2026-10-16)：这里要的是**无条件**停止 —— 释放引擎优先于「别打断可见页」，
+                // 所以显式绕过 abortProcessing 的可见页守卫。
+                runCatching { Waifu2x.abortProcessing(protectVisiblePage = false) }
                 runCatching { Waifu2x.destroy() }
             }
             .launchIn(scope)
