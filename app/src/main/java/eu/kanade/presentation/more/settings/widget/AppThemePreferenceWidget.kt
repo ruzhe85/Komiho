@@ -53,12 +53,15 @@ internal fun AppThemePreferenceWidget(
     value: AppTheme,
     amoled: Boolean,
     onItemClick: (AppTheme) -> Unit,
+    // Komiho: null = 全部主题；非空时只列出给定子集（E-Ink 模式下只剩两套 e-ink 皮肤）。
+    allowedThemes: List<AppTheme>? = null,
 ) {
     BasePreferenceWidget(
         subcomponent = {
             AppThemesList(
                 currentTheme = value,
                 amoled = amoled,
+                allowedThemes = allowedThemes,
                 onItemClick = onItemClick,
             )
         },
@@ -69,12 +72,14 @@ internal fun AppThemePreferenceWidget(
 private fun AppThemesList(
     currentTheme: AppTheme,
     amoled: Boolean,
+    allowedThemes: List<AppTheme>?,
     onItemClick: (AppTheme) -> Unit,
 ) {
     val context = LocalContext.current
-    val appThemes = remember {
+    val appThemes = remember(allowedThemes) {
         AppTheme.entries
             .filterNot { it.titleRes == null || (it == AppTheme.MONET && !DeviceUtil.isDynamicColorAvailable) }
+            .filter { allowedThemes == null || it in allowedThemes }
     }
     LazyRow(
         contentPadding = PaddingValues(horizontal = PrefsHorizontalPadding),

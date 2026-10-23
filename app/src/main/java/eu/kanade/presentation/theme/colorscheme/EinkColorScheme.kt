@@ -6,7 +6,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
 /**
- * Komiho: E-Ink 专用黑白皮肤（应用设置 → 外观 → E-Ink 模式时自动启用）。
+ * Komiho: E-Ink 专用黑白皮肤（外观 → 主题里可手动选择）。
+ *
+ * E-Ink 模式开关默认写入的是纯色版 [PureEinkColorScheme]；本类保留给「面板靠 1 级
+ * 灰差分层次」的取舍场景，两套都在主题列表里可选。
  *
  * 与 [MonochromeColorScheme] 的区别，也是本文件存在的理由：后者把五个
  * `surfaceContainer*` 全设成同一个白/黑，层级**只**靠 Material 的 tonal elevation

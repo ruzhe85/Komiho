@@ -18,6 +18,7 @@ import eu.kanade.presentation.theme.colorscheme.MidnightDuskColorScheme
 import eu.kanade.presentation.theme.colorscheme.MonetColorScheme
 import eu.kanade.presentation.theme.colorscheme.MonochromeColorScheme
 import eu.kanade.presentation.theme.colorscheme.NordColorScheme
+import eu.kanade.presentation.theme.colorscheme.PureEinkColorScheme
 import eu.kanade.presentation.theme.colorscheme.StrawberryColorScheme
 import eu.kanade.presentation.theme.colorscheme.TachiyomiColorScheme
 import eu.kanade.presentation.theme.colorscheme.TakoColorScheme
@@ -73,6 +74,8 @@ private fun colorSchemeFor(
         AppTheme.MONOCHROME -> MonochromeColorScheme
         // Komiho: E-Ink 专用皮肤（色值对齐面板 16 级真实档位，层级用描边表达）
         AppTheme.EINK -> EinkColorScheme
+        // Komiho: 纯色版 E-Ink 皮肤（页面内无中间灰，层级用描边与反色表达）
+        AppTheme.EINK_PURE -> PureEinkColorScheme
         AppTheme.NORD -> NordColorScheme
         AppTheme.STRAWBERRY_DAIQUIRI -> StrawberryColorScheme
         AppTheme.TAKO -> TakoColorScheme

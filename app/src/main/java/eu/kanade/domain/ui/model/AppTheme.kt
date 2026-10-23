@@ -29,6 +29,18 @@ enum class AppTheme(val titleRes: StringResource?) {
      */
     EINK(MR.strings.theme_eink),
 
+    /**
+     * Komiho: 纯色版 E-Ink 皮肤（见 [PureEinkColorScheme]）。与 [EINK] 的区别是
+     * `background` 与面板同色（浅色全白 / 深色全黑），页面内不出现任何大面积中间灰，
+     * 层级只靠描边与反色表达 —— 也就是墨水屏 UI 的通行做法。
+     *
+     * [EINK] 保留原样不动：它那套 0xEE 背景在部分场景（有卡片的页面）仍有对照价值，
+     * 两种皮肤都由用户在「外观 → 主题」里自行选择。
+     *
+     * **这是 E-Ink 模式开关写入的默认皮肤**；已在任一套 e-ink 皮肤上时开关不改写。
+     */
+    EINK_PURE(MR.strings.theme_eink_pure),
+
     // Deprecated
     DARK_BLUE(null),
     HOT_PINK(null),

@@ -30,6 +30,8 @@ private val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 internal fun AppThemeModePreferenceWidget(
     value: ThemeMode,
     onItemClick: (ThemeMode) -> Unit,
+    // Komiho: null = 全部可选；非空时集合外的模式置灰不可点（E-Ink 模式只留浅色）。
+    allowedModes: Set<ThemeMode>? = null,
 ) {
     BasePreferenceWidget(
         subcomponent = {
@@ -42,6 +44,7 @@ internal fun AppThemeModePreferenceWidget(
                     SegmentedButton(
                         checked = mode == value,
                         onCheckedChange = { onItemClick(mode) },
+                        enabled = allowedModes == null || mode in allowedModes,
                         shape = SegmentedButtonDefaults.itemShape(
                             index,
                             options.size,

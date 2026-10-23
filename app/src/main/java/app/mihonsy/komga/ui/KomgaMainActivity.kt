@@ -4605,6 +4605,9 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                     prefs.themeMode = it.name
                     activity?.recreate()
                 },
+                // Komiho: E-Ink 模式下只留浅色（反射式屏在环境光下白底最清楚），
+                // 深色与「跟随系统」置灰不可点。
+                allowedModes = if (einkModeSel) setOf(ThemeMode.LIGHT) else null,
             )
         }
         item {
@@ -4616,6 +4619,9 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                     appThemeSel = it
                     activity?.recreate()
                 },
+                // Komiho: E-Ink 模式下只显示两套 e-ink 皮肤，其余主题在墨水屏上
+                // 都带连续灰或彩色，量化后不可读。
+                allowedThemes = if (einkModeSel) listOf(AppTheme.EINK, AppTheme.EINK_PURE) else null,
             )
         }
         // SY --> Komiho: E-Ink 模式下隐藏 AMOLED 项。反射式墨水屏没有 OLED 的省电优势，
@@ -4648,13 +4654,14 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                 onCheckedChanged = { enabled ->
                     einkModeSel = enabled
                     uiPrefs.einkMode.set(enabled)
-                    if (enabled && appThemeSel != AppTheme.EINK) {
-                        // 现成的 AppTheme.MONOCHROME 把五个 surfaceContainer 全设成同色，
-                        // 层级只靠 tonal elevation —— 那在 16 级面板上会量化进同一级，
-                        // 卡片与对话框糊成一片。EinkColorScheme 才是对齐真实档位的版本。
-                        prefs.appTheme = AppTheme.EINK.name
-                        appThemeSel = AppTheme.EINK
+                    // Komiho: 两套 e-ink 皮肤都由用户自选，已在其中一套上就不再改写；
+                    // 默认落到纯色版（页面内无中间灰，最贴合墨水屏）。
+                    if (enabled && appThemeSel != AppTheme.EINK && appThemeSel != AppTheme.EINK_PURE) {
+                        prefs.appTheme = AppTheme.EINK_PURE.name
+                        appThemeSel = AppTheme.EINK_PURE
                     }
+                    // Komiho: 明暗模式同样由 EinkReaderDefaults 收敛（E-Ink 生效即浅色、
+                    // 关闭时还原），下面那句 sync() 会处理，这里不重复写值。
                     // Komiho (2026-10-04): 阅读器的白底 / 无翻页动画由 E-Ink 开关负责调好
                     // （用户原值已备份，关闭 E-Ink 时还原）。必须在 recreate 之前落库，
                     // 否则重组后设置项读到的还是旧值，会出现「显示开着、实际不生效」的错位。

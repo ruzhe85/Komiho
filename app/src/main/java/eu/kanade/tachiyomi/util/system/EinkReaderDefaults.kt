@@ -4,6 +4,7 @@ import android.app.Application
 import app.mihonsy.komga.data.KomgaPreferences
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.domain.ui.model.AppTheme
+import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import tachiyomi.core.common.preference.Preference
 import uy.kohesive.injekt.Injekt
@@ -24,7 +25,8 @@ import uy.kohesive.injekt.api.get
  * | 页模式翻页动画 `pageTransitionsPager` | [UiPreferences.isEinkAnimationOff] | 关 |
  * | 条漫翻页动画 v1 `pageTransitionsWebtoon` | 同上 | 关 |
  * | 条漫翻页动画 v2 `pageTransitionsWebtoonV2` | 同上 | 关 |
- * | 皮肤 `KomgaPreferences.appTheme` | [UiPreferences.isEinkModeActive] | `AppTheme.EINK` |
+ * | 皮肤 `KomgaPreferences.appTheme` | [UiPreferences.isEinkModeActive] | `AppTheme.EINK_PURE` |
+ * | 明暗模式 `KomgaPreferences.themeMode` | [UiPreferences.isEinkModeActive] | `LIGHT` |
  *
  * 备份存在（`isSet()`）即表示该项**当前正被 E-Ink 改写**：此时只保证目标值仍然成立
  * （用户在 E-Ink 期间又打开了翻页动画，下次 sync 会再关掉），**绝不更新备份**，
@@ -76,6 +78,9 @@ object EinkReaderDefaults {
 
         // 3) 皮肤（Komga 侧）：E-Ink 生效 → 切 EINK；关闭 → 还原原皮肤 / 回落默认皮肤。
         syncKomgaAppTheme(ui)
+
+        // 4) 明暗模式（Komga 侧）：E-Ink 生效 → 锁定浅色；关闭 → 还原原值。
+        syncThemeMode(ui)
     }
 
     /**
@@ -86,28 +91,62 @@ object EinkReaderDefaults {
      * `UiPreferences.appTheme` 是另一份存储（驱动 Activity 的 XML 主题），开关从未写过，故不代管。
      *
      * **迁移护栏**：本修复前就已开着 E-Ink 的用户，其皮肤就是 `EINK`。若无条件快照，关闭后会
-     * 「还原」成 EINK —— bug 换个形式复现。所以只在当前值不是 EINK 时才记快照；这也顺带让
-     * 「模式已关、皮肤仍是 EINK」这一存量坏状态在下一次 sync（App 启动即触发）时自愈。
+     * 「还原」成 EINK —— bug 换个形式复现。所以只在当前值**不是 e-ink 皮肤**（`EINK` /
+     * `EINK_PURE`）时才记快照；这也顺带让「模式已关、皮肤仍是 `EINK`」这一存量坏状态在
+     * 下一次 sync（App 启动即触发）时自愈。
      *
      * 幂等且可重复调用；异常由 [sync] 的 runCatching 兜住（皮肤读写失败只维持现状）。
      */
     private fun syncKomgaAppTheme(ui: UiPreferences) {
         val komga = KomgaPreferences(Injekt.get<Application>())
         val current = komga.appTheme
-        val einkName = AppTheme.EINK.name
+        // Komiho: E-Ink 皮肤有两套（原始档位版 EINK 与纯色版 EINK_PURE），都由用户自选，
+        // 开关不再把已在 e-ink 皮肤上的用户改写成另一套。开关的默认值是纯色版 ——
+        // 页面内没有中间灰，最贴合墨水屏。
+        val defaultSkin = AppTheme.EINK_PURE.name
+        val alreadyEinkSkin = current == AppTheme.EINK.name || current == defaultSkin
         if (ui.isEinkModeActive) {
-            if (!ui.einkBackupAppTheme.isSet() && current != einkName) {
+            if (!ui.einkBackupAppTheme.isSet() && !alreadyEinkSkin) {
                 ui.einkBackupAppTheme.set(current)
             }
-            if (current != einkName) {
-                komga.appTheme = einkName
+            if (!alreadyEinkSkin) {
+                komga.appTheme = defaultSkin
             }
         } else if (ui.einkBackupAppTheme.isSet()) {
             komga.appTheme = ui.einkBackupAppTheme.get()
             ui.einkBackupAppTheme.delete()
-        } else if (current == einkName) {
+        } else if (current == AppTheme.EINK.name) {
             // 存量坏状态：升级前就开着 E-Ink、因此没有快照 → 回落到默认皮肤。
+            // 只判 EINK 不判 EINK_PURE：后者是用户不开模式也能自己选的主题，
+            // 一并回落会把「只是喜欢这套皮肤」的用户强行改掉。
             komga.appTheme = AppTheme.DEFAULT.name
+        }
+    }
+
+    /**
+     * Komga 侧明暗模式的收敛（与 [syncKomgaAppTheme] 同一套口径）。
+     *
+     * E-Ink 生效时锁 LIGHT：反射式屏靠环境光反射，白底最清楚，深色反而像脏灰。
+     * 备份存在即表示当前正被 E-Ink 改写，此时只保证目标值仍成立、不覆盖快照；
+     * 模式关闭后写回快照并清除。
+     *
+     * 模式已关但值仍是 LIGHT 且无快照的情况不处理：无快照时无法区分「用户自己选的
+     * 浅色」与「E-Ink 留下的浅色」，强改会误伤用户选择。
+     */
+    private fun syncThemeMode(ui: UiPreferences) {
+        val komga = KomgaPreferences(Injekt.get<Application>())
+        val current = komga.themeMode
+        val lightName = ThemeMode.LIGHT.name
+        if (ui.isEinkModeActive) {
+            if (!ui.einkBackupThemeMode.isSet() && current != lightName) {
+                ui.einkBackupThemeMode.set(current)
+            }
+            if (current != lightName) {
+                komga.themeMode = lightName
+            }
+        } else if (ui.einkBackupThemeMode.isSet()) {
+            komga.themeMode = ui.einkBackupThemeMode.get()
+            ui.einkBackupThemeMode.delete()
         }
     }
 
