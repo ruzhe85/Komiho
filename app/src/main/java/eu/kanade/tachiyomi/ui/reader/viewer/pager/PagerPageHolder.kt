@@ -474,6 +474,8 @@ class PagerPageHolder(
         cropBordersAggressive = viewer.config.imageCropBordersAggressive,
         zoomStartPosition = viewer.config.imageZoomType,
         landscapeZoom = viewer.config.landscapeZoom,
+        // Komiho: 关掉后双击不再放大，点击翻页才能「抬手即启动」（见 Pager.tapImmediate）。
+        doubleTapZoom = viewer.config.pagedDoubleTapZoom,
     )
 
     /**

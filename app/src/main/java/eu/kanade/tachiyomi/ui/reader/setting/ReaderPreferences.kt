@@ -48,6 +48,17 @@ class ReaderPreferences(
      */
     val pageFlipSpeed: Preference<Int> = preferenceStore.getInt("pref_page_flip_speed", 250)
 
+    /**
+     * Komiho: 页漫双击缩放。
+     *
+     * 关闭后点击翻页没有「等双击判定」这一段 —— 抬手即派发点击，动画立刻启动。
+     * 代价是双击不再放大（默认开，保持既有行为）。
+     */
+    val pagedDoubleTapZoom: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_paged_double_tap_zoom",
+        true,
+    )
+
     val pageTransitionsWebtoon: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_webtoon_key", true)
 
     // Komiho: 条页点击滚屏的第二套动画（ComicScreen 手感：五次方减速 + 时长按距离算）。

@@ -75,7 +75,16 @@ open class Pager(
      * Gesture listener that implements tap and long tap events.
      */
     private val gestureListener = object : GestureDetectorWithLongTap.Listener() {
+        override fun onSingleTapUp(ev: MotionEvent): Boolean {
+            // Komiho: 关闭双击缩放后点击在**抬手当帧**派发，不再等双击窗口（见 [tapImmediate]）。
+            if (!tapImmediate) return false
+            tapListener?.invoke(ev)
+            return true
+        }
+
         override fun onSingleTapConfirmed(ev: MotionEvent): Boolean {
+            // 已由 onSingleTapUp 即时派发过，跳过，避免一次点击翻两页。
+            if (tapImmediate) return true
             tapListener?.invoke(ev)
             return true
         }
@@ -97,6 +106,22 @@ open class Pager(
      * Whether the gesture detector is currently enabled.
      */
     private var isGestureDetectorEnabled = true
+
+    /**
+     * Komiho: 点击是否「抬手即派发」。
+     *
+     * `GestureDetector` 只有在挂了双击监听时才需要等双击窗口（约 300ms）才敢确认单击 ——
+     * 那 300ms 就是点击翻页的固定延迟。页漫关掉「双击缩放」后这里置 true：把双击监听从
+     * 探测器上摘掉，点击由 `onSingleTapUp` 在抬手当帧派发，动画立刻启动。
+     *
+     * 打开双击缩放时保持 false（走 `onSingleTapConfirmed`），双击放大照旧。
+     */
+    var tapImmediate: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            gestureDetector.setOnDoubleTapListener(if (value) null else gestureListener)
+        }
 
     /**
      * Dispatches a touch event.

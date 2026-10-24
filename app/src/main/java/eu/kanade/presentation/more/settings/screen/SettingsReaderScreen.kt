@@ -280,6 +280,12 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_page_transitions),
                     enabled = !einkAnimationOff,
                 ),
+                // Komiho: 页漫双击缩放。关掉后点击翻页没有双击判定等待，抬手即翻页。
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.pagedDoubleTapZoom,
+                    title = stringResource(MR.strings.pref_paged_double_tap_zoom),
+                    subtitle = stringResource(MR.strings.pref_paged_double_tap_zoom_summary),
+                ),
                 // Komiho: 覆盖翻页（页漫）。从属于上面的总开关，E-Ink 关动画时同样置灰。
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.pageFlipAnimation,

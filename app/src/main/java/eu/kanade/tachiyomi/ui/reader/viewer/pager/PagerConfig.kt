@@ -91,6 +91,13 @@ class PagerConfig(
     var pageFlipBaseMs = readerPreferences.pageFlipSpeed.get()
         private set
 
+    /**
+     * Komiho: 页漫双击缩放。关闭后点击翻页改为「抬手即派发」——
+     * 没有双击判定，也就没有那 ~300ms 的固定延迟（见 `Pager.tapImmediate`）。
+     */
+    var pagedDoubleTapZoom = readerPreferences.pagedDoubleTapZoom.get()
+        private set
+
     var shiftDoublePage = false
 
     var doublePages =
@@ -225,6 +232,12 @@ class PagerConfig(
         // Komiho: 点击翻页时长基准。同上，只读不改位图，不接 imagePropertyChangedListener。
         readerPreferences.pageFlipSpeed
             .register({ pageFlipBaseMs = it })
+        // Komiho: 双击缩放开关同时决定点击是否「抬手即派发」（关掉它才有 0 延迟）。
+        readerPreferences.pagedDoubleTapZoom
+            .register {
+                pagedDoubleTapZoom = it
+                viewer.pager.tapImmediate = !it
+            }
         readerPreferences.readerTheme
             .register(
                 {

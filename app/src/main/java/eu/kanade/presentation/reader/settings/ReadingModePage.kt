@@ -201,6 +201,11 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
     // Komiho: 覆盖翻页（页漫）。从属于上面的总开关，E-Ink 关动画 / 总开关关闭时一并置灰
     // —— 与全局设置里的同一项保持一致的启用条件。
     val pageTransitionsPager by screenModel.preferences.pageTransitionsPager.collectAsState()
+    // Komiho: 双击缩放。关掉后点击翻页不再等双击判定，抬手即启动。
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_paged_double_tap_zoom),
+        pref = screenModel.preferences.pagedDoubleTapZoom,
+    )
     CheckboxItem(
         label = stringResource(MR.strings.pref_page_flip),
         pref = screenModel.preferences.pageFlipAnimation,

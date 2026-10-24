@@ -424,7 +424,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private fun SubsamplingScaleImageView.setupZoom(config: Config?) {
         // 5x zoom
         maxScale = scale * MAX_ZOOM_SCALE
-        setDoubleTapZoomScale(scale * 2)
+        // Komiho: 关闭「双击缩放」时把双击目标设成当前缩放 —— 双击等于不放大。
+        // 配合 `Pager.tapImmediate`：没有双击判定后，点击翻页才能做到抬手即启动。
+        setDoubleTapZoomScale(if (config?.doubleTapZoom != false) scale * 2 else scale)
 
         when (config?.zoomStartPosition) {
             ZoomStartPosition.LEFT -> setScaleAndCenter(scale, PointF(0F, 0F))
@@ -599,6 +601,8 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 setOnDoubleTapListener(
                     object : GestureDetector.SimpleOnGestureListener() {
                         override fun onDoubleTap(e: MotionEvent): Boolean {
+                            // Komiho: 关闭「双击缩放」后不再放大（见 Config.doubleTapZoom）。
+                            if (this@ReaderPageImageView.config?.doubleTapZoom == false) return false
                             if (scale > 1F) {
                                 setScale(1F, e.x, e.y, true)
                             } else {
@@ -676,6 +680,13 @@ open class ReaderPageImageView @JvmOverloads constructor(
         val cropBordersAggressive: Boolean = false,
         val zoomStartPosition: ZoomStartPosition = ZoomStartPosition.CENTER,
         val landscapeZoom: Boolean = false,
+        /**
+         * Komiho: 是否允许双击放大。
+         *
+         * 关闭后页漫的点击翻页才能做到「抬手即启动」—— 打开时 `GestureDetector` 必须等
+         * 双击判定超时（约 300ms）才敢确认是单击，那 300ms 就是点击翻页的固定延迟。
+         */
+        val doubleTapZoom: Boolean = true,
     )
 
     enum class ZoomStartPosition {
