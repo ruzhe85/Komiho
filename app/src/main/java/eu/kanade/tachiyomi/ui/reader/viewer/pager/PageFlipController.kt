@@ -13,16 +13,9 @@ import kotlin.math.abs
 private const val KOMIHA_FLIP_TAG = "PageFlip"
 
 /**
- * 点击翻页的时长 —— 直接用 `ViewPager` 结算拖动时的那条公式：
- *
- * ```
- * duration = (pageDelta + 1) * DEFAULT_SCROLL_DURATION，再按 MAX_SETTLING_DURATION 封顶
- * ```
- *
- * 整页切换（pageDelta = 1）算出来是 500ms，与「拖动后抬手」那一段**同源同值**，
- * 所以点击与滑动的节奏自然一致，不需要再单独调一个数字。
+ * 点击翻页的上限 —— 与 `ViewPager.MAX_SETTLING_DURATION` 同值。基准再大也不会超过它，
+ * 免得一次点击拖成 1 秒以上。
  */
-private const val PAGER_DEFAULT_SCROLL_MS = 250
 private const val PAGER_MAX_SETTLING_MS = 600
 
 /**
@@ -140,11 +133,11 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     }
 
     /**
-     * 与 `ViewPager` 结算拖动完全同一条公式，所以点击和滑动的节奏一致。
-     * 一页 = (1 + 1) × 250 = **500ms**（未触及 600ms 上限）。
+     * 与 `ViewPager` 结算拖动同一条公式，所以点击和滑动的节奏一致：
+     * `(页数 + 1) × 基准`。基准可调（默认 250 → 一页 500ms），上限 600ms。
      */
     private fun settlingDurationFor(pages: Int): Long =
-        ((abs(pages) + 1) * PAGER_DEFAULT_SCROLL_MS)
+        ((abs(pages) + 1) * viewer.config.pageFlipBaseMs)
             .coerceAtMost(PAGER_MAX_SETTLING_MS)
             .toLong()
 

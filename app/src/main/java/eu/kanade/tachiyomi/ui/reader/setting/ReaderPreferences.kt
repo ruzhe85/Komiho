@@ -39,6 +39,15 @@ class ReaderPreferences(
         false,
     )
 
+    /**
+     * Komiho: 覆盖翻页在**点击 / 按键**翻页时的时长基准（毫秒）。
+     *
+     * 实际时长 = (页数 + 1) × 基准 —— 与 `ViewPager` 结算拖动用的是同一条公式，
+     * 所以基准 250 时翻一页正好 500ms，与「拖动后抬手」一致。
+     * 可选 100 / 150 / 200 / 250（步进 50），默认 250 保持既有手感。
+     */
+    val pageFlipSpeed: Preference<Int> = preferenceStore.getInt("pref_page_flip_speed", 250)
+
     val pageTransitionsWebtoon: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_webtoon_key", true)
 
     // Komiho: 条页点击滚屏的第二套动画（ComicScreen 手感：五次方减速 + 时长按距离算）。

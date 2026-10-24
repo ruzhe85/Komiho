@@ -84,6 +84,13 @@ class PagerConfig(
     val pageFlipActive: Boolean
         get() = pageFlipEnabled && pageSlideAnimationsEnabled
 
+    /**
+     * Komiho: 点击 / 按键翻页的时长基准（毫秒）。整页实际用时 = (页数 + 1) × 该值，
+     * 与 `ViewPager` 结算拖动的公式一致，默认 250（一页 500ms）。
+     */
+    var pageFlipBaseMs = readerPreferences.pageFlipSpeed.get()
+        private set
+
     var shiftDoublePage = false
 
     var doublePages =
@@ -215,6 +222,9 @@ class PagerConfig(
         // 让可见页重新解码并重跑一次 AI 增强。
         readerPreferences.pageFlipAnimation
             .register({ pageFlipEnabled = it })
+        // Komiho: 点击翻页时长基准。同上，只读不改位图，不接 imagePropertyChangedListener。
+        readerPreferences.pageFlipSpeed
+            .register({ pageFlipBaseMs = it })
         readerPreferences.readerTheme
             .register(
                 {

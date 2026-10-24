@@ -225,6 +225,8 @@ object SettingsReaderScreen : SearchableSettings {
         val rotateToFit by rotateToFitPref.collectAsState()
         // Komiho: 翻书动画从属于「翻页动画」总开关，关掉总开关时一并置灰。
         val pageTransitions by readerPreferences.pageTransitionsPager.collectAsState()
+        val pageFlipOn by readerPreferences.pageFlipAnimation.collectAsState()
+        val pageFlipSpeed by readerPreferences.pageFlipSpeed.collectAsState()
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pager_viewer),
@@ -284,6 +286,16 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_page_flip),
                     subtitle = stringResource(MR.strings.pref_page_flip_summary),
                     enabled = pageTransitions && !einkAnimationOff,
+                ),
+                // Komiho: 点击翻页时长基准（100/150/200/250，步进 50；整页实际 = 基准 × 2）。
+                Preference.PreferenceItem.SliderPreference(
+                    value = pageFlipSpeed,
+                    valueRange = 100..250,
+                    steps = 2,
+                    title = stringResource(MR.strings.pref_page_flip_speed),
+                    valueString = "$pageFlipSpeed ms",
+                    enabled = pageTransitions && pageFlipOn && !einkAnimationOff,
+                    onValueChanged = { readerPreferences.pageFlipSpeed.set(it) },
                 ),
                 // SY <--
                 Preference.PreferenceItem.SwitchPreference(

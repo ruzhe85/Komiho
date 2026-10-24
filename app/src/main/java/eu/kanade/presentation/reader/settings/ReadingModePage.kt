@@ -207,6 +207,21 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
         enabled = !pageTransitionsLocked && pageTransitionsPager,
     )
 
+    // Komiho: 点击翻页时长基准（100~250，步进 50；整页实际用时 = 基准 × 2）。
+    // 放在这里是为了能在阅读器里直接对比手感，不用退回全局设置。
+    val pageFlipOn by screenModel.preferences.pageFlipAnimation.collectAsState()
+    if (pageFlipOn && !pageTransitionsLocked && pageTransitionsPager) {
+        val pageFlipSpeed by screenModel.preferences.pageFlipSpeed.collectAsState()
+        SliderItem(
+            value = pageFlipSpeed,
+            valueRange = 100..250,
+            steps = 2,
+            label = stringResource(MR.strings.pref_page_flip_speed),
+            valueString = "$pageFlipSpeed ms",
+            onChange = { screenModel.preferences.pageFlipSpeed.set(it) },
+        )
+    }
+
     CheckboxItem(
         label = stringResource(SYMR.strings.invert_double_pages),
         pref = screenModel.preferences.invertDoublePages,
