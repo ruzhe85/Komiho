@@ -17,19 +17,24 @@ import android.view.View
  * 这正是「覆盖」与「滑动」的区别：滑动是两页一起走，覆盖只有新页在动。
  *
  * ```
- *   当前页（钉住不动） │ 投影 │ 下一页（按原生偏移滑入）
+ *   当前页（钉住不动） │ 投影 │ 下一页（按它自己的屏幕位置绘制）
  * ```
  *
- * ## 为什么要自己画新页
+ * ## 只认坐标，不认方向
  *
- * 新页由本层绘制、并把它原本的 View 隐藏，而不是交给 `ViewPager`：
- * `ViewPager` 的子 View 绘制顺序取决于下标（`mCurItem` 不一定最后画），后退翻页时
- * 新页下标更小、会被钉住的当前页盖住 —— 那样看到的就不是覆盖而是「新页被挡住」。
- * 本层最后绘制，层级永远正确，两个方向表现一致。
+ * 本层不接收「前进 / 后退」，只接收 [sheetOffsetX]（新页在屏幕上的左边界，可以为负）。
+ * 它为正说明新页从右侧滑入，为负说明从左滑入 —— 一切由几何决定，两个方向走同一段代码，
+ * 不会再出现「一边正常、另一边反了」的情况。
+ *
+ * ## 为什么自己画新页
+ *
+ * 新页由本层绘制、并把它原本的 View 隐藏，而不是交给 `ViewPager`：`ViewPager` 的子 View
+ * 绘制顺序取决于下标，后退翻页时新页下标更小、会被钉住的当前页盖住 —— 那样看到的就不是
+ * 覆盖而是「新页被挡住」。本层最后绘制，层级永远正确。
  *
  * ## 成本
  *
- * 每帧 = 1 次页面合成（无裁剪、无变换，除平移外） + 1 个渐变矩形；全部预分配，
+ * 每帧 = 1 次页面合成（除平移外无裁剪、无变换） + 1 个渐变矩形；全部预分配，
  * `onDraw` 内零分配，不触达解码/增强。
  */
 internal class PageFlipView(context: Context) : View(context) {
@@ -41,11 +46,14 @@ internal class PageFlipView(context: Context) : View(context) {
      */
     var sheetView: View? = null
 
-    /** 覆盖进度：0 = 还没盖上来（当前页完整），1 = 完全盖住（目标页完整）。 */
-    var progress: Float = 0f
+    /**
+     * 新页在屏幕上的左边界（像素）。为正是从右侧滑入，为负是从左侧滑入；
+     * 0 表示已经盖满。方向完全由此值决定，见类注释。
+     */
+    var sheetOffsetX: Float = 0f
 
-    /** 新页从哪一侧盖上来：true = 从右往左，false = 从左往右。 */
-    var scrollForward: Boolean = true
+    /** 覆盖进度（仅用于投影淡入）。 */
+    var progress: Float = 0f
 
     /** 投在下方当前页上的阴影。 */
     private val shadowPaint = Paint()
@@ -83,7 +91,7 @@ internal class PageFlipView(context: Context) : View(context) {
 
     /** 清空状态（会话结束 / 视图销毁）。只解除引用，不持有任何绘制产物。 */
     fun reset() {
-        if (sheetView == null && progress == 0f) return
+        if (sheetView == null) return
         sheetView = null
         progress = 0f
         invalidate()
@@ -104,28 +112,25 @@ internal class PageFlipView(context: Context) : View(context) {
                 )
             }
             sheetView = null
-            progress = 0f
             onDrawFailed?.invoke()
         }
     }
 
     private fun drawCover(canvas: Canvas) {
         val sheet = sheetView ?: return
-        val p = progress
-        if (p <= MIN_PROGRESS) return
-        val w = width.toFloat()
         val h = height.toFloat()
+        val w = width.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        // 新页在屏幕上的横向位置：它按 ViewPager 的原生偏移滑入。
-        val sheetLeft = if (scrollForward) (1f - p) * w else -(1f - p) * w
+        val left = sheetOffsetX
+        // 新页从右侧滑入时，它的前沿是左边缘；从左侧滑入时前沿是右边缘。
+        val fromRight = left >= 0f
+        val edgeX = if (fromRight) left else left + w
+        // 投影落在下方当前页上，也就是新页前沿的外侧。
+        val shadowDir = if (fromRight) -1f else 1f
 
-        // 新页的前沿（也就是投下阴影的那条边），以及阴影方向（指向下方当前页）。
-        val edgeX = if (scrollForward) sheetLeft else sheetLeft + w
-        val shadowDir = if (scrollForward) -1f else 1f
-
-        // ① 投影：压在当前页上，贴着新页前沿。起点附近淡入，避免刚起手就闪一道暗带。
-        val fade = (p / START_FADE).coerceAtMost(1f)
+        // 起点附近淡入，避免刚起手就闪一道暗带。
+        val fade = (progress / START_FADE).coerceAtMost(1f)
         shadowPaint.alpha = (255 * fade).toInt().coerceIn(0, 255)
         val sc1 = canvas.save()
         canvas.translate(edgeX, 0f)
@@ -133,15 +138,15 @@ internal class PageFlipView(context: Context) : View(context) {
         canvas.drawRect(0f, 0f, shadowW, h, shadowPaint)
         canvas.restoreToCount(sc1)
 
-        // ② 新页：按原生偏移画在最上层，盖住当前页。
+        // 新页：按真实屏幕位置画在最上层，盖住当前页。
         val sc2 = canvas.save()
-        canvas.translate(sheetLeft, 0f)
+        canvas.translate(left, 0f)
         sheet.draw(canvas)
         canvas.restoreToCount(sc2)
     }
 
     internal companion object {
-        /** 低于此进度不绘制（新页还在屏幕外）。 */
+        /** 低于此进度不接管（新页还在屏幕外）。 */
         const val MIN_PROGRESS = 0.002f
 
         /** 投影宽度（占页宽比例）。 */

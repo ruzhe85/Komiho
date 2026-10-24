@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.diagnostic.DiagLog
-import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 
 /** Komiho 诊断 TAG：翻书动画。 */
 private const val KOMIHA_FLIP_TAG = "PageFlip"
@@ -15,15 +14,19 @@ private const val KOMIHA_FLIP_TAG = "PageFlip"
  * 1. **钉住当前页**：把正在露出的那一页的 `translationX` 抵消掉，让它停在原位不动
  *    （这就是「覆盖」与「滑动」的分界 —— 滑动是两页一起走）；
  * 2. **隐藏新页**：它改由 [PageFlipView] 画在最上层，保证两个方向的层级都正确；
- * 3. 每帧把进度交给叠加层，由它在交界处画一道压在当前页上的投影。
+ * 3. 每帧把新页的**屏幕位置**交给叠加层，由它在交界处画一道压在当前页上的投影。
  *
  * 翻页的判定、速度、阈值、取消回弹仍然完全归 `ViewPager`，这里不碰。
  *
- * ## 方向
+ * ## 为什么不用「前进 / 后退」判断方向
  *
- * 方向由 `scrollX` 的位移方向判定（`ViewPager.currentItem` 在滚动一开始就已经是目标页，
- * 用它推方向会把前进判成后退），并在本轮滚动内**锁定**：用户拖到一半回拖时 `delta`
- * 会反号，而交界位置是按 `offset` 算的，方向一翻新页就会从另一侧跳进来。
+ * 之前靠 `scrollX` 的位移符号推方向，再决定谁钉住、新页从哪侧进来。这在点击翻页
+ * （`setCurrentItem`）上会判错：一旦判反，当前页会被推向错误的一侧、新页也从错误的一侧
+ * 进来，收尾时两页「炸开」。
+ *
+ * 现在完全不判方向 —— 每帧直接读两页的 `left - scrollX`（它们在屏幕上的真实位置）：
+ * 离屏幕原点近的那一页是当前页（钉住），另一页是新页（按它自己的真实位置绘制）。
+ * 两个方向走的是同一段代码，天然对称。
  *
  * ## 前置条件
  *
@@ -45,20 +48,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val sheetView: PagerPageHolder,
     )
 
-    /**
-     * 上一帧的 `scrollX`，只用来判定本次滚动的方向。
-     */
-    private var lastScrollX = 0
-
     /** 当前滚动状态。只在真正滚动的帧里接管（瞬间跳页没有滚动过程）。 */
     private var scrollState = ViewPager.SCROLL_STATE_IDLE
-
-    /**
-     * 本轮滚动的方向锁定值，以及锁定时 `onPageScrolled` 报出的 position。
-     * 只有 `position` 变了（拖过起点、进到另一页）才重新判定。
-     */
-    private var lockedForward = true
-    private var lockedPosition = -1
 
     /** 本轮滚动是否已经打过启动日志（避免逐帧刷屏）。 */
     private var loggedThisScroll = false
@@ -73,58 +64,20 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
     /** `ViewPager` 的滚动回调，唯一的驱动源：拖动与 `setCurrentItem(…, true)` 都走这里。 */
     fun onPageScrolled(position: Int, offset: Float) {
-        val scrollX = viewer.pager.scrollX
-        val delta = scrollX - lastScrollX
-        lastScrollX = scrollX
-
         if (offset <= PageFlipView.MIN_PROGRESS || !isEnabled()) {
             end()
-            lockedPosition = -1
-            return
-        }
-        if (lockedPosition != position) {
-            // 首帧 scrollX 可能还没动，方向未知就先等一帧。
-            if (delta == 0) return
-            lockedPosition = position
-            lockedForward = delta > 0
-        }
-
-        val scrollForward = lockedForward
-        // `position` 是「最左侧那一页」的下标：
-        // 前进时它自己就是当前页、下一页在它右边；后退时它就是新页、当前页在它右边。
-        val leavingItem = viewer.itemAt(if (scrollForward) position else position + 1)
-        val enteringItem = viewer.itemAt(if (scrollForward) position + 1 else position)
-        // 章节过渡页（PagerTransitionHolder）没有「一整张纸」的语义，保持普通滑动。
-        if (leavingItem !is ReaderPage || enteringItem !is ReaderPage) {
-            end()
-            return
-        }
-        val leaving = findHolder(leavingItem)
-        val entering = findHolder(enteringItem)
-        if (leaving == null || entering == null || !entering.isImageReady) {
-            end()
             return
         }
 
-        val current = session
-        if (current == null || current.pinnedView !== leaving || current.sheetView !== entering) {
-            end()
-            session = Session(pinnedView = leaving, sheetView = entering)
-            entering.alpha = 0f
-            if (!loggedThisScroll) {
-                loggedThisScroll = true
-                DiagLog.d(
-                    KOMIHA_FLIP_TAG,
-                    "cover start page=${enteringItem.index} forward=$scrollForward",
-                )
-            }
-        }
+        val pager = viewer.pager
+        val scrollX = pager.scrollX
+        val current = session ?: startSession(position, scrollX) ?: return
 
-        val w = viewer.pager.width.toFloat()
-        // 钉住当前页：抵消 ViewPager 给它的位移，让它原地不动。
-        leaving.translationX = if (scrollForward) offset * w else -offset * w
-        overlay.sheetView = entering
-        overlay.scrollForward = scrollForward
+        // 钉住当前页：让它相对视口停在 0（抵消 ViewPager 给它的位移）。
+        current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
+        // 新页按它自己的真实屏幕位置绘制，方向由位置本身决定，不需要额外判断。
+        overlay.sheetView = current.sheetView
+        overlay.sheetOffsetX = (current.sheetView.left - scrollX).toFloat()
         overlay.progress = offset
         overlay.invalidate()
     }
@@ -132,10 +85,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     /** 滚动状态变化：一旦停稳就复位。 */
     fun onScrollStateChanged(state: Int) {
         scrollState = state
-        lastScrollX = viewer.pager.scrollX
         if (state == ViewPager.SCROLL_STATE_IDLE) {
             loggedThisScroll = false
-            lockedPosition = -1
             end()
         }
     }
@@ -152,12 +103,45 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     /** 释放（退出阅读器 / 切换阅读模式）。 */
     fun release() {
         end()
-        lastScrollX = 0
-        lockedPosition = -1
         scrollState = ViewPager.SCROLL_STATE_IDLE
     }
 
     // endregion
+
+    /**
+     * 会话启动：把参与这次滚动的两页找出来。
+     *
+     * 不做方向判断 —— 直接比 `left - scrollX`：滚动刚开始时，当前页几乎贴在视口原点
+     * （偏移≈0），另一页还在一屏之外（偏移≈±w）。近的那个是当前页，另一个是新页。
+     */
+    private fun startSession(position: Int, scrollX: Int): Session? {
+        val pager = viewer.pager
+        val a = viewer.itemAt(position)
+        val b = viewer.itemAt(position + 1)
+        // 章节过渡页（PagerTransitionHolder）没有「一整张纸」的语义，保持普通滑动。
+        if (a !is ReaderPage || b !is ReaderPage) return null
+
+        val holderA = findHolder(a) ?: return null
+        val holderB = findHolder(b) ?: return null
+        val distA = kotlin.math.abs(holderA.left - scrollX)
+        val distB = kotlin.math.abs(holderB.left - scrollX)
+        val pinned = if (distA <= distB) holderA else holderB
+        val sheet = if (pinned === holderA) holderB else holderA
+
+        // 新页还没画出来就退回普通滑动 —— 否则会把一张空白页盖到屏幕上。
+        if (!sheet.isImageReady) return null
+
+        sheet.alpha = 0f
+        if (!loggedThisScroll) {
+            loggedThisScroll = true
+            DiagLog.d(
+                KOMIHA_FLIP_TAG,
+                "cover start pinnedLeft=${pinned.item.first.index} " +
+                    "sheetLeft=${sheet.item.first.index} sheetX=${sheet.left - scrollX}",
+            )
+        }
+        return Session(pinnedView = pinned, sheetView = sheet).also { session = it }
+    }
 
     private fun isEnabled(): Boolean {
         // 瞬间跳页（恢复进度 / 旋转 / 滑杆拖拽）不接管：那几个场景根本没有滚动过程。

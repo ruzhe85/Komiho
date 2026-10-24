@@ -616,6 +616,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanRight()) {
                 holder.panRight()
+            } else if (config.pageFlipActive && pager.isHorizontalPager) {
+                // Komiho: 点击翻页用「假拖动 + 先加速后减速」驱动，默认曲线起步太冲。
+                // 只在横向页漫 + 翻书动画开启时替换；其余情况保持原来的 setCurrentItem。
+                pager.flipByPages(1)
             } else {
                 pager.setCurrentItem(pager.currentItem + 1, config.pageSlideAnimationsEnabled)
             }
@@ -630,6 +634,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanLeft()) {
                 holder.panLeft()
+            } else if (config.pageFlipActive && pager.isHorizontalPager) {
+                // Komiho: 同上。
+                pager.flipByPages(-1)
             } else {
                 pager.setCurrentItem(pager.currentItem - 1, config.pageSlideAnimationsEnabled)
             }
