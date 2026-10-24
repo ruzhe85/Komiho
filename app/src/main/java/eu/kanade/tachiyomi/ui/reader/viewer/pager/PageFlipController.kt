@@ -7,15 +7,23 @@ import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences.ReaderTheme
+import kotlin.math.abs
 
 /** Komiho 诊断 TAG：翻书动画。 */
 private const val KOMIHA_FLIP_TAG = "PageFlip"
 
 /**
- * 点击翻页的时长。参考录制是 42.42fps，逐帧量下来一次换页约 8~9 帧（≈190~210ms），
- * 取 220ms 与之对齐；曲线用「先加速后减速」，峰值速度只有平均值的 1.57 倍，快而不窜。
+ * 点击翻页的时长 —— 直接用 `ViewPager` 结算拖动时的那条公式：
+ *
+ * ```
+ * duration = (pageDelta + 1) * DEFAULT_SCROLL_DURATION，再按 MAX_SETTLING_DURATION 封顶
+ * ```
+ *
+ * 整页切换（pageDelta = 1）算出来是 500ms，与「拖动后抬手」那一段**同源同值**，
+ * 所以点击与滑动的节奏自然一致，不需要再单独调一个数字。
  */
-private const val TAP_FLIP_MS = 220L
+private const val PAGER_DEFAULT_SCROLL_MS = 250
+private const val PAGER_MAX_SETTLING_MS = 600
 
 /**
  * Komiho: 页漫「覆盖翻页」的驱动。
@@ -100,7 +108,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         // 新页的起点就是它在布局里的真实位置（±页宽），方向不用额外判断。
         val startOffset = overlay.sheetOffsetX
         tapAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = TAP_FLIP_MS
+            duration = settlingDurationFor(pages)
             interpolator = AccelerateDecelerateInterpolator()
             addUpdateListener {
                 val t = it.animatedValue as Float
@@ -130,6 +138,15 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         current?.pinnedView?.translationX = 0f
         current?.sheetView?.alpha = 1f
     }
+
+    /**
+     * 与 `ViewPager` 结算拖动完全同一条公式，所以点击和滑动的节奏一致。
+     * 一页 = (1 + 1) × 250 = **500ms**（未触及 600ms 上限）。
+     */
+    private fun settlingDurationFor(pages: Int): Long =
+        ((abs(pages) + 1) * PAGER_DEFAULT_SCROLL_MS)
+            .coerceAtMost(PAGER_MAX_SETTLING_MS)
+            .toLong()
 
     /**
      * 预置会话：钉住当前页、藏起新页。
