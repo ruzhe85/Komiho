@@ -230,21 +230,25 @@ private fun EnhancementRootList(
     if (!einkModeActive()) {
         // GPU：切回时恢复**这个后端上次选的模型**（而不是当前档位上的模型）—— 不静默换掉用户在
         // 另一个后端上选过的东西。
-        val gpuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.NCNN_VULKAN
-        val activateGpu: () -> Unit = {
-            if (!gpuActive) setEnhancementModel(preferences, gpuMemory)
+        // Komiho (2026-10-25): 设备没有 Vulkan 就整行不出现。原先 GPU 恒显示、跑不起来时靠
+        // CPU Lanczos 兜底掩盖；那条兜底已删除，所以「跑不了」必须在列表层表达。
+        if (Waifu2x.isVulkanAvailable) {
+            val gpuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.NCNN_VULKAN
+            val activateGpu: () -> Unit = {
+                if (!gpuActive) setEnhancementModel(preferences, gpuMemory)
+            }
+            EnhancementMethodRow(
+                label = stringResource(MR.strings.enhancement_group_gpu),
+                // 选中时显示当前生效的模型，未选中时显示这个后端上次选的那个（切回去会得到它）。
+                subtitle = if (gpuActive) activeModel.displayLabel() else gpuMemory.displayLabel(),
+                selected = gpuActive,
+                onClick = {
+                    activateGpu()
+                    onOpen(EnhancementDetail.GPU)
+                },
+                onSelect = activateGpu,
+            )
         }
-        EnhancementMethodRow(
-            label = stringResource(MR.strings.enhancement_group_gpu),
-            // 选中时显示当前生效的模型，未选中时显示这个后端上次选的那个（切回去会得到它）。
-            subtitle = if (gpuActive) activeModel.displayLabel() else gpuMemory.displayLabel(),
-            selected = gpuActive,
-            onClick = {
-                activateGpu()
-                onOpen(EnhancementDetail.GPU)
-            },
-            onSelect = activateGpu,
-        )
 
         // NPU：门控与详情页共用同一条件（CDSP 优先）。没有可用模型时不改设置，只进详情页看提示。
         if (npuAvailable) {

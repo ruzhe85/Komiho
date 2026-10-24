@@ -16,6 +16,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
+import eu.kanade.tachiyomi.util.EnhanceBurst
 import eu.kanade.tachiyomi.util.EnhanceTimings
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
 import uy.kohesive.injekt.Injekt
@@ -128,8 +129,23 @@ class PagerPageHolder(
     /** 补算请求在飞标记——防止停顿回调与迟到回调叠加重复发。 */
     private var reEnhanceInFlight = false
 
-    /** 迟到补算延迟（ms）：等预热抢占的 abort 发生、被打断的解码出图后再判一次。 */
-    private val reEnhanceDelayMs = 400L
+    /**
+     * Komiho (2026-10-25): 本 holder 连续补算次数。
+     *
+     * 引擎整页失败（例如 CPU 兜底后仍未出 AI 结果）时，补算会被反复重新登记，
+     * 形成「渲染 → 失败 → 400ms 后再渲染」的循环。这里封顶，成功后清零。
+     */
+    private var reEnhanceAttempts = 0
+    private val maxReEnhanceAttempts = 3
+
+    /**
+     * 迟到补算延迟（ms）。
+     *
+     * Komiho (2026-10-25)：400 → **150**。连点期间增强被整段跳过（见 [EnhanceBurst]），
+     * 停稳后要尽快把当前页补上；原生那边置 abort 标志到真正退出只隔一两个 tile，
+     * 150ms 足够，再等 400ms 只会让用户多看着原图 0.25s。
+     */
+    private val reEnhanceDelayMs = 150L
 
     private val pendingReEnhance = Runnable { maybeReEnhance("late") }
 
@@ -155,6 +171,7 @@ class PagerPageHolder(
         currentImageEnhanced = enhanced
         reEnhanceInFlight = false
         if (enhanced) {
+            reEnhanceAttempts = 0
             appliedSource = null
             removeCallbacks(pendingReEnhance)
             return
@@ -179,11 +196,19 @@ class PagerPageHolder(
      */
     private fun maybeReEnhance(reason: String) {
         if (currentImageEnhanced || reEnhanceInFlight) return
+        if (reEnhanceAttempts >= maxReEnhanceAttempts) return
         val src = appliedSource ?: return
         if (appliedAnimated) return
         if (page?.skipEnhance == true) return
         val preferences = Injekt.get<ReaderPreferences>()
         if (preferences.enhancementMode.get() == 0 && preferences.denoiseLevel.get() == 0) return
+        // Komiho (2026-10-25): 还在连点 —— 等它停，别在这儿发起必然被打断的推理。
+        // 每轮重排 150ms，连点结束后自然落到下面的正常流程（不消耗补算次数）。
+        if (EnhanceBurst.isBursting) {
+            removeCallbacks(pendingReEnhance)
+            postDelayed(pendingReEnhance, reEnhanceDelayMs)
+            return
+        }
         // Komiho (2026-10-16): 闸门换成**应用层**的「本页被抢占过」登记（由 MihonSyEnhancer 在
         // 抢占当场写入、按页保留）。原来查的是原生 `Waifu2x.wasAborted()` —— 那个槽位只有一个，
         // 下一次推理一起步就被清成 -1，而这里是几百毫秒后才回头看，实测必为 false ⇒ 这条兜底
@@ -194,11 +219,15 @@ class PagerPageHolder(
         if (!viewer.isCurrentItem(item)) return
         EnhanceTimings.takeInterrupted(page.index)
         reEnhanceInFlight = true
+        reEnhanceAttempts++
         // 作废预处理缓存里那份未增强位图 + 放行 already-rendered 守卫：否则回翻再命中
         // 还是原图，状态重发也被守卫挡掉。缓存删除后本 holder 持有的源是唯一引用。
         val key = viewer.preparedCache.key(page, extraPage)
         viewer.preparedCache.remove(key)
         renderedKey = null
+        // Komiho (2026-10-25): 给这次补算开放行窗口 —— 否则它会被连点判定挡在门外
+        // （停稳到真正发起补算之间可能只有 150ms，仍在 burst 窗口内）。
+        EnhanceBurst.openResumeWindow()
         eu.kanade.tachiyomi.diagnostic.DiagLog.d(
             "Waifu2xReEnhance",
             "page=${page.index} reason=$reason id=${System.identityHashCode(this)}",
@@ -405,12 +434,13 @@ class PagerPageHolder(
                     // Komiho (2026-10-25): 这里必须自己解除「补算在飞」标记。
                     // 这条路径**不走 Coil 回调** ⇒ `handleDecodeCompleted` 永远不会被调，
                     // 而它是唯一清除点。补算落到这条分支后标记会永久为 true，
-                    // 该页此后 `maybeReEnhance` 一律早退 —— 正是「快速连点后停在
-                    // CPU OK / skip 的那一页再也不会增强」。
+                    // 该页此后 `maybeReEnhance` 一律早退 —— 表现就是「快速连点后停在
+                    // 未增强页上，那一页再也不会自己变清晰」。
                     reEnhanceInFlight = false
                     // Komiho (2026-10-13): 登记本次屏上图是否真增强。未增强（被抢占打断）时
                     // 保留源，停顿后由 maybeReEnhance 补算一次。
                     currentImageEnhanced = result.enhanced
+                    if (result.enhanced) reEnhanceAttempts = 0
                     appliedAnimated = result.isAnimated
                     appliedSource = if (result.enhanced) null else result.source
                     // Komiho (2026-10-16): 预解码路径也要安排补算。这条路径**不走 Coil 回调**，

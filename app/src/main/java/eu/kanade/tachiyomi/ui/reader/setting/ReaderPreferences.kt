@@ -282,7 +282,13 @@ class ReaderPreferences(
     // MihonSY: Anime4K disabled — preference retained for stored-value compatibility only.
     // val anime4kMode: Preference<Int> = preferenceStore.getInt("pref_anime4k_mode", 0) // 0 Fast, 1 High, 2 Ultra
 
-    val lanczosScale: Preference<Int> = preferenceStore.getInt("pref_lanczos_scale", 200) // 150/200/300 = 1.5x/2x/3x
+    /**
+     * CPU 重采样档（增强模式 2 = Lanczos3 / 3 = Catmull-Rom）的倍率：150/200/300。
+     *
+     * Komiho (2026-10-25): **只服务这两个显式 CPU 档**。GPU / NPU 模型不再降级到 CPU
+     * Lanczos（那条兜底已删除），所以它不再参与 AI 模型的失败路径。
+     */
+    val lanczosScale: Preference<Int> = preferenceStore.getInt("pref_lanczos_scale", 200)
 
     /**
      * Komiho: tile edge (px) for the AI upscaler — forwarded to the native `tilesize` via

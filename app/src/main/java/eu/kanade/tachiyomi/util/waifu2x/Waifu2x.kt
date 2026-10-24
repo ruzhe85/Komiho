@@ -1,11 +1,15 @@
 package eu.kanade.tachiyomi.util.waifu2x
 
+import android.app.Application
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.AssetManager
 import android.graphics.Bitmap
 import java.io.File
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 /**
  * Komiho: ncnn + Vulkan AI upscaler.
@@ -267,7 +271,7 @@ object Waifu2x {
      * drawn per page while [lastEngine] is one global slot.
      *
      * Why the global slot alone was wrong: enhancements run concurrently for neighbouring
-     * pages (background prewarm + the page on screen), and [markCpuFallback] used to clear
+     * pages (background prewarm + the page on screen), and the old CPU-fallback marker cleared
      * the global value for *any* page that produced no result — including pages whose
      * inference the pager deliberately aborted when the user swiped. The next badge to be
      * drawn then read `NONE` and printed `CPU OK` on a page that had in fact run on the NPU.
@@ -286,24 +290,9 @@ object Waifu2x {
     fun engineFor(pageIndex: Int): EngineKind =
         if (pageIndex >= 0) engineByPage[pageIndex] ?: lastEngine else lastEngine
 
-    /**
-     * Komiho: records that [pageIndex] had to be completed on the **CPU** resampler because
-     * neither the NPU nor the Vulkan engine produced a result.
-     *
-     * Called by [MihonSY]'s enhancer on the CPU fallback path. Without it the badge would
-     * keep showing the previous page's engine — the state is sticky by design (a page that
-     * never reaches [process] must not clear an earlier result), so the transition to CPU
-     * has to be reported explicitly.
-     *
-     * Scoped to [pageIndex] so one page's fallback can no longer mislabel its neighbours;
-     * `pageIndex < 0` (no page number) still clears the global slot only.
-     */
-    fun markCpuFallback(pageIndex: Int = -1) {
-        lastEngine = EngineKind.NONE
-        if (pageIndex >= 0) {
-            engineByPage[pageIndex] = EngineKind.NONE
-        }
-    }
+    // Komiho (2026-10-25): `markCpuFallback` 已删除。
+    // GPU / NPU 模型不再降级到 CPU Lanczos（见 `MihonSyEnhancer.enhanceWithGpu` 尾部），
+    // 「本页没有 AI 结果」现在由角标按 [EngineKind.NONE] 显示为 SKIP，不再冒充 CPU 完成。
 
     /**
      * Komiho (2026-10-01): 当前可见页的页号（-1 = 未知）。阅读器准备**可见页**时写入
@@ -919,15 +908,33 @@ object Waifu2x {
         }
 
     /**
-     * UI filter: an NPU model is offered on any device with a real Qualcomm HTP.
-     * Per-generation coverage is decided separately by [contextAssetFor] / the settings
-     * UI (a family that skips this device's generation simply lists no matching model).
+     * Komiho (2026-10-25): 设备是否具备可用的 Vulkan。
      *
-     * Non-Qualcomm hardware reports architecture 0 (no `ON_CHIP` HTP device) and stays hidden.
-     * Vulkan entries are always shown (their failure path is the CPU resampler fallback).
+     * 只做**粗筛**（系统特性 `FEATURE_VULKAN_HARDWARE_VERSION`）：驱动坏掉的设备仍可能通过，
+     * 那时 `nativeInitW2xEx` 会失败并留一条 WARN，上层按「引擎不可用」处理。
+     *
+     * 为什么需要它：CPU 兜底已经删除（GPU/NPU 模型下不再降级到 Lanczos），所以「设备跑不了
+     * 某个 backend」这件事必须在**列表层**表达 —— 否则用户会选到一个永远不出图的模型。
+     */
+    val isVulkanAvailable: Boolean by lazy {
+        runCatching {
+            Injekt.get<Application>().packageManager
+                .hasSystemFeature(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION)
+        }.getOrDefault(false)
+    }
+
+    /**
+     * UI filter: 一个模型只在**真能跑**的设备上出现。
+     *
+     * - NPU：需要真实存在的高通 HTP + QNN runtime（[isCdspAvailable]）；
+     * - GPU：需要系统具备 Vulkan（[isVulkanAvailable]）。
+     *
+     * 非高通设备报告 architecture 0，NPU 分组自然不出现。
+     * Komiho (2026-10-25)：GPU 不再恒为 true —— 原先靠 CPU 兜底掩盖了「无 Vulkan」，
+     * 兜底删除后必须在这里如实过滤。
      */
     fun isModelSupported(model: UpscaleModelSpec): Boolean = when (model.backend) {
-        UpscaleModelSpec.Backend.NCNN_VULKAN -> true
+        UpscaleModelSpec.Backend.NCNN_VULKAN -> isVulkanAvailable
         // CDSP first: no compute DSP means no model could ever run on this device.
         UpscaleModelSpec.Backend.QNN_HTP -> isCdspAvailable && isQnnRuntimeAvailable
     }

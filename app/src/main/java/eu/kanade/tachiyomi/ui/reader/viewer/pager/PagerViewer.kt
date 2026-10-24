@@ -22,6 +22,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import eu.kanade.tachiyomi.util.EnhanceBurst
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -131,6 +132,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             // SY -->
             if (pager.isRestoring) return
             // SY <--
+            // Komiho (2026-10-25): 换页落地 → 连点判定（拖动也走这里，点击则由 moveRight/moveLeft 计入）。
+            EnhanceBurst.onTurn()
             if (!activity.isScrollingThroughPages) {
                 activity.hideMenu()
             }
@@ -258,6 +261,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         Waifu2x.visiblePageIndex = -1
         lastPreparePage = -1
         pageFlip.release()
+        // Komiho (2026-10-25): 连点节奏不该跨会话残留（否则刚退出时的翻页速度会带进下一本）。
+        EnhanceBurst.reset()
         scope.cancel()
     }
 
@@ -642,12 +647,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanRight()) {
                 holder.panRight()
-            } else if (config.pageSlideAnimationsEnabled && pager.isHorizontalPager) {
-                // Komiho: 点击翻页统一由叠加层播放（平移 / 覆盖同一套时长与缓动）。
-                // 交回 ViewPager 的话时长由它的 Scroller 决定，而这个 fork 换不掉 Scroller。
-                pageFlip.startTapFlip(1)
             } else {
-                pager.setCurrentItem(pager.currentItem + 1, config.pageSlideAnimationsEnabled)
+                // Komiho: 真正要换页了 → 喂给连点判定（见 EnhanceBurst）。
+                EnhanceBurst.onTurn()
+                if (config.pageSlideAnimationsEnabled && pager.isHorizontalPager) {
+                    // Komiho: 点击翻页统一由叠加层播放（平移 / 覆盖同一套时长与缓动）。
+                    // 交回 ViewPager 的话时长由它的 Scroller 决定，而这个 fork 换不掉 Scroller。
+                    pageFlip.startTapFlip(1)
+                } else {
+                    pager.setCurrentItem(pager.currentItem + 1, config.pageSlideAnimationsEnabled)
+                }
             }
         }
     }
@@ -662,11 +671,15 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanLeft()) {
                 holder.panLeft()
-            } else if (config.pageSlideAnimationsEnabled && pager.isHorizontalPager) {
-                // Komiho: 同上。
-                pageFlip.startTapFlip(-1)
             } else {
-                pager.setCurrentItem(pager.currentItem - 1, config.pageSlideAnimationsEnabled)
+                // Komiho: 同上 —— 真正要换页了。
+                EnhanceBurst.onTurn()
+                if (config.pageSlideAnimationsEnabled && pager.isHorizontalPager) {
+                    // Komiho: 同上。
+                    pageFlip.startTapFlip(-1)
+                } else {
+                    pager.setCurrentItem(pager.currentItem - 1, config.pageSlideAnimationsEnabled)
+                }
             }
         }
     }

@@ -355,8 +355,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
             else -> when (Waifu2x.engineFor(pageIndex)) {
                 Waifu2x.EngineKind.QNN_HTP -> "NPU OK"
                 Waifu2x.EngineKind.NCNN_VULKAN -> "GPU OK"
-                // NONE = 引擎没出结果，本页由 CPU 重采样兜底（或首个引擎结果尚未登记）。
-                Waifu2x.EngineKind.NONE -> "CPU OK"
+                // Komiho (2026-10-25): NONE 不再表示「CPU 兜底」—— 那条路径已删除。
+                // 它现在只表示「本页没有 AI 结果」，此时 `success` 必为 false、角标走
+                // 「跳过」文案，这里的值只是兜底，不再冒充 CPU 完成。
+                Waifu2x.EngineKind.NONE -> "SKIP"
             }
         }
     // MihonSY <--
