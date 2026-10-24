@@ -1,15 +1,14 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.RectF
 import android.graphics.Shader
 import android.view.View
+import eu.kanade.tachiyomi.ui.reader.viewer.PaperPageTexture
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -21,39 +20,51 @@ import kotlin.math.sin
  *
  * ## 它画什么
  *
- * 只画**正在翻动的那一张纸**，不画任何页面 View：
+ * 一张正在翻动的纸，由三部分组成：
  *
- * 1. 纸面正面 —— 折线靠书脊一侧的剩余平放部分（[sheet] 裁剪绘制）；
- * 2. 纸面背面 —— 折过去的那一块。几何上等于「页矩形 关于折线 的镜像」与「平放半平面」
- *    在页面范围内的交集，内容就是同一张快照的镜像，再压一层纸色（[backTint]）。
- *    这样处理的好处：**不需要第二张位图**，也不需要目标页的纹理 —— 与真实纸张
- *    「背面是白纸、只能透出一点背面油墨」一致；
- * 3. 折痕阴影 —— 沿折线对称衰减的渐变，压在前后两面之上，是「像纸」的关键一笔。
+ * 1. **正面** —— 折线靠书脊一侧的剩余平放部分，内容取自 [sheetView]（真实页 View）；
+ * 2. **背面** —— 折过去的那一块。几何上等于「页矩形 关于折线 的镜像」与「平放半平面」
+ *    在页面范围内的交集，内容就是同一个 View 的镜像，再压一层纸色（[backTint]）；
+ * 3. **折痕阴影** —— 沿折线对称衰减的渐变，压在前后两面之上，是「像纸」的关键一笔。
  *
- * 目标页（翻过去后露出的那一页）始终是**活 View**，所以永远是增强后的最新图；
- * 本层只负责把「纸」盖在上面。
+ * 目标页（翻过去后露出的那一页）始终是**活 View**，所以永远是增强后的最新图。
+ *
+ * ## 为什么直接画 View，而不是先截图
+ *
+ * 曾经的做法是把页 View `draw()` 进一张位图再采样。实测**只能得到一片底色**：
+ * 页面主体是 `SubsamplingScaleImageView` 在硬件画布上产出的绘制内容，重绘到软件位图
+ * 上拿不到东西。改成直接 `View.draw(canvas)` 画到本层的硬件画布上之后：
+ *
+ * - 内容必然是屏上的真实画面（增强结果、裁边、缩放、翻页角标都在内）；
+ * - 不需要额外位图（省掉 2.6MB 常驻 + 一次全屏 blit）；
+ * - 没有「快照是半分辨率、翻动时发虚」的问题。
+ *
+ * 代价只有绘制量：纸面每帧多画 1~2 次页 View（纯纹理/compositing，不触发解码）。
  *
  * ## 成本约束（本文件最容易写坏的地方）
  *
- * - [onDraw] 内**零分配**：Path / RectF / Paint / Shader 全部是成员，逐帧只 `rewind()`；
- * - 每帧固定 2 次 `drawBitmap`（正/背）+ 1 次 `drawRect`（背面纸色）+ 1 次渐变矩形（阴影）；
- * - 快照是屏幕的 [SHEET_SCALE] 倍（见 [PageFlipController]），采样时只做一次双线性缩放；
- * - 不做 `setShadowLayer` / `saveLayer` / `Path.op` —— 这三样在绘制期都会触发离屏缓冲或
- *   几何布尔运算，是同类实现（含参考库）在低端机上掉帧的主因。
+ * - [onDraw] 内**零分配**：Path / Paint / Shader 全部是成员，逐帧只 `rewind()`；
+ * - 不做 `setShadowLayer` / `saveLayer` / `Path.op` —— 绘制期触发离屏缓冲或几何布尔运算，
+ *   是同类实现（含参考库）在低端机上掉帧的主因；
+ * - 阴影渐变只在尺寸变化时创建，逐帧靠 canvas 平移旋转复用它。
  *
  * ## 方向
  *
  * 折线**永远从自由边扫向书脊**：[spineOnLeft] 为 true 时书脊在左（左→右阅读），
  * false 时书脊在右（日漫右→左）。翻页方向不同只改变 [PageFlipController] 里
- * 「快照取自哪一页」与 progress 的走向，几何本身不变。
+ * 「纸面取自哪一页」与 progress 的走向，几何本身不变。
  */
 internal class PageFlipView(context: Context) : View(context) {
 
-    /** 正在翻动那一页的半分辨率快照。null = 没有可画的纸（空闲状态）。 */
-    var sheet: Bitmap? = null
+    /**
+     * 正在翻动的那一页（真实页 View）。null = 没有可画的纸（空闲状态）。
+     *
+     * 只作引用、**不缓存其绘制结果**：内容随时可能是增强刚出的新图。
+     */
+    var sheetView: View? = null
 
     /**
-     * 翻动进度：0 = 整页平放（快照盖满屏幕），1 = 完全翻走（屏幕上一点纸都不剩）。
+     * 翻动进度：0 = 整页平放（纸面盖满屏幕），1 = 完全翻走（屏幕上一点纸都不剩）。
      * 由 `ViewPager` 的滚动偏移直接驱动，因此拖动与点击翻页共用同一套姿态。
      */
     var progress: Float = 0f
@@ -67,16 +78,32 @@ internal class PageFlipView(context: Context) : View(context) {
      */
     var grabFraction: Float = 0.5f
 
-    /** 背面纸色（跟随阅读器页面底色），见 [PageFlipController] 的取色。 */
+    /**
+     * 纸色，由控制器按当前背景档位给出：
+     * - 普通档位 = `pageCanvasColor`；
+     * - 纸化档位（羊皮纸 / 牛皮纸）= `PaperStyle.whiteColor`（它们的 `pageCanvasColor`
+     *   恒为白，直接套会在翻动时露出一块纯白）。
+     *
+     * 两处用途：纸面内容的**不透明衬底**（页 View 的 letterbox 是透明的，不铺底会漏出
+     * 下面那一页），以及背面纸色的 [tintPaint]。
+     */
     var backTint: Int = Color.WHITE
 
-    private val sheetPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+    /** 纸面衬底：不透明，画在页 View 之下。 */
+    private val sheetBgPaint = Paint()
+
+    /** 背面纸色：半透明，压在镜像内容之上，留一点透印。 */
     private val tintPaint = Paint()
     private val shadowPaint = Paint()
-    private val sheetDst = RectF()
     private val frontPath = Path()
     private val mirroredPath = Path()
     private var shadowRadius = 0f
+
+    /** 跨 View 绘制失败的记录标记（只记一次日志，之后静默跳过）。 */
+    private var drawFailed = false
+
+    /** 绘制失败时回调（控制器据此收尾，把页 View 的透明度与位移复原）。 */
+    var onDrawFailed: (() -> Unit)? = null
 
     init {
         // 纯绘制层：不拦截触摸（点击/拖动必须继续落到下面的 Pager 上）。
@@ -101,22 +128,42 @@ internal class PageFlipView(context: Context) : View(context) {
         )
     }
 
-    /** 清空状态（会话结束 / 视图销毁）。位图本身由控制器复用，这里只解除引用。 */
+    /** 清空状态（会话结束 / 视图销毁）。只解除引用，不持有任何绘制产物。 */
     fun reset() {
-        if (sheet == null && progress == 0f) return
-        sheet = null
+        if (sheetView == null && progress == 0f) return
+        sheetView = null
         progress = 0f
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
-        val bmp = sheet ?: return
+        // 这里会把**别人的** View 画到自己的画布上，属于跨 View 绘制。正常情况下和
+        // DragShadowBuilder 是同一套机制，但一旦某个页面在这种画法下抛异常，异常会直接
+        // 落进绘制遍历 → 整个阅读器崩。兜住它：失败就退化成不画纸（页面照常可见）。
+        try {
+            drawFlip(canvas)
+        } catch (e: Throwable) {
+            if (!drawFailed) {
+                drawFailed = true
+                eu.kanade.tachiyomi.diagnostic.DiagLog.w(
+                    "PageFlip",
+                    "draw failed, skip flip: ${e.javaClass.simpleName}: ${e.message}",
+                )
+            }
+            sheetView = null
+            progress = 0f
+            onDrawFailed?.invoke()
+        }
+    }
+
+    private fun drawFlip(canvas: Canvas) {
+        val sheet = sheetView ?: return
         val p = progress
         // 两端什么都不画：0 = 页面还是原样（真实页 View 就位），1 = 纸已经翻走。
         if (p <= MIN_PROGRESS || p >= MAX_PROGRESS) return
         val w = width.toFloat()
         val h = height.toFloat()
-        if (w <= 0f || h <= 0f || bmp.isRecycled) return
+        if (w <= 0f || h <= 0f) return
 
         val freeX = if (spineOnLeft) w else 0f
         val spineX = if (spineOnLeft) 0f else w
@@ -159,16 +206,22 @@ internal class PageFlipView(context: Context) : View(context) {
 
         buildMirroredRect(topX, ux, uy, w, h)
 
-        sheetDst.set(0f, 0f, w, h)
         val deg = atan2(uy, ux) * 180f / PI.toFloat()
+        sheetBgPaint.color = backTint
+        sheetBgPaint.alpha = 255
 
         // ① 正面：折线靠书脊一侧的剩余平放部分。
+        //    只加裁剪、不加变换 —— 页 View 在这种画法下相当于一次普通合成，
+        //    页内部的裁剪计算（SSIV 按 clipBounds 挑瓦片）也仍然成立。
         val sc1 = canvas.save()
         canvas.clipPath(frontPath)
-        canvas.drawBitmap(bmp, null, sheetDst, sheetPaint)
+        canvas.drawRect(0f, 0f, w, h, sheetBgPaint)
+        sheet.draw(canvas)
         canvas.restoreToCount(sc1)
 
-        // ② 背面：平放半平面 ∩ 镜像后的页矩形。裁好之后把画布镜像过去再画同一张快照。
+        // ② 背面：平放半平面 ∩ 镜像后的页矩形。裁好之后把画布镜像过去再画同一个 View。
+        //    这里的镜像变换会让页内部的 clipBounds 判断失真（拿到的是设备空间的矩形），
+        //    所以背面内容只当「透印」看待：即便某些页面画不满，底色 + 纸色 + 阴影仍然成立。
         val sc2 = canvas.save()
         canvas.clipPath(frontPath)
         canvas.clipPath(mirroredPath)
@@ -177,10 +230,15 @@ internal class PageFlipView(context: Context) : View(context) {
         canvas.scale(1f, -1f)
         canvas.rotate(-deg)
         canvas.translate(-topX, 0f)
-        canvas.drawBitmap(bmp, null, sheetDst, sheetPaint)
+        canvas.drawRect(0f, 0f, w, h, sheetBgPaint)
+        sheet.draw(canvas)
         tintPaint.color = backTint
         tintPaint.alpha = BACK_TINT_ALPHA
-        canvas.drawRect(sheetDst, tintPaint)
+        canvas.drawRect(0f, 0f, w, h, tintPaint)
+        // 纸化档位：把页面级纸纹也乘到背面。否则翻动时会出现「有颗粒的页面 +
+        // 一块光面的纸」，色值也会比页面亮一档（纸色是乘完纸纹之后的均值）。
+        // 非纸档位时 drawOver 直接返回，零开销。
+        PaperPageTexture.drawOver(canvas, width, height)
         canvas.restoreToCount(sc2)
 
         // ③ 折痕阴影：本地系里折线就是 x 轴，渐变沿 y 向对称衰减。
@@ -223,7 +281,7 @@ internal class PageFlipView(context: Context) : View(context) {
          *
          * **与 `PageFlipController` 的接管阈值必须是同一个值** —— 低于它两边都不动手
          * （既不藏真实页、也不抵消 ViewPager 的位移），高于它叠加层与真实页同时交接，
-         * 屏幕上不会出现「快照与真实页同时可见」或「谁也没画」的中间态。
+         * 屏幕上不会出现「纸面与真实页同时可见」或「谁也没画」的中间态。
          */
         const val MIN_PROGRESS = 0.002f
 
@@ -239,7 +297,7 @@ internal class PageFlipView(context: Context) : View(context) {
         /** 折线两端相对中点的最大水平张开（占页宽比例）。 */
         const val TILT_MAX = 0.35f
 
-        /** 背面纸色的不透明度：留一点镜像内容透出来（模拟背面油墨透印）。 */
+        /** 背面纸色的不透明度：留一点背面内容透出来（模拟背面油墨透印）。 */
         const val BACK_TINT_ALPHA = 217
 
         /** 折痕阴影半径（dp）。 */

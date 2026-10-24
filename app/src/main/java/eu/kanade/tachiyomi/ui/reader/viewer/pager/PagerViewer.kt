@@ -62,7 +62,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
     /**
      * Komiho: 「真实翻书」动画的会话控制 + 叠加绘制层（见 [PageFlipController]）。
-     * 翻页判定仍归 [pager]，这里只负责快照、进度换算与方向。
+     * 翻页判定仍归 [pager]，这里只负责选定纸面、进度换算与方向。
      */
     internal val pageFlip = PageFlipController(this)
 

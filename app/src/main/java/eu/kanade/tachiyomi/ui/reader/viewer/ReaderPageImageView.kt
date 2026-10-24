@@ -107,6 +107,20 @@ open class ReaderPageImageView @JvmOverloads constructor(
         get() = (pageView as? SubsamplingScaleImageView)?.sHeight ?: 0
 
     /**
+     * Komiho: 画面是否**已经真的画得出来**。
+     *
+     * `Page.State.Ready` 只代表页面数据到位；之后还有 Coil 解码 / 图像增强 / SSIV 初始化
+     * 一连串异步步骤，这期间 View 是空的。翻书动画把页 View 当纸面复用，必须先过这一关，
+     * 否则会翻出一张空白纸。
+     */
+    val isImageReady: Boolean
+        get() = when (val view = pageView) {
+            is SubsamplingScaleImageView -> view.isReady
+            is AppCompatImageView -> view.drawable != null
+            else -> false
+        }
+
+    /**
      * For automatic background. Will be set as background color when [onImageLoaded] is called.
      */
     var pageBackground: Drawable? = null

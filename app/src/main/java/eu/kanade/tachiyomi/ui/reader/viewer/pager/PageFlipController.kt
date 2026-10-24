@@ -1,16 +1,12 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.os.SystemClock
-import android.view.View
 import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
-import kotlin.math.max
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences.ReaderTheme
 
-/** Komiho 诊断 TAG：翻书动画（快照耗时 / 降级原因）。 */
+/** Komiho 诊断 TAG：翻书动画。 */
 private const val KOMIHA_FLIP_TAG = "PageFlip"
 
 /**
@@ -21,34 +17,30 @@ private const val KOMIHA_FLIP_TAG = "PageFlip"
  * 翻页判定与滚动仍然完全交给 `ViewPager`（速度、阈值、边界、取消回弹都不碰），
  * 本类只做三件事：
  *
- * 1. 在用户开始翻页的那一刻给**被翻走的那一页**拍一张半分辨率快照；
- * 2. 每收到一次 `onPageScrolled` 就把进度换算成折线姿态交给 [PageFlipView]，
- *    同时把 `ViewPager` 自己的横向平移**抵消掉**（页面原地不动，只有纸在动）；
+ * 1. 在用户开始翻页的那一刻选定「哪一页当纸」，交给 [PageFlipView]；
+ * 2. 每收到一次 `onPageScrolled` 就把进度换算成折线姿态，同时把 `ViewPager` 自己的
+ *    横向平移**抵消掉**（页面原地不动，只有纸在动）；
  * 3. 会话结束时复位（页 View 透明度、位移、叠加层）。
  *
  * ## 两张「纸」的来源
  *
- * - **前进**（`currentItem` → +1）：纸 = 当前页。它在屏幕上、必然已加载，快照不会空。
- * - **后退**（`currentItem` → -1）：纸 = 即将进入的那一页（进度 1 → 0）。物理上这是
- *   同一张叶子从书脊处翻回来落地 —— 起点纸是翻走的（不可见），终点正好盖满屏幕，
- *   与活 View 无缝交接。代价是它可能还没解码完，所以 [isPageReady] 不过就直接不播动画。
+ * - **前进**（页码往后走）：纸 = 出发页。它在屏幕上、必然已渲染，直接复用其 View。
+ * - **后退**：纸 = 即将进入的那一页（进度 1 → 0）。物理上这是同一张叶子从书脊处翻回来
+ *   落地 —— 起点纸是翻走的（不可见），终点正好盖满屏幕，与活 View 无缝交接。
  *
- * 两种方向共用同一套折线几何（折线从自由边扫向书脊），只有「快照取自哪一页」与进度
- * 走向相反。这样**永远只需要一张快照**，也不需要下一页的纹理。
+ * 两种方向共用同一套折线几何（折线从自由边扫向书脊），只有「纸取自哪一页」与进度
+ * 走向相反。全程只有一张纸，也不需要下一页的纹理。
  *
  * ## 与图像增强的关系
  *
- * 本类**不发起任何解码 / 增强 / 网络请求**：快照只是把页 View 已在内存里的 tile
- * 画一次到 0.5× 位图上（实测 3–5ms）。每帧只有一次网格无关的裁剪绘制，且全部零分配。
- * 唯一的共享资源是那 3–5ms 的 CPU blit，发生在翻页起点，不与增强的推理窗口重叠。
+ * 本类**不发起任何解码 / 增强 / 网络请求，也不做任何位图快照**：纸面就是真实页 View，
+ * 由 [PageFlipView] 每帧多画一到两遍（纯合成）。增强管线在翻页期间照常工作，两者只在
+ * GPU 上有一次整屏合成的交叠，量级远小于一次推理。
  */
 internal class PageFlipController(private val viewer: PagerViewer) {
 
     /** 叠在 pager 之上的绘制层。由 [PagerViewer] 放进容器。 */
     val overlay = PageFlipView(viewer.activity)
-
-    /** 单张快照位图，跨翻页复用；尺寸变化（旋转）才重建。 */
-    private var sheetBitmap: Bitmap? = null
 
     private var session: Session? = null
 
@@ -64,14 +56,14 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     /** 当前滚动状态。只在真正由手指/惯性驱动的滚动里开动画（瞬间跳页不会走到这里）。 */
     private var scrollState = ViewPager.SCROLL_STATE_IDLE
 
-    /**
-     * 快照失败（例如页面含 HARDWARE 位图，无法画进软件 Canvas）后的降级原因。
-     * 一旦写入就**永久**退回普通滑动，避免每翻一页都抛一次异常。
-     */
-    private var disabledReason: String? = null
-
     /** 手指落点（0..1，相对 pager 高度），由 [Pager] 的 DOWN 回调写入。 */
     private var grabFraction = 0.5f
+
+    init {
+        // 跨 View 绘制失败（极少数机型/页面）→ 立刻收尾，把页 View 复原，
+        // 用户看到的就是一次普通换页，而不是「页不见了」。
+        overlay.onDrawFailed = { end() }
+    }
 
     private class Session(
         /** 阅读方向是否在前进（= 页码在往后走）。R2L 下 item 下标是递减的，见 [startSession]。 */
@@ -83,7 +75,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         /** 参与本次翻页的另一页；只需要把它的位移一起抵消。 */
         val otherView: PagerPageHolder?,
     ) {
-        /** 纸当前是否已把页 View 藏起来（低于隐藏阈值时先不藏，避免第一帧画质突变）。 */
+        /** 纸当前是否已把页 View 藏起来（低于接管阈值时先不藏）。 */
         var hidden: Boolean = false
     }
 
@@ -101,7 +93,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
      */
     fun onPageScrolled(position: Int, offset: Float) {
         // 方向只能由 scrollX 的位移方向判定：ViewPager 在滚动**一开始**就把 currentItem
-        // 改成了目标页（populate 里赋值），所以 rolling 期间的 currentItem 与 position 的
+        // 改成了目标页（populate 里赋值），所以滚动期间的 currentItem 与 position 的
         // 先后关系恰好相反，拿它推方向会把前进判成后退。
         val scrollX = viewer.pager.scrollX
         val delta = scrollX - lastScrollX
@@ -139,17 +131,13 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val current = session ?: return
         session = null
         current.sheetView.alpha = 1f
-        current.otherView?.translationX = 0f
         resetTranslations()
         overlay.reset()
     }
 
-    /** 释放快照位图（退出阅读器 / 切换阅读模式）。 */
+    /** 释放（退出阅读器 / 切换阅读模式）。 */
     fun release() {
         end()
-        sheetBitmap?.recycle()
-        sheetBitmap = null
-        disabledReason = null
         attempted = false
     }
 
@@ -158,7 +146,6 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     // region 会话启动
 
     private fun startSession(position: Int, offset: Float, scrollForward: Boolean) {
-        if (disabledReason != null) return
         // 只对真正在滚动的翻页开动画：瞬间跳页（恢复进度 / 旋转 / 滑杆）不该播。
         if (scrollState == ViewPager.SCROLL_STATE_IDLE) return
         // 只有横向的 L2R / R2L 页漫才翻书；竖向翻页没有「纸」的语义。
@@ -187,47 +174,41 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         if (sheetItem !is ReaderPage || otherItem !is ReaderPage) return
 
         val sheetView = findHolder(sheetItem) ?: return
-        // 纸必须先就绪：后退时它是「还没进场的页」，前进时也可能正赶上首图还在加载
-        // （此时拍到的只有底色和进度环，翻起来就是一张白纸）。没就绪就退回普通滑动。
-        // 双页跨页要**两页都就绪** —— holder 的合并渲染本来就等两页 settle（见
-        // `PagerPageHolder.awaitPairSettled`），只判 first 会把「半张跨页」拍成快照。
+        // 纸面必须已经**渲染出图**：`Page.State.Ready` 只代表数据到了，位图解码（尤其带
+        // 增强时 0.5~3s）与 SSIV 初始化都可能还没完成，此时画出来就是一张空白纸。
         if (!isSheetReady(sheetView)) return
 
-        val startedAt = SystemClock.uptimeMillis()
-        val bitmap = capture(sheetView) ?: return
-        val cost = SystemClock.uptimeMillis() - startedAt
+        val otherView = findHolder(otherItem)
         DiagLog.d(
             KOMIHA_FLIP_TAG,
             "start advancing=$advancing page=${sheetItem.index} " +
-                "size=${bitmap.width}x${bitmap.height} capture=${cost}ms " +
                 "grab=${(grabFraction * 100).toInt()}% spineLeft=${viewer !is R2LPagerViewer}",
         )
-        if (cost > SLOW_CAPTURE_MS) {
-            // 只记录不降级：一次 15ms 的 blit 对 60fps 也只有一帧，值得保留动画。
-            DiagLog.w(KOMIHA_FLIP_TAG, "slow snapshot ${cost}ms (page=${sheetItem.index})")
-        }
 
-        overlay.sheet = bitmap
+        overlay.sheetView = sheetView
         overlay.spineOnLeft = viewer !is R2LPagerViewer
         overlay.grabFraction = grabbedFractionForOverlay()
-        overlay.backTint = viewer.config.pageCanvasColor
+        // 纸色必须跟背景档位一致：纸化档位（羊皮纸/牛皮纸）的 `pageCanvasColor` 是**白**，
+        // 直接用会在翻动时露出一块纯白 —— 它们的实际纸色在 `PaperStyle.whiteColor` 里。
+        overlay.backTint = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
+            ?: viewer.config.pageCanvasColor
 
         session = Session(
             advancing = advancing,
             expectedPosition = expectedPosition,
             sheetView = sheetView,
-            otherView = findHolder(otherItem),
+            otherView = otherView,
         )
         applyProgress(if (advancing) offset else 1f - offset)
     }
 
-    /** 抓点只在使用边距内生效；接近顶部/底部时夹一下，避免折线过陡。 */
+    /** 抓点只在安全边距内生效；接近顶部/底部时夹一下，避免折线过陡。 */
     private fun grabbedFractionForOverlay(): Float = grabFraction.coerceIn(0.12f, 0.88f)
 
     /**
      * 按页找 holder。必须同时比 `item.first` 与 `item.second`：双页模式下 holder 的
-     * `item` 是 `page to extraPage` 这一对整个 Pair，只比 `first` 会漏掉「右半页」，
-     * 只比整个 Pair 又会在 `itemAt()` 只返回单页时永远不等。
+     * `item` 是 `page to extraPage` 这一对整个 Pair，只比整个 Pair 会在 `itemAt()`
+     * 只返回单页时永远不等。
      */
     private fun findHolder(page: ReaderPage): PagerPageHolder? {
         val pager = viewer.pager
@@ -238,21 +219,24 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         return null
     }
 
-    /** 页面内容是否已经落到屏上（[Page.State.Ready]）。 */
-    private fun isPageReady(page: ReaderPage): Boolean =
-        page.statusFlow.value is Page.State.Ready
-
     /**
-     * 纸面是否已经可以拍快照。
+     * 纸面是否已经可以画。
      *
-     * 双页模式下 holder 的 `item` 是 `page to extraPage`，**两页都要就绪**：合并渲染
-     * 会先等两页 settle，只判第一页的话，回翻时很容易拍到「左半页有了、右半页还是
-     * 空白/进度环」的中间态 —— 那张快照会在整段动画里以半张跨页的形式展示。
+     * 两道门缺一不可：
+     * - 双页跨页的**两页都要 Ready** —— 合并渲染本来就等两页 settle（见
+     *   `PagerPageHolder.awaitPairSettled`），只判 first 会拿到「半张跨页」；
+     * - 页 View 本身要**已渲染**（`ReaderPageImageView.isImageReady`）—— Ready 之后
+     *   还有 Coil 解码 / 增强 / SSIV 初始化，那段时间画出来是空白。
      */
     private fun isSheetReady(holder: PagerPageHolder): Boolean {
         val (first, second) = holder.item
-        return isPageReady(first) && (second == null || isPageReady(second))
+        val dataReady = isPageReady(first) && (second == null || isPageReady(second))
+        return dataReady && holder.isImageReady
     }
+
+    /** 页面数据是否已经落到本地（[Page.State.Ready]）。 */
+    private fun isPageReady(page: ReaderPage): Boolean =
+        page.statusFlow.value is Page.State.Ready
 
     // endregion
 
@@ -282,6 +266,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             }
         }
 
+        // 纸面由叠加层负责重画，原 View 必须隐身，否则会在折起来的区域盖住目标页。
         if (active != current.hidden) {
             current.hidden = active
             current.sheetView.alpha = if (active) 0f else 1f
@@ -300,59 +285,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
     // endregion
 
-    // region 快照
-
-    /**
-     * 把 [holder] 当前的显示内容画进复用位图（屏幕的 [SHEET_SCALE] 倍）。
-     *
-     * 用 `View.draw()` 而不是 `PixelCopy` / Coil 重新解码：内容已经在显存/内存里，
-     * 这一遍只是把它 blit 到一张小位图上，不触发任何解码、不与增强抢引擎。
-     */
-    private fun capture(holder: View): Bitmap? {
-        val pager = viewer.pager
-        val w = holder.width.takeIf { it > 0 } ?: pager.width
-        val h = holder.height.takeIf { it > 0 } ?: pager.height
-        if (w <= 0 || h <= 0) return null
-        val tw = max(1, (w * SHEET_SCALE).toInt())
-        val th = max(1, (h * SHEET_SCALE).toInt())
-        return try {
-            var cached = sheetBitmap
-            if (cached != null && (cached.width != tw || cached.height != th || cached.isRecycled)) {
-                cached.recycle()
-                cached = null
-            }
-            val target = cached ?: Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
-                .also { sheetBitmap = it }
-            val canvas = Canvas(target)
-            // 先铺页面底色：纸的边缘不该是透明像素（否则叠加时会透出下一层）。
-            canvas.drawColor(viewer.config.pageCanvasColor)
-            canvas.scale(tw / w.toFloat(), th / h.toFloat())
-            holder.draw(canvas)
-            target
-        } catch (e: Throwable) {
-            // 典型原因：页内含 Config.HARDWARE 位图，软件 Canvas 画不了。
-            // 一旦发生就永久退回普通滑动，绝不让它每页抛一次。
-            disabledReason = "${e.javaClass.simpleName}: ${e.message}"
-            DiagLog.w(KOMIHA_FLIP_TAG, "capture failed, fallback to slide — $disabledReason")
-            sheetBitmap?.recycle()
-            sheetBitmap = null
-            null
-        }
-    }
-
-    // endregion
-
     private companion object {
-        /**
-         * 快照相对屏幕的缩放：0.5 ⇒ 面积与 blit 成本都是 1/4。
-         * 翻页全程纸都在运动，双线性放大带来的柔化在运动中是察觉不到的。
-         */
-        const val SHEET_SCALE = 0.5f
-
         /** 低于此偏移不启动会话（此时整页还在原位，开始翻没有意义）。 */
         const val START_OFFSET = 0.002f
-
-        /** 超过这个耗时的快照会在日志里标红（用于实机验收）。 */
-        const val SLOW_CAPTURE_MS = 16L
     }
 }
