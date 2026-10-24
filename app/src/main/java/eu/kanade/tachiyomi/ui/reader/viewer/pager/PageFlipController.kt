@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.diagnostic.DiagLog
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 
 /** Komiho 诊断 TAG：翻书动画。 */
 private const val KOMIHA_FLIP_TAG = "PageFlip"
