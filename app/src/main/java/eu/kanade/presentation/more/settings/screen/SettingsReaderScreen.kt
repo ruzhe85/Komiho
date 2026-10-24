@@ -278,7 +278,7 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_page_transitions),
                     enabled = !einkAnimationOff,
                 ),
-                // Komiho: 真实翻书动画（页漫）。从属于上面的总开关，E-Ink 关动画时同样置灰。
+                // Komiho: 覆盖翻页（页漫）。从属于上面的总开关，E-Ink 关动画时同样置灰。
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.pageFlipAnimation,
                     title = stringResource(MR.strings.pref_page_flip),

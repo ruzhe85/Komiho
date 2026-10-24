@@ -91,10 +91,15 @@ open class Pager(
         flipAnimator = null
     }
 
-    /** 点击翻页的时长。想让翻页更慢就调这里（默认比 ViewPager 自带的 500ms 略短，
-     *  但曲线是先加速后减速，观感反而更缓）。 */
+    /**
+     * 点击翻页的时长。
+     *
+     * 参考录制是 42fps，逐帧比对下来一次换页大约占 8~9 帧（≈190~210ms），明显比
+     * `ViewPager` 自带的 500ms 果断得多，但它的速度曲线是平滑的 —— 快而不「窜」。
+     * 这里取 220ms + 先加速后减速：时长贴近参考，峰值速度只有平均速度的 1.57 倍。
+     */
     private companion object {
-        const val FLIP_DURATION_MS = 420L
+        const val FLIP_DURATION_MS = 220L
     }
 
     /** 本次手势是否走「不跟手翻页」（只在 ACTION_DOWN 判定一次，避免每个事件都读偏好）。 */

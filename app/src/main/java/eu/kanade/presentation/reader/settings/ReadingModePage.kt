@@ -198,7 +198,7 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
         enabled = !pageTransitionsLocked,
     )
 
-    // Komiho: 真实翻书动画（页漫）。从属于上面的总开关，E-Ink 关动画 / 总开关关闭时一并置灰
+    // Komiho: 覆盖翻页（页漫）。从属于上面的总开关，E-Ink 关动画 / 总开关关闭时一并置灰
     // —— 与全局设置里的同一项保持一致的启用条件。
     val pageTransitionsPager by screenModel.preferences.pageTransitionsPager.collectAsState()
     CheckboxItem(

@@ -28,8 +28,8 @@ class ReaderPreferences(
     val pageTransitionsPager: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_pager_key", true)
 
     /**
-     * Komiho: 页漫「真实翻书」动画。开启后换页不再是整屏滑移，而是把当前页当作一张纸
-     * 沿折线翻走（见 `PageFlipController`）。默认关 —— 保持原有滑移行为。
+     * Komiho: 页漫「覆盖翻页」。开启后换页不再是两页一起平移，而是当前页原地不动、
+     * 下一页从一侧滑上来把它盖住（见 `PageFlipController`）。默认关 —— 保持原有滑移行为。
      *
      * 从属于 [pageTransitionsPager]（总开关），且 E-Ink 关动画时由
      * `PagerConfig.pageSlideAnimationsEnabled` 一并闸掉，这里不需要重复处理。

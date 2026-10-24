@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences.ReaderTheme
 
 /** Komiho 诊断 TAG：翻书动画。 */
 private const val KOMIHA_FLIP_TAG = "PageFlip"
@@ -14,26 +15,17 @@ private const val KOMIHA_FLIP_TAG = "PageFlip"
  *
  * 1. **钉住当前页**：把正在露出的那一页的 `translationX` 抵消掉，让它停在原位不动
  *    （这就是「覆盖」与「滑动」的分界 —— 滑动是两页一起走）；
- * 2. **隐藏新页**：它改由 [PageFlipView] 画在最上层，保证两个方向的层级都正确；
- * 3. 每帧把新页的**屏幕位置**交给叠加层，由它在交界处画一道压在当前页上的投影。
+ * 2. **藏起新页**：它改由 [PageFlipView] 画在最上层，保证两个方向的层级都正确；
+ * 3. 每帧把新页的**屏幕位置**交给叠加层，由它画新页并在交界处压一道投影。
  *
  * 翻页的判定、速度、阈值、取消回弹仍然完全归 `ViewPager`，这里不碰。
  *
- * ## 为什么不用「前进 / 后退」判断方向
+ * ## 两个方向完全对称
  *
- * 之前靠 `scrollX` 的位移符号推方向，再决定谁钉住、新页从哪侧进来。这在点击翻页
- * （`setCurrentItem`）上会判错：一旦判反，当前页会被推向错误的一侧、新页也从错误的一侧
- * 进来，收尾时两页「炸开」。
- *
- * 现在完全不判方向 —— 每帧直接读两页的 `left - scrollX`（它们在屏幕上的真实位置）：
- * 离屏幕原点近的那一页是当前页（钉住），另一页是新页（按它自己的真实位置绘制）。
- * 两个方向走的是同一段代码，天然对称。
- *
- * ## 前置条件
- *
- * 新页必须**已经渲染出图**（`ReaderPageImageView.isImageReady`）才接管。它通常在预载
- * 窗口里、已解码好；若还在解码（例如开着增强快速连翻），这一次就退回普通滑动 ——
- * 否则会把一张空白页盖到屏幕上，比没有动画更糟。
+ * 全程**不判断「前进 / 后退」**：每帧直接比两页的 `left - scrollX`（它们在屏幕上的真实
+ * 位置）—— 贴在视口原点的那一页是当前页（钉住），另一页是新页（按它自己的位置绘制）。
+ * 曾经靠 `scrollX` 的位移符号推方向，点击翻页时会判反：当前页被推向错误一侧、新页也从
+ * 错误一侧进来，收尾时两页「炸开」。
  */
 internal class PageFlipController(private val viewer: PagerViewer) {
 
@@ -79,6 +71,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         // 新页按它自己的真实屏幕位置绘制，方向由位置本身决定，不需要额外判断。
         overlay.sheetView = current.sheetView
         overlay.sheetOffsetX = (current.sheetView.left - scrollX).toFloat()
+        // 纸档的衬底要用纸色（不是纯白）：静态时页面之外的空白处是纸纹底，
+        // 纸色是它的均值，乘上同一张纸纹后两者才对得上。
+        overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
+            ?: viewer.config.pageCanvasColor
         overlay.progress = offset
         overlay.invalidate()
     }
@@ -96,8 +92,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     fun end() {
         val current = session ?: return
         session = null
-        current.sheetView.alpha = 1f
         current.pinnedView.translationX = 0f
+        current.sheetView.alpha = 1f
         overlay.reset()
     }
 
@@ -129,9 +125,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val pinned = if (distA <= distB) holderA else holderB
         val sheet = if (pinned === holderA) holderB else holderA
 
-        // 新页还没画出来就退回普通滑动 —— 否则会把一张空白页盖到屏幕上。
-        if (!sheet.isImageReady) return null
-
+        // 新页藏起来，改由叠加层画在最上层 —— 否则后退翻页时它会被钉住的当前页盖住。
         sheet.alpha = 0f
         if (!loggedThisScroll) {
             loggedThisScroll = true

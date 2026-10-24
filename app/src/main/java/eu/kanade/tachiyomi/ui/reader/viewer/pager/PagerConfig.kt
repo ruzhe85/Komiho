@@ -70,15 +70,15 @@ class PagerConfig(
     val pageSlideAnimationsEnabled: Boolean
         get() = usePageTransitions && !EinkMotion.isAnimationOff
 
-    /** Komiho: 「真实翻书」开关的原始值（是否生效还要看 [pageFlipActive]）。 */
+    /** Komiho: 「覆盖翻页」开关的原始值（是否生效还要看 [pageFlipActive]）。 */
     var pageFlipEnabled = readerPreferences.pageFlipAnimation.get()
         private set
 
     /**
-     * Komiho: 翻书动画是否真的生效。
+     * Komiho: 「覆盖翻页」是否真的生效。
      *
      * 必须复用 [pageSlideAnimationsEnabled] 这一道闸 —— 它同时覆盖「翻页动画」总开关与
-     * E-Ink 关动画（墨水屏上任何一种逐帧重绘都会叠残影，翻书尤其明显）。这样 E-Ink
+     * E-Ink 关动画（墨水屏上任何一种逐帧重绘都会叠残影，翻页动画尤其明显）。这样 E-Ink
      * 侧不需要为新开关再写一遍收敛逻辑。
      */
     val pageFlipActive: Boolean
@@ -210,7 +210,7 @@ class PagerConfig(
         // —— 否则拨一下开关会白白重建 adapter、清 preparedCache，可见页重新解码 + 重跑 AI 增强。
         readerPreferences.pageTransitionsPager
             .register({ usePageTransitions = it })
-        // Komiho: 「真实翻书」开关同理 —— 只在翻页时现读，不改位图输出，**不接**
+        // Komiho: 「覆盖翻页」开关同理 —— 只在翻页时现读，不改位图输出，**不接**
         // imagePropertyChangedListener，否则拨一下开关就要重建 adapter、清 preparedCache、
         // 让可见页重新解码并重跑一次 AI 增强。
         readerPreferences.pageFlipAnimation

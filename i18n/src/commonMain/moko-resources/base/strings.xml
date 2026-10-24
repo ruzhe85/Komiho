@@ -418,8 +418,8 @@
     <string name="pref_cutout_short">Show content in cutout area</string>
     <string name="pref_page_transitions">Animate page transitions</string>
     <!-- Komiho: paged reader only — turns the current page like a sheet of paper -->
-    <string name="pref_page_flip">Realistic page turn</string>
-    <string name="pref_page_flip_summary">The next page covers the current one, like a real book</string>
+    <string name="pref_page_flip">Cover page turn</string>
+    <string name="pref_page_flip_summary">The next page slides in and covers the current one</string>
     <string name="pref_flash_page">Flash on page change</string>
     <string name="pref_flash_page_summ">Reduces ghosting on e-ink displays</string>
     <string name="pref_flash_duration">Flash duration</string>

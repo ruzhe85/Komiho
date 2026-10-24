@@ -7,6 +7,7 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import android.view.View
+import eu.kanade.tachiyomi.ui.reader.viewer.PaperPageTexture
 
 /**
  * Komiho: 页漫「覆盖翻页」的绘制层。
@@ -23,19 +24,26 @@ import android.view.View
  * ## 只认坐标，不认方向
  *
  * 本层不接收「前进 / 后退」，只接收 [sheetOffsetX]（新页在屏幕上的左边界，可以为负）。
- * 它为正说明新页从右侧滑入，为负说明从左滑入 —— 一切由几何决定，两个方向走同一段代码，
- * 不会再出现「一边正常、另一边反了」的情况。
+ * 它为正说明新页从右侧滑入，为负说明从左滑入 —— 一切由几何决定，两个方向走同一段代码。
  *
  * ## 为什么自己画新页
  *
- * 新页由本层绘制、并把它原本的 View 隐藏，而不是交给 `ViewPager`：`ViewPager` 的子 View
- * 绘制顺序取决于下标，后退翻页时新页下标更小、会被钉住的当前页盖住 —— 那样看到的就不是
- * 覆盖而是「新页被挡住」。本层最后绘制，层级永远正确。
+ * `ViewPager` 的子 View 按 index 绘制，后退翻页时新页下标更小、会被钉住的当前页盖住。
+ * 本层最后绘制，层级永远正确。
+ *
+ * ## 纸化档位的隔离层（色差修正）
+ *
+ * 纸档（羊皮纸/牛皮纸）下，页面会在 `dispatchDraw` 里用 `saveLayer` + **MULTIPLY** 贴一层
+ * 纸纹。MULTIPLY 的对象是「画布上该位置已有的像素」：静态渲染时页面自己是不透明的，
+ * 纸纹乘的就是页面本身；而本层把页面画到叠加层时，页面之外的透明区域下面是**另一张页**，
+ * 乘出来的纸色就偏了 —— 表现为翻页过程中出现色差。
+ *
+ * 所以纸档下先把这一遍画进**隔离层**，并铺上页面底色（与静态时页面之下那层一致），
+ * 让纸纹只跟页面自身相乘。非纸档没有这一步，零额外开销。
  *
  * ## 成本
  *
- * 每帧 = 1 次页面合成（除平移外无裁剪、无变换） + 1 个渐变矩形；全部预分配，
- * `onDraw` 内零分配，不触达解码/增强。
+ * 每帧 = 1 次页面合成 + 1 个渐变矩形；纸档多一个隔离层。全部预分配、零分配。
  */
 internal class PageFlipView(context: Context) : View(context) {
 
@@ -48,15 +56,21 @@ internal class PageFlipView(context: Context) : View(context) {
 
     /**
      * 新页在屏幕上的左边界（像素）。为正是从右侧滑入，为负是从左侧滑入；
-     * 0 表示已经盖满。方向完全由此值决定，见类注释。
+     * 方向完全由此值决定，两个方向走同一段代码。
      */
     var sheetOffsetX: Float = 0f
 
     /** 覆盖进度（仅用于投影淡入）。 */
     var progress: Float = 0f
 
+    /** 页面底色（`pageCanvasColor`），纸档隔离层里当页面之下的衬底用。 */
+    var canvasColor: Int = Color.WHITE
+
     /** 投在下方当前页上的阴影。 */
     private val shadowPaint = Paint()
+
+    /** 纸档隔离层的衬底画笔。 */
+    private val backdropPaint = Paint()
 
     private var shadowW = 0f
 
@@ -129,7 +143,7 @@ internal class PageFlipView(context: Context) : View(context) {
         // 投影落在下方当前页上，也就是新页前沿的外侧。
         val shadowDir = if (fromRight) -1f else 1f
 
-        // 起点附近淡入，避免刚起手就闪一道暗带。
+        // ① 投影：起点附近淡入，避免刚起手就闪一道暗带。
         val fade = (progress / START_FADE).coerceAtMost(1f)
         shadowPaint.alpha = (255 * fade).toInt().coerceIn(0, 255)
         val sc1 = canvas.save()
@@ -138,10 +152,20 @@ internal class PageFlipView(context: Context) : View(context) {
         canvas.drawRect(0f, 0f, shadowW, h, shadowPaint)
         canvas.restoreToCount(sc1)
 
-        // 新页：按真实屏幕位置画在最上层，盖住当前页。
+        // ② 新页：按真实屏幕位置画在最上层，盖住当前页。
         val sc2 = canvas.save()
         canvas.translate(left, 0f)
-        sheet.draw(canvas)
+        if (PaperPageTexture.enabled) {
+            // 纸档隔离层：见类注释。先铺底色再画页面，纸纹只跟页面自身相乘。
+            val layer = canvas.saveLayer(0f, 0f, w, h, null)
+            backdropPaint.color = canvasColor
+            backdropPaint.alpha = 255
+            canvas.drawRect(0f, 0f, w, h, backdropPaint)
+            sheet.draw(canvas)
+            canvas.restoreToCount(layer)
+        } else {
+            sheet.draw(canvas)
+        }
         canvas.restoreToCount(sc2)
     }
 
