@@ -168,8 +168,6 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             pageFlip.overlay,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
-        // 折线倾角来自手指落点：抓页面上部/下部决定折线绕哪一端旋转。
-        pager.touchDownListener = { _, y -> pageFlip.onTouchDown(y) }
         // SY: 离屏缓冲 = 1（前后各 1 页）。流畅度由「并发解码密度」决定而非 Mutex：
         // offscreen 越高，ViewPager 同时撑起的页面越多，5000×2400 整页解码+Lanczos 增强
         // 并发打满 CPU/GC 导致掉帧。降回 1 恢复最早顺滑感；独立的 ByteArray 内存流已

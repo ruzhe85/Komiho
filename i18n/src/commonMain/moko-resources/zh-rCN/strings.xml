@@ -125,7 +125,7 @@
     <string name="pref_fullscreen">全屏</string>
     <string name="pref_page_transitions">翻页动画</string>
     <string name="pref_page_flip">真实翻书动画</string>
-    <string name="pref_page_flip_summary">新的一页从一侧压上来，替代整屏滑移</string>
+    <string name="pref_page_flip_summary">当前页不动、下一页盖上来，接近实体书翻页</string>
     <string name="pref_double_tap_anim_speed">双击动画速度</string>
     <string name="pref_show_page_number">显示页码</string>
     <string name="pref_crop_borders">裁剪边缘</string>
