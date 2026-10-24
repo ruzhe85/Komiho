@@ -55,9 +55,32 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
     // region 对外入口
 
+    /**
+     * 点击翻页**启动前**预置会话。
+     *
+     * 钉住当前页的动作必须发生在滚动开始之前：若等第一帧 `onPageScrolled` 才接管，
+     * 那一帧页面已经滚开了一小段，钉住会把它拽回原位 —— 观感就是「画面抖一下才开始动」。
+     * 在静止状态预置时 `left - scrollX ≈ 0`，钉住是零位移，衔接无缝。
+     */
+    fun prepareForFlip(pages: Int) {
+        if (!isSupported()) return
+        val pager = viewer.pager
+        val leavingItem = viewer.itemAt(pager.currentItem)
+        val enteringItem = viewer.itemAt(pager.currentItem + pages)
+        if (leavingItem !is ReaderPage || enteringItem !is ReaderPage) return
+        val leaving = findHolder(leavingItem) ?: return
+        val entering = findHolder(enteringItem) ?: return
+
+        end()
+        entering.alpha = 0f
+        val prepared = Session(pinnedView = leaving, sheetView = entering)
+        session = prepared
+        applyFrame(prepared, pager.scrollX, 0f)
+    }
+
     /** `ViewPager` 的滚动回调，唯一的驱动源：拖动与 `setCurrentItem(…, true)` 都走这里。 */
     fun onPageScrolled(position: Int, offset: Float) {
-        if (offset <= PageFlipView.MIN_PROGRESS || !isEnabled()) {
+        if (!isSupported() || scrollState == ViewPager.SCROLL_STATE_IDLE) {
             end()
             return
         }
@@ -65,7 +88,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val pager = viewer.pager
         val scrollX = pager.scrollX
         val current = session ?: startSession(position, scrollX) ?: return
+        applyFrame(current, scrollX, offset)
+    }
 
+    private fun applyFrame(current: Session, scrollX: Int, offset: Float) {
         // 钉住当前页：让它相对视口停在 0（抵消 ViewPager 给它的位移）。
         current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
         // 新页按它自己的真实屏幕位置绘制，方向由位置本身决定，不需要额外判断。
@@ -138,9 +164,11 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         return Session(pinnedView = pinned, sheetView = sheet).also { session = it }
     }
 
-    private fun isEnabled(): Boolean {
-        // 瞬间跳页（恢复进度 / 旋转 / 滑杆拖拽）不接管：那几个场景根本没有滚动过程。
-        if (scrollState == ViewPager.SCROLL_STATE_IDLE) return false
+    /**
+     * 这个 viewer 是否支持覆盖翻页（与「此刻是否在滚动」无关 —— 点击翻页需要在滚动
+     * 开始之前就预置会话，见 [prepareForFlip]）。
+     */
+    private fun isSupported(): Boolean {
         // 只有横向的 L2R / R2L 页漫才翻书；竖向翻页没有「纸」的语义。
         if (viewer is VerticalPagerViewer) return false
         if (viewer !is L2RPagerViewer && viewer !is R2LPagerViewer) return false

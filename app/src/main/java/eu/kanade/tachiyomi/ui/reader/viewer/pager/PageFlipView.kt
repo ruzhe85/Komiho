@@ -170,9 +170,6 @@ internal class PageFlipView(context: Context) : View(context) {
     }
 
     internal companion object {
-        /** 低于此进度不接管（新页还在屏幕外）。 */
-        const val MIN_PROGRESS = 0.002f
-
         /** 投影宽度（占页宽比例）。 */
         const val SHADOW_FRACTION = 0.045f
 
