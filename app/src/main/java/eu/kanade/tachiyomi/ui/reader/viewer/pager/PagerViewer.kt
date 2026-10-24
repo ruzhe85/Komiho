@@ -280,6 +280,26 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     fun itemAt(position: Int): Any? = adapter.joinedItems.getOrNull(position)?.first
 
     /**
+     * Komiho: 双击缩放实时生效 —— 遍历当前页 View 逐个切换，不必重新加载图片。
+     *
+     * 页 View 的 `Config` 是加载那一刻的快照，只改设置不会影响已经渲染出来的页；
+     * 而 [Pager.tapImmediate] 是实时的，两者必须一起变。
+     */
+    /**
+     * Komiho: 上一次翻页是否还没结束（用于连点时忽略新点击）。
+     *
+     * - 平移：`ViewPager` 还在 DRAGGING / SETTLING（[isIdle] 为 false）；
+     * - 覆盖翻页：ViewPager 全程不动、[isIdle] 一直是 true，要看叠加层自己的动画。
+     */
+    private fun isBusyWithFlip(): Boolean = !isIdle || pageFlip.isBusy
+
+    fun applyDoubleTapZoom(enabled: Boolean) {
+        for (i in 0 until pager.childCount) {
+            (pager.getChildAt(i) as? PagerPageHolder)?.setDoubleTapZoomEnabled(enabled)
+        }
+    }
+
+    /**
      * Returns the PagerPageHolder for the provided page
      */
     private fun getPageHolder(page: ReaderPage): PagerPageHolder? =
@@ -614,12 +634,17 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Moves to the page at the right.
      */
     protected open fun moveRight() {
+        // Komiho: 上一页还没翻完就忽略这次点击。
+        // 关掉双击缩放后点击是「抬手即派发」，连点会连着排好几次翻页：动画被不断重定向，
+        // 观感是一闪就过去；更要紧的是页面来不及解码 / 增强，状态会落到 skip 或 CPU 回退。
+        if (isBusyWithFlip()) return
         if (pager.currentItem != adapter.count - 1) {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanRight()) {
                 holder.panRight()
-            } else if (config.pageFlipActive && pager.isHorizontalPager) {
-                // Komiho: 点击翻页由叠加层自己播（ViewPager 全程不动），结束后一次性落位。
+            } else if (config.pageSlideAnimationsEnabled && pager.isHorizontalPager) {
+                // Komiho: 点击翻页统一由叠加层播放（平移 / 覆盖同一套时长与缓动）。
+                // 交回 ViewPager 的话时长由它的 Scroller 决定，而这个 fork 换不掉 Scroller。
                 pageFlip.startTapFlip(1)
             } else {
                 pager.setCurrentItem(pager.currentItem + 1, config.pageSlideAnimationsEnabled)
@@ -631,11 +656,13 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Moves to the page at the left.
      */
     protected open fun moveLeft() {
+        // Komiho: 同上 —— 上一页还没翻完就忽略这次点击。
+        if (isBusyWithFlip()) return
         if (pager.currentItem != 0) {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanLeft()) {
                 holder.panLeft()
-            } else if (config.pageFlipActive && pager.isHorizontalPager) {
+            } else if (config.pageSlideAnimationsEnabled && pager.isHorizontalPager) {
                 // Komiho: 同上。
                 pageFlip.startTapFlip(-1)
             } else {

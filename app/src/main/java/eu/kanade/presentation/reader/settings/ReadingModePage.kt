@@ -142,16 +142,19 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
     }
     // SY <--
 
+    // Komiho: 裁边是主项，「深度裁剪」是它的附加档 —— 只有开了裁边才出现，
+    // 不在菜单里留一个「永远是无效状态」的开关。
+    val cropBorders by screenModel.preferences.cropBorders.collectAsState()
     CheckboxItem(
         label = stringResource(MR.strings.pref_crop_borders),
         pref = screenModel.preferences.cropBorders,
     )
-
-    // Komiho: 深度裁剪边缘 —— 全局开关，跟随各裁边开关生效。
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_crop_borders_aggressive),
-        pref = screenModel.preferences.cropBordersAggressive,
-    )
+    if (cropBorders) {
+        CheckboxItem(
+            label = stringResource(MR.strings.pref_crop_borders_aggressive),
+            pref = screenModel.preferences.cropBordersAggressive,
+        )
+    }
 
     CheckboxItem(
         label = stringResource(MR.strings.pref_landscape_zoom),
@@ -192,40 +195,51 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
     // SY -->
     // Komiho (2026-10-04): E-Ink 生效时翻页动画由 E-Ink 接管（已被写成关闭），开关置灰。
     val pageTransitionsLocked = einkAnimationOff()
+    val pageTransitionsPager by screenModel.preferences.pageTransitionsPager.collectAsState()
     CheckboxItem(
         label = stringResource(MR.strings.pref_page_transitions),
         pref = screenModel.preferences.pageTransitionsPager,
         enabled = !pageTransitionsLocked,
     )
 
-    // Komiho: 覆盖翻页（页漫）。从属于上面的总开关，E-Ink 关动画 / 总开关关闭时一并置灰
-    // —— 与全局设置里的同一项保持一致的启用条件。
-    val pageTransitionsPager by screenModel.preferences.pageTransitionsPager.collectAsState()
-    // Komiho: 双击缩放。关掉后点击翻页不再等双击判定，抬手即启动。
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_paged_double_tap_zoom),
-        pref = screenModel.preferences.pagedDoubleTapZoom,
-    )
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_page_flip),
-        pref = screenModel.preferences.pageFlipAnimation,
-        enabled = !pageTransitionsLocked && pageTransitionsPager,
-    )
+    // Komiho: 翻页方式是「翻页动画」的下一层 —— 总开关没开就不出现在菜单里。
+    // 平移 = ViewPager 原生滑移（时长由它自己的结算公式决定，改不了）；
+    // 覆盖 = 叠加层动画（时长可调）。
+    if (!pageTransitionsLocked && pageTransitionsPager) {
+        val pageFlipOn by screenModel.preferences.pageFlipAnimation.collectAsState()
+        SettingsChipRow(MR.strings.pref_page_flip_mode) {
+            listOf(false, true).forEach { cover ->
+                FilterChip(
+                    selected = pageFlipOn == cover,
+                    onClick = { screenModel.preferences.pageFlipAnimation.set(cover) },
+                    label = {
+                        Text(
+                            stringResource(
+                                if (cover) MR.strings.pref_page_flip else MR.strings.pref_page_flip_translate,
+                            ),
+                        )
+                    },
+                )
+            }
+        }
 
-    // Komiho: 点击翻页时长基准（100~250，步进 50；整页实际用时 = 基准 × 2）。
-    // 放在这里是为了能在阅读器里直接对比手感，不用退回全局设置。
-    val pageFlipOn by screenModel.preferences.pageFlipAnimation.collectAsState()
-    if (pageFlipOn && !pageTransitionsLocked && pageTransitionsPager) {
+        // 时长对平移 / 覆盖都生效（两者都由叠加层播放）；显示整页实际用时（= 基准 × 2）。
         val pageFlipSpeed by screenModel.preferences.pageFlipSpeed.collectAsState()
         SliderItem(
             value = pageFlipSpeed,
             valueRange = 100..250,
             steps = 2,
             label = stringResource(MR.strings.pref_page_flip_speed),
-            valueString = "$pageFlipSpeed ms",
+            valueString = "${pageFlipSpeed * 2} ms",
             onChange = { screenModel.preferences.pageFlipSpeed.set(it) },
         )
     }
+
+    // Komiho: 双击缩放。关掉后点击翻页不再等双击判定，抬手即启动。
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_paged_double_tap_zoom),
+        pref = screenModel.preferences.pagedDoubleTapZoom,
+    )
 
     CheckboxItem(
         label = stringResource(SYMR.strings.invert_double_pages),

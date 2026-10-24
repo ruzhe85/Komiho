@@ -127,6 +127,8 @@
     <string name="pref_page_flip">覆盖翻页</string>
     <string name="pref_page_flip_summary">当前页不动，下一页滑上来把它盖住</string>
     <string name="pref_page_flip_speed">点击翻页时长</string>
+    <string name="pref_page_flip_mode">翻页方式</string>
+    <string name="pref_page_flip_translate">平移</string>
     <string name="pref_paged_double_tap_zoom">双击缩放</string>
     <string name="pref_paged_double_tap_zoom_summary">关闭后点击翻页立刻启动，不再等双击判定</string>
     <string name="pref_double_tap_anim_speed">双击动画速度</string>

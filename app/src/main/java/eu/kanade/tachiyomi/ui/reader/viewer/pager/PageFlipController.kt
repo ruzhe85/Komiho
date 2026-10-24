@@ -100,6 +100,11 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         }
         // 新页的起点就是它在布局里的真实位置（±页宽），方向不用额外判断。
         val startOffset = overlay.sheetOffsetX
+        // 覆盖 = 当前页钉住不动、新页压上来；平移 = 两页并排滑动（当前页反向让开）。
+        // 平移不画交界投影 —— 两页没有层级关系。
+        val slide = !viewer.config.pageFlipEnabled
+        overlay.drawShadow = !slide
+        val pinnedView = session?.pinnedView
         tapAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = settlingDurationFor(pages)
             interpolator = AccelerateDecelerateInterpolator()
@@ -107,6 +112,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
                 val t = it.animatedValue as Float
                 overlay.sheetOffsetX = startOffset * (1f - t)
                 overlay.progress = t
+                // 平移：当前页仍由 ViewPager 绘制，这里只补它的位移（覆盖模式恒为 0）。
+                if (slide && pinnedView != null) pinnedView.translationX = -startOffset * t
                 overlay.invalidate()
             }
             doOnEnd {
@@ -121,6 +128,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     fun abortTapFlip() {
         tapAnimator?.cancel() // cancel 也会走 doOnEnd → commitTapFlip
     }
+
+    /** 点击翻页动画是否正在进行（用于连点时忽略新点击，见 `PagerViewer.moveRight`）。 */
+    val isBusy: Boolean
+        get() = tapAnimator != null
 
     private fun commitTapFlip(target: Int) {
         val current = session
@@ -150,7 +161,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
      * @return 是否成功备好一张可用的「纸」。
      */
     private fun prepareSession(pages: Int): Boolean {
-        if (!isSupported()) return false
+        // 注意这里判的是「翻页动画是否开着」而不是 [isSupported]（那条要求开了覆盖翻页）：
+        // 点击翻页不论平移还是覆盖都由叠加层播，拖动才只有覆盖需要接管。
+        if (!canDriveTapFlip()) return false
         val pager = viewer.pager
         val leavingItem = viewer.itemAt(pager.currentItem)
         val enteringItem = viewer.itemAt(pager.currentItem + pages)
@@ -263,8 +276,21 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     }
 
     /**
-     * 这个 viewer 是否支持覆盖翻页（与「此刻是否在滚动」无关 —— 点击翻页需要在滚动
-     * 开始之前就预置会话，见 [startTapFlip]）。
+     * 点击翻页是否可以由叠加层接管。
+     *
+     * 只要「翻页动画」开着就行 —— 平移与覆盖都由 [startTapFlip] 播放（这样时长才可控，
+     * `ViewPager` 的 Scroller 在这个 fork 里换不掉）。竖向翻页没有横向的语义，不接管。
+     */
+    private fun canDriveTapFlip(): Boolean {
+        if (viewer is VerticalPagerViewer) return false
+        if (viewer !is L2RPagerViewer && viewer !is R2LPagerViewer) return false
+        if (viewer.activity.isScrollingThroughPages) return false
+        return viewer.config.pageSlideAnimationsEnabled
+    }
+
+    /**
+     * 这个 viewer 是否支持**拖动**时的覆盖翻页（与「此刻是否在滚动」无关 —— 点击翻页
+     * 需要在滚动开始之前就预置会话，见 [startTapFlip]）。
      */
     private fun isSupported(): Boolean {
         // 只有横向的 L2R / R2L 页漫才翻书；竖向翻页没有「纸」的语义。

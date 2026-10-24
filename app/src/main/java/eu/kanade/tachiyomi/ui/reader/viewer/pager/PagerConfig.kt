@@ -237,6 +237,8 @@ class PagerConfig(
             .register({ enabled ->
                 pagedDoubleTapZoom = enabled
                 viewer.pager.tapImmediate = !enabled
+                // 已渲染出来的页也要立刻跟着变，否则「点击没延迟了、双击却还能放大」。
+                viewer.applyDoubleTapZoom(enabled)
             })
         readerPreferences.readerTheme
             .register(

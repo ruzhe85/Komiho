@@ -106,6 +106,29 @@ open class ReaderPageImageView @JvmOverloads constructor(
     val imageSHeight: Int
         get() = (pageView as? SubsamplingScaleImageView)?.sHeight ?: 0
 
+    // Komiho: 双击缩放的运行期状态。
+    // `Config` 是图片加载那一刻的快照，改设置后不重新加载就不会变 —— 而点击翻页的
+    // `Pager.tapImmediate` 是实时的，两边必须同步，否则会出现「点击没延迟了但双击还能放大」。
+    private var doubleTapZoomEnabled = true
+    private var doubleTapZoomScale = 1f
+
+    /**
+     * Komiho: 实时切换双击缩放 —— 不必重新加载图片。
+     *
+     * 关掉时把 SSIV 的双击目标设成当前缩放（等于不放大），PhotoView 则由
+     * [doubleTapZoomEnabled] 直接拦下。
+     */
+    fun setDoubleTapZoomEnabled(enabled: Boolean) {
+        doubleTapZoomEnabled = enabled
+        val view = pageView as? SubsamplingScaleImageView ?: return
+        // 视图还没布局时 scale 可能是 0，先跳过 —— 图片加载完 setupZoom 会按 config 再设一次。
+        if (!enabled) {
+            if (view.scale > 0f) view.setDoubleTapZoomScale(view.scale)
+        } else if (doubleTapZoomScale > 0f) {
+            view.setDoubleTapZoomScale(doubleTapZoomScale)
+        }
+    }
+
     /**
      * For automatic background. Will be set as background color when [onImageLoaded] is called.
      */
@@ -426,7 +449,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
         maxScale = scale * MAX_ZOOM_SCALE
         // Komiho: 关闭「双击缩放」时把双击目标设成当前缩放 —— 双击等于不放大。
         // 配合 `Pager.tapImmediate`：没有双击判定后，点击翻页才能做到抬手即启动。
-        setDoubleTapZoomScale(if (config?.doubleTapZoom != false) scale * 2 else scale)
+        doubleTapZoomEnabled = config?.doubleTapZoom != false
+        doubleTapZoomScale = scale * 2
+        setDoubleTapZoomScale(if (doubleTapZoomEnabled) doubleTapZoomScale else scale)
 
         when (config?.zoomStartPosition) {
             ZoomStartPosition.LEFT -> setScaleAndCenter(scale, PointF(0F, 0F))
@@ -601,8 +626,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 setOnDoubleTapListener(
                     object : GestureDetector.SimpleOnGestureListener() {
                         override fun onDoubleTap(e: MotionEvent): Boolean {
-                            // Komiho: 关闭「双击缩放」后不再放大（见 Config.doubleTapZoom）。
-                            if (this@ReaderPageImageView.config?.doubleTapZoom == false) return false
+                            // Komiho: 关闭「双击缩放」后不再放大。
+                            // 读字段而不是 config —— 开关要能即时生效，config 是加载那一刻的快照。
+                            if (!doubleTapZoomEnabled) return false
                             if (scale > 1F) {
                                 setScale(1F, e.x, e.y, true)
                             } else {
