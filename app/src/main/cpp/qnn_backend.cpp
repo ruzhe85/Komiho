@@ -468,6 +468,16 @@ public:
                         output_quant8_buffer_.size());
     }
     padding_ = std::clamp(padding, 0, 48);
+    // Komiho (2026-10-25): tile 几何必须留得下有效区域，否则 process() 每次都静默 -1，
+    // 而 is_initialized() 仍为真 —— 上层看不出「初始化成功但不可用」，只会每页掉回退。
+    // 真机日志证实过：引擎重建后整段（约 3 分钟、32 页）全部走 Vulkan，直到下次重建才恢复。
+    // 这里让初始化**如实失败**，调用方就能正常回退 / 重试，而不是进入假可用状态。
+    if (tile_size_ <= 2 * padding_) {
+      LOGE("QNN tile geometry unusable: tile=%d padding=%d (need tile > 2*padding)",
+           tile_size_, padding_);
+      deactivate();
+      return false;
+    }
     configure_performance();
     initialized_ = true;
     LOGD("Loaded QNN graph %s with tile %dx%d, scale %dx, %s IO and padding %d",
@@ -480,11 +490,25 @@ public:
   int process(const uint8_t *input, int width, int height, int input_stride,
               uint8_t *output, int output_stride, std::atomic<int> *progress,
               const std::atomic<bool> *should_abort) {
-    if (!initialized_ || !input || !output || width <= 0 || height <= 0) {
+    // Komiho (2026-10-25): 每条失败都要说清楚原因。此前全是静默 -1，日志里只看到
+    // 「QNN HTP processing failed in 0 ms」而没有任何线索 —— 这是排查「掉到回退不回来」
+    // 时最大的障碍。
+    if (!initialized_) {
+      LOGE("process: engine not initialized");
+      return -1;
+    }
+    if (!input || !output) {
+      LOGE("process: null buffer (input=%p output=%p)", input, output);
+      return -1;
+    }
+    if (width <= 0 || height <= 0) {
+      LOGE("process: bad image size %dx%d", width, height);
       return -1;
     }
     const int core = tile_size_ - 2 * padding_;
     if (core <= 0) {
+      LOGE("process: invalid tile geometry tile=%d padding=%d core=%d",
+           tile_size_, padding_, core);
       return -1;
     }
     const int columns = (width + core - 1) / core;

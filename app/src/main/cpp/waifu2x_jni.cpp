@@ -416,13 +416,18 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeProcess(JNIEnv *env,
                                     .count();
             // Komiho: 成功才登记纯耗时（口径与 Vulkan 路径一致，角标据此剔除排队）
             g_last_inference_ms.store(ret == 0 ? (long long)qnn_ms : -1);
+            // Komiho (2026-10-25): 三种结果分开打。
+            // -2 = 被抢占（翻页 / 预载打断，正常且频繁）；-1 = 真失败（引擎不可用 /
+            // 几何非法 / graphExecute 报错）。以前两者都写成 "failed"，日志里看起来
+            // 像 NPU 一直在挂，实际上绝大多数只是打断。
             LOGD("QNN HTP processing %s in %lld ms",
-                 ret == 0 ? "completed" : "failed",
+                 ret == 0 ? "completed" : (ret == -2 ? "aborted" : "failed"),
                  static_cast<long long>(qnn_ms));
           }
 
           if (ret != 0 && !g_abort_processing.load() && g_waifu2x &&
               g_waifu2x->has_gpu_pipeline()) {
+            LOGD("QNN unavailable (ret=%d) - falling back to fused Vulkan", ret);
             const auto fused_start = std::chrono::steady_clock::now();
             ret = g_waifu2x->process_gpu(packed_input, outPixels,
                                          outInfo.stride, input_has_alpha,
