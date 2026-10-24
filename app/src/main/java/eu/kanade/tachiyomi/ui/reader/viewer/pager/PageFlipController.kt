@@ -1,5 +1,8 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
+import android.animation.ValueAnimator
+import android.view.animation.AccelerateDecelerateInterpolator
+import androidx.core.animation.doOnEnd
 import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
@@ -7,6 +10,12 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences.ReaderTheme
 
 /** Komiho 诊断 TAG：翻书动画。 */
 private const val KOMIHA_FLIP_TAG = "PageFlip"
+
+/**
+ * 点击翻页的时长。参考录制是 42.42fps，逐帧量下来一次换页约 8~9 帧（≈190~210ms），
+ * 取 220ms 与之对齐；曲线用「先加速后减速」，峰值速度只有平均值的 1.57 倍，快而不窜。
+ */
+private const val TAP_FLIP_MS = 220L
 
 /**
  * Komiho: 页漫「覆盖翻页」的驱动。
@@ -47,6 +56,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     /** 本轮滚动是否已经打过启动日志（避免逐帧刷屏）。 */
     private var loggedThisScroll = false
 
+    /** 点击翻页动画（见 [startTapFlip]）。 */
+    private var tapAnimator: ValueAnimator? = null
+
     init {
         // 跨 View 绘制失败（极少数机型/页面）→ 立刻收尾，把页 View 复原，
         // 用户看到的就是一次普通滑动，而不是「页不见了」。
@@ -56,26 +68,91 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     // region 对外入口
 
     /**
-     * 点击翻页**启动前**预置会话。
+     * 点击 / 按键翻页：由叠加层自己播完，最后一帧一次性落到目标页。
      *
-     * 钉住当前页的动作必须发生在滚动开始之前：若等第一帧 `onPageScrolled` 才接管，
-     * 那一帧页面已经滚开了一小段，钉住会把它拽回原位 —— 观感就是「画面抖一下才开始动」。
-     * 在静止状态预置时 `left - scrollX ≈ 0`，钉住是零位移，衔接无缝。
+     * ## 为什么不用 `setCurrentItem(…, true)` 或「假拖动」
+     *
+     * - `setCurrentItem(…, true)` 用 ViewPager 写死的 viscous-fluid 曲线，前 100ms 走完
+     *   大半行程，观感很「窜」；而这个 fork 没有暴露 `setScroller`，换不了曲线。
+     * - 「假拖动」（`beginFakeDrag` + `fakeDragBy`）看起来能自定义曲线，但它绕过了手势的
+     *   位移累积：首帧真正滚动的像素与我们给的值并不严格相等。叠加层是按**真实 `scrollX`**
+     *   钉住当前页的，于是第一帧就被拽回一点 —— 表现就是「横向抖一下，然后才开始动」。
+     *
+     * 现在整段动画里 ViewPager **一动不动**（`currentItem` 也不变），叠加层把新页从一侧
+     * 推到 0；结束后 `setCurrentItem(target, false)` 一次性落位。因为叠加层早已把新页画满
+     * 全屏，这一下切换在视觉上不可见，也就不存在任何「拽回」。
      */
-    fun prepareForFlip(pages: Int) {
-        if (!isSupported()) return
+    fun startTapFlip(pages: Int) {
+        // 先把上一次还没播完的落位（连点两次时 currentItem 会因此变化，target 必须在那之后算）。
+        abortTapFlip()
+
+        val pager = viewer.pager
+        val target = pager.currentItem + pages
+        if (target < 0 || target >= viewer.adapter.count) return
+
+        val prepared = prepareSession(pages)
+        if (!prepared) {
+            // 没有可用的「纸」（章节过渡页 / 页未就绪）：交回 ViewPager 的默认动画。
+            pager.setCurrentItem(target, true)
+            return
+        }
+        // 新页的起点就是它在布局里的真实位置（±页宽），方向不用额外判断。
+        val startOffset = overlay.sheetOffsetX
+        tapAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = TAP_FLIP_MS
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                overlay.sheetOffsetX = startOffset * (1f - t)
+                overlay.progress = t
+                overlay.invalidate()
+            }
+            doOnEnd {
+                tapAnimator = null
+                commitTapFlip(target)
+            }
+            start()
+        }
+    }
+
+    /** 动画途中用户触摸 → 立即落位，把控制权交回手势。 */
+    fun abortTapFlip() {
+        tapAnimator?.cancel() // cancel 也会走 doOnEnd → commitTapFlip
+    }
+
+    private fun commitTapFlip(target: Int) {
+        val current = session
+        session = null
+        overlay.reset()
+        // 先落位再复原：落位后新页就是 currentItem，恢复 alpha 不会闪。
+        viewer.pager.setCurrentItem(target, false)
+        current?.pinnedView?.translationX = 0f
+        current?.sheetView?.alpha = 1f
+    }
+
+    /**
+     * 预置会话：钉住当前页、藏起新页。
+     *
+     * 必须在动画开始**之前**做：钉住是按 `left - scrollX` 算的，静止状态下它就是 0，
+     * 所以没有任何位移跳变。
+     *
+     * @return 是否成功备好一张可用的「纸」。
+     */
+    private fun prepareSession(pages: Int): Boolean {
+        if (!isSupported()) return false
         val pager = viewer.pager
         val leavingItem = viewer.itemAt(pager.currentItem)
         val enteringItem = viewer.itemAt(pager.currentItem + pages)
-        if (leavingItem !is ReaderPage || enteringItem !is ReaderPage) return
-        val leaving = findHolder(leavingItem) ?: return
-        val entering = findHolder(enteringItem) ?: return
+        if (leavingItem !is ReaderPage || enteringItem !is ReaderPage) return false
+        val leaving = findHolder(leavingItem) ?: return false
+        val entering = findHolder(enteringItem) ?: return false
 
         end()
         entering.alpha = 0f
         val prepared = Session(pinnedView = leaving, sheetView = entering)
         session = prepared
         applyFrame(prepared, pager.scrollX, 0f)
+        return true
     }
 
     /** `ViewPager` 的滚动回调，唯一的驱动源：拖动与 `setCurrentItem(…, true)` 都走这里。 */
@@ -114,8 +191,18 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         }
     }
 
-    /** 立即结束并复位所有副作用（幂等）。 */
+    /**
+     * 立即结束并复位所有副作用（幂等）。
+     *
+     * 若点击动画正在进行，这里是**放弃**它（不跳页）；主动落位走 [commitTapFlip]。
+     */
     fun end() {
+        // 先摘监听再取消：否则 cancel 会走 doOnEnd → commitTapFlip，在收尾途中又去跳页。
+        tapAnimator?.also {
+            it.removeAllListeners()
+            it.cancel()
+        }
+        tapAnimator = null
         val current = session ?: return
         session = null
         current.pinnedView.translationX = 0f
@@ -166,7 +253,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
     /**
      * 这个 viewer 是否支持覆盖翻页（与「此刻是否在滚动」无关 —— 点击翻页需要在滚动
-     * 开始之前就预置会话，见 [prepareForFlip]）。
+     * 开始之前就预置会话，见 [startTapFlip]）。
      */
     private fun isSupported(): Boolean {
         // 只有横向的 L2R / R2L 页漫才翻书；竖向翻页没有「纸」的语义。

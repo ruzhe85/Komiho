@@ -1,14 +1,11 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
-import android.animation.ValueAnimator
 import android.content.Context
 import android.os.Parcelable
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ViewConfiguration
-import android.view.animation.AccelerateDecelerateInterpolator
-import androidx.core.animation.doOnEnd
 import androidx.viewpager.widget.DirectionalViewPager
 import eu.kanade.tachiyomi.ui.reader.viewer.GestureDetectorWithLongTap
 import eu.kanade.tachiyomi.util.system.EinkMotion
@@ -43,64 +40,14 @@ open class Pager(
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
 
-    /** Komiho: 是否为横向 pager。竖向翻页没有覆盖翻页动画，[flipByPages] 也不适用。 */
+    /** Komiho: 是否为横向 pager。竖向翻页没有覆盖翻页动画。 */
     val isHorizontalPager: Boolean = isHorizontal
 
-    /** Komiho: 点击翻页动画（见 [flipByPages]）。 */
-    private var flipAnimator: ValueAnimator? = null
-
     /**
-     * Komiho: 用「假拖动」驱动一次整页翻页，时长与缓动自己控制。
-     *
-     * `setCurrentItem(…, true)` 的曲线被这个 fork 写死（默认 `Scroller` 起步极快，点一下
-     * 屏幕页面是「窜」进来的），而它没有暴露 `setScroller`，没法只换缓动曲线。
-     * 所以自己按目标曲线喂 [fakeDragBy]，最后 [endFakeDrag] 收尾 —— 这时剩余位移≈0，
-     * 不会再补一段默认动画。滚动过程中的 `onPageScrolled` 照常派发，翻页动画不受影响。
-     *
-     * @param pages 正数往后翻，负数往前翻。
+     * Komiho: 手势按下回调。点击翻页动画进行中若用户触摸屏幕，用它立刻落位、
+     * 把控制权交回手势（见 `PageFlipController.abortTapFlip`）。
      */
-    fun flipByPages(pages: Int) {
-        cancelFlipAnimation()
-        if (!beginFakeDrag()) {
-            // 正在被真实手势拖动等情况：退回默认行为，不要卡住。
-            setCurrentItem(currentItem + pages, true)
-            return
-        }
-        val total = width.toFloat() * pages
-        var last = 0f
-        flipAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = FLIP_DURATION_MS
-            interpolator = AccelerateDecelerateInterpolator()
-            addUpdateListener {
-                val t = it.animatedValue as Float
-                // fakeDragBy 的入参是「手指位移」：往左拖为负，内容才往左走（页码增大）。
-                fakeDragBy(-(total * (t - last)))
-                last = t
-            }
-            doOnEnd {
-                flipAnimator = null
-                endFakeDrag()
-            }
-            start()
-        }
-    }
-
-    /** 取消进行中的点击翻页动画（用户重新触摸屏幕时应立刻让位）。 */
-    private fun cancelFlipAnimation() {
-        flipAnimator?.cancel()
-        flipAnimator = null
-    }
-
-    /**
-     * 点击翻页的时长。
-     *
-     * 参考录制是 42fps，逐帧比对下来一次换页大约占 8~9 帧（≈190~210ms），明显比
-     * `ViewPager` 自带的 500ms 果断得多，但它的速度曲线是平滑的 —— 快而不「窜」。
-     * 这里取 220ms + 先加速后减速：时长贴近参考，峰值速度只有平均速度的 1.57 倍。
-     */
-    private companion object {
-        const val FLIP_DURATION_MS = 220L
-    }
+    var onTouchDownListener: (() -> Unit)? = null
 
     /** 本次手势是否走「不跟手翻页」（只在 ACTION_DOWN 判定一次，避免每个事件都读偏好）。 */
     private var einkSwipeGesture = false
@@ -156,8 +103,8 @@ open class Pager(
      */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
-            // Komiho: 用户重新触摸时立刻停掉点击翻页动画，让手势接管。
-            cancelFlipAnimation()
+            // Komiho: 用户重新触摸时立刻让点击翻页动画落位，把控制权交回手势。
+            onTouchDownListener?.invoke()
             beginSwipeTracking(ev)
         }
         val handled = super.dispatchTouchEvent(ev)

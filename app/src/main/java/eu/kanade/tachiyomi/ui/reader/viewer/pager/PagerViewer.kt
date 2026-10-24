@@ -168,6 +168,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             pageFlip.overlay,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
+        // Komiho: 点击翻页动画途中用户触摸 → 立刻落位，把控制权交回手势。
+        pager.onTouchDownListener = { pageFlip.abortTapFlip() }
         // SY: 离屏缓冲 = 1（前后各 1 页）。流畅度由「并发解码密度」决定而非 Mutex：
         // offscreen 越高，ViewPager 同时撑起的页面越多，5000×2400 整页解码+Lanczos 增强
         // 并发打满 CPU/GC 导致掉帧。降回 1 恢复最早顺滑感；独立的 ByteArray 内存流已
@@ -617,10 +619,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             if (holder != null && config.navigateToPan && holder.canPanRight()) {
                 holder.panRight()
             } else if (config.pageFlipActive && pager.isHorizontalPager) {
-                // Komiho: 点击翻页用「假拖动 + 先加速后减速」驱动，默认曲线起步太冲。
-                // 先预置会话（钉住当前页）再启动，否则第一帧才接管会把页面拽回去、抖一下。
-                pageFlip.prepareForFlip(1)
-                pager.flipByPages(1)
+                // Komiho: 点击翻页由叠加层自己播（ViewPager 全程不动），结束后一次性落位。
+                pageFlip.startTapFlip(1)
             } else {
                 pager.setCurrentItem(pager.currentItem + 1, config.pageSlideAnimationsEnabled)
             }
@@ -637,8 +637,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                 holder.panLeft()
             } else if (config.pageFlipActive && pager.isHorizontalPager) {
                 // Komiho: 同上。
-                pageFlip.prepareForFlip(-1)
-                pager.flipByPages(-1)
+                pageFlip.startTapFlip(-1)
             } else {
                 pager.setCurrentItem(pager.currentItem - 1, config.pageSlideAnimationsEnabled)
             }
