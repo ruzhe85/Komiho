@@ -18,85 +18,73 @@ import kotlin.math.sin
 /**
  * Komiho: 页漫「真实翻书」的绘制层。
  *
- * ## 它画什么
+ * ## 效果
  *
- * 一张正在翻动的纸，由三部分组成：
+ * **新的一页从一侧盖上来，把当前页压下去**，全程内容清晰：
  *
- * 1. **正面** —— 折线靠书脊一侧的剩余平放部分，内容取自 [sheetView]（真实页 View）；
- * 2. **背面** —— 折过去的那一块。几何上等于「页矩形 关于折线 的镜像」与「平放半平面」
- *    在页面范围内的交集，内容就是同一个 View 的镜像，再压一层纸色（[backTint]）；
- * 3. **折痕阴影** —— 沿折线对称衰减的渐变，压在前后两面之上，是「像纸」的关键一笔。
+ * ```
+ *   当前页 │阴影│折边│          新页（真实页 View，清晰）
+ * ```
  *
- * 目标页（翻过去后露出的那一页）始终是**活 View**，所以永远是增强后的最新图。
+ * - 新页就是目标页的**活 View**，直接画到本层（硬件画布）上，不是截图，所以永远是
+ *   增强后的最新图、全分辨率；
+ * - 当前页保持不动（就是下面那个真实页 View），随新页推进被逐步遮住；
+ * - 折边：新页前沿压住一条**空白纸**（纸的背面），配合折痕阴影，是「像纸」的关键一笔。
  *
- * ## 为什么直接画 View，而不是先截图
+ * ## 为什么是这个模型
  *
- * 曾经的做法是把页 View `draw()` 进一张位图再采样。实测**只能得到一片底色**：
- * 页面主体是 `SubsamplingScaleImageView` 在硬件画布上产出的绘制内容，重绘到软件位图
- * 上拿不到东西。改成直接 `View.draw(canvas)` 画到本层的硬件画布上之后：
- *
- * - 内容必然是屏上的真实画面（增强结果、裁边、缩放、翻页角标都在内）；
- * - 不需要额外位图（省掉 2.6MB 常驻 + 一次全屏 blit）；
- * - 没有「快照是半分辨率、翻动时发虚」的问题。
- *
- * 代价只有绘制量：纸面每帧多画 1~2 次页 View（纯纹理/compositing，不触发解码）。
+ * 曾经做过「当前页沿折线卷走、露出下一页」，但那张纸只能做到半透明的镜像页，屏幕上
+ * 会出现一大块看不清主体的重影；而且前置条件是「当前页先折叠」，与「下一页面盖上来」
+ * 的直觉相反。现在改成新页着陆覆盖：只有一块纸、内容清晰、每帧一次裁剪绘制。
  *
  * ## 成本约束（本文件最容易写坏的地方）
  *
  * - [onDraw] 内**零分配**：Path / Paint / Shader 全部是成员，逐帧只 `rewind()`；
- * - 不做 `setShadowLayer` / `saveLayer` / `Path.op` —— 绘制期触发离屏缓冲或几何布尔运算，
- *   是同类实现（含参考库）在低端机上掉帧的主因；
- * - 阴影渐变只在尺寸变化时创建，逐帧靠 canvas 平移旋转复用它。
- *
- * ## 方向
- *
- * 折线**永远从自由边扫向书脊**：[spineOnLeft] 为 true 时书脊在左（左→右阅读），
- * false 时书脊在右（日漫右→左）。翻页方向不同只改变 [PageFlipController] 里
- * 「纸面取自哪一页」与 progress 的走向，几何本身不变。
+ * - 每帧 = 1 次带裁剪的整页合成 + 1 个纸色四边形 + 1 个渐变矩形；
+ * - 不做 `setShadowLayer` / `saveLayer` / `Path.op` / 镜像重绘 —— 离屏缓冲与几何布尔
+ *   运算正是同类实现在低端机上掉帧的主因；纸化档位的纸纹是唯二的例外（复用页面同一张）。
  */
 internal class PageFlipView(context: Context) : View(context) {
 
     /**
-     * 正在翻动的那一页（真实页 View）。null = 没有可画的纸（空闲状态）。
+     * 正在盖上来那一页（真实页 View，即目标页）。null = 空闲。
      *
-     * 只作引用、**不缓存其绘制结果**：内容随时可能是增强刚出的新图。
+     * 只作引用、**不缓存绘制结果**：内容随时可能是增强刚出的新图。
      */
     var sheetView: View? = null
 
-    /**
-     * 翻动进度：0 = 整页平放（纸面盖满屏幕），1 = 完全翻走（屏幕上一点纸都不剩）。
-     * 由 `ViewPager` 的滚动偏移直接驱动，因此拖动与点击翻页共用同一套姿态。
-     */
+    /** 覆盖进度：0 = 还没盖上来（当前页完整），1 = 完全盖住（目标页完整）。 */
     var progress: Float = 0f
 
-    /** true = 书脊在左（L2R）；false = 书脊在右（R2L / 日漫）。 */
-    var spineOnLeft: Boolean = true
+    /** 新页从哪一侧盖上来：true = 从右往左，false = 从左往右。 */
+    var coverFromRight: Boolean = true
 
     /**
-     * 手指落点（0..1，相对屏幕高度），决定折线倾角：抓上方则折线绕上方旋转，
-     * 抓中间（0.5）退化为竖直折线。翻页动画的「捏住一角」手感全靠它。
+     * 手指落点（0..1，相对屏幕高度），让前沿略微倾斜：抓上方则上半部先盖到。
+     * 0.5 退化为竖直前沿。
      */
     var grabFraction: Float = 0.5f
 
     /**
      * 纸色，由控制器按当前背景档位给出：
      * - 普通档位 = `pageCanvasColor`；
-     * - 纸化档位（羊皮纸 / 牛皮纸）= `PaperStyle.whiteColor`（它们的 `pageCanvasColor`
-     *   恒为白，直接套会在翻动时露出一块纯白）。
+     * - 纸化档位（羊皮纸 / 牛皮纸）= `PaperStyle.whiteColor`。
      *
-     * 两处用途：纸面内容的**不透明衬底**（页 View 的 letterbox 是透明的，不铺底会漏出
-     * 下面那一页），以及背面纸色的 [tintPaint]。
+     * 两处用途：新页内容的**不透明衬底**（页 View 的 letterbox 是透明的，不铺底会漏出
+     * 下面那一页），以及折边那条空白纸。
      */
     var backTint: Int = Color.WHITE
 
-    /** 纸面衬底：不透明，画在页 View 之下。 */
+    /** 纸色。衬底与折边共用。 */
     private val sheetBgPaint = Paint()
-
-    /** 背面纸色：半透明，压在镜像内容之上，留一点透印。 */
-    private val tintPaint = Paint()
     private val shadowPaint = Paint()
-    private val frontPath = Path()
-    private val mirroredPath = Path()
+
+    /** 已盖住的区域（书脊侧到前沿）。 */
+    private val coveredPath = Path()
+
+    /** 前沿到折进去的那条线之间的一条带 —— 纸的背面。 */
+    private val foldPath = Path()
+
     private var shadowRadius = 0f
 
     /** 跨 View 绘制失败的记录标记（只记一次日志，之后静默跳过）。 */
@@ -114,8 +102,6 @@ internal class PageFlipView(context: Context) : View(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        // 阴影视口只在尺寸变化时重建：渐变坐标固定在本地系 ±radius，逐帧靠 canvas
-        // 的 translate+rotate 把它挪到折线上，因此拖动时不需要重新分配 Shader。
         shadowRadius = SHADOW_DP * resources.displayMetrics.density
         shadowPaint.shader = LinearGradient(
             0f,
@@ -137,9 +123,9 @@ internal class PageFlipView(context: Context) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        // 这里会把**别人的** View 画到自己的画布上，属于跨 View 绘制。正常情况下和
-        // DragShadowBuilder 是同一套机制，但一旦某个页面在这种画法下抛异常，异常会直接
-        // 落进绘制遍历 → 整个阅读器崩。兜住它：失败就退化成不画纸（页面照常可见）。
+        // 这里会把**别人的** View 画到自己的画布上，属于跨 View 绘制（与 DragShadowBuilder
+        // 同一套机制）。万一某个页面在这种画法下抛异常，异常会落进绘制遍历 → 阅读器崩，
+        // 所以兜住：失败就退化成不画纸（页面照常可见）。
         try {
             drawFlip(canvas)
         } catch (e: Throwable) {
@@ -159,32 +145,23 @@ internal class PageFlipView(context: Context) : View(context) {
     private fun drawFlip(canvas: Canvas) {
         val sheet = sheetView ?: return
         val p = progress
-        // 两端什么都不画：0 = 页面还是原样（真实页 View 就位），1 = 纸已经翻走。
+        // 两端不画：0 = 还没开始，1 = 已经盖满（交给真实页 View，避免多一层合成）。
         if (p <= MIN_PROGRESS || p >= MAX_PROGRESS) return
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val freeX = if (spineOnLeft) w else 0f
-        val spineX = if (spineOnLeft) 0f else w
+        // 前沿：从进入侧向另一侧推进，与 ViewPager 的滚动偏移 1:1（跟手）。
+        val travelled = p * w
+        val edgeX = if (coverFromRight) w - travelled else travelled
 
-        // 折线中点沿「自由边 → 书脊」推进。两段式：前 34% 走完 62% 的行程，
-        // 与参考实现（pagecurl 的 keyframes：450ms / 中间姿态在 150ms）比例一致。
-        val t = if (p < MID_PROGRESS) {
-            p / MID_PROGRESS * 0.62f
-        } else {
-            0.62f + (p - MID_PROGRESS) / (1f - MID_PROGRESS) * 0.38f
-        }
-        val cx = freeX + (spineX - freeX) * t
-
-        // 折线绕手指落点旋转，两端相对中点水平张开；张开量在两端收敛为 0
-        // （p→0 必须竖直贴住自由边，否则第一帧就会凭空出现一大块折角）。
+        // 前沿按手指落点倾一点：抓上半部则上半部先盖到，0.5 时竖直线。
         val gy = grabFraction.coerceIn(0.12f, 0.88f) * h
         val env = sin(PI.toFloat() * min(p / TILT_FADE_END, 1f))
-        val ahead = if (spineOnLeft) 1f else -1f
-        val drift = ahead * (0.5f - grabFraction) * 2f * TILT_MAX * w * env
-        val topX = cx - drift * (gy / h)
-        val botX = cx + drift * ((h - gy) / h)
+        val sign = if (coverFromRight) 1f else -1f
+        val drift = (0.5f - grabFraction) * 2f * TILT_MAX * w * env
+        val topX = edgeX - sign * drift * (gy / h)
+        val botX = edgeX + sign * drift * ((h - gy) / h)
 
         val dx = botX - topX
         val lineLen = hypot(dx, h)
@@ -192,60 +169,57 @@ internal class PageFlipView(context: Context) : View(context) {
         val ux = dx / lineLen
         val uy = h / lineLen
 
-        // 指向「平放侧」（书脊一侧）的单位法线。
-        val nx = if (spineOnLeft) -uy else uy
-        val ny = if (spineOnLeft) ux else -ux
+        // 前沿向「已覆盖侧」延伸的单位法线。
+        val nx = if (coverFromRight) uy else -uy
+        val ny = if (coverFromRight) -ux else ux
         val ext = (w + h) * 2f
 
-        frontPath.rewind()
-        frontPath.moveTo(topX, 0f)
-        frontPath.lineTo(botX, h)
-        frontPath.lineTo(botX + nx * ext, h + ny * ext)
-        frontPath.lineTo(topX + nx * ext, ny * ext)
-        frontPath.close()
+        // ① 已覆盖区域：新页（真实页 View）。
+        coveredPath.rewind()
+        coveredPath.moveTo(topX, 0f)
+        coveredPath.lineTo(botX, h)
+        coveredPath.lineTo(botX + nx * ext, h + ny * ext)
+        coveredPath.lineTo(topX + nx * ext, ny * ext)
+        coveredPath.close()
 
-        buildMirroredRect(topX, ux, uy, w, h)
-
-        val deg = atan2(uy, ux) * 180f / PI.toFloat()
         sheetBgPaint.color = backTint
         sheetBgPaint.alpha = 255
 
-        // ① 正面：折线靠书脊一侧的剩余平放部分。
-        //    只加裁剪、不加变换 —— 页 View 在这种画法下相当于一次普通合成，
-        //    页内部的裁剪计算（SSIV 按 clipBounds 挑瓦片）也仍然成立。
         val sc1 = canvas.save()
-        canvas.clipPath(frontPath)
+        canvas.clipPath(coveredPath)
         canvas.drawRect(0f, 0f, w, h, sheetBgPaint)
         sheet.draw(canvas)
         canvas.restoreToCount(sc1)
 
-        // ② 背面：平放半平面 ∩ 镜像后的页矩形。裁好之后把画布镜像过去再画同一个 View。
-        //    这里的镜像变换会让页内部的 clipBounds 判断失真（拿到的是设备空间的矩形），
-        //    所以背面内容只当「透印」看待：即便某些页面画不满，底色 + 纸色 + 阴影仍然成立。
-        val sc2 = canvas.save()
-        canvas.clipPath(frontPath)
-        canvas.clipPath(mirroredPath)
-        canvas.translate(topX, 0f)
-        canvas.rotate(deg)
-        canvas.scale(1f, -1f)
-        canvas.rotate(-deg)
-        canvas.translate(-topX, 0f)
-        canvas.drawRect(0f, 0f, w, h, sheetBgPaint)
-        sheet.draw(canvas)
-        tintPaint.color = backTint
-        tintPaint.alpha = BACK_TINT_ALPHA
-        canvas.drawRect(0f, 0f, w, h, tintPaint)
-        // 纸化档位：把页面级纸纹也乘到背面。否则翻动时会出现「有颗粒的页面 +
-        // 一块光面的纸」，色值也会比页面亮一档（纸色是乘完纸纹之后的均值）。
-        // 非纸档位时 drawOver 直接返回，零开销。
-        PaperPageTexture.drawOver(canvas, width, height)
-        canvas.restoreToCount(sc2)
+        // ② 折边：前沿往里 FLAP_FRACTION 的一条带，是压住的那张纸的**背面**（空白纸）。
+        //    两端淡出：起步时它还没出现，盖满时它必须收干，否则最后一帧会留一道白条。
+        val edgeFade = min(1f, min(p, 1f - p) / EDGE_FADE)
+        val flapW = FLAP_FRACTION * w * edgeFade
+        if (flapW > 0.5f) {
+            // 折线沿两端各延长 ext，保证倾斜时不会在屏幕上下沿留下缺口。
+            val ax = topX - ux * ext
+            val ay = -uy * ext
+            val bx = botX + ux * ext
+            val by = h + uy * ext
+            foldPath.rewind()
+            foldPath.moveTo(ax, ay)
+            foldPath.lineTo(bx, by)
+            foldPath.lineTo(bx - nx * flapW, by - ny * flapW)
+            foldPath.lineTo(ax - nx * flapW, ay - ny * flapW)
+            foldPath.close()
 
-        // ③ 折痕阴影：本地系里折线就是 x 轴，渐变沿 y 向对称衰减。
-        // 两端各淡出一段：阴影在折线贴到屏幕边缘时会突然消失，不淡出就是一次可见的闪跳。
-        if (shadowPaint.shader != null) {
-            val fade = min(1f, p / SHADOW_FADE_IN) * min(1f, (1f - p) / SHADOW_FADE_OUT)
-            shadowPaint.alpha = (255 * fade).toInt().coerceIn(0, 255)
+            val sc2 = canvas.save()
+            canvas.clipPath(foldPath)
+            canvas.drawRect(0f, 0f, w, h, sheetBgPaint)
+            // 纸化档位：折边也乘同一张纸纹，颗粒与色值才和页面一致。非纸档位直接返回。
+            PaperPageTexture.drawOver(canvas, width, height)
+            canvas.restoreToCount(sc2)
+        }
+
+        // ③ 折痕阴影：沿前沿对称衰减，正好压住「当前页 → 折边」这条交界，是让它像纸的关键。
+        if (shadowPaint.shader != null && edgeFade > 0f) {
+            shadowPaint.alpha = (255 * edgeFade).toInt().coerceIn(0, 255)
+            val deg = atan2(uy, ux) * 180f / PI.toFloat()
             val sc3 = canvas.save()
             canvas.translate(topX, 0f)
             canvas.rotate(deg)
@@ -254,58 +228,27 @@ internal class PageFlipView(context: Context) : View(context) {
         }
     }
 
-    /**
-     * 生成「页矩形关于折线镜像」后的四边形。
-     *
-     * 背面之所以还要裁它：折过去的那一块在几何上只可能来自页面本身，镜像矩形之外
-     * 对应的是「纸外」，不裁就会画出越出页面边缘的残影。
-     */
-    private fun buildMirroredRect(topX: Float, ux: Float, uy: Float, w: Float, h: Float) {
-        mirroredPath.rewind()
-        for (i in 0..3) {
-            val px = if (i == 0 || i == 3) 0f else w
-            val py = if (i < 2) 0f else h
-            val vx = px - topX
-            val vy = py
-            val dot = vx * ux + vy * uy
-            val rx = 2f * (topX + ux * dot) - px
-            val ry = 2f * (uy * dot) - py
-            if (i == 0) mirroredPath.moveTo(rx, ry) else mirroredPath.lineTo(rx, ry)
-        }
-        mirroredPath.close()
-    }
-
     internal companion object {
-        /**
-         * 低于此进度不绘制：此时纸还贴着原样，交给真实页 View。
-         *
-         * **与 `PageFlipController` 的接管阈值必须是同一个值** —— 低于它两边都不动手
-         * （既不藏真实页、也不抵消 ViewPager 的位移），高于它叠加层与真实页同时交接，
-         * 屏幕上不会出现「纸面与真实页同时可见」或「谁也没画」的中间态。
-         */
+        /** 低于此进度不绘制（此时目标页还没露出来，交给真实页 View）。 */
         const val MIN_PROGRESS = 0.002f
 
-        /** 高于此进度不绘制：纸已经翻出屏幕。 */
+        /** 高于此进度不绘制（此时已经盖满，交给真实页 View）。 */
         const val MAX_PROGRESS = 0.998f
 
-        /** 折线行程的分段点（对应参考实现 450ms 里的 150ms 中间姿态）。 */
-        const val MID_PROGRESS = 0.34f
+        /** 前沿倾斜的衰减终点：超过这个进度前沿必须已经竖直，否则贴近边缘时会撕裂。 */
+        const val TILT_FADE_END = 0.6f
 
-        /** 折线倾角的衰减终点：超过这个进度折线必须已经竖直，否则贴近书脊时会撕裂。 */
-        const val TILT_FADE_END = 0.75f
+        /** 前沿两端相对中点的最大水平张开（占页宽比例）。 */
+        const val TILT_MAX = 0.18f
 
-        /** 折线两端相对中点的最大水平张开（占页宽比例）。 */
-        const val TILT_MAX = 0.35f
+        /** 折边宽度（占页宽比例）。 */
+        const val FLAP_FRACTION = 0.05f
 
-        /** 背面纸色的不透明度：留一点背面内容透出来（模拟背面油墨透印）。 */
-        const val BACK_TINT_ALPHA = 217
+        /** 折边与阴影在起点 / 终点的淡出区间（占进度比例）。 */
+        const val EDGE_FADE = 0.12f
 
         /** 折痕阴影半径（dp）。 */
         const val SHADOW_DP = 18f
-
-        /** 阴影在起点 / 终点附近的淡出区间（占进度比例）。 */
-        const val SHADOW_FADE_IN = 0.06f
-        const val SHADOW_FADE_OUT = 0.12f
 
         /** 折痕阴影峰值色（约 24% 黑）。 */
         const val SHADOW_COLOR = 0x3D000000

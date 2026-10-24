@@ -17,25 +17,26 @@ private const val KOMIHA_FLIP_TAG = "PageFlip"
  * 翻页判定与滚动仍然完全交给 `ViewPager`（速度、阈值、边界、取消回弹都不碰），
  * 本类只做三件事：
  *
- * 1. 在用户开始翻页的那一刻选定「哪一页当纸」，交给 [PageFlipView]；
- * 2. 每收到一次 `onPageScrolled` 就把进度换算成折线姿态，同时把 `ViewPager` 自己的
- *    横向平移**抵消掉**（页面原地不动，只有纸在动）；
+ * 1. 在用户开始翻页的那一刻选定「哪一页盖上来」，交给 [PageFlipView]；
+ * 2. 每收到一次 `onPageScrolled` 就把进度交过去，同时把 `ViewPager` 自己的横向平移
+ *    **抵消掉**（两页都停在原位，屏幕上只有那张纸在推进）；
  * 3. 会话结束时复位（页 View 透明度、位移、叠加层）。
  *
- * ## 两张「纸」的来源
+ * ## 盖上来的是「目标页」
  *
- * - **前进**（页码往后走）：纸 = 出发页。它在屏幕上、必然已渲染，直接复用其 View。
- * - **后退**：纸 = 即将进入的那一页（进度 1 → 0）。物理上这是同一张叶子从书脊处翻回来
- *   落地 —— 起点纸是翻走的（不可见），终点正好盖满屏幕，与活 View 无缝交接。
+ * 两个方向都是**目标页从进入侧压住当前页**：当前页原地不动、保持不变暗，目标页逐步
+ * 露出。方向只决定从哪一侧进入（与 ViewPager 自身的滚动方向一致，跟手）。
  *
- * 两种方向共用同一套折线几何（折线从自由边扫向书脊），只有「纸取自哪一页」与进度
- * 走向相反。全程只有一张纸，也不需要下一页的纹理。
+ * 当前页**不需要隐身**，它本来就是屏上那一层；只有目标页要藏起来由叠加层按进度裁剪重画。
  *
  * ## 与图像增强的关系
  *
- * 本类**不发起任何解码 / 增强 / 网络请求，也不做任何位图快照**：纸面就是真实页 View，
- * 由 [PageFlipView] 每帧多画一到两遍（纯合成）。增强管线在翻页期间照常工作，两者只在
- * GPU 上有一次整屏合成的交叠，量级远小于一次推理。
+ * 本类**不发起任何解码 / 增强 / 网络请求，也不做任何位图快照**：纸面就是目标页的活 View，
+ * 由 [PageFlipView] 每帧裁剪合成一次。增强管线在翻页期间照常工作，两者只在 GPU 上有一次
+ * 整屏合成的交叠，量级远小于一次推理。
+ *
+ * 代价是目标页必须**已经渲染**（见 [isSheetReady]）：它通常在预载窗口里、已解码好；若还
+ * 没出来，本次翻页就退回普通滑动 —— 与没有这个动画时的表现一致。
  */
 internal class PageFlipController(private val viewer: PagerViewer) {
 
@@ -66,16 +67,14 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     }
 
     private class Session(
-        /** 阅读方向是否在前进（= 页码在往后走）。R2L 下 item 下标是递减的，见 [startSession]。 */
-        val advancing: Boolean,
         /** 本会话对应的 `onPageScrolled.position`（用于识别拖过半反向的情况）。 */
         val expectedPosition: Int,
-        /** 纸面取自哪个 holder（前进 = 出发页，后退 = 目标页）。 */
+        /** 盖上来那一页（目标页）的 holder —— 由叠加层负责绘制，原 View 需要隐身。 */
         val sheetView: PagerPageHolder,
-        /** 参与本次翻页的另一页；只需要把它的位移一起抵消。 */
+        /** 被盖住的那一页；只需要把它的位移一起抵消。 */
         val otherView: PagerPageHolder?,
     ) {
-        /** 纸当前是否已把页 View 藏起来（低于接管阈值时先不藏）。 */
+        /** 页 View 是否已被叠加层接管（低于接管阈值时先不管）。 */
         var hidden: Boolean = false
     }
 
@@ -111,7 +110,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             end()
             return
         }
-        applyProgress(if (current.advancing) offset else 1f - offset)
+        applyProgress(offset)
     }
 
     /** 滚动状态变化：一旦停稳就复位。 */
@@ -156,19 +155,15 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         if (viewer.activity.isScrollingThroughPages) return
 
         // `position` 是「最左侧那一页」的下标：scrollX 增大时它就是出发页，
-        // 减小时出发页是 position + 1。这一步只跟几何有关，与阅读方向无关。
+        // 减小时出发页是 position + 1。
         val fromItem = if (scrollForward) position else position + 1
         val toItem = if (scrollForward) fromItem + 1 else fromItem - 1
         val expectedPosition = if (scrollForward) fromItem else fromItem - 1
 
-        // 阅读方向：R2L 的 joinedItems 是反序的，**下一页 = 下标减一**。
-        // 翻书的视觉必须跟阅读方向一致（前进 = 当前页翻走），不能直接用 scrollX 的方向。
-        val advancing = if (viewer is R2LPagerViewer) !scrollForward else scrollForward
-        val sheetPos = if (advancing) fromItem else toItem
-        val otherPos = if (advancing) toItem else fromItem
-
-        val sheetItem = viewer.itemAt(sheetPos) ?: return
-        val otherItem = viewer.itemAt(otherPos) ?: return
+        // 盖上来的一律是**目标页**：两个方向都是「新页从进入侧压住当前页」。
+        // 方向只决定从哪一侧进入 —— 与 ViewPager 自身的滚动方向一致（跟手）。
+        val sheetItem = viewer.itemAt(toItem) ?: return
+        val otherItem = viewer.itemAt(fromItem) ?: return
         // 章节过渡页（PagerTransitionHolder）没有「一整张纸」的语义，直接走原有滑动。
         // 插入页（拆开宽图后的右半张）本身是 ReaderPage，且已被合并进所属跨页，不在此列。
         if (sheetItem !is ReaderPage || otherItem !is ReaderPage) return
@@ -181,12 +176,12 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val otherView = findHolder(otherItem)
         DiagLog.d(
             KOMIHA_FLIP_TAG,
-            "start advancing=$advancing page=${sheetItem.index} " +
-                "grab=${(grabFraction * 100).toInt()}% spineLeft=${viewer !is R2LPagerViewer}",
+            "start coverFromRight=$scrollForward page=${sheetItem.index} " +
+                "grab=${(grabFraction * 100).toInt()}%",
         )
 
         overlay.sheetView = sheetView
-        overlay.spineOnLeft = viewer !is R2LPagerViewer
+        overlay.coverFromRight = scrollForward
         overlay.grabFraction = grabbedFractionForOverlay()
         // 纸色必须跟背景档位一致：纸化档位（羊皮纸/牛皮纸）的 `pageCanvasColor` 是**白**，
         // 直接用会在翻动时露出一块纯白 —— 它们的实际纸色在 `PaperStyle.whiteColor` 里。
@@ -194,12 +189,11 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             ?: viewer.config.pageCanvasColor
 
         session = Session(
-            advancing = advancing,
             expectedPosition = expectedPosition,
             sheetView = sheetView,
             otherView = otherView,
         )
-        applyProgress(if (advancing) offset else 1f - offset)
+        applyProgress(offset)
     }
 
     /** 抓点只在安全边距内生效；接近顶部/底部时夹一下，避免折线过陡。 */
@@ -266,7 +260,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             }
         }
 
-        // 纸面由叠加层负责重画，原 View 必须隐身，否则会在折起来的区域盖住目标页。
+        // 目标页由叠加层按进度裁剪重画，原 View 必须隐身 —— 否则它会整屏盖住当前页。
         if (active != current.hidden) {
             current.hidden = active
             current.sheetView.alpha = if (active) 0f else 1f

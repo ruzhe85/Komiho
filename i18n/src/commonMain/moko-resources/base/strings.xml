@@ -419,7 +419,7 @@
     <string name="pref_page_transitions">Animate page transitions</string>
     <!-- Komiho: paged reader only — turns the current page like a sheet of paper -->
     <string name="pref_page_flip">Realistic page turn</string>
-    <string name="pref_page_flip_summary">Folds the page away along a crease instead of sliding it</string>
+    <string name="pref_page_flip_summary">The next page sweeps over the current one instead of sliding it</string>
     <string name="pref_flash_page">Flash on page change</string>
     <string name="pref_flash_page_summ">Reduces ghosting on e-ink displays</string>
     <string name="pref_flash_duration">Flash duration</string>

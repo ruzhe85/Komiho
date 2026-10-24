@@ -175,7 +175,7 @@
     <string name="pref_library_columns">每列數目</string>
     <string name="pref_page_transitions">翻頁轉場動畫</string>
     <string name="pref_page_flip">真實翻書動畫</string>
-    <string name="pref_page_flip_summary">沿摺線把目前頁面翻走，接近實體書翻頁</string>
+    <string name="pref_page_flip_summary">新的一頁從一側壓上來，取代整屏滑移</string>
     <string name="pref_crop_borders">邊緣裁剪</string>
     <string name="pref_crop_borders_aggressive">深度裁剪邊緣</string>
     <string name="pref_color_filter_mode">濾鏡融合機制</string>
