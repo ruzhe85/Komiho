@@ -6,6 +6,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup.LayoutParams
+import android.widget.FrameLayout
 import androidx.core.view.children
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
@@ -58,6 +59,18 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * top of this class.
      */
     val pager = createPager()
+
+    /**
+     * Komiho: 「真实翻书」动画的会话控制 + 叠加绘制层（见 [PageFlipController]）。
+     * 翻页判定仍归 [pager]，这里只负责快照、进度换算与方向。
+     */
+    internal val pageFlip = PageFlipController(this)
+
+    /**
+     * Komiho: pager 的宿主容器。叠加层必须画在 pager **之上**，而 [getView] 只能返回一个
+     * View，所以再包一层 FrameLayout（与 `WebtoonViewer` 的 `frame` 同一个套路）。
+     */
+    private val pagerFrame = FrameLayout(activity)
 
     /**
      * Configuration used by the pager, like allow taps, scale mode on images, page transitions...
@@ -124,6 +137,12 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             onPageChange(position)
         }
 
+        override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
+            // Komiho: 翻书动画唯一的驱动源。拖动与 setCurrentItem(…, true) 都会走到这里，
+            // 所以速度判定、边界、取消回弹全部沿用 ViewPager，不另写一套。
+            pageFlip.onPageScrolled(position, positionOffset)
+        }
+
         override fun onPageScrollStateChanged(state: Int) {
             isIdle = state == ViewPager.SCROLL_STATE_IDLE
             // Komiho (2026-10-01): 手指拖动期间让原生推理让位（见 [Waifu2x.setUiBusy]）。
@@ -131,6 +150,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             // 封顶（`waifu2x.cpp`），连惯性期也让位只会白白推迟出图。
             // 这套让位逻辑在原生里一直存在，但此前没有任何 Kotlin 调用点 —— 等于死代码。
             Waifu2x.setUiBusy(state == ViewPager.SCROLL_STATE_DRAGGING)
+            // Komiho: 停稳即收尾（复位透明度/位移/叠加层）。放在这里而不是 onPageSelected，
+            // 因为取消回弹（拖了一点又回去）不会触发 onPageSelected。
+            pageFlip.onScrollStateChanged(state)
         }
     }
 
@@ -138,6 +160,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         pager.isVisible = false // Don't layout the pager yet
         pager.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         pager.isFocusable = false
+        // Komiho: 翻书叠加层挂在 pager 之上。它不消费触摸（不可点击），因此点击/拖动/
+        // 双指缩放全部照旧落到下面的 pager 与页 View。
+        pagerFrame.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        pagerFrame.addView(pager)
+        pagerFrame.addView(
+            pageFlip.overlay,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
+        )
+        // 折线倾角来自手指落点：抓页面上部/下部决定折线绕哪一端旋转。
+        pager.touchDownListener = { _, y -> pageFlip.onTouchDown(y) }
         // SY: 离屏缓冲 = 1（前后各 1 页）。流畅度由「并发解码密度」决定而非 Mutex：
         // offscreen 越高，ViewPager 同时撑起的页面越多，5000×2400 整页解码+Lanczos 增强
         // 并发打满 CPU/GC 导致掉帧。降回 1 恢复最早顺滑感；独立的 ByteArray 内存流已
@@ -225,6 +257,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         // 依赖这个字段，不能再让它跨会话残留）。
         Waifu2x.visiblePageIndex = -1
         lastPreparePage = -1
+        pageFlip.release()
         scope.cancel()
     }
 
@@ -237,8 +270,14 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Returns the view this viewer uses.
      */
     override fun getView(): View {
-        return pager
+        return pagerFrame
     }
+
+    /**
+     * Komiho: `joinedItems` 下标 → 当前项。翻书动画据此确认「这一页是 ReaderPage 还是
+     * 章节过渡页」，也只有拿到具体项才能把参与翻页的两页认出来（不能靠 position 浮点）。
+     */
+    fun itemAt(position: Int): Any? = adapter.joinedItems.getOrNull(position)?.first
 
     /**
      * Returns the PagerPageHolder for the provided page
@@ -508,6 +547,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Sets the active [chapters] on this pager.
      */
     private fun setChaptersInternal(chapters: ViewerChapters) {
+        // Komiho: 章节/页列表重建会让 holder 全部重造，进行中的翻书会话必须立刻收尾，
+        // 否则它会攥着一个即将被回收的 View 去改 alpha。
+        pageFlip.end()
         // Remove listener so the change in item doesn't trigger it
         pager.removeOnPageChangeListener(pagerListener)
 
@@ -631,6 +673,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         refreshJob = scope.launch {
             delay(REFRESH_COALESCE_DELAY_MS)
             eu.kanade.tachiyomi.diagnostic.DiagLog.d(KOMIHA_REBUILD_TAG, "rebuild adapter (coalesced)")
+            // Komiho: 重建会换掉所有 holder，先收尾翻书会话（同 setChaptersInternal）。
+            pageFlip.end()
             val currentItem = pager.currentItem
             preparedCache.clear() // SY: 图像配置变更（分割/裁剪/背景等）后旧结果全部失效
             adapter.refresh()
@@ -708,12 +752,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
     fun onPageSplit(currentPage: ReaderPage, newPage: InsertPage) {
         activity.runOnUiThread {
+            // Komiho: 插入页会重排 joinedItems 并重建 holder，进行中的翻书会话必须收尾
+            // （同 setChaptersInternal —— 否则会话会攥着一个即将失效的 View）。
+            pageFlip.end()
             // Need to insert on UI thread else images will go blank
             adapter.onPageSplit(currentPage, newPage)
         }
     }
 
     private fun cleanupPageSplit() {
+        pageFlip.end()
         adapter.cleanupPageSplit()
     }
 
@@ -727,6 +775,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     }
 
     fun splitDoublePages(currentPage: ReaderPage) {
+        // Komiho: 拆跨页会重排 joinedItems（holder 全部重建），会话先收尾，理由同上。
+        pageFlip.end()
         adapter.splitDoublePages(currentPage)
     }
 

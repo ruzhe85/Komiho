@@ -27,6 +27,18 @@ class ReaderPreferences(
     // SY -->
     val pageTransitionsPager: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_pager_key", true)
 
+    /**
+     * Komiho: 页漫「真实翻书」动画。开启后换页不再是整屏滑移，而是把当前页当作一张纸
+     * 沿折线翻走（见 `PageFlipController`）。默认关 —— 保持原有滑移行为。
+     *
+     * 从属于 [pageTransitionsPager]（总开关），且 E-Ink 关动画时由
+     * `PagerConfig.pageSlideAnimationsEnabled` 一并闸掉，这里不需要重复处理。
+     */
+    val pageFlipAnimation: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_page_flip_animation",
+        false,
+    )
+
     val pageTransitionsWebtoon: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_transitions_webtoon_key", true)
 
     // Komiho: 条页点击滚屏的第二套动画（ComicScreen 手感：五次方减速 + 时长按距离算）。

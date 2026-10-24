@@ -38,6 +38,12 @@ open class Pager(
      */
     var swipePageListener: ((dx: Float, dy: Float) -> Unit)? = null
 
+    /**
+     * Komiho: 手势按下点（相对本 View 的坐标，即整屏）。只被翻书动画用来决定折线倾角 ——
+     * 抓页面上部还是下部，决定折线绕哪一端旋转。
+     */
+    var touchDownListener: ((x: Float, y: Float) -> Unit)? = null
+
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
 
     /** 本次手势是否走「不跟手翻页」（只在 ACTION_DOWN 判定一次，避免每个事件都读偏好）。 */
@@ -95,6 +101,7 @@ open class Pager(
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             beginSwipeTracking(ev)
+            touchDownListener?.invoke(ev.x, ev.y)
         }
         val handled = super.dispatchTouchEvent(ev)
         if (isGestureDetectorEnabled) {

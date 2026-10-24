@@ -223,6 +223,8 @@ object SettingsReaderScreen : SearchableSettings {
         val imageScaleType by imageScaleTypePref.collectAsState()
         val dualPageSplit by dualPageSplitPref.collectAsState()
         val rotateToFit by rotateToFitPref.collectAsState()
+        // Komiho: 翻书动画从属于「翻页动画」总开关，关掉总开关时一并置灰。
+        val pageTransitions by readerPreferences.pageTransitionsPager.collectAsState()
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pager_viewer),
@@ -275,6 +277,13 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.pageTransitionsPager,
                     title = stringResource(MR.strings.pref_page_transitions),
                     enabled = !einkAnimationOff,
+                ),
+                // Komiho: 真实翻书动画（页漫）。从属于上面的总开关，E-Ink 关动画时同样置灰。
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.pageFlipAnimation,
+                    title = stringResource(MR.strings.pref_page_flip),
+                    subtitle = stringResource(MR.strings.pref_page_flip_summary),
+                    enabled = pageTransitions && !einkAnimationOff,
                 ),
                 // SY <--
                 Preference.PreferenceItem.SwitchPreference(
