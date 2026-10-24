@@ -40,13 +40,14 @@ class ReaderPreferences(
     )
 
     /**
-     * Komiho: 覆盖翻页在**点击 / 按键**翻页时的时长基准（毫秒）。
+     * Komiho: 点击 / 按键翻一页的**实际时长**（毫秒）。
      *
-     * 实际时长 = (页数 + 1) × 基准 —— 与 `ViewPager` 结算拖动用的是同一条公式，
-     * 所以基准 250 时翻一页正好 500ms，与「拖动后抬手」一致。
-     * 可选 100 / 150 / 200 / 250（步进 50），默认 250 保持既有手感。
+     * 平移与覆盖都由叠加层播放，所以这一个值同时决定两者。
+     * 可选 100 ~ 500（步进 50），默认 500 —— 与「拖动后抬手」的结算时长一致。
+     *
+     * 目前为了找最佳手感暂时做成可调，定值后可把滑条撤掉、只留这个偏好。
      */
-    val pageFlipSpeed: Preference<Int> = preferenceStore.getInt("pref_page_flip_speed", 250)
+    val pageFlipSpeed: Preference<Int> = preferenceStore.getInt("pref_page_flip_speed", 500)
 
     /**
      * Komiho: 页漫双击缩放。

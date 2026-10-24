@@ -85,10 +85,10 @@ class PagerConfig(
         get() = pageFlipEnabled && pageSlideAnimationsEnabled
 
     /**
-     * Komiho: 点击 / 按键翻页的时长基准（毫秒）。整页实际用时 = (页数 + 1) × 该值，
-     * 与 `ViewPager` 结算拖动的公式一致，默认 250（一页 500ms）。
+     * Komiho: 点击 / 按键翻一页的实际时长（毫秒）。平移与覆盖共用，
+     * 默认 500（与拖动后抬手的结算时长一致），可调范围 100 ~ 500。
      */
-    var pageFlipBaseMs = readerPreferences.pageFlipSpeed.get()
+    var pageFlipDurationMs = readerPreferences.pageFlipSpeed.get()
         private set
 
     /**
@@ -231,7 +231,7 @@ class PagerConfig(
             .register({ pageFlipEnabled = it })
         // Komiho: 点击翻页时长基准。同上，只读不改位图，不接 imagePropertyChangedListener。
         readerPreferences.pageFlipSpeed
-            .register({ pageFlipBaseMs = it })
+            .register({ pageFlipDurationMs = it })
         // Komiho: 双击缩放开关同时决定点击是否「抬手即派发」（关掉它才有 0 延迟）。
         readerPreferences.pagedDoubleTapZoom
             .register({ enabled ->

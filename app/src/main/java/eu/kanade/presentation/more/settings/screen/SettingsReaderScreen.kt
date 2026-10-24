@@ -293,11 +293,11 @@ object SettingsReaderScreen : SearchableSettings {
                     subtitle = stringResource(MR.strings.pref_page_flip_summary),
                     enabled = pageTransitions && !einkAnimationOff,
                 ),
-                // Komiho: 点击翻页时长基准（100/150/200/250，步进 50；整页实际 = 基准 × 2）。
+                // Komiho: 点击翻页时长（100~500，步进 50）。
                 Preference.PreferenceItem.SliderPreference(
                     value = pageFlipSpeed,
-                    valueRange = 100..250,
-                    steps = 2,
+                    valueRange = 100..500,
+                    steps = 7,
                     title = stringResource(MR.strings.pref_page_flip_speed),
                     valueString = "$pageFlipSpeed ms",
                     enabled = pageTransitions && pageFlipOn && !einkAnimationOff,

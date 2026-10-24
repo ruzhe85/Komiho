@@ -7,16 +7,9 @@ import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences.ReaderTheme
-import kotlin.math.abs
 
 /** Komiho 诊断 TAG：翻书动画。 */
 private const val KOMIHA_FLIP_TAG = "PageFlip"
-
-/**
- * 点击翻页的上限 —— 与 `ViewPager.MAX_SETTLING_DURATION` 同值。基准再大也不会超过它，
- * 免得一次点击拖成 1 秒以上。
- */
-private const val PAGER_MAX_SETTLING_MS = 600
 
 /**
  * Komiho: 页漫「覆盖翻页」的驱动。
@@ -106,7 +99,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         overlay.drawShadow = !slide
         val pinnedView = session?.pinnedView
         tapAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = settlingDurationFor(pages)
+            duration = tapFlipDuration()
             interpolator = AccelerateDecelerateInterpolator()
             addUpdateListener {
                 val t = it.animatedValue as Float
@@ -144,13 +137,15 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     }
 
     /**
-     * 与 `ViewPager` 结算拖动同一条公式，所以点击和滑动的节奏一致：
-     * `(页数 + 1) × 基准`。基准可调（默认 250 → 一页 500ms），上限 600ms。
+     * 点击翻页的时长。
+     *
+     * 没有「页数」参数：`joinedItems` 的一项就是一屏（单页或合并后的整跨），
+     * 翻页永远是换 1 项；会跳多项的路径（页码滑杆 / 打开章节 / 恢复进度）都是
+     * `setCurrentItem(…, false)` 瞬时到位，不经过动画。所以这里只有一个时长值。
+     *
+     * 平移与覆盖都走这里，滑条对两者同时生效。
      */
-    private fun settlingDurationFor(pages: Int): Long =
-        ((abs(pages) + 1) * viewer.config.pageFlipBaseMs)
-            .coerceAtMost(PAGER_MAX_SETTLING_MS)
-            .toLong()
+    private fun tapFlipDuration(): Long = viewer.config.pageFlipDurationMs.toLong()
 
     /**
      * 预置会话：钉住当前页、藏起新页。

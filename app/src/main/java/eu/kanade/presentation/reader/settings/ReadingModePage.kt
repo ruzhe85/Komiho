@@ -223,14 +223,14 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
             }
         }
 
-        // 时长对平移 / 覆盖都生效（两者都由叠加层播放）；显示整页实际用时（= 基准 × 2）。
+        // 时长对平移 / 覆盖都生效（两者都由叠加层播放），范围 100~500、步进 50。
         val pageFlipSpeed by screenModel.preferences.pageFlipSpeed.collectAsState()
         SliderItem(
             value = pageFlipSpeed,
-            valueRange = 100..250,
-            steps = 2,
+            valueRange = 100..500,
+            steps = 7,
             label = stringResource(MR.strings.pref_page_flip_speed),
-            valueString = "${pageFlipSpeed * 2} ms",
+            valueString = "$pageFlipSpeed ms",
             onChange = { screenModel.preferences.pageFlipSpeed.set(it) },
         )
     }
