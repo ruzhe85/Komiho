@@ -234,10 +234,10 @@ class PagerConfig(
             .register({ pageFlipBaseMs = it })
         // Komiho: 双击缩放开关同时决定点击是否「抬手即派发」（关掉它才有 0 延迟）。
         readerPreferences.pagedDoubleTapZoom
-            .register {
-                pagedDoubleTapZoom = it
-                viewer.pager.tapImmediate = !it
-            }
+            .register({ enabled ->
+                pagedDoubleTapZoom = enabled
+                viewer.pager.tapImmediate = !enabled
+            })
         readerPreferences.readerTheme
             .register(
                 {
