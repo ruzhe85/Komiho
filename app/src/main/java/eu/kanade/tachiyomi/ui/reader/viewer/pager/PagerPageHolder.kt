@@ -402,6 +402,12 @@ class PagerPageHolder(
                         android.graphics.drawable.BitmapDrawable(resources, bitmap),
                         viewerImageConfig(),
                     )
+                    // Komiho (2026-10-25): 这里必须自己解除「补算在飞」标记。
+                    // 这条路径**不走 Coil 回调** ⇒ `handleDecodeCompleted` 永远不会被调，
+                    // 而它是唯一清除点。补算落到这条分支后标记会永久为 true，
+                    // 该页此后 `maybeReEnhance` 一律早退 —— 正是「快速连点后停在
+                    // CPU OK / skip 的那一页再也不会增强」。
+                    reEnhanceInFlight = false
                     // Komiho (2026-10-13): 登记本次屏上图是否真增强。未增强（被抢占打断）时
                     // 保留源，停顿后由 maybeReEnhance 补算一次。
                     currentImageEnhanced = result.enhanced
