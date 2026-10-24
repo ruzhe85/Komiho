@@ -88,7 +88,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
         val pager = viewer.pager
         val target = pager.currentItem + pages
-        if (target < 0 || target >= viewer.adapter.count) return
+        // 越界判定走 `itemAt`（`adapter` 在 PagerViewer 里是 private）。
+        if (target < 0 || viewer.itemAt(target) == null) return
 
         val prepared = prepareSession(pages)
         if (!prepared) {
