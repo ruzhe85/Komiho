@@ -86,8 +86,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val foldPinned: PagerPageHolder? = null,
         /** 翻书模式：折线从右侧自由边开始。 */
         val foldFromRight: Boolean = true,
-        /** 翻书模式：本次翻页用的快照（点击路径在藏起当前页之前抓好）。 */
-        val foldSheet: Bitmap? = null,
+        /** 翻书模式：会话开始时的 `scrollX`（进度与方向都按它算，见 applyFrame）。 */
+        val startScrollX: Int = 0,
     )
 
     /** 当前滚动状态。只在真正滚动的帧里接管（瞬间跳页没有滚动过程）。 */
@@ -317,13 +317,14 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
             current.foldPinned?.let { it.translationX = -(it.left - scrollX).toFloat() }
             // 拖动：实时 View 直接画，不需要快照 —— 折线一跟手就有内容。
+            // 进度与方向都按**实际滚动位移**算（相对会话起点），而不是 position/offset：
+            // 松手回弹时 offset 会继续朝 1 走，但页面其实在往回，两者一旦反向就会闪。
+            val w = viewer.pager.width.coerceAtLeast(1)
+            val delta = (scrollX - current.startScrollX).toFloat() / w
             overlay.foldView = current.sheetView
-            overlay.spineOnLeft = current.foldFromRight
+            overlay.spineOnLeft = delta > 0f
             overlay.grabFraction = 0.5f
-            // 进度方向要和折线方向对齐：`offset` 只在「前进」时是 0→1；
-            // 往回拖时它是 1→0（因为 position 对齐到了左边那页），直接拿来用会变成
-            // 「一上来就已经翻完、然后反向展开」，观感就是无论怎么拖都从右侧折。
-            overlay.foldProgress = if (current.foldFromRight) offset else 1f - offset
+            overlay.foldProgress = kotlin.math.abs(delta).coerceIn(0f, 1f)
             overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
                 ?: viewer.config.pageCanvasColor
             overlay.invalidate()
@@ -486,6 +487,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
                 sheetView = current,
                 foldPinned = current,
                 foldFromRight = pinned === holderA,
+                startScrollX = scrollX,
             ).also { session = it }
         }
 
