@@ -99,6 +99,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     /** 点击翻页动画（见 [startTapFlip]）。 */
     private var tapAnimator: ValueAnimator? = null
 
+    /** 手指按下位置（0..1，相对 pager 高度），决定翻书折线的倾角。 */
+    private var grabFraction = 0.5f
+
     /**
      * 翻书用的快照位图，跨翻页复用；尺寸变化（旋转/切布局）才重建。
      *
@@ -207,6 +210,17 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     val isBusy: Boolean
         get() = tapAnimator != null
 
+    /**
+     * Komiho (2026-10-26): 记下手指按下位置（相对 pager 高度）。
+     *
+     * 翻书的折线绕这个点旋转：抓上半部 → 折线倾角朝上，抓下半部 → 朝下，抓中间 → 竖直。
+     * 这就是「捏住一角翻页」的手感来源（`PageFlipView.grabFraction`）。
+     */
+    fun onTouchDown(y: Float) {
+        val h = viewer.pager.height
+        if (h > 0) grabFraction = (y / h).coerceIn(0f, 1f)
+    }
+
     private fun commitTapFlip(target: Int) {
         val current = session
         session = null
@@ -286,7 +300,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // 翻书要按像素做折线变形，所以这里给当前页抓一张快照（实测 11~30ms）。
             overlay.foldView = prepared.sheetView
             overlay.spineOnLeft = prepared.foldFromRight
-            overlay.grabFraction = 0.5f
+            overlay.grabFraction = grabFraction
             overlay.foldProgress = 0f
             overlay.backTint = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
                 ?: viewer.config.pageCanvasColor
@@ -323,7 +337,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             val delta = (scrollX - current.startScrollX).toFloat() / w
             overlay.foldView = current.sheetView
             overlay.spineOnLeft = delta > 0f
-            overlay.grabFraction = 0.5f
+            overlay.grabFraction = grabFraction
             overlay.foldProgress = kotlin.math.abs(delta).coerceIn(0f, 1f)
             overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
                 ?: viewer.config.pageCanvasColor

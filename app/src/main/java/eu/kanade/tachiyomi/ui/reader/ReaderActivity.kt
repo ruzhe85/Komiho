@@ -24,6 +24,7 @@ import android.widget.TextView
 import android.view.View.LAYER_TYPE_HARDWARE
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
@@ -250,7 +251,19 @@ class ReaderActivity : BaseActivity() {
             overridePendingTransition(pushEnter, pushExit)
         }
 
-        enableEdgeToEdge()
+        // Komiho (2026-10-26): 系统栏完全透明。`enableEdgeToEdge()` 的默认样式会在导航栏底
+        // 铺一层 scrim（浅色模式下是灰白），E-Ink 纯色档里那块灰底就是它 —— 内容区是纯色，
+        // 栏位却更灰，边界很明显。这里两边都给透明，由内容自己透上来。
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT,
+            ),
+            navigationBarStyle = SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT,
+            ),
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
         }

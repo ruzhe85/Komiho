@@ -47,7 +47,7 @@ open class Pager(
      * Komiho: 手势按下回调。点击翻页动画进行中若用户触摸屏幕，用它立刻落位、
      * 把控制权交回手势（见 `PageFlipController.abortTapFlip`）。
      */
-    var onTouchDownListener: (() -> Unit)? = null
+    var onTouchDownListener: ((Float) -> Unit)? = null
 
     /** 本次手势是否走「不跟手翻页」（只在 ACTION_DOWN 判定一次，避免每个事件都读偏好）。 */
     private var einkSwipeGesture = false
@@ -129,7 +129,7 @@ open class Pager(
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             // Komiho: 用户重新触摸时立刻让点击翻页动画落位，把控制权交回手势。
-            onTouchDownListener?.invoke()
+            onTouchDownListener?.invoke(ev.y)
             beginSwipeTracking(ev)
         }
         val handled = super.dispatchTouchEvent(ev)
