@@ -13,7 +13,7 @@
         <item name="android:forceDarkAllowed" tools:targetApi="Q">false</item>
         <!-- Komiho (2026-10-26): 系统导航栏跟随**页面底色**而不是 surface。
              原来用 ?attr/colorSurface，在设置等纯白页面上会露出一条灰带。 -->
-        <item name="android:navigationBarColor">?attr/colorBackground</item>
+        <item name="android:navigationBarColor">?android:attr/colorBackground</item>
 
         <!-- Theme Colors -->
         <item name="colorPrimary">@color/tachiyomi_primary</item>
