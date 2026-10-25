@@ -15,9 +15,14 @@ private const val KOMIHA_FLIP_TAG = "PageFlip"
  * 双页（一跨两页）时的时长倍数。
  *
  * 一屏承载两页内容，相同毫秒数下信息量翻倍、观感更快，所以按此放慢：
- * 400ms × 1.3 ≈ **520ms**。觉得还快就 1.4，嫌慢就 1.2。
+ * 400ms × 1.2 = **480ms**。觉得还快就 1.3，嫌慢就 1.1。
  */
-private const val DOUBLE_PAGE_FACTOR = 1.3f
+private const val DOUBLE_PAGE_FACTOR = 1.2f
+
+/** 翻页方式（与 `ReaderPreferences.pageTurnStyle` 一致）。 */
+private const val STYLE_SLIDE = 0
+private const val STYLE_COVER = 1
+private const val STYLE_FOLD = 2
 
 
 
@@ -105,11 +110,28 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
     /** 会话已备好，真正开始播放。 */
     private fun startTapAnimator(target: Int) {
+        if (viewer.config.pageTurnStyle == STYLE_FOLD) {
+            // 翻书：两个页 View 都静止，只推进折线；落位时页面早已被折到书脊。
+            tapAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = tapFlipDuration()
+                interpolator = AccelerateDecelerateInterpolator()
+                addUpdateListener {
+                    overlay.foldProgress = it.animatedValue as Float
+                    overlay.invalidate()
+                }
+                doOnEnd {
+                    tapAnimator = null
+                    commitTapFlip(target)
+                }
+                start()
+            }
+            return
+        }
         // 新页的起点就是它在布局里的真实位置（±页宽），方向不用额外判断。
         val startOffset = overlay.sheetOffsetX
         // 覆盖 = 当前页钉住不动、新页压上来；平移 = 两页并排滑动（当前页反向让开）。
         // 平移不画交界投影 —— 两页没有层级关系。
-        val slide = !viewer.config.pageFlipEnabled
+        val slide = viewer.config.pageTurnStyle == STYLE_SLIDE
         overlay.drawShadow = !slide
         val pinnedView = session?.pinnedView
         tapAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -189,10 +211,28 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val entering = findHolder(enteringItem) ?: return false
 
         end()
-        entering.alpha = 0f
-        val prepared = Session(pinnedView = leaving, sheetView = entering)
+        val prepared = if (viewer.config.pageTurnStyle == STYLE_FOLD) {
+            // 翻书：被折走的是**当前页**（藏起来由叠加层画），下一页保持静止（保留原 View）。
+            leaving.alpha = 0f
+            entering.translationX = 0f
+            Session(pinnedView = entering, sheetView = leaving)
+        } else {
+            // 覆盖 / 平移：新页藏起来，由叠加层按屏幕位置绘制。
+            entering.alpha = 0f
+            Session(pinnedView = leaving, sheetView = entering)
+        }
         session = prepared
-        applyFrame(prepared, pager.scrollX, 0f)
+        if (viewer.config.pageTurnStyle == STYLE_FOLD) {
+            overlay.foldView = prepared.sheetView
+            overlay.underView = prepared.pinnedView
+            overlay.foldFromRight = pages > 0
+            overlay.foldProgress = 0f
+            overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
+                ?: viewer.config.pageCanvasColor
+            overlay.invalidate()
+        } else {
+            applyFrame(prepared, pager.scrollX, 0f)
+        }
         return true
     }
 
@@ -307,8 +347,11 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     }
 
     /**
-     * 这个 viewer 是否支持**拖动**时的覆盖翻页（与「此刻是否在滚动」无关 —— 点击翻页
+     * 这个 viewer 是否支持**拖动**时的接管（与「此刻是否在滚动」无关 —— 点击翻页
      * 需要在滚动开始之前就预置会话，见 [startTapFlip]）。
+     *
+     * 只有「覆盖」需要接管拖动：平移本来就是两页并排滑动（ViewPager 原生即可），
+     * 翻书目前只做点击 / 按键 —— 拖动时它需要同时钉住两页并驱动折线，属于另一套逻辑。
      */
     private fun isSupported(): Boolean {
         // 只有横向的 L2R / R2L 页漫才翻书；竖向翻页没有「纸」的语义。
@@ -316,7 +359,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         if (viewer !is L2RPagerViewer && viewer !is R2LPagerViewer) return false
         // 页码滑杆连续跳页时不接管（跟着手指刷几十页会很吵）。
         if (viewer.activity.isScrollingThroughPages) return false
-        return viewer.config.pageFlipActive
+        return viewer.config.pageFlipActive && viewer.config.pageTurnStyle == STYLE_COVER
     }
 
     /**

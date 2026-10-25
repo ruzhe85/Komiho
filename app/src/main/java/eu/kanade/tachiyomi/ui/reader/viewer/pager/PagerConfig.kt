@@ -78,19 +78,19 @@ class PagerConfig(
     val pageSlideAnimationsEnabled: Boolean
         get() = usePageTransitions && !EinkMotion.isAnimationOff
 
-    /** Komiho: 「覆盖翻页」开关的原始值（是否生效还要看 [pageFlipActive]）。 */
-    var pageFlipEnabled = readerPreferences.pageFlipAnimation.get()
+    /**
+     * Komiho: 页漫翻页方式（0 = 平移 / 1 = 覆盖 / 2 = 翻书）。
+     *
+     * 老版本只有一个「覆盖」开关（`pageFlipAnimation`）：
+     * - 升级时若旧开关是开着的、而新偏好还是 0，迁移成「覆盖」（见 init 的一次性迁移）；
+     * - 之后每次切方式都会回写旧开关（平移 → false），迁移条件就不会再成立。
+     */
+    var pageTurnStyle = readerPreferences.pageTurnStyle.get().coerceIn(0, 2)
         private set
 
-    /**
-     * Komiho: 「覆盖翻页」是否真的生效。
-     *
-     * 必须复用 [pageSlideAnimationsEnabled] 这一道闸 —— 它同时覆盖「翻页动画」总开关与
-     * E-Ink 关动画（墨水屏上任何一种逐帧重绘都会叠残影，翻页动画尤其明显）。这样 E-Ink
-     * 侧不需要为新开关再写一遍收敛逻辑。
-     */
+    /** 是否走「非平移」的翻页动画（覆盖 / 翻书由叠加层接管拖动）。 */
     val pageFlipActive: Boolean
-        get() = pageFlipEnabled && pageSlideAnimationsEnabled
+        get() = pageTurnStyle != 0 && pageSlideAnimationsEnabled
 
     /**
      * Komiho: 点击 / 按键翻一页的实际时长（毫秒）。平移与覆盖共用。
@@ -145,6 +145,11 @@ class PagerConfig(
     // SY <--
 
     init {
+        // Komiho (2026-10-25): 一次性迁移 —— 旧版只有「覆盖」开关，若它是开着的而新偏好
+        // 还是默认值 0，就按「覆盖」初始化，避免升级后手感突然变回平移。
+        if (readerPreferences.pageTurnStyle.get() == 0 && readerPreferences.pageFlipAnimation.get()) {
+            readerPreferences.pageTurnStyle.set(1)
+        }
         readerPreferences.readerTheme
             .register(
                 {
@@ -243,8 +248,14 @@ class PagerConfig(
         // Komiho: 「覆盖翻页」开关同理 —— 只在翻页时现读，不改位图输出，**不接**
         // imagePropertyChangedListener，否则拨一下开关就要重建 adapter、清 preparedCache、
         // 让可见页重新解码并重跑一次 AI 增强。
-        readerPreferences.pageFlipAnimation
-            .register({ pageFlipEnabled = it })
+        // Komiho (2026-10-25): 翻页方式（平移 / 覆盖 / 翻书）。只影响翻页动画的绘制，
+        // 不改位图输出，所以不接 imagePropertyChangedListener。
+        readerPreferences.pageTurnStyle
+            .register({ style ->
+                pageTurnStyle = style.coerceIn(0, 2)
+                // 回写旧开关：让它只表示「非平移」，init 里的一次性迁移就不会重复触发。
+                readerPreferences.pageFlipAnimation.set(pageTurnStyle != 0)
+            })
         // Komiho (2026-10-25): 点击翻页时长已固定为常量，不再订阅偏好。
         // Komiho: 双击缩放开关同时决定点击是否「抬手即派发」（关掉它才有 0 延迟）。
         readerPreferences.pagedDoubleTapZoom

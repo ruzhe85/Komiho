@@ -225,7 +225,6 @@ object SettingsReaderScreen : SearchableSettings {
         val rotateToFit by rotateToFitPref.collectAsState()
         // Komiho: 翻书动画从属于「翻页动画」总开关，关掉总开关时一并置灰。
         val pageTransitions by readerPreferences.pageTransitionsPager.collectAsState()
-        val pageFlipOn by readerPreferences.pageFlipAnimation.collectAsState()
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pager_viewer),
@@ -286,10 +285,14 @@ object SettingsReaderScreen : SearchableSettings {
                     subtitle = stringResource(MR.strings.pref_paged_double_tap_zoom_summary),
                 ),
                 // Komiho: 覆盖翻页（页漫）。从属于上面的总开关，E-Ink 关动画时同样置灰。
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = readerPreferences.pageFlipAnimation,
-                    title = stringResource(MR.strings.pref_page_flip),
-                    subtitle = stringResource(MR.strings.pref_page_flip_summary),
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.pageTurnStyle,
+                    entries = mapOf(
+                        0 to stringResource(MR.strings.pref_page_flip_translate),
+                        1 to stringResource(MR.strings.pref_page_flip),
+                        2 to stringResource(MR.strings.pref_page_flip_fold),
+                    ),
+                    title = stringResource(MR.strings.pref_page_flip_mode),
                     enabled = pageTransitions && !einkAnimationOff,
                 ),
                 // Komiho (2026-10-25): 点击翻页时长固定 400ms，不再提供滑条

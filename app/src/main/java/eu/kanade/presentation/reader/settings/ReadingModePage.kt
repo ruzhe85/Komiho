@@ -212,16 +212,20 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
     // chip 紧贴在上面那一项下面（SettingsChipRow 传 null 即不画标题）。
     // 点击翻页时长已固定 400ms（见 PagerConfig.TAP_FLIP_DURATION_MS），没有滑条。
     if (!pageTransitionsLocked && pageTransitionsPager) {
-        val pageFlipOn by screenModel.preferences.pageFlipAnimation.collectAsState()
+        val turnStyle by screenModel.preferences.pageTurnStyle.collectAsState()
         SettingsChipRow {
-            listOf(false, true).forEach { cover ->
+            listOf(0, 1, 2).forEach { style ->
                 FilterChip(
-                    selected = pageFlipOn == cover,
-                    onClick = { screenModel.preferences.pageFlipAnimation.set(cover) },
+                    selected = turnStyle == style,
+                    onClick = { screenModel.preferences.pageTurnStyle.set(style) },
                     label = {
                         Text(
                             stringResource(
-                                if (cover) MR.strings.pref_page_flip else MR.strings.pref_page_flip_translate,
+                                when (style) {
+                                    1 -> MR.strings.pref_page_flip
+                                    2 -> MR.strings.pref_page_flip_fold
+                                    else -> MR.strings.pref_page_flip_translate
+                                },
                             ),
                         )
                     },

@@ -52,6 +52,17 @@ class ReaderPreferences(
     // 旧的 pref_page_flip_speed 保留在存量数据里但不再读取。
 
     /**
+     * Komiho: 页漫翻页方式。
+     *
+     * - 0 = 平移（两页并排滑动，最朴素）
+     * - 1 = 覆盖（当前页不动，新页压上来）
+     * - 2 = 翻书（当前页沿折线卷走，露出下一页）
+     *
+     * 默认 0；老版本只有「覆盖」开关，见 [PagerConfig] 里的迁移。
+     */
+    val pageTurnStyle: Preference<Int> = preferenceStore.getInt("pref_page_turn_style", 0)
+
+    /**
      * Komiho: 页漫双击缩放。
      *
      * 关闭后点击翻页没有「等双击判定」这一段 —— 抬手即派发点击，动画立刻启动。
