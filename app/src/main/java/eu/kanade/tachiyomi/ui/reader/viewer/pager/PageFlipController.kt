@@ -3,8 +3,11 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
-import android.view.View
+import android.graphics.Rect
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.core.animation.doOnEnd
 import androidx.viewpager.widget.ViewPager
@@ -95,6 +98,12 @@ internal class PageFlipController(private val viewer: PagerViewer) {
      * 代价是这 400ms 内显示的是抓图那一瞬的内容（增强刚好完成也不会即时反映）。
      */
     private var sheetBitmap: Bitmap? = null
+
+    /** 这张快照抓的是哪个 `joinedItems` 下标（`Int.MIN_VALUE` = 无效）。 */
+    private var sheetIndex = Int.MIN_VALUE
+
+    /** 抓图请求在飞。 */
+    private var capturePending = false
 
     init {
         // 跨 View 绘制失败（极少数机型/页面）→ 立刻收尾，把页 View 复原，
@@ -243,7 +252,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // 翻书：被折走的是**当前页**（藏起来由叠加层画），下一页保持静止。
             // 折线方向与拖动路径同一条规则（看两页在布局里的左右关系），不再用 `pages` 猜。
             // ⚠️ 快照必须在 `alpha = 0` **之前**抓：先藏再抓有可能抓到一张空白（旧版踩过）。
-            val sheet = captureSheet(leaving)
+            // 快照必须已经抓到手（停稳时预抓）——拿不到就退回普通滑动，绝不播一张错图/空白。
+            val sheet = sheetFor(pager.currentItem) ?: return false
             leaving.alpha = 0f
             // 点击时 ViewPager 完全不滚，下一页还停在 ±页宽（屏幕外）——必须把它**平移进视口**，
             // 否则被揭开的那片区域没有任何东西可画，只剩底色。
@@ -266,7 +276,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         session = prepared
         if (viewer.config.pageTurnStyle == STYLE_FOLD) {
             // 翻书要按像素做折线变形，所以这里给当前页抓一张快照（实测 11~30ms）。
-            overlay.foldSheet = prepared.foldSheet ?: captureSheet(prepared.sheetView)
+            overlay.foldSheet = prepared.foldSheet
             overlay.spineOnLeft = prepared.foldFromRight
             overlay.grabFraction = 0.5f
             overlay.foldProgress = 0f
@@ -298,9 +308,12 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // 翻书：两页都钉住（画面完全冻结），折线完全由 offset 驱动 —— 这就是「跟手翻书」。
             current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
             current.foldPinned?.let { it.translationX = -(it.left - scrollX).toFloat() }
-            // 拖动第一次进入时抓一次快照，之后沿用（同一页不再重复抓）。
+            // 拖动：用停稳时预抓的那张（它与当前页对应）。拿不到就让本次滚动保持原样，
+            // 下个 IDLE 会重新预抓。
             if (overlay.foldSheet == null) {
-                overlay.foldSheet = captureSheet(current.sheetView)
+                val sheet = sheetFor(viewer.pager.currentItem)
+                if (sheet == null) return
+                overlay.foldSheet = sheet
                 overlay.spineOnLeft = current.foldFromRight
                 overlay.grabFraction = 0.5f
                 overlay.backTint = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
@@ -334,6 +347,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         if (state == ViewPager.SCROLL_STATE_IDLE) {
             loggedThisScroll = false
             end()
+            // Komiho (2026-10-25): 停稳就预抓一张当前页快照 —— 翻书要真实像素，而 PixelCopy
+            // 是异步的，等用户点下去再抓就晚了（那一帧还没回来，只能退回普通滑动）。
+            prefetchSheet()
         }
     }
 
@@ -366,24 +382,62 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     }
 
     /**
-     * 抓一张页 View 的快照（与旧版 `75a9eda0` 同一做法，实测 11~30ms）。
+     * 预先抓一张当前页快照（[PixelCopy]，能抓到硬件渲染的真实像素）。
      *
-     * 位图跨翻页复用：只有尺寸变化时才重建，避免每次翻页都分配一张 1500×1060 的 ARGB。
+     * 页面停稳后调用；点击/拖动开始时它通常已经就绪，因此翻书启动没有任何等待。
+     * `view.draw(Canvas)` 对 `Config.HARDWARE` 位图是画不上去的（只会得到一张空白/纯底色），
+     * 所以这里必须走窗口级抓图。
      */
-    private fun captureSheet(view: View): Bitmap? {
-        val w = view.width
-        val h = view.height
-        if (w <= 0 || h <= 0) return null
+    fun prefetchSheet() {
+        // PixelCopy 是 API 26+；低版本直接不抓 —— 翻书会退回普通滑动，不会崩。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val pager = viewer.pager
+        val w = pager.width
+        val h = pager.height
+        if (w <= 0 || h <= 0) return
+        if (capturePending) return
+
         var bmp = sheetBitmap
         if (bmp == null || bmp.isRecycled || bmp.width != w || bmp.height != h) {
             bmp?.recycle()
             bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             sheetBitmap = bmp
         }
-        bmp.eraseColor(Color.TRANSPARENT)
-        view.draw(Canvas(bmp))
-        return bmp
+        val target = bmp
+        val loc = IntArray(2)
+        pager.getLocationInWindow(loc)
+        val src = Rect(loc[0], loc[1], loc[0] + w, loc[1] + h)
+        val index = pager.currentItem
+        capturePending = true
+        try {
+            PixelCopy.request(
+                viewer.activity.window,
+                src,
+                target,
+                { result ->
+                    capturePending = false
+                    sheetIndex = if (result == PixelCopy.SUCCESS) index else Int.MIN_VALUE
+                },
+                Handler(Looper.getMainLooper()),
+            )
+        } catch (e: Throwable) {
+            capturePending = false
+            sheetIndex = Int.MIN_VALUE
+            eu.kanade.tachiyomi.diagnostic.DiagLog.w(
+                KOMIHA_FLIP_TAG,
+                "PixelCopy failed: ${e.javaClass.simpleName}: ${e.message}",
+            )
+        }
     }
+
+    /**
+     * 取「当前页」的快照。
+     *
+     * 只有抓到过、且抓的就是这一页时才可用 —— 否则翻书会画出上一页的画面。
+     * 拿不到就返回 null，调用方退回普通滑动（宁可没有动画，也不播一张错图）。
+     */
+    private fun sheetFor(index: Int): Bitmap? =
+        sheetBitmap?.takeIf { !it.isRecycled && !capturePending && sheetIndex == index }
 
     // endregion
 
