@@ -58,11 +58,12 @@ internal class PageFlipView(context: Context) : View(context) {
     // region 翻书模式
 
     /**
-     * 正在翻动那一页的快照。null = 不画纸（本层走覆盖模式或空闲）。
+     * 正在翻动的那一页（真实页 View，由本层画正面 + 镜像背面）。
      *
-     * 位图由控制器持有并复用，本层只读。
+     * 不用快照：`PixelCopy` 是异步的，拿不到就得回落，行为不稳定；而实时 View 每帧都在，
+     * 翻开过程中增强完成也能立刻反映。代价是每帧多一次同一页的绘制（正面 + 镜像）。
      */
-    var foldSheet: Bitmap? = null
+    var foldView: View? = null
 
     /**
      * 翻动进度：0 = 整页平放，1 = 完全翻走。
@@ -127,9 +128,9 @@ internal class PageFlipView(context: Context) : View(context) {
 
     /** 清空状态（会话结束 / 视图销毁）。位图由控制器复用，这里只解除引用。 */
     fun reset() {
-        val dirty = sheetView != null || foldSheet != null
+        val dirty = sheetView != null || foldView != null
         sheetView = null
-        foldSheet = null
+        foldView = null
         progress = 0f
         foldProgress = 0f
         if (dirty) invalidate()
@@ -139,7 +140,7 @@ internal class PageFlipView(context: Context) : View(context) {
         // 这里会把**别人的** View / 位图画到自己的画布上。万一抛异常会落进绘制遍历 → 崩溃，
         // 所以兜住：失败就退化成不画（页面照常可见）。
         try {
-            if (foldSheet != null) drawFold(canvas) else drawCover(canvas)
+            if (foldView != null) drawFold(canvas) else drawCover(canvas)
         } catch (e: Throwable) {
             if (!drawFailed) {
                 drawFailed = true
@@ -187,13 +188,13 @@ internal class PageFlipView(context: Context) : View(context) {
     // region 翻书
 
     private fun drawFold(canvas: Canvas) {
-        val bmp = foldSheet ?: return
+        val page = foldView ?: return
         val p = foldProgress
         // 两端什么都不画：0 = 页面还是原样（真实页 View 就位），1 = 纸已经翻走。
         if (p <= MIN_PROGRESS || p >= MAX_PROGRESS) return
         val w = width.toFloat()
         val h = height.toFloat()
-        if (w <= 0f || h <= 0f || bmp.isRecycled) return
+        if (w <= 0f || h <= 0f) return
 
         val freeX = if (spineOnLeft) w else 0f
         val spineX = if (spineOnLeft) 0f else w
@@ -240,7 +241,7 @@ internal class PageFlipView(context: Context) : View(context) {
         // ① 正面：折线靠书脊一侧的剩余平放部分。
         val sc1 = canvas.save()
         canvas.clipPath(frontPath)
-        canvas.drawBitmap(bmp, null, sheetDst, sheetPaint)
+        drawPage(canvas, page)
         canvas.restoreToCount(sc1)
 
         // ② 背面：平放半平面 ∩ 镜像后的页矩形。裁好之后把画布镜像过去再画同一张快照。
@@ -252,10 +253,8 @@ internal class PageFlipView(context: Context) : View(context) {
         canvas.scale(1f, -1f)
         canvas.rotate(-deg)
         canvas.translate(-topX, 0f)
-        canvas.drawBitmap(bmp, null, sheetDst, sheetPaint)
-        // Komiho (2026-10-25): **不再压纸色**。快照本身就是真实像素（羊皮纸下已带纸色），
-        // 再叠一层白/纸色只会把它冲淡 —— 之前 BACK_TINT_ALPHA=217 就是这样变白的。
-        // 现在背面 = 同一张图镜像，与正面严格一致。
+        // 背面画的是**同一页的实时内容**（镜像），不叠任何纸色 —— 纸色由页面自己带。
+        drawPage(canvas, page)
         canvas.restoreToCount(sc2)
 
         // ③ 折痕阴影：本地系里折线就是 x 轴，渐变沿 y 向对称衰减。

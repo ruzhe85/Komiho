@@ -252,8 +252,6 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // 翻书：被折走的是**当前页**（藏起来由叠加层画），下一页保持静止。
             // 折线方向与拖动路径同一条规则（看两页在布局里的左右关系），不再用 `pages` 猜。
             // ⚠️ 快照必须在 `alpha = 0` **之前**抓：先藏再抓有可能抓到一张空白（旧版踩过）。
-            // 快照必须已经抓到手（停稳时预抓）——拿不到就退回普通滑动，绝不播一张错图/空白。
-            val sheet = sheetFor(pager.currentItem) ?: return false
             leaving.alpha = 0f
             // 点击时 ViewPager 完全不滚，下一页还停在 ±页宽（屏幕外）——必须把它**平移进视口**，
             // 否则被揭开的那片区域没有任何东西可画，只剩底色。
@@ -266,7 +264,6 @@ internal class PageFlipController(private val viewer: PagerViewer) {
                 // 不能用 `leaving.left <= entering.left`：相邻位置有时解析到同一个 holder
                 // （双页 / 邻居未附着），left 相等时 `<=` 恒为真 ⇒ 前进后退都从右侧折起。
                 foldFromRight = pages > 0,
-                foldSheet = sheet,
             )
         } else {
             // 覆盖 / 平移：新页藏起来，由叠加层按屏幕位置绘制。
@@ -276,7 +273,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         session = prepared
         if (viewer.config.pageTurnStyle == STYLE_FOLD) {
             // 翻书要按像素做折线变形，所以这里给当前页抓一张快照（实测 11~30ms）。
-            overlay.foldSheet = prepared.foldSheet
+            overlay.foldView = prepared.sheetView
             overlay.spineOnLeft = prepared.foldFromRight
             overlay.grabFraction = 0.5f
             overlay.foldProgress = 0f
@@ -308,17 +305,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // 翻书：两页都钉住（画面完全冻结），折线完全由 offset 驱动 —— 这就是「跟手翻书」。
             current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
             current.foldPinned?.let { it.translationX = -(it.left - scrollX).toFloat() }
-            // 拖动：用停稳时预抓的那张（它与当前页对应）。拿不到就让本次滚动保持原样，
-            // 下个 IDLE 会重新预抓。
-            if (overlay.foldSheet == null) {
-                val sheet = current.foldSheet
-                if (sheet == null) return
-                overlay.foldSheet = sheet
-                overlay.spineOnLeft = current.foldFromRight
-                overlay.grabFraction = 0.5f
-                overlay.backTint = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
-                    ?: viewer.config.pageCanvasColor
-            }
+            // 拖动：实时 View 直接画，不需要快照 —— 折线一跟手就有内容。
+            overlay.foldView = current.sheetView
+            overlay.spineOnLeft = current.foldFromRight
+            overlay.grabFraction = 0.5f
             // 进度方向要和折线方向对齐：`offset` 只在「前进」时是 0→1；
             // 往回拖时它是 1→0（因为 position 对齐到了左边那页），直接拿来用会变成
             // 「一上来就已经翻完、然后反向展开」，观感就是无论怎么拖都从右侧折。
@@ -349,7 +339,6 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             end()
             // Komiho (2026-10-25): 停稳就预抓一张当前页快照 —— 翻书要真实像素，而 PixelCopy
             // 是异步的，等用户点下去再抓就晚了（那一帧还没回来，只能退回普通滑动）。
-            prefetchSheet()
         }
     }
 
@@ -468,7 +457,6 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             val incoming = sheet
             // ⚠️ 必须先确认快照已经到手，**再**藏当前页：否则一藏、叠加层又没纸可画，
             // 屏幕上就只剩下一页 —— 表现就是「拖动一启动底图已经换成下一张」。
-            val sheetBitmap = sheetFor(viewer.pager.currentItem) ?: return null
             current.alpha = 0f
             current.translationX = 0f
             incoming.translationX = 0f
@@ -487,7 +475,6 @@ internal class PageFlipController(private val viewer: PagerViewer) {
                 sheetView = current,
                 foldPinned = current,
                 foldFromRight = pinned === holderA,
-                foldSheet = sheetBitmap,
             ).also { session = it }
         }
 
