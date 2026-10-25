@@ -311,7 +311,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // 拖动：用停稳时预抓的那张（它与当前页对应）。拿不到就让本次滚动保持原样，
             // 下个 IDLE 会重新预抓。
             if (overlay.foldSheet == null) {
-                val sheet = sheetFor(viewer.pager.currentItem)
+                val sheet = current.foldSheet
                 if (sheet == null) return
                 overlay.foldSheet = sheet
                 overlay.spineOnLeft = current.foldFromRight
@@ -466,6 +466,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // 两页都要钉住 —— 画面冻结，折线完全由滚动 offset 驱动，才有「跟手」。
             val current = pinned
             val incoming = sheet
+            // ⚠️ 必须先确认快照已经到手，**再**藏当前页：否则一藏、叠加层又没纸可画，
+            // 屏幕上就只剩下一页 —— 表现就是「拖动一启动底图已经换成下一张」。
+            val sheetBitmap = sheetFor(viewer.pager.currentItem) ?: return null
             current.alpha = 0f
             current.translationX = 0f
             incoming.translationX = 0f
@@ -484,6 +487,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
                 sheetView = current,
                 foldPinned = current,
                 foldFromRight = pinned === holderA,
+                foldSheet = sheetBitmap,
             ).also { session = it }
         }
 

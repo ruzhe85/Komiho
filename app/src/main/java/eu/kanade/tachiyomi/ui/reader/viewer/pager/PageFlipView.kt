@@ -253,9 +253,9 @@ internal class PageFlipView(context: Context) : View(context) {
         canvas.rotate(-deg)
         canvas.translate(-topX, 0f)
         canvas.drawBitmap(bmp, null, sheetDst, sheetPaint)
-        tintPaint.color = backTint
-        tintPaint.alpha = BACK_TINT_ALPHA
-        canvas.drawRect(sheetDst, tintPaint)
+        // Komiho (2026-10-25): **不再压纸色**。快照本身就是真实像素（羊皮纸下已带纸色），
+        // 再叠一层白/纸色只会把它冲淡 —— 之前 BACK_TINT_ALPHA=217 就是这样变白的。
+        // 现在背面 = 同一张图镜像，与正面严格一致。
         canvas.restoreToCount(sc2)
 
         // ③ 折痕阴影：本地系里折线就是 x 轴，渐变沿 y 向对称衰减。
