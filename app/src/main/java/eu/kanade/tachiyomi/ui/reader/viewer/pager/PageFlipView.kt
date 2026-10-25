@@ -198,12 +198,12 @@ internal class PageFlipView(context: Context) : View(context) {
         val freeX = if (spineOnLeft) w else 0f
         val spineX = if (spineOnLeft) 0f else w
 
-        // 折线中点沿「自由边 → 书脊」推进。两段式：前 34% 走完 62% 的行程。
-        val t = if (p < MID_PROGRESS) {
-            p / MID_PROGRESS * 0.62f
-        } else {
-            0.62f + (p - MID_PROGRESS) / (1f - MID_PROGRESS) * 0.38f
-        }
+        // 折线中点沿「自由边 → 书脊」推进。
+        //
+        // **必须线性**（t = p）：ViewPager 的落位判据是 offset ≥ 0.5，如果这里前 34% 就走完
+        // 62% 的行程，拖动到 1/3 时画面已经翻了 2/3，而 ViewPager 仍按位置判"回去/前进"，
+        // 观感就是「只翻了不到 1/3 就自己翻过去/弹回」。
+        val t = p
         val cx = freeX + (spineX - freeX) * t
 
         // 折线绕手指落点旋转；张开量在两端收敛为 0（p→0 必须竖直贴住自由边）。
@@ -324,8 +324,13 @@ internal class PageFlipView(context: Context) : View(context) {
         /** 折线两端相对中点的最大水平张开（占页宽比例）。 */
         const val TILT_MAX = 0.35f
 
-        /** 背面纸色不透明度：留一点镜像内容透出来（模拟背面油墨透印）。 */
-        const val BACK_TINT_ALPHA = 217
+        /**
+         * 背面纸色不透明度。
+         *
+         * 折过去那块看到的是**正在移走的那一页**（镜像内容），所以只压一层很淡的纸色
+         * （约 19%），不再是白纸 —— 217 时几乎把内容盖没了。
+         */
+        const val BACK_TINT_ALPHA = 48
 
         /** 折痕阴影半径（dp）。 */
         const val SHADOW_DP = 18f

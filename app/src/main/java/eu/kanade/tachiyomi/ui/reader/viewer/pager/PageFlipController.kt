@@ -252,7 +252,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             Session(
                 pinnedView = entering,
                 sheetView = leaving,
-                foldFromRight = leaving.left <= entering.left,
+                // 按**位置序号**判方向：新页在右（pages > 0）⇒ 自由边在右、书脊在左。
+                // 不能用 `leaving.left <= entering.left`：相邻位置有时解析到同一个 holder
+                // （双页 / 邻居未附着），left 相等时 `<=` 恒为真 ⇒ 前进后退都从右侧折起。
+                foldFromRight = pages > 0,
                 foldSheet = sheet,
             )
         } else {
@@ -303,7 +306,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
                 overlay.backTint = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
                     ?: viewer.config.pageCanvasColor
             }
-            overlay.foldProgress = offset
+            // 进度方向要和折线方向对齐：`offset` 只在「前进」时是 0→1；
+            // 往回拖时它是 1→0（因为 position 对齐到了左边那页），直接拿来用会变成
+            // 「一上来就已经翻完、然后反向展开」，观感就是无论怎么拖都从右侧折。
+            overlay.foldProgress = if (current.foldFromRight) offset else 1f - offset
             overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
                 ?: viewer.config.pageCanvasColor
             overlay.invalidate()
@@ -417,12 +423,13 @@ internal class PageFlipController(private val viewer: PagerViewer) {
                         "incoming=${incoming.item.first.index}",
                 )
             }
-            // 当前页在左 ⇒ 折线从右侧自由边起（相反的排布同理）。
+            // 方向按位置序号：当前页是 `position`（左边那项）⇒ 新页在右 ⇒ 从右侧折起。
+            // 同点击路径：不能比 left，双页或邻居未附着时两者相等会恒定成同一个方向。
             return Session(
                 pinnedView = incoming,
                 sheetView = current,
                 foldPinned = current,
-                foldFromRight = current.left <= incoming.left,
+                foldFromRight = pinned === holderA,
             ).also { session = it }
         }
 
