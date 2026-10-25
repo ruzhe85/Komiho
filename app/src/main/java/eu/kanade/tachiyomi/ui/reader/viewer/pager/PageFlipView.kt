@@ -302,8 +302,13 @@ internal class PageFlipView(context: Context) : View(context) {
         /** 自由边暗带不透明度。 */
         const val EDGE_ALPHA = 0x8C
 
-        /** 暗带峰值（约 55% 黑，靠近边缘）。 */
-        const val EDGE_DARK = 0x8C000000
+        /**
+         * 暗带峰值（约 55% 黑，靠近边缘）。
+         *
+         * 注意用 `toInt()`：`0x8C000000` 超出 `Int.MAX_VALUE`，字面量会被推断成 `Long`，
+         * 放进 `intArrayOf` 会编译失败。
+         */
+        val EDGE_DARK: Int = 0x8C000000.toInt()
 
         /**
          * 折线的横向剪切量（x' = x + k·y）。
