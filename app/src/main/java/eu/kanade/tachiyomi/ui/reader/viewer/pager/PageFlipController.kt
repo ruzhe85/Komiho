@@ -11,6 +11,14 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences.ReaderTheme
 /** Komiho 诊断 TAG：翻书动画。 */
 private const val KOMIHA_FLIP_TAG = "PageFlip"
 
+/**
+ * 双页（一跨两页）时的时长倍数。
+ *
+ * 一屏承载两页内容，相同毫秒数下信息量翻倍、观感更快，所以按此放慢：
+ * 400ms × 1.3 ≈ **520ms**。觉得还快就 1.4，嫌慢就 1.2。
+ */
+private const val DOUBLE_PAGE_FACTOR = 1.3f
+
 
 
 /**
@@ -147,11 +155,16 @@ internal class PageFlipController(private val viewer: PagerViewer) {
      *
      * 没有「页数」参数：`joinedItems` 的一项就是一屏（单页或合并后的整跨），
      * 翻页永远是换 1 项；会跳多项的路径（页码滑杆 / 打开章节 / 恢复进度）都是
-     * `setCurrentItem(…, false)` 瞬时到位，不经过动画。所以这里只有一个时长值。
+     * `setCurrentItem(…, false)` 瞬时到位，不经过动画。
      *
-     * 平移与覆盖都走这里，滑条对两者同时生效。
+     * **双页额外放慢**：一跨两页时，同样的时长下屏幕上有两页的信息量在动，
+     * 主观速度会明显更快，所以乘 [DOUBLE_PAGE_FACTOR]（400 × 1.3 = 520ms）。
      */
-    private fun tapFlipDuration(): Long = viewer.config.pageFlipDurationMs.toLong()
+    private fun tapFlipDuration(): Long {
+        val base = viewer.config.pageFlipDurationMs
+        val factor = if (viewer.isDoubleSpread(viewer.pager.currentItem)) DOUBLE_PAGE_FACTOR else 1f
+        return (base * factor).toLong()
+    }
 
     /**
      * 预置会话：钉住当前页、藏起新页。

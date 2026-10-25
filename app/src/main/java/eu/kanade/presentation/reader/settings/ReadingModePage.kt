@@ -142,10 +142,24 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
         pref = screenModel.preferences.cropBorders,
     )
     if (cropBorders) {
-        CheckboxItem(
-            label = stringResource(MR.strings.pref_crop_borders_aggressive),
-            pref = screenModel.preferences.cropBordersAggressive,
-        )
+        // Komiho: 深度裁剪改成「无 / 深度裁剪边缘」二选一 —— 它本质是裁边档位的强度，
+        // 用 chip 表达比一个独立开关更清楚（关掉裁边时整行不出现，见上面）。
+        val cropAggressive by screenModel.preferences.cropBordersAggressive.collectAsState()
+        SettingsChipRow {
+            listOf(false, true).forEach { aggressive ->
+                FilterChip(
+                    selected = cropAggressive == aggressive,
+                    onClick = { screenModel.preferences.cropBordersAggressive.set(aggressive) },
+                    label = {
+                        Text(
+                            stringResource(
+                                if (aggressive) MR.strings.pref_crop_borders_aggressive else MR.strings.none,
+                            ),
+                        )
+                    },
+                )
+            }
+        }
     }
 
     CheckboxItem(
@@ -194,12 +208,12 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
         enabled = !pageTransitionsLocked,
     )
 
-    // Komiho: 翻页方式是「翻页动画」的下一层 —— 总开关没开就不出现在菜单里。
-    // 平移 = ViewPager 原生滑移（时长由它自己的结算公式决定，改不了）；
-    // 覆盖 = 叠加层动画（时长可调）。
+    // Komiho (2026-10-25): 翻页方式是「翻页动画」的直接下文 —— 不另起标题行，
+    // chip 紧贴在上面那一项下面（SettingsChipRow 传 null 即不画标题）。
+    // 点击翻页时长已固定 400ms（见 PagerConfig.TAP_FLIP_DURATION_MS），没有滑条。
     if (!pageTransitionsLocked && pageTransitionsPager) {
         val pageFlipOn by screenModel.preferences.pageFlipAnimation.collectAsState()
-        SettingsChipRow(MR.strings.pref_page_flip_mode) {
+        SettingsChipRow {
             listOf(false, true).forEach { cover ->
                 FilterChip(
                     selected = pageFlipOn == cover,
@@ -214,9 +228,6 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
                 )
             }
         }
-
-        // Komiho (2026-10-25): 「点击翻页时长」不再可调 —— 固定 400ms
-        // （见 PagerConfig.TAP_FLIP_DURATION_MS），所以这里没有滑条。
     }
 
     // Komiho: 双击缩放。关掉后点击翻页不再等双击判定，抬手即启动。

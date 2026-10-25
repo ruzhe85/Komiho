@@ -301,6 +301,15 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     fun itemAt(position: Int): Any? = adapter.joinedItems.getOrNull(position)?.first
 
     /**
+     * Komiho: 该位置当前是否为「双页合并」的一跨。
+     *
+     * 用于翻页动画的时长补偿：一屏承载两页内容时，相同时长下信息量翻倍、观感更快，
+     * 所以双页那一跨要多给一点时间（见 `PageFlipController.tapFlipDuration`）。
+     */
+    fun isDoubleSpread(position: Int): Boolean =
+        adapter.joinedItems.getOrNull(position)?.second != null
+
+    /**
      * Komiho: 双击缩放实时生效 —— 遍历当前页 View 逐个切换，不必重新加载图片。
      *
      * 页 View 的 `Config` 是加载那一刻的快照，只改设置不会影响已经渲染出来的页；
