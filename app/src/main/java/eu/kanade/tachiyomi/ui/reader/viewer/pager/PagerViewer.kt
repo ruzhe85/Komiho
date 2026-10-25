@@ -187,11 +187,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
         // Komiho: 点击翻页动画途中用户触摸 → 立刻落位，把控制权交回手势。
-        pager.onTouchDownListener = { y ->
-            pageFlip.abortTapFlip()
-            // Komiho: 记下按下位置，翻书时折线绕它旋转（抓上边/下边倾角不同）。
-            pageFlip.onTouchDown(y)
-        }
+        // Komiho (2026-10-26): 折线不再跟按下位置（实测拖慢输入、点击/拖动常有掉帧般无响应）。
+        // 恢复固定中点：倾角恒定，手势路径最短。
+        pager.onTouchDownListener = { pageFlip.abortTapFlip() }
         // SY: 离屏缓冲 = 1（前后各 1 页）。流畅度由「并发解码密度」决定而非 Mutex：
         // offscreen 越高，ViewPager 同时撑起的页面越多，5000×2400 整页解码+Lanczos 增强
         // 并发打满 CPU/GC 导致掉帧。降回 1 恢复最早顺滑感；独立的 ByteArray 内存流已

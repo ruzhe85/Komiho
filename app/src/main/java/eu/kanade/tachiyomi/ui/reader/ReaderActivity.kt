@@ -1766,19 +1766,23 @@ class ReaderActivity : BaseActivity() {
                 ReaderTheme.KRAFT -> R.drawable.reader_bg_kraft
                 else -> null
             }
+            val solid = when (theme) {
+                ReaderTheme.WHITE -> Color.WHITE
+                ReaderTheme.GRAY -> grayBackgroundColor
+                ReaderTheme.AUTOMATIC -> automaticBackgroundColor()
+                else -> Color.BLACK
+            }
             if (paperDrawableRes != null) {
                 binding.readerContainer.background =
                     ContextCompat.getDrawable(this@ReaderActivity, paperDrawableRes)
             } else {
-                binding.readerContainer.setBackgroundColor(
-                    when (theme) {
-                        ReaderTheme.WHITE -> Color.WHITE
-                        ReaderTheme.GRAY -> grayBackgroundColor
-                        ReaderTheme.AUTOMATIC -> automaticBackgroundColor()
-                        else -> Color.BLACK
-                    },
-                )
+                binding.readerContainer.setBackgroundColor(solid)
             }
+            // Komiho (2026-10-26): 系统栏透明之后，栏位下方露出的是**窗口/根布局**的底色
+            // （主题默认那一层），所以 E-Ink 纯色档会出现「内容白、导航栏灰」。
+            // 这里把窗口与根布局一起涂成同一个阅读底色，栏位就与内容连续了。
+            window.decorView.setBackgroundColor(solid)
+            binding.root.setBackgroundColor(solid)
         }
 
         /*
