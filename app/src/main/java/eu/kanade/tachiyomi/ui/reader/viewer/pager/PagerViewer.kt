@@ -396,6 +396,11 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                 else -> true
             }
             currentPage = page
+            // Komiho (2026-10-25): 立刻更新「可见页」，不要等 holder 开始准备时才写
+            // （见 onPrepareStart）。翻页瞬间若它仍指向旧页，`prewarm-far` 会判定「跑远了」
+            // 而把**刚变成可见页**的那次推理打断 —— 实测一次会话 34 页因此被打断，
+            // 表现就是「停在某页显示 skip」。这个标记同时是可见页优先与打断守卫的参考值。
+            (page as? ReaderPage)?.let { Waifu2x.visiblePageIndex = it.index }
             when (page) {
                 is ReaderPage -> onReaderPageSelected(page, allowPreload, forward, pagePair.second != null)
                 is ChapterTransition -> onTransitionSelected(page)
