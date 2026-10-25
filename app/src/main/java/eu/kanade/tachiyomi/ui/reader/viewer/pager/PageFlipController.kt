@@ -53,10 +53,24 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     private var session: Session? = null
 
     private class Session(
-        /** 被钉在原位的那一页（当前页）。 */
+        /**
+         * 被钉在原位的那一页。
+         *
+         * - 覆盖 / 平移：当前页（新页在动）；
+         * - 翻书：**下一页**（它是被揭开的那张，必须静止）。
+         */
         val pinnedView: PagerPageHolder,
-        /** 被隐藏、改由叠加层绘制的那一页（新页）。 */
+        /**
+         * 被隐藏、改由叠加层绘制的那一页。
+         *
+         * - 覆盖 / 平移：新页；
+         * - 翻书：**当前页**（正在被折走的那张）。
+         */
         val sheetView: PagerPageHolder,
+        /** 翻书模式下需要额外钉住的另一页（当前页）；其它模式为 null。 */
+        val foldPinned: PagerPageHolder? = null,
+        /** 翻书模式：折线从右侧自由边开始。 */
+        val foldFromRight: Boolean = true,
     )
 
     /** 当前滚动状态。只在真正滚动的帧里接管（瞬间跳页没有滚动过程）。 */
@@ -224,7 +238,6 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         session = prepared
         if (viewer.config.pageTurnStyle == STYLE_FOLD) {
             overlay.foldView = prepared.sheetView
-            overlay.underView = prepared.pinnedView
             overlay.foldFromRight = pages > 0
             overlay.foldProgress = 0f
             overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
@@ -251,6 +264,18 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     }
 
     private fun applyFrame(current: Session, scrollX: Int, offset: Float) {
+        if (viewer.config.pageTurnStyle == STYLE_FOLD) {
+            // 翻书：两页都钉住（画面完全冻结），折线完全由 offset 驱动 —— 这就是「跟手翻书」。
+            current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
+            current.foldPinned?.let { it.translationX = -(it.left - scrollX).toFloat() }
+            overlay.foldView = current.sheetView
+            overlay.foldFromRight = current.foldFromRight
+            overlay.foldProgress = offset
+            overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
+                ?: viewer.config.pageCanvasColor
+            overlay.invalidate()
+            return
+        }
         // 钉住当前页：让它相对视口停在 0（抵消 ViewPager 给它的位移）。
         current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
         // 新页按它自己的真实屏幕位置绘制，方向由位置本身决定，不需要额外判断。
@@ -288,6 +313,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val current = session ?: return
         session = null
         current.pinnedView.translationX = 0f
+        current.foldPinned?.translationX = 0f
         current.sheetView.alpha = 1f
         overlay.reset()
     }
@@ -320,6 +346,31 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val pinned = if (distA <= distB) holderA else holderB
         val sheet = if (pinned === holderA) holderB else holderA
 
+        if (viewer.config.pageTurnStyle == STYLE_FOLD) {
+            // 翻书：当前页（离原点近的那张）藏起来由叠加层折走，下一页留在下面当底。
+            // 两页都要钉住 —— 画面冻结，折线完全由滚动 offset 驱动，才有「跟手」。
+            val current = pinned
+            val incoming = sheet
+            current.alpha = 0f
+            current.translationX = 0f
+            incoming.translationX = 0f
+            if (!loggedThisScroll) {
+                loggedThisScroll = true
+                DiagLog.d(
+                    KOMIHA_FLIP_TAG,
+                    "fold start current=${current.item.first.index} " +
+                        "incoming=${incoming.item.first.index}",
+                )
+            }
+            // 当前页在左 ⇒ 折线从右侧自由边起（相反的排布同理）。
+            return Session(
+                pinnedView = incoming,
+                sheetView = current,
+                foldPinned = current,
+                foldFromRight = current.left <= incoming.left,
+            ).also { session = it }
+        }
+
         // 新页藏起来，改由叠加层画在最上层 —— 否则后退翻页时它会被钉住的当前页盖住。
         sheet.alpha = 0f
         if (!loggedThisScroll) {
@@ -350,8 +401,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
      * 这个 viewer 是否支持**拖动**时的接管（与「此刻是否在滚动」无关 —— 点击翻页
      * 需要在滚动开始之前就预置会话，见 [startTapFlip]）。
      *
-     * 只有「覆盖」需要接管拖动：平移本来就是两页并排滑动（ViewPager 原生即可），
-     * 翻书目前只做点击 / 按键 —— 拖动时它需要同时钉住两页并驱动折线，属于另一套逻辑。
+     * 「覆盖」与「翻书」都接管拖动：前者只钉住当前页，后者把两页都钉住、让折线跟着
+     * 手指走（见 [startSession] 与 [applyFrame]）。平移不接管 —— 它本来就是两页并排
+     * 滑动，ViewPager 原生就够。
      */
     private fun isSupported(): Boolean {
         // 只有横向的 L2R / R2L 页漫才翻书；竖向翻页没有「纸」的语义。
@@ -359,7 +411,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         if (viewer !is L2RPagerViewer && viewer !is R2LPagerViewer) return false
         // 页码滑杆连续跳页时不接管（跟着手指刷几十页会很吵）。
         if (viewer.activity.isScrollingThroughPages) return false
-        return viewer.config.pageFlipActive && viewer.config.pageTurnStyle == STYLE_COVER
+        return viewer.config.pageFlipActive
     }
 
     /**

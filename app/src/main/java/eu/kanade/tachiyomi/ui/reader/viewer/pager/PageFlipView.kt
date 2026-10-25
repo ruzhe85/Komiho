@@ -68,11 +68,13 @@ internal class PageFlipView(context: Context) : View(context) {
 
     // region 翻书模式
 
-    /** 被折走的那一页（当前页，由本层绘制）。非 null 时进入翻书模式。 */
+    /**
+     * 被折走的那一页（当前页，由本层绘制）。非 null 时进入翻书模式。
+     *
+     * 只画这一页：下面那张「被揭开」的下一页仍然是可见的，由 `ViewPager` 自己绘制。
+     * 如果这里再画一遍，纸化档位的纸纹（MULTIPLY）会乘两次 —— 纸色明显变深。
+     */
     var foldView: View? = null
-
-    /** 保持在下面静止的那一页（下一页）。 */
-    var underView: View? = null
 
     /** 折线进度：0 = 尚未折起，1 = 已折到书脊。 */
     var foldProgress: Float = 0f
@@ -141,7 +143,6 @@ internal class PageFlipView(context: Context) : View(context) {
         if (sheetView == null && foldView == null) return
         sheetView = null
         foldView = null
-        underView = null
         progress = 0f
         foldProgress = 0f
         invalidate()
@@ -221,8 +222,8 @@ internal class PageFlipView(context: Context) : View(context) {
         if (w <= 0f || h <= 0f) return
         val p = foldProgress.coerceIn(0f, 1f)
 
-        // ① 下层：下一页保持静止（此时两个页 View 都已被钉住，ViewPager 不会移动它们）。
-        underView?.let { drawPage(canvas, it) }
+        // ① 下层（被揭开的下一页）由 `ViewPager` 绘制 —— 它已被钉在 0 且可见。
+        //    这里不能重画：纸纹是 MULTIPLY，画两遍会乘两次，纸档会明显偏深。
 
         // ② 折线位置：自由边 → 书脊。
         val creaseX = if (foldFromRight) w * (1f - p) else w * p
