@@ -540,6 +540,14 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         }
     }
 
+    /**
+     * Komiho (2026-10-25): 只在进度不超过这个百分比时才打断跑远的预载。
+     *
+     * 超过它说明这次推理快跑完了 —— 打断后仍要整页重算，比让它跑完更亏。
+     * 70 的依据：单次约 540ms，70% ≈ 380ms，剩下 160ms 内完成的概率高。
+     */
+    private val ABORT_MAX_PROGRESS = 70
+
     /** 连点期间被推迟的预载，延后多久再试（`EnhanceBurst.EXIT_MS` 之后即可）。 */
     private val prewarmDeferMs = 300L
 
@@ -575,11 +583,17 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             val running = Waifu2x.currentInferencePage()
             val reference = currentPageIndexForAbortGuard()
             if (running >= 0 && reference >= 0 && abs(running - reference) > 1) {
+                // Komiho (2026-10-25): **快跑完的就让它跑完**。
+                // 单次推理约 540ms，实测被掐掉的那些多数已经跑到 400~600ms —— 掐在 90%
+                // 之后仍要整页重算，代价比「让它跑完并进缓存」更大。只有还没跑多少时才值得打断。
+                val progress = Waifu2x.progressPercent()
+                val worthAborting = progress < 0 || progress <= ABORT_MAX_PROGRESS
                 eu.kanade.tachiyomi.diagnostic.DiagLog.d(
                     "Waifu2xAbort",
-                    "want reason=prewarm-far running=$running ref=$reference",
+                    "want reason=prewarm-far running=$running ref=$reference " +
+                        "progress=$progress abort=$worthAborting",
                 )
-                Waifu2x.abortProcessing()
+                if (worthAborting) Waifu2x.abortProcessing()
             }
         }
 

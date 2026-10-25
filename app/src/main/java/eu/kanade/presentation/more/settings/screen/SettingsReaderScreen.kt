@@ -226,7 +226,6 @@ object SettingsReaderScreen : SearchableSettings {
         // Komiho: 翻书动画从属于「翻页动画」总开关，关掉总开关时一并置灰。
         val pageTransitions by readerPreferences.pageTransitionsPager.collectAsState()
         val pageFlipOn by readerPreferences.pageFlipAnimation.collectAsState()
-        val pageFlipSpeed by readerPreferences.pageFlipSpeed.collectAsState()
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pager_viewer),
@@ -293,16 +292,8 @@ object SettingsReaderScreen : SearchableSettings {
                     subtitle = stringResource(MR.strings.pref_page_flip_summary),
                     enabled = pageTransitions && !einkAnimationOff,
                 ),
-                // Komiho: 点击翻页时长（100~500，步进 50）。
-                Preference.PreferenceItem.SliderPreference(
-                    value = pageFlipSpeed,
-                    valueRange = 100..500,
-                    steps = 7,
-                    title = stringResource(MR.strings.pref_page_flip_speed),
-                    valueString = "$pageFlipSpeed ms",
-                    enabled = pageTransitions && pageFlipOn && !einkAnimationOff,
-                    onValueChanged = { readerPreferences.pageFlipSpeed.set(it) },
-                ),
+                // Komiho (2026-10-25): 点击翻页时长固定 400ms，不再提供滑条
+                // （见 PagerConfig.TAP_FLIP_DURATION_MS）。
                 // SY <--
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.landscapeZoom,
@@ -341,13 +332,8 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_page_rotate_invert),
                     enabled = rotateToFit,
                 ),
-                // Komiho：预载页数（前后各几页）。档位只写值。
-                Preference.PreferenceItem.ListPreference(
-                    preference = readerPreferences.pagerOffscreenLimit,
-                    entries = (PagerConfig.OffscreenPages.MIN..PagerConfig.OffscreenPages.MAX)
-                        .associateWith { it.toString() },
-                    title = stringResource(MR.strings.pref_pager_offscreen_limit),
-                ),
+                // Komiho (2026-10-25): 「预载页数」已移除 —— 离屏缓冲固定 1 页
+                // （增强时引擎串行，多留页只会抢锁；不增强时解码很快，多留只占内存）。
             ),
         )
     }

@@ -20,6 +20,14 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 /**
+ * Komiho: 点击 / 按键翻一页的时长（ms）。
+ *
+ * 平移与覆盖共用这一个值（两者都由叠加层播放，见 `PageFlipController`）。
+ * 400ms 与「拖动后抬手结算」同一量级：够稳、又不拖沓。要调手感只改这里。
+ */
+private const val TAP_FLIP_DURATION_MS = 400L
+
+/**
  * Configuration used by pager viewers.
  */
 class PagerConfig(
@@ -85,11 +93,12 @@ class PagerConfig(
         get() = pageFlipEnabled && pageSlideAnimationsEnabled
 
     /**
-     * Komiho: 点击 / 按键翻一页的实际时长（毫秒）。平移与覆盖共用，
-     * 默认 500（与拖动后抬手的结算时长一致），可调范围 100 ~ 500。
+     * Komiho: 点击 / 按键翻一页的实际时长（毫秒）。平移与覆盖共用。
+     *
+     * 定为常量 **400ms**（不再可调）：它与「拖动后抬手结算」同一量级，足够稳，
+     * 又不会像 500ms 那样显得拖沓。要改只改 [TAP_FLIP_DURATION_MS] 一处。
      */
-    var pageFlipDurationMs = readerPreferences.pageFlipSpeed.get()
-        private set
+    val pageFlipDurationMs = TAP_FLIP_DURATION_MS
 
     /**
      * Komiho: 页漫双击缩放。关闭后点击翻页改为「抬手即派发」——
@@ -119,11 +128,18 @@ class PagerConfig(
     var centerMarginType = CenterMarginType.NONE
 
     /**
-     * Komiho：预载页数（ViewPager 离屏缓冲 = 前后各保留 N 页）。
-     * 见 [ReaderPreferences.pagerOffscreenLimit]；运行时改也会即时生效（见 init 里的 register）。
+     * Komiho (2026-10-25): ViewPager 离屏缓冲 —— **固定 1 页**，不再对外暴露。
+     *
+     * 原因：
+     * - **增强开启时**：引擎是单槽串行的，离屏窗口里的每个 holder 都会各自启动解码+增强，
+     *   窗口越大只是让更多页去抢同一把锁 → 队列变长、顺序不可控，可见页排在后面，
+     *   最后被 `prewarm-far` 打断（表现为 skip）。
+     * - **增强关闭时**：现代机型解码一页只要 50~100ms，调大换来的是内存（每页 6MB 级位图），
+     *   感知不到速度差。
+     *
+     * 老偏好 [ReaderPreferences.pagerOffscreenLimit] 保留但不再消费（老数据不影响）。
      */
-    var offscreenPageLimit = readerPreferences.pagerOffscreenLimit.get()
-        .coerceIn(OffscreenPages.MIN, OffscreenPages.MAX)
+    var offscreenPageLimit = OffscreenPages.DEFAULT
         private set
 
     // SY <--
@@ -229,9 +245,7 @@ class PagerConfig(
         // 让可见页重新解码并重跑一次 AI 增强。
         readerPreferences.pageFlipAnimation
             .register({ pageFlipEnabled = it })
-        // Komiho: 点击翻页时长基准。同上，只读不改位图，不接 imagePropertyChangedListener。
-        readerPreferences.pageFlipSpeed
-            .register({ pageFlipDurationMs = it })
+        // Komiho (2026-10-25): 点击翻页时长已固定为常量，不再订阅偏好。
         // Komiho: 双击缩放开关同时决定点击是否「抬手即派发」（关掉它才有 0 延迟）。
         readerPreferences.pagedDoubleTapZoom
             .register({ enabled ->
@@ -273,17 +287,8 @@ class PagerConfig(
         readerPreferences.invertDoublePages
             .register({ invertDoublePages = it && dualPageSplit == false }, { imagePropertyChangedListener?.invoke() })
 
-        // Komiho：预载页数（离屏缓冲）。改设置**即时生效** —— ViewPager 允许动态改，会触发一次
-        // populate：前后各 N 页的 holder 随之重建（多出来的会被创建并各自跑一次预处理）。
-        // 与其它 register 一样，注册时的首个值也会走 onChanged ⇒ 构造期就把 pager 设好。
-        readerPreferences.pagerOffscreenLimit
-            .register(
-                { offscreenPageLimit = it.coerceIn(OffscreenPages.MIN, OffscreenPages.MAX) },
-                {
-                    offscreenPageLimit = it.coerceIn(OffscreenPages.MIN, OffscreenPages.MAX)
-                    viewer.pager.offscreenPageLimit = offscreenPageLimit
-                },
-            )
+        // Komiho (2026-10-25): 预载页数已固定为 1（原因见 [offscreenPageLimit]），
+        // 因此不再订阅 `pagerOffscreenLimit`；老用户存的值不再生效。
         // SY <--
     }
 

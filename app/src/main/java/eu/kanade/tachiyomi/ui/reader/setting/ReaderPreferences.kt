@@ -47,7 +47,9 @@ class ReaderPreferences(
      *
      * 目前为了找最佳手感暂时做成可调，定值后可把滑条撤掉、只留这个偏好。
      */
-    val pageFlipSpeed: Preference<Int> = preferenceStore.getInt("pref_page_flip_speed", 500)
+    // Komiho (2026-10-25): 「点击翻页时长」已定为常量 400ms（见 PagerConfig.pageFlipDurationMs），
+    // 不再做成可调项 —— 滑条会让人反复怀疑「是不是没调对」，而它与拖动结算同量级即可。
+    // 旧的 pref_page_flip_speed 保留在存量数据里但不再读取。
 
     /**
      * Komiho: 页漫双击缩放。

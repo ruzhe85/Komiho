@@ -418,7 +418,7 @@
     <string name="pref_cutout_short">Show content in cutout area</string>
     <string name="pref_page_transitions">Animate page transitions</string>
     <!-- Komiho: paged reader only — turns the current page like a sheet of paper -->
-    <string name="pref_page_flip">Cover page turn</string>
+    <string name="pref_page_flip">Cover</string>
     <string name="pref_page_flip_summary">The next page slides in and covers the current one</string>
     <!-- Komiho: tap page-turn duration base (100/150/200/250 ms; full page = base x 2) -->
     <string name="pref_page_flip_speed">Tap page turn duration</string>

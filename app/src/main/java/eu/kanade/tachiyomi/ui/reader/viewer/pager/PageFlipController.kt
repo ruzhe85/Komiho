@@ -11,6 +11,8 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences.ReaderTheme
 /** Komiho 诊断 TAG：翻书动画。 */
 private const val KOMIHA_FLIP_TAG = "PageFlip"
 
+
+
 /**
  * Komiho: 页漫「覆盖翻页」的驱动。
  *
@@ -85,12 +87,16 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         // 越界判定走 `itemAt`（`adapter` 在 PagerViewer 里是 private）。
         if (target < 0 || viewer.itemAt(target) == null) return
 
-        val prepared = prepareSession(pages)
-        if (!prepared) {
-            // 没有可用的「纸」（章节过渡页 / 页未就绪）：交回 ViewPager 的默认动画。
+        if (!prepareSession(pages)) {
+            // 没有可用的两页（章节过渡页 / holder 缺失）→ 交回 ViewPager 的默认动画。
             pager.setCurrentItem(target, true)
             return
         }
+        startTapAnimator(target)
+    }
+
+    /** 会话已备好，真正开始播放。 */
+    private fun startTapAnimator(target: Int) {
         // 新页的起点就是它在布局里的真实位置（±页宽），方向不用额外判断。
         val startOffset = overlay.sheetOffsetX
         // 覆盖 = 当前页钉住不动、新页压上来；平移 = 两页并排滑动（当前页反向让开）。
@@ -164,6 +170,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val enteringItem = viewer.itemAt(pager.currentItem + pages)
         if (leavingItem !is ReaderPage || enteringItem !is ReaderPage) return false
         val leaving = findHolder(leavingItem) ?: return false
+        // 新页还没画出来（解码未完成）时**也照样接管**：叠加层画的就是这页现在的样子
+        // （可能只有纸色），与普通滑动看到的一致。换成另一种动画、或者等它就绪再播，
+        // 都只会让行为变得不一致 —— 所以不等待、不降级。
         val entering = findHolder(enteringItem) ?: return false
 
         end()
@@ -180,6 +189,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             end()
             return
         }
+
 
         val pager = viewer.pager
         val scrollX = pager.scrollX

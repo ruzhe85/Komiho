@@ -129,17 +129,9 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
         }
     }
 
-    // Komiho：预载页数（前后各几页）。档位只写值，含义由行标题承担。
-    val offscreenLimit by screenModel.preferences.pagerOffscreenLimit.collectAsState()
-    SettingsChipRow(MR.strings.pref_pager_offscreen_limit) {
-        (PagerConfig.OffscreenPages.MIN..PagerConfig.OffscreenPages.MAX).forEach { pages ->
-            FilterChip(
-                selected = offscreenLimit == pages,
-                onClick = { screenModel.preferences.pagerOffscreenLimit.set(pages) },
-                label = { Text(pages.toString()) },
-            )
-        }
-    }
+    // Komiho (2026-10-25): 「预载页数」已移除 —— 离屏缓冲固定 1 页。
+    // 增强开启时引擎单槽串行，多留几页只会让它们抢同一把锁（队列变长、可见页被抢占）；
+    // 关闭增强时现代机型解码 50~100ms，调大只多占内存。见 PagerConfig.offscreenPageLimit。
     // SY <--
 
     // Komiho: 裁边是主项，「深度裁剪」是它的附加档 —— 只有开了裁边才出现，
@@ -223,16 +215,8 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
             }
         }
 
-        // 时长对平移 / 覆盖都生效（两者都由叠加层播放），范围 100~500、步进 50。
-        val pageFlipSpeed by screenModel.preferences.pageFlipSpeed.collectAsState()
-        SliderItem(
-            value = pageFlipSpeed,
-            valueRange = 100..500,
-            steps = 7,
-            label = stringResource(MR.strings.pref_page_flip_speed),
-            valueString = "$pageFlipSpeed ms",
-            onChange = { screenModel.preferences.pageFlipSpeed.set(it) },
-        )
+        // Komiho (2026-10-25): 「点击翻页时长」不再可调 —— 固定 400ms
+        // （见 PagerConfig.TAP_FLIP_DURATION_MS），所以这里没有滑条。
     }
 
     // Komiho: 双击缩放。关掉后点击翻页不再等双击判定，抬手即启动。
