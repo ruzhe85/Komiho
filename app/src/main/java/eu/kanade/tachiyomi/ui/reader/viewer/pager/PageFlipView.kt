@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Shader
 import android.view.View
 import eu.kanade.tachiyomi.ui.reader.viewer.PaperPageTexture
@@ -95,6 +96,9 @@ internal class PageFlipView(context: Context) : View(context) {
 
     /** 卷边筒面的明暗（沿卷边带宽方向的渐变）。 */
     private val rollPaint = Paint()
+
+    /** 斜折线的正面裁剪路径（预分配，逐帧 rewind 复用）。 */
+    private val frontPath = Path()
 
     private var shadowW = 0f
 
@@ -225,52 +229,65 @@ internal class PageFlipView(context: Context) : View(context) {
         // ① 下层（被揭开的下一页）由 `ViewPager` 绘制 —— 它已被钉在 0 且可见。
         //    这里不能重画：纸纹是 MULTIPLY，画两遍会乘两次，纸档会明显偏深。
 
-        // ② 折线位置：自由边 → 书脊。
-        val creaseX = if (foldFromRight) w * (1f - p) else w * p
+        // ② 折线：倾斜的。上端推进得比下端快，所以残余会先在上边收窄，
+        //    最后落成**下角的一块楔形** —— 这正是参考里「揭起一角」的形态。
+        val shift = if (foldFromRight) 1f else -1f      // 自由边在右 ⇒ 向 -x 推进
+        val edge = if (foldFromRight) w else 0f
+        // 上端比下端推进得快（TOP > BOTTOM），残余因此先在上边收窄、最后落成下角楔形。
+        val topX = (edge - shift * w * (p * FOLD_TILT_TOP)).coerceIn(0f, w)
+        val botX = (edge - shift * w * (p * FOLD_TILT_BOTTOM)).coerceIn(0f, w)
 
-        // ③ 正面：靠书脊一侧的剩余部分（被折走那一页还没被揭走的部分）。
-        val frontLeft = if (foldFromRight) 0f else creaseX
-        val frontRight = if (foldFromRight) creaseX else w
-        if (frontRight > frontLeft) {
+        // ③ 正面：折线靠书脊一侧的剩余部分（四边形，倾斜后自然成楔形）。
+        frontPath.rewind()
+        if (foldFromRight) {
+            frontPath.moveTo(0f, 0f)
+            frontPath.lineTo(topX, 0f)
+            frontPath.lineTo(botX, h)
+            frontPath.lineTo(0f, h)
+        } else {
+            frontPath.moveTo(topX, 0f)
+            frontPath.lineTo(w, 0f)
+            frontPath.lineTo(w, h)
+            frontPath.lineTo(botX, h)
+        }
+        frontPath.close()
+        if (p < 1f) {
             val sc1 = canvas.save()
-            canvas.clipRect(frontLeft, 0f, frontRight, h)
+            canvas.clipPath(frontPath)
             drawPage(canvas, page)
             canvas.restoreToCount(sc1)
         }
 
-        // ④ 卷边：折线处那条**被压扁的当前页** —— 筒面正对着我们的那一小段。
-        //    取折线内侧附近 srcW 宽的内容，横向压缩到 bandW 宽并镜像，这就是「纸卷起来」的
-        //    唯一视觉证据；少了它，看着只是「页面被裁掉一块」。
-        if (creaseX > 0f && creaseX < w) {
+        // ④ 卷边：折线中点附近一条**被压扁的当前页**（筒面）。
+        //    折线虽然是斜的，但倾角只有十几度，这里仍按竖带对齐 —— 省掉一次带旋转的
+        //    整页重放（那是唯一的昂贵绘制），观感上看不出差别。
+        if (p > 0f && p < 1f) {
             val bandW = w * ROLL_FRACTION
             val srcW = bandW / ROLL_SQUEEZE
-            val bandLeft = if (foldFromRight) creaseX else creaseX - bandW
-            val bandRight = bandLeft + bandW
             val k = bandW / srcW
+            val midX = (topX + botX) / 2f
+            val bandLeft = if (foldFromRight) midX else midX - bandW
+            val bandRight = bandLeft + bandW
             val sc2 = canvas.save()
             canvas.clipRect(bandLeft, 0f, bandRight, h)
-            // dest(x) = crease + (crease − x) · k：把源条带压进卷边、并左右镜像。
-            canvas.translate(creaseX, 0f)
+            // dest(x) = mid + (mid − x) · k：把源条带压进卷边、并左右镜像。
+            canvas.translate(midX, 0f)
             canvas.scale(-k, 1f)
-            canvas.translate(-creaseX, 0f)
+            canvas.translate(-midX, 0f)
             drawPage(canvas, page)
             canvas.restoreToCount(sc2)
 
-            // 筒面明暗：靠近折线一侧压暗，外缘留一道亮边（shader 在 onSizeChanged 里预建，
-            // 坐标固定在 [0, bandW]，这里只平移 —— 逐帧零分配）。
+            // 筒面明暗（shader 在 onSizeChanged 里预建，逐帧零分配）。
             val sc3 = canvas.save()
             canvas.clipRect(bandLeft, 0f, bandRight, h)
             canvas.translate(bandLeft, 0f)
             canvas.drawRect(0f, 0f, bandW, h, rollPaint)
             canvas.restoreToCount(sc3)
-        }
 
-        // ⑤ 投影：落在**被揭开的下一页**上，从卷边外侧向外衰减。
-        if (creaseX > 0f && creaseX < w) {
-            val bandW = w * ROLL_FRACTION
+            // ⑤ 投影：落在被揭开的下一页上，从卷边外侧向外衰减。
             shadowPaint.alpha = FOLD_SHADOW_ALPHA
             val sc4 = canvas.save()
-            canvas.translate(if (foldFromRight) creaseX + bandW else creaseX - bandW, 0f)
+            canvas.translate(if (foldFromRight) bandRight else bandLeft, 0f)
             canvas.scale(if (foldFromRight) 1f else -1f, 1f)
             canvas.drawRect(0f, 0f, shadowW, h, shadowPaint)
             canvas.restoreToCount(sc4)
@@ -309,6 +326,17 @@ internal class PageFlipView(context: Context) : View(context) {
 
         /** 折痕阴影不透明度（固定，不随进度淡入 —— 折起本身就意味着有厚度）。 */
         const val FOLD_SHADOW_ALPHA = 0x66
+
+        /**
+         * 斜折线上端的推进比例（相对页宽）。
+         *
+         * > 1 表示会越过整页宽 —— 上端先到书脊，残余便只剩下半部分，形成参考里那种
+         * 「左下角一块楔形」。
+         */
+        const val FOLD_TILT_TOP = 1.18f
+
+        /** 斜折线下端的推进比例。比上端小 ⇒ 折线倾斜。 */
+        const val FOLD_TILT_BOTTOM = 1.0f
 
         /** 卷边宽度（占页宽比例）。太窄看不出卷，太宽会像一根粗黑条。 */
         const val ROLL_FRACTION = 0.035f

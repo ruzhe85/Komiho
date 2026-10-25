@@ -226,10 +226,18 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
         end()
         val prepared = if (viewer.config.pageTurnStyle == STYLE_FOLD) {
-            // 翻书：被折走的是**当前页**（藏起来由叠加层画），下一页保持静止（保留原 View）。
+            // 翻书：被折走的是**当前页**（藏起来由叠加层画），下一页保持静止。
+            // 折线方向与拖动路径同一条规则（看两页在布局里的左右关系），不再用 `pages` 猜。
             leaving.alpha = 0f
-            entering.translationX = 0f
-            Session(pinnedView = entering, sheetView = leaving)
+            // 点击时 ViewPager 完全不滚，下一页还停在 ±页宽（屏幕外）——必须把它**平移进视口**，
+            // 否则被揭开的那片区域没有任何东西可画，只剩底色。
+            // 用平移而不是「叠加层重画」：与拖动路径同一条渲染路径，纸纹不会乘两次。
+            entering.translationX = -(entering.left - pager.scrollX).toFloat()
+            Session(
+                pinnedView = entering,
+                sheetView = leaving,
+                foldFromRight = leaving.left <= entering.left,
+            )
         } else {
             // 覆盖 / 平移：新页藏起来，由叠加层按屏幕位置绘制。
             entering.alpha = 0f
@@ -238,7 +246,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         session = prepared
         if (viewer.config.pageTurnStyle == STYLE_FOLD) {
             overlay.foldView = prepared.sheetView
-            overlay.foldFromRight = pages > 0
+            overlay.foldFromRight = prepared.foldFromRight
             overlay.foldProgress = 0f
             overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
                 ?: viewer.config.pageCanvasColor
