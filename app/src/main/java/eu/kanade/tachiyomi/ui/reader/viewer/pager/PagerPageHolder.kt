@@ -390,8 +390,10 @@ class PagerPageHolder(
             var prepared = viewer.preparedCache.get(key)
             val prewarmHit = prepared != null
             if (prepared == null) {
-                prepared = PagerPagePreparer.preparePure(
-                    viewer = viewer,
+                // Komiho (2026-10-25): 走单飞准备 —— 若预载正在算同一页，这里**等它的结果**，
+                // 而不是再算一遍。否则两次抢同一把原生锁，先到的那次（预载）会被
+                // `prewarm-far` 打断，白烧一次推理，这一页还可能落成 skip。
+                prepared = viewer.prepareShared(
                     page = page,
                     extraPage = extraPage,
                     viewHeight = if (height > 0) height else viewer.pager.height,

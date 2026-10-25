@@ -24,6 +24,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
 import eu.kanade.tachiyomi.util.EnhanceBurst
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -277,6 +278,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         pageFlip.release()
         // Komiho (2026-10-25): 连点节奏不该跨会话残留（否则刚退出时的翻页速度会带进下一本）。
         EnhanceBurst.reset()
+        pager.removeCallbacks(prewarmWhenQuiet)
         scope.cancel()
     }
 
@@ -490,6 +492,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastBurstSettleAt < 1_000L) return
         lastBurstSettleAt = now
+        // 直接走 prewarmAdjacentPages：它内部会判断「是否仍在连续阅读」，
+        // 需要时自动延后到静默之后（见 prewarmWhenQuiet）。
         prewarmAdjacentPages(forward = lastPrewarmForward)
     }
 
@@ -499,8 +503,64 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         return (adapter.joinedItems.getOrNull(pager.currentItem)?.first as? ReaderPage)?.index ?: -1
     }
 
+    /**
+     * Komiho (2026-10-25): **单飞准备** —— 同一页只算一次。
+     *
+     * 预载与 holder 都会准备同一页：预载正在算 N+1 时用户翻到 N+1，holder 只看自己的
+     * `renderedKey`（没算过）就另起一次，两次抢同一把原生锁，先到的那次被 `prewarm-far`
+     * 打断 —— 白算一遍，而且那一页最终可能落成 skip。
+     *
+     * 现在两个入口都走这里：先查缓存，再查「正在算」；命中就等它的结果，不重复烧推理。
+     */
+    suspend fun prepareShared(page: ReaderPage, extraPage: ReaderPage?, viewHeight: Int): PagerPreparedPage? {
+        val key = preparedCache.key(page, extraPage)
+        preparedCache.get(key)?.let { return it }
+
+        val mine = CompletableDeferred<PagerPreparedPage?>()
+        val existing = preparedCache.beginInFlight(key, mine)
+        if (existing != null) {
+            eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+                "Waifu2xPrefetch",
+                "page=${page.index} join in-flight extra=${extraPage?.index ?: -1}",
+            )
+            return existing.await()
+        }
+        try {
+            val result = PagerPagePreparer.preparePure(
+                viewer = this,
+                page = page,
+                extraPage = extraPage,
+                viewHeight = viewHeight,
+            )
+            result?.let { preparedCache.put(key, it) }
+            return result
+        } finally {
+            // 必须无条件结束登记：等待方可能正卡在 await 上，漏一次就会永久挂住。
+            preparedCache.endInFlight(key, preparedCache.get(key))
+        }
+    }
+
+    /** 连点期间被推迟的预载，延后多久再试（`EnhanceBurst.EXIT_MS` 之后即可）。 */
+    private val prewarmDeferMs = 300L
+
+    /** 连点结束后的那次预载。 */
+    private val prewarmWhenQuiet = Runnable {
+        if (EnhanceBurst.isBursting) return@Runnable
+        prewarmAdjacentPages(forward = lastPrewarmForward)
+    }
+
     private fun prewarmAdjacentPages(forward: Boolean) {
         lastPrewarmForward = forward
+        // Komiho (2026-10-25): **只在连点期间**让位，其余情况照常预载。
+        // 预载的意义就是「翻过去时已经算完」，正常阅读（每页停留 1~3 秒）完全来得及；
+        // 但连点时节奏 200~400ms/页，预载追不上，只会占住引擎让可见页排在自己后面，
+        // 最后被 `prewarm-far` 打断、那一页落成 skip。这类场景推迟到连点结束再补。
+        if (EnhanceBurst.isBursting) {
+            pager.removeCallbacks(prewarmWhenQuiet)
+            pager.postDelayed(prewarmWhenQuiet, prewarmDeferMs)
+            prewarmLog("defer pos=${pager.currentItem} reason=bursting")
+            return
+        }
         val enhancementOn = readerPrefs.enhancementMode.get() != 0
         val generation = prewarmGeneration.incrementAndGet()
 
@@ -572,8 +632,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                     // Komiho P3：把预热也登记进「谁在跑」，这样可见页 holder 开始跑时能把它打断
                     // （否则新可见页会排在一条已无人要的预热推理后面，实测可拖到 +2.5s）。
                     onPrepareStart(pageIndex = next.index, visible = false)
-                    val prepared = PagerPagePreparer.preparePure(
-                        viewer = this@PagerViewer,
+                    // Komiho (2026-10-25): 走单飞准备（见 prepareShared）—— 若 holder 已经在算
+                    // 同一页，就等它的结果，不重复烧一次推理。
+                    val prepared = prepareShared(
                         page = next,
                         extraPage = pair.second as? ReaderPage,
                         viewHeight = pager.height,
@@ -583,7 +644,6 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                             "enhanceMs=${prepared?.enhanceElapsedMillis} " +
                             "layoutApplied=${prepared?.layoutApplied}",
                     )
-                    prepared?.let { preparedCache.put(key, it) }
                 }
             }
         }

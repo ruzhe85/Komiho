@@ -53,6 +53,8 @@ object EnhanceBurst {
     /** 停稳后给当前页的放行窗口：够跑完一次推理即可，超时自动收回。 */
     private const val RESUME_WINDOW_MS = 1500L
 
+
+
     /** 最近一次换页的时刻。 */
     @Volatile
     private var lastTurnAt = 0L
