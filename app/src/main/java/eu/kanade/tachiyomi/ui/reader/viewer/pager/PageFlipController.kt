@@ -1,6 +1,10 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.animation.ValueAnimator
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.core.animation.doOnEnd
 import androidx.viewpager.widget.ViewPager
@@ -71,6 +75,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val foldPinned: PagerPageHolder? = null,
         /** 翻书模式：折线从右侧自由边开始。 */
         val foldFromRight: Boolean = true,
+        /** 翻书模式：本次翻页用的快照（点击路径在藏起当前页之前抓好）。 */
+        val foldSheet: Bitmap? = null,
     )
 
     /** 当前滚动状态。只在真正滚动的帧里接管（瞬间跳页没有滚动过程）。 */
@@ -81,6 +87,14 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
     /** 点击翻页动画（见 [startTapFlip]）。 */
     private var tapAnimator: ValueAnimator? = null
+
+    /**
+     * 翻书用的快照位图，跨翻页复用；尺寸变化（旋转/切布局）才重建。
+     *
+     * 翻书必须按像素做折线变形，而我们的页是活 View —— 只能在翻转开始那一刻抓一张。
+     * 代价是这 400ms 内显示的是抓图那一瞬的内容（增强刚好完成也不会即时反映）。
+     */
+    private var sheetBitmap: Bitmap? = null
 
     init {
         // 跨 View 绘制失败（极少数机型/页面）→ 立刻收尾，把页 View 复原，
@@ -228,6 +242,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val prepared = if (viewer.config.pageTurnStyle == STYLE_FOLD) {
             // 翻书：被折走的是**当前页**（藏起来由叠加层画），下一页保持静止。
             // 折线方向与拖动路径同一条规则（看两页在布局里的左右关系），不再用 `pages` 猜。
+            // ⚠️ 快照必须在 `alpha = 0` **之前**抓：先藏再抓有可能抓到一张空白（旧版踩过）。
+            val sheet = captureSheet(leaving)
             leaving.alpha = 0f
             // 点击时 ViewPager 完全不滚，下一页还停在 ±页宽（屏幕外）——必须把它**平移进视口**，
             // 否则被揭开的那片区域没有任何东西可画，只剩底色。
@@ -237,6 +253,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
                 pinnedView = entering,
                 sheetView = leaving,
                 foldFromRight = leaving.left <= entering.left,
+                foldSheet = sheet,
             )
         } else {
             // 覆盖 / 平移：新页藏起来，由叠加层按屏幕位置绘制。
@@ -245,10 +262,12 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         }
         session = prepared
         if (viewer.config.pageTurnStyle == STYLE_FOLD) {
-            overlay.foldView = prepared.sheetView
-            overlay.foldFromRight = prepared.foldFromRight
+            // 翻书要按像素做折线变形，所以这里给当前页抓一张快照（实测 11~30ms）。
+            overlay.foldSheet = prepared.foldSheet ?: captureSheet(prepared.sheetView)
+            overlay.spineOnLeft = prepared.foldFromRight
+            overlay.grabFraction = 0.5f
             overlay.foldProgress = 0f
-            overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
+            overlay.backTint = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
                 ?: viewer.config.pageCanvasColor
             overlay.invalidate()
         } else {
@@ -276,8 +295,14 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // 翻书：两页都钉住（画面完全冻结），折线完全由 offset 驱动 —— 这就是「跟手翻书」。
             current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
             current.foldPinned?.let { it.translationX = -(it.left - scrollX).toFloat() }
-            overlay.foldView = current.sheetView
-            overlay.foldFromRight = current.foldFromRight
+            // 拖动第一次进入时抓一次快照，之后沿用（同一页不再重复抓）。
+            if (overlay.foldSheet == null) {
+                overlay.foldSheet = captureSheet(current.sheetView)
+                overlay.spineOnLeft = current.foldFromRight
+                overlay.grabFraction = 0.5f
+                overlay.backTint = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
+                    ?: viewer.config.pageCanvasColor
+            }
             overlay.foldProgress = offset
             overlay.canvasColor = ReaderTheme.paperStyleOf(viewer.config.theme)?.whiteColor
                 ?: viewer.config.pageCanvasColor
@@ -329,7 +354,29 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     /** 释放（退出阅读器 / 切换阅读模式）。 */
     fun release() {
         end()
+        sheetBitmap?.recycle()
+        sheetBitmap = null
         scrollState = ViewPager.SCROLL_STATE_IDLE
+    }
+
+    /**
+     * 抓一张页 View 的快照（与旧版 `75a9eda0` 同一做法，实测 11~30ms）。
+     *
+     * 位图跨翻页复用：只有尺寸变化时才重建，避免每次翻页都分配一张 1500×1060 的 ARGB。
+     */
+    private fun captureSheet(view: View): Bitmap? {
+        val w = view.width
+        val h = view.height
+        if (w <= 0 || h <= 0) return null
+        var bmp = sheetBitmap
+        if (bmp == null || bmp.isRecycled || bmp.width != w || bmp.height != h) {
+            bmp?.recycle()
+            bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            sheetBitmap = bmp
+        }
+        bmp.eraseColor(Color.TRANSPARENT)
+        view.draw(Canvas(bmp))
+        return bmp
     }
 
     // endregion
