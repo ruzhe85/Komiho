@@ -209,6 +209,10 @@ class PagerPageHolder(
             postDelayed(pendingReEnhance, reEnhanceDelayMs)
             return
         }
+        // Komiho (2026-10-25): 刚离开连点 —— 顺手补一次邻居预热。
+        // 预热只在换页时触发，连点期间被挡掉后如果用户就此停下、不再翻页，邻居会一直是冷的。
+        // （viewer 内部有 1s 节流，多个 holder 同时回调也不会重复。）
+        viewer.onBurstSettled()
         // Komiho (2026-10-16): 闸门换成**应用层**的「本页被抢占过」登记（由 MihonSyEnhancer 在
         // 抢占当场写入、按页保留）。原来查的是原生 `Waifu2x.wasAborted()` —— 那个槽位只有一个，
         // 下一次推理一起步就被清成 -1，而这里是几百毫秒后才回头看，实测必为 false ⇒ 这条兜底

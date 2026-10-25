@@ -132,8 +132,14 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             // SY -->
             if (pager.isRestoring) return
             // SY <--
-            // Komiho (2026-10-25): 换页落地 → 连点判定（拖动也走这里，点击则由 moveRight/moveLeft 计入）。
-            EnhanceBurst.onTurn()
+            // Komiho (2026-10-25): 只有**拖动结算**才在这里计入连点。
+            // 点击 / 音量键 / 翻页键已经在 moveRight/moveLeft 计过一次了；同一次翻页计两次的话，
+            // 「落地」与「下一次点击」只隔 ~100ms，会让**慢速阅读**也被判成连点 —— 表现得就是
+            // 「skip → NPU OK → skip」来回抖。判据必须是「一次用户操作 = 一次计数」。
+            if (scrolledSinceSelection) {
+                scrolledSinceSelection = false
+                EnhanceBurst.onTurn()
+            }
             if (!activity.isScrollingThroughPages) {
                 activity.hideMenu()
             }
@@ -153,6 +159,14 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             // 封顶（`waifu2x.cpp`），连惯性期也让位只会白白推迟出图。
             // 这套让位逻辑在原生里一直存在，但此前没有任何 Kotlin 调用点 —— 等于死代码。
             Waifu2x.setUiBusy(state == ViewPager.SCROLL_STATE_DRAGGING)
+            // Komiho (2026-10-25): 记下「这次换页来自手指拖动」—— 拖动没有请求事件，
+            // 只能在落地时补记一次连点计数（见 onPageSelected）。停稳即清，避免拖了又回去
+            // 的那一次残留到下一个点击上。
+            if (state == ViewPager.SCROLL_STATE_DRAGGING) {
+                scrolledSinceSelection = true
+            } else if (state == ViewPager.SCROLL_STATE_IDLE) {
+                scrolledSinceSelection = false
+            }
             // Komiho: 停稳即收尾（复位透明度/位移/叠加层）。放在这里而不是 onPageSelected，
             // 因为取消回弹（拖了一点又回去）不会触发 onPageSelected。
             pageFlip.onScrollStateChanged(state)
@@ -297,6 +311,15 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * - 覆盖翻页：ViewPager 全程不动、[isIdle] 一直是 true，要看叠加层自己的动画。
      */
     private fun isBusyWithFlip(): Boolean = !isIdle || pageFlip.isBusy
+
+    /**
+     * Komiho (2026-10-25): 本次换页是不是**手指拖动**造成的。
+     *
+     * 拖动没有「请求」事件，只能在落地时补记一次连点计数；而点击翻页已经在
+     * `moveRight/moveLeft` 记过，落地时不能再记（否则一次操作算两次，慢读也会被判成连点）。
+     * 覆盖翻页全程不滚动 ⇒ 这里保持 false，不会重复计数。
+     */
+    private var scrolledSinceSelection = false
 
     fun applyDoubleTapZoom(enabled: Boolean) {
         for (i in 0 until pager.childCount) {
@@ -445,6 +468,26 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * 可见时写入；尚未写过（刚进阅读器、holder 还没渲染出可见页）时退回当前 ViewPager 项的
      * 页号，否则「跑太远」的保护会整体失效。
      */
+    /** 上一次预热用的方向（供 [onBurstSettled] 复用，避免猜错邻居）。 */
+    private var lastPrewarmForward = true
+
+    /** [onBurstSettled] 的节流时刻（多个 holder 会同时回调）。 */
+    private var lastBurstSettleAt = 0L
+
+    /**
+     * Komiho (2026-10-25): 连点结束后补一次邻居预热。
+     *
+     * 预热只在**换页**时触发；连点期间它被 [EnhanceBurst] 挡掉之后，如果用户就此停下、
+     * 不再翻页，邻居页会一直冷着 —— 表现就是「停下后要等很久预载才恢复」。
+     * 补算链路只负责当前页，这里把邻居那一份补上（1 秒内只跑一次，多个 holder 同时回调也不会重复）。
+     */
+    fun onBurstSettled() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastBurstSettleAt < 1_000L) return
+        lastBurstSettleAt = now
+        prewarmAdjacentPages(forward = lastPrewarmForward)
+    }
+
     private fun currentPageIndexForAbortGuard(): Int {
         val visible = Waifu2x.visiblePageIndex
         if (visible >= 0) return visible
@@ -452,6 +495,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     }
 
     private fun prewarmAdjacentPages(forward: Boolean) {
+        lastPrewarmForward = forward
         val enhancementOn = readerPrefs.enhancementMode.get() != 0
         val generation = prewarmGeneration.incrementAndGet()
 
