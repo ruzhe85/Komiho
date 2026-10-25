@@ -26,6 +26,14 @@ private const val KOMIHA_FLIP_TAG = "PageFlip"
  */
 private const val DOUBLE_PAGE_FACTOR = 1.2f
 
+/**
+ * 翻书（折线）模式的时长倍数。
+ *
+ * 三种模式共用 400ms，但翻书的视觉位移从第一帧就铺满整屏，主观上明显更快；
+ * 1.4 之后单页 560ms、双页 672ms，节奏与平移/覆盖接近。
+ */
+private const val FOLD_DURATION_FACTOR = 1.4f
+
 /** 翻页方式（与 `ReaderPreferences.pageTurnStyle` 一致）。 */
 private const val STYLE_SLIDE = 0
 private const val STYLE_COVER = 1
@@ -221,7 +229,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
      */
     private fun tapFlipDuration(): Long {
         val base = viewer.config.pageFlipDurationMs
-        val factor = if (viewer.isDoubleSpread(viewer.pager.currentItem)) DOUBLE_PAGE_FACTOR else 1f
+        var factor = if (viewer.isDoubleSpread(viewer.pager.currentItem)) DOUBLE_PAGE_FACTOR else 1f
+        // Komiho (2026-10-25): 翻书观感明显比平移/覆盖快 —— 它的画面从第一帧就开始整页位移，
+        // 同样的 400ms 视觉变化量最大。这里给它单独放慢一点（400 → 560ms）。
+        if (viewer.config.pageTurnStyle == STYLE_FOLD) factor *= FOLD_DURATION_FACTOR
         return (base * factor).toLong()
     }
 

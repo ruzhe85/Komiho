@@ -189,9 +189,11 @@ internal class PageFlipView(context: Context) : View(context) {
 
     private fun drawFold(canvas: Canvas) {
         val page = foldView ?: return
-        val p = foldProgress
-        // 两端什么都不画：0 = 页面还是原样（真实页 View 就位），1 = 纸已经翻走。
-        if (p <= MIN_PROGRESS || p >= MAX_PROGRESS) return
+        // 进度 0 时**也要画**：此时几何退化为「整页平放」，与真实页一模一样。
+        // 只在 0 附近跳过会导致「当前页已隐藏、叠加层又没画」的那一帧 —— 就是点击/按住
+        // 先闪一下的原因。只有到 1（纸完全翻走）才停画。
+        val p = foldProgress.coerceIn(0f, 1f)
+        if (p >= MAX_PROGRESS) return
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
