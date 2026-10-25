@@ -1,6 +1,10 @@
 package eu.kanade.tachiyomi.util
 
 import android.os.SystemClock
+import eu.kanade.tachiyomi.diagnostic.DiagLog
+
+/** Komiho 诊断 TAG：连点判定。 */
+private const val TAG = "EnhanceBurst"
 
 /**
  * Komiho (2026-10-25): 「快速连点」判定 —— 连点期间整段跳过增强（含 CPU 兜底）。
@@ -70,6 +74,10 @@ object EnhanceBurst {
     @Volatile
     private var resumeUntil = 0L
 
+    /** 「被挡住」诊断日志的限流时刻。 */
+    @Volatile
+    private var lastBlockLogAt = 0L
+
     /**
      * 记录一次换页。
      *
@@ -80,6 +88,9 @@ object EnhanceBurst {
         val now = SystemClock.uptimeMillis()
         // 与上一次换页挨得很近 ⇒ 连续翻页。首次调用不置位（间隔视为无穷大）。
         if (lastTurnAt != 0L && now - lastTurnAt <= ENTER_MS) {
+            if (!burstActive) {
+                DiagLog.d(TAG, "burst enter gap=${now - lastTurnAt}ms")
+            }
             burstActive = true
         }
         lastTurnAt = now
@@ -89,8 +100,10 @@ object EnhanceBurst {
     val isBursting: Boolean
         get() {
             if (!burstActive) return false
-            if (SystemClock.uptimeMillis() - lastTurnAt > EXIT_MS) {
+            val idle = SystemClock.uptimeMillis() - lastTurnAt
+            if (idle > EXIT_MS) {
                 burstActive = false
+                DiagLog.d(TAG, "burst exit idle=${idle}ms")
                 return false
             }
             return true
@@ -118,6 +131,14 @@ object EnhanceBurst {
      */
     fun allows(visible: Boolean): Boolean {
         if (!isBursting) return true
-        return visible && SystemClock.uptimeMillis() <= resumeUntil
+        val inWindow = SystemClock.uptimeMillis() <= resumeUntil
+        if (visible && inWindow) return true
+        // 诊断：谁被挡了、当时是不是可见页、放行窗口开没开。限流 500ms，避免刷屏。
+        val now = SystemClock.uptimeMillis()
+        if (now - lastBlockLogAt >= 500L) {
+            lastBlockLogAt = now
+            DiagLog.d(TAG, "block visible=$visible window=$inWindow")
+        }
+        return false
     }
 }
