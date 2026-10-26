@@ -2,7 +2,6 @@ package app.mihonsy.komga.data.webdav
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 // SY --> Komiho Phase7: 页缓存上提为共用实现（data.remote 包），需显式导入。
 import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
@@ -32,7 +31,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlin.concurrent.thread
-import kotlin.math.max
 import kotlin.math.min
 
 // SY --> Komiho Phase4: WebDAV 历史/书签封面 —— 打开章节时「顺便」生成首图封面。
@@ -455,22 +453,9 @@ object WebDavCoverCache {
         bmp.recycle()
     }
 
-    /** 两次 decode：先读边界算 inSampleSize，再采样解码（与 LocalCoverFetcher 同策略）。 */
-    private fun decodeSampled(open: () -> ByteArrayInputStream, maxPx: Int): Bitmap? {
-        runCatching {
-            open().use { first ->
-                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeStream(first, null, opts)
-                if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
-                val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
-                open().use { second ->
-                    val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
-                    return BitmapFactory.decodeStream(second, null, opts2)
-                }
-            }
-        }
-        return null
-    }
+    /** 采样解码统一走 [ImageUtil.decodeSampled]（AVIF/JXL 交给 ImageDecoder，见 issue #10）。 */
+    private fun decodeSampled(open: () -> ByteArrayInputStream, maxPx: Int): Bitmap? =
+        ImageUtil.decodeSampled(open, maxPx)
 
     private fun sha256(s: String): String {
         val md = MessageDigest.getInstance("SHA-256")

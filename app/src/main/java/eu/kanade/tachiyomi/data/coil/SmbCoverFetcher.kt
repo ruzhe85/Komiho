@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.data.coil
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import coil3.ImageLoader
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
@@ -33,7 +32,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
-import kotlin.math.max
 
 // SY --> Komiho Phase7: SMB 浏览列表封面 —— 对齐本地模式（LocalCoverFetcher）：
 // 归档拆包取首图、单图文件直接显示、目录列目录取首图（cover 优先，2026-09 对齐本地），
@@ -225,19 +223,9 @@ class SmbCoverFetcher(
         }
     }
 
-    /** 两次 decode：先读边界算 inSampleSize，再采样解码。 */
-    private fun decodeSampled(open: () -> InputStream, maxPx: Int): Bitmap? {
-        open().use { first ->
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeStream(first, null, opts)
-            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
-            val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
-            open().use { second ->
-                val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
-                return BitmapFactory.decodeStream(second, null, opts2)
-            }
-        }
-    }
+    /** 采样解码统一走 [ImageUtil.decodeSampled]（AVIF/JXL 交给 ImageDecoder，见 issue #10）。 */
+    private fun decodeSampled(open: () -> InputStream, maxPx: Int): Bitmap? =
+        ImageUtil.decodeSampled(open, maxPx)
 
     class Factory(private val context: Context) : Fetcher.Factory<SmbCoverData> {
         override fun create(data: SmbCoverData, options: Options, imageLoader: ImageLoader): Fetcher {

@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.data.coil
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import coil3.ImageLoader
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
@@ -29,7 +28,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
-import kotlin.math.max
 
 /**
  * 本地（文件型来源）封面的 Coil 取图器 —— 自带独立文件级缓存（`filesDir/komiho_local_covers/`），
@@ -193,20 +191,9 @@ class LocalCoverFetcher(
         }
     }
 
-    /** 两次 decode：先读边界算 inSampleSize，再采样解码；open 提供可重开的输入流。 */
-    private fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? {
-        open()?.use { first ->
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeStream(first, null, opts)
-            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
-            val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
-            open()?.use { second ->
-                val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
-                return BitmapFactory.decodeStream(second, null, opts2)
-            }
-        }
-        return null
-    }
+    /** 采样解码统一走 [ImageUtil.decodeSampled]（AVIF/JXL 交给 ImageDecoder，见 issue #10）。 */
+    private fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? =
+        ImageUtil.decodeSampled(open, maxPx)
 
     /** Komiho: 是否为 MOBI / AZW3 / AZW（Kindle 容器，共用 libmobi 抽图）。 */
     private fun isMobi(name: String?): Boolean =

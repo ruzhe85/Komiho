@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.data.coil
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.LruCache
 import coil3.ImageLoader
 import coil3.decode.DataSource
@@ -23,7 +22,6 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
-import kotlin.math.max
 
 /**
  * 进度条缩略图：复用章节 [PageLoader] 加载某一页，子采样解码为小尺寸 JPEG 后交给 Coil。
@@ -106,20 +104,9 @@ class ReaderPageThumbnailFetcher(
         )
     }
 
-    /** 两次 decode：先读边界算 inSampleSize，再采样解码；open 提供可重开的输入流。 */
-    private fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? {
-        open()?.use { first ->
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeStream(first, null, opts)
-            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
-            val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
-            open()?.use { second ->
-                val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
-                return BitmapFactory.decodeStream(second, null, opts2)
-            }
-        }
-        return null
-    }
+    /** 采样解码统一走 [ImageUtil.decodeSampled]（AVIF/JXL 交给 ImageDecoder，见 issue #10）。 */
+    private fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? =
+        ImageUtil.decodeSampled(open, maxPx)
 
     class Factory : Fetcher.Factory<ReaderPageThumbnailRequest> {
         override fun create(

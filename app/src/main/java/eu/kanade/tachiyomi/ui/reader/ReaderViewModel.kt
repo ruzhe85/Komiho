@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.ui.reader
 
 import android.app.Application
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.annotation.ColorInt
 import androidx.annotation.IntRange
@@ -822,7 +821,8 @@ class ReaderViewModel @JvmOverloads constructor(
      * Komiho (2026-09-24): 首次把章节喂给 viewer **之前**的提前判定。
      *
      * 本地目录 / 归档 / SMB·WebDAV 散图源在列页时（`PageLoader.getPages()`）就把所有页置
-     * `Page.State.Ready`，而判定只需读图片头（[measurePageAspectRatio] 用 `inJustDecodeBounds`），
+     * `Page.State.Ready`，而判定只需读图片头（[measurePageAspectRatio] 走 ImageUtil 只读宽高，
+     * 不解像素；系统 bounds 读不出时由 JNI 解析容器头兜底），
      * 所以模式可以在 viewer 拿到第一页之前就定下来 —— 避免「先按页漫建起来、再切换重建」，
      * 那条路径会把可见页白白解码一遍。
      *
@@ -1031,12 +1031,10 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     private fun measurePageAspectRatio(page: ReaderPage): Float? {
         return try {
-            val inputStream = page.stream?.invoke() ?: return null
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            inputStream.use { BitmapFactory.decodeStream(it, null, options) }
-            val width = options.outWidth
-            val height = options.outHeight
-            if (width <= 0 || height <= 0) null else height.toFloat() / width
+            // Komiho: 尺寸读取统一走 ImageUtil —— 系统 bounds 读不出（AVIF 在部分机型恒 0×0）
+            // 时自动改用 JNI 解析容器头，仍然不解像素。
+            val (width, height) = ImageUtil.readImageSize { page.stream?.invoke() } ?: return null
+            height.toFloat() / width
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e) { "MihonSY auto-webtoon aspect check failed" }
             null
