@@ -20,26 +20,17 @@ enum class AppTheme(val titleRes: StringResource?) {
     MONOCHROME(MR.strings.theme_monochrome),
 
     /**
-     * Komiho: E-Ink 专用黑白皮肤（见 [EinkColorScheme]）。与 [MONOCHROME] 的区别是
-     * 色值全部对齐面板 16 级的真实档位、且把 tonal 层级压平改用描边表达 —— 在
-     * 墨水屏上 M3 那套连续灰会量化进同一级，卡片与对话框会糊成一片。
+     * Komiho: E-Ink 专用黑白皮肤（见 [PureEinkColorScheme]）—— 也是**唯一**一套 e-ink 皮肤。
+     *
+     * 与 [MONOCHROME] 的区别：色值对齐面板 16 级的真实档位，`background` 与面板同色
+     * （浅色全白 / 深色全黑），页面内不出现大面积中间灰，层级只靠描边与反色表达。
+     * 原先那套「原始档位版」（0xEE 背景、靠 tonal 层级）已下线 —— 它在有卡片的页面上
+     * 仍会出现中间灰，与墨水屏的实际观感不符。
      *
      * 「外观」里的 E-Ink 模式开关会自动切到这一项并强制浅色 + 禁 AMOLED；
-     * 这里保留为可单独选择的主题项，方便不开模式时也能用。
+     * 不开模式时也可以单独选它。
      */
-    EINK(MR.strings.theme_eink),
-
-    /**
-     * Komiho: 纯色版 E-Ink 皮肤（见 [PureEinkColorScheme]）。与 [EINK] 的区别是
-     * `background` 与面板同色（浅色全白 / 深色全黑），页面内不出现任何大面积中间灰，
-     * 层级只靠描边与反色表达 —— 也就是墨水屏 UI 的通行做法。
-     *
-     * [EINK] 保留原样不动：它那套 0xEE 背景在部分场景（有卡片的页面）仍有对照价值，
-     * 两种皮肤都由用户在「外观 → 主题」里自行选择。
-     *
-     * **这是 E-Ink 模式开关写入的默认皮肤**；已在任一套 e-ink 皮肤上时开关不改写。
-     */
-    EINK_PURE(MR.strings.theme_eink_pure),
+    EINK_PURE(MR.strings.theme_eink),
 
     // Deprecated
     DARK_BLUE(null),

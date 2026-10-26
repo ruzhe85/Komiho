@@ -7,6 +7,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
@@ -19,6 +21,8 @@ import tachiyomi.presentation.core.components.SliderItem
 import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 private val themes = listOf(
     MR.strings.black_background to ReaderPreferences.ReaderTheme.BLACK,
@@ -38,6 +42,10 @@ private val flashColors = listOf(
 @Composable
 internal fun ColumnScope.GeneralPage(screenModel: ReaderSettingsScreenModel) {
     val readerTheme by screenModel.preferences.readerTheme.collectAsState()
+    // Komiho: E-Ink 模式下阅读背景恒为白（见 ReaderPreferences.effectiveReaderTheme），
+    // 这一项直接隐藏 —— 留着只会让人以为「改了没生效」。
+    val uiPreferences = remember { Injekt.get<UiPreferences>() }
+    val einkMode by uiPreferences.einkMode.collectAsState()
 
     val flashPageState by screenModel.preferences.flashOnPageChange.collectAsState()
 
@@ -50,13 +58,15 @@ internal fun ColumnScope.GeneralPage(screenModel: ReaderSettingsScreenModel) {
     val flashColorPref = screenModel.preferences.flashColor
     val flashColor by flashColorPref.collectAsState()
 
-    SettingsChipRow(MR.strings.pref_reader_theme) {
-        themes.map { (labelRes, value) ->
-            FilterChip(
-                selected = readerTheme == value,
-                onClick = { screenModel.preferences.readerTheme.set(value) },
-                label = { Text(stringResource(labelRes)) },
-            )
+    if (!einkMode) {
+        SettingsChipRow(MR.strings.pref_reader_theme) {
+            themes.map { (labelRes, value) ->
+                FilterChip(
+                    selected = readerTheme == value,
+                    onClick = { screenModel.preferences.readerTheme.set(value) },
+                    label = { Text(stringResource(labelRes)) },
+                )
+            }
         }
     }
 

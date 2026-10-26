@@ -4580,7 +4580,7 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
     // SY <--
 
     // SY --> Komiho: E-Ink 模式。应用级设置，不在阅读器设置里。
-    // 皮肤那部分在开启时一次性切到 AppTheme.EINK（见下方 item）。
+    // 皮肤那部分在开启时一次性切到 AppTheme.EINK_PURE（见下方 item）。
     val uiPrefs = remember { Injekt.get<UiPreferences>() }
     var einkModeSel by remember { mutableStateOf(uiPrefs.einkMode.get()) }
     var einkDisableAnimSel by remember { mutableStateOf(uiPrefs.einkDisableAnimation.get()) }
@@ -4619,9 +4619,9 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                     appThemeSel = it
                     activity?.recreate()
                 },
-                // Komiho: E-Ink 模式下只显示两套 e-ink 皮肤，其余主题在墨水屏上
+                // Komiho: E-Ink 模式下只显示 e-ink 皮肤，其余主题在墨水屏上
                 // 都带连续灰或彩色，量化后不可读。
-                allowedThemes = if (einkModeSel) listOf(AppTheme.EINK, AppTheme.EINK_PURE) else null,
+                allowedThemes = if (einkModeSel) listOf(AppTheme.EINK_PURE) else null,
             )
         }
         // SY --> Komiho: E-Ink 模式下隐藏 AMOLED 项。反射式墨水屏没有 OLED 的省电优势，
@@ -4654,9 +4654,9 @@ private fun KomgaAppearanceSettings(modifier: Modifier, context: android.content
                 onCheckedChanged = { enabled ->
                     einkModeSel = enabled
                     uiPrefs.einkMode.set(enabled)
-                    // Komiho: 两套 e-ink 皮肤都由用户自选，已在其中一套上就不再改写；
-                    // 默认落到纯色版（页面内无中间灰，最贴合墨水屏）。
-                    if (enabled && appThemeSel != AppTheme.EINK && appThemeSel != AppTheme.EINK_PURE) {
+                    // Komiho: 已在 e-ink 皮肤上就不再改写（模式只是「顺便切皮肤」，
+                    // 不覆盖用户的显式选择）。
+                    if (enabled && appThemeSel != AppTheme.EINK_PURE) {
                         prefs.appTheme = AppTheme.EINK_PURE.name
                         appThemeSel = AppTheme.EINK_PURE
                     }

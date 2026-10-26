@@ -88,44 +88,62 @@ object SettingsReaderScreen : SearchableSettings {
     @Composable
     private fun getDisplayGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
         val fullscreen by readerPreferences.fullscreen.collectAsState()
+        // Komiho: E-Ink 模式下阅读背景恒为白（见 ReaderPreferences.effectiveReaderTheme），
+        // 这一项直接隐藏 —— 留着只会让人以为「改了没生效」。
+        val einkMode by remember { Injekt.get<UiPreferences>() }.einkMode.collectAsState()
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_category_display),
-            preferenceItems = listOf(
-                Preference.PreferenceItem.ListPreference(
-                    preference = readerPreferences.defaultOrientationType,
-                    entries = ReaderOrientation.entries.drop(1)
-                        .associate { it.flagValue to stringResource(it.stringRes) },
-                    title = stringResource(MR.strings.pref_rotation_type),
-                ),
-                Preference.PreferenceItem.ListPreference(
-                    preference = readerPreferences.readerTheme,
-                    entries = mapOf(
-                        ReaderPreferences.ReaderTheme.BLACK to stringResource(MR.strings.black_background),
-                        ReaderPreferences.ReaderTheme.GRAY to stringResource(MR.strings.gray_background),
-                        ReaderPreferences.ReaderTheme.WHITE to stringResource(MR.strings.white_background),
-                        ReaderPreferences.ReaderTheme.PARCHMENT to stringResource(MR.strings.parchment_background),
-                        ReaderPreferences.ReaderTheme.KRAFT to stringResource(MR.strings.kraft_background),
+            preferenceItems = buildList {
+                add(
+                    Preference.PreferenceItem.ListPreference(
+                        preference = readerPreferences.defaultOrientationType,
+                        entries = ReaderOrientation.entries.drop(1)
+                            .associate { it.flagValue to stringResource(it.stringRes) },
+                        title = stringResource(MR.strings.pref_rotation_type),
                     ),
-                    title = stringResource(MR.strings.pref_reader_theme),
-                ),
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = readerPreferences.fullscreen,
-                    title = stringResource(MR.strings.pref_fullscreen),
-                ),
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = readerPreferences.drawUnderCutout,
-                    title = stringResource(MR.strings.pref_cutout_short),
-                    enabled = LocalView.current.hasDisplayCutout() && fullscreen,
-                ),
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = readerPreferences.keepScreenOn,
-                    title = stringResource(MR.strings.pref_keep_screen_on),
-                ),
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = readerPreferences.showPageNumber,
-                    title = stringResource(MR.strings.pref_show_page_number),
-                ),
-            ),
+                )
+                if (!einkMode) {
+                    add(
+                        Preference.PreferenceItem.ListPreference(
+                            preference = readerPreferences.readerTheme,
+                            entries = mapOf(
+                                ReaderPreferences.ReaderTheme.BLACK to stringResource(MR.strings.black_background),
+                                ReaderPreferences.ReaderTheme.GRAY to stringResource(MR.strings.gray_background),
+                                ReaderPreferences.ReaderTheme.WHITE to stringResource(MR.strings.white_background),
+                                ReaderPreferences.ReaderTheme.PARCHMENT to
+                                    stringResource(MR.strings.parchment_background),
+                                ReaderPreferences.ReaderTheme.KRAFT to stringResource(MR.strings.kraft_background),
+                            ),
+                            title = stringResource(MR.strings.pref_reader_theme),
+                        ),
+                    )
+                }
+                add(
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = readerPreferences.fullscreen,
+                        title = stringResource(MR.strings.pref_fullscreen),
+                    ),
+                )
+                add(
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = readerPreferences.drawUnderCutout,
+                        title = stringResource(MR.strings.pref_cutout_short),
+                        enabled = LocalView.current.hasDisplayCutout() && fullscreen,
+                    ),
+                )
+                add(
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = readerPreferences.keepScreenOn,
+                        title = stringResource(MR.strings.pref_keep_screen_on),
+                    ),
+                )
+                add(
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = readerPreferences.showPageNumber,
+                        title = stringResource(MR.strings.pref_show_page_number),
+                    ),
+                )
+            },
         )
     }
 

@@ -36,7 +36,8 @@ class PagerConfig(
     readerPreferences: ReaderPreferences = Injekt.get(),
 ) : ViewerConfig(readerPreferences, scope) {
 
-    var theme = readerPreferences.readerTheme.get()
+    // Komiho: 读「实际生效」的背景（E-Ink 模式下恒为白，见 ReaderPreferences.effectiveReaderTheme）。
+    var theme = readerPreferences.effectiveReaderTheme
         private set
 
     var automaticBackground = false
@@ -333,7 +334,7 @@ class PagerConfig(
      */
     override fun imageFingerprint(): String = buildString {
         append(readerPreferences.enhancementCacheKey())
-        append('|').append(readerPreferences.readerTheme.get())
+        append('|').append(readerPreferences.effectiveReaderTheme)
         append('|').append(readerPreferences.imageScaleType.get())
         append('|').append(readerPreferences.zoomStart.get())
         append('|').append(readerPreferences.landscapeZoom.get())

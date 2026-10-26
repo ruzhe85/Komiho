@@ -75,7 +75,8 @@ class WebtoonConfig(
         private set
     // MihonSY <--
 
-    val theme = readerPreferences.readerTheme.get()
+    // Komiho: 读「实际生效」的背景（E-Ink 模式下恒为白，见 ReaderPreferences.effectiveReaderTheme）。
+    val theme = readerPreferences.effectiveReaderTheme
 
     // SY -->
     var usePageTransitions = false

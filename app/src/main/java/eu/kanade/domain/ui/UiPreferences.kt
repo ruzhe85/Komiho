@@ -51,14 +51,13 @@ class UiPreferences(
      * E-Ink 模式总开关。**应用级**（不在阅读器设置里），三件事由它派生：
      * 1. 全局动画归零（见 `EinkMotion`）—— 墨水屏每次动画 = 多次全刷 = 残影 + 功耗；
      * 2. 皮肤切到 [AppTheme.EINK_PURE]（见 `PureEinkColorScheme`）—— 页面内没有大面积
-     *    中间灰，层级靠描边与反色；另一套 [AppTheme.EINK] 仍在主题列表里可选。
+     *    中间灰，层级靠描边与反色；也是唯一一套 e-ink 皮肤。
      *    （现成的 [AppTheme.MONOCHROME] 把五个 surfaceContainer 全设成同色，层级只靠
      *    tonal elevation，在 16 级面板上会量化进同一级而糊成一片。）
      * 3. 阅读器按墨水屏灰阶渲染（见 `EinkGray`）—— 16 级量化 + 曲线，CPU-only 引擎。
      *
-     * 开关打开时**一次性**把 [appTheme] 写成 [AppTheme.EINK]（当前已是 [AppTheme.EINK]
-     * 或 [AppTheme.EINK_PURE] 时不动，两套皮肤都由用户自选）；关闭时皮肤保持不变
-     * （不擅自改回用户原选），因为关掉 AMOLED 之类我们一个值都不动。
+     * 开关打开时**一次性**把 [appTheme] 写成 [AppTheme.EINK_PURE]（已是该皮肤时不动）；
+     * 关闭时皮肤保持不变（不擅自改回用户原选），因为关掉 AMOLED 之类我们一个值都不动。
      */
     val einkMode: Preference<Boolean> = preferenceStore.getBoolean("pref_eink_mode", false)
 

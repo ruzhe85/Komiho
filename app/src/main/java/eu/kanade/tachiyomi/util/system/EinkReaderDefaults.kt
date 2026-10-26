@@ -90,36 +90,32 @@ object EinkReaderDefaults {
      * 写它 —— 设置页的皮肤列表与 E-Ink 开关（都在 `KomgaMainActivity`）。Mihon 侧
      * `UiPreferences.appTheme` 是另一份存储（驱动 Activity 的 XML 主题），开关从未写过，故不代管。
      *
-     * **迁移护栏**：本修复前就已开着 E-Ink 的用户，其皮肤就是 `EINK`。若无条件快照，关闭后会
-     * 「还原」成 EINK —— bug 换个形式复现。所以只在当前值**不是 e-ink 皮肤**（`EINK` /
-     * `EINK_PURE`）时才记快照；这也顺带让「模式已关、皮肤仍是 `EINK`」这一存量坏状态在
-     * 下一次 sync（App 启动即触发）时自愈。
+     * **存量迁移**：原始档位版 e-ink 皮肤（枚举名 `EINK`）已下线，存量值一律迁到唯一那套
+     * `EINK_PURE`。迁移放在最前面且无条件执行 —— 否则该值在枚举里已不存在，读皮肤时会
+     * 回落到默认蓝，用户会以为「升级后主题被重置了」。
      *
      * 幂等且可重复调用；异常由 [sync] 的 runCatching 兜住（皮肤读写失败只维持现状）。
      */
     private fun syncKomgaAppTheme(ui: UiPreferences) {
         val komga = KomgaPreferences(Injekt.get<Application>())
+        // 1) 下线皮肤的存量迁移（含「模式已关但皮肤仍是老值」这一历史坏状态）。
+        if (komga.appTheme == LEGACY_EINK_THEME) {
+            komga.appTheme = EINK_SKIN
+        }
+        // 2) E-Ink 生效时收敛到 e-ink 皮肤，关闭时还原快照。
         val current = komga.appTheme
-        // Komiho: E-Ink 皮肤有两套（原始档位版 EINK 与纯色版 EINK_PURE），都由用户自选，
-        // 开关不再把已在 e-ink 皮肤上的用户改写成另一套。开关的默认值是纯色版 ——
-        // 页面内没有中间灰，最贴合墨水屏。
-        val defaultSkin = AppTheme.EINK_PURE.name
-        val alreadyEinkSkin = current == AppTheme.EINK.name || current == defaultSkin
+        val alreadyEinkSkin = current == EINK_SKIN
         if (ui.isEinkModeActive) {
             if (!ui.einkBackupAppTheme.isSet() && !alreadyEinkSkin) {
                 ui.einkBackupAppTheme.set(current)
             }
             if (!alreadyEinkSkin) {
-                komga.appTheme = defaultSkin
+                komga.appTheme = EINK_SKIN
             }
         } else if (ui.einkBackupAppTheme.isSet()) {
-            komga.appTheme = ui.einkBackupAppTheme.get()
+            val backup = ui.einkBackupAppTheme.get()
+            komga.appTheme = if (backup == LEGACY_EINK_THEME) EINK_SKIN else backup
             ui.einkBackupAppTheme.delete()
-        } else if (current == AppTheme.EINK.name) {
-            // 存量坏状态：升级前就开着 E-Ink、因此没有快照 → 回落到默认皮肤。
-            // 只判 EINK 不判 EINK_PURE：后者是用户不开模式也能自己选的主题，
-            // 一并回落会把「只是喜欢这套皮肤」的用户强行改掉。
-            komga.appTheme = AppTheme.DEFAULT.name
         }
     }
 
@@ -178,4 +174,10 @@ object EinkReaderDefaults {
 
     /** `ReaderPreferences.readerTheme` 的「白色」档位（0 白 / 1 黑 / 2 灰；3 自动已隐藏，存量已收敛到 1）。 */
     private const val READER_THEME_WHITE = 0
+
+    /** 唯一一套 e-ink 皮肤的枚举名（`AppTheme.EINK_PURE`）。 */
+    private val EINK_SKIN = AppTheme.EINK_PURE.name
+
+    /** 已下线的「原始档位版」e-ink 皮肤枚举名，仅用于存量迁移。 */
+    private const val LEGACY_EINK_THEME = "EINK"
 }

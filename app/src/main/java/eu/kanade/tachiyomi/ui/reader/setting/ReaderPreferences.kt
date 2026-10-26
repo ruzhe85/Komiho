@@ -146,6 +146,16 @@ class ReaderPreferences(
 
     val readerTheme: Preference<Int> = preferenceStore.getInt("pref_reader_theme_key", 1)
 
+    /**
+     * Komiho: **实际生效**的阅读背景。E-Ink 模式下恒为白。
+     *
+     * 开关本身会把偏好写成 [ReaderTheme.WHITE]（见 `EinkReaderDefaults`，并备份用户原值），
+     * 这里再兜一道：存量数据、或模式在阅读器打开期间被切走，都不会让墨水屏出现黑底/纸纹。
+     * 渲染侧一律读这个值，设置项仍然读写 [readerTheme]。
+     */
+    val effectiveReaderTheme: Int
+        get() = if (Injekt.get<UiPreferences>().isEinkModeActive) ReaderTheme.WHITE else readerTheme.get()
+
     val alwaysShowChapterTransition: Preference<Boolean> = preferenceStore.getBoolean(
         "always_show_chapter_transition",
         true,

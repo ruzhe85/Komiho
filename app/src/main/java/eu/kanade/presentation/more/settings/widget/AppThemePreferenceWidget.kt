@@ -53,7 +53,7 @@ internal fun AppThemePreferenceWidget(
     value: AppTheme,
     amoled: Boolean,
     onItemClick: (AppTheme) -> Unit,
-    // Komiho: null = 全部主题；非空时只列出给定子集（E-Ink 模式下只剩两套 e-ink 皮肤）。
+    // Komiho: null = 全部主题；非空时只列出给定子集（E-Ink 模式下只剩 e-ink 皮肤）。
     allowedThemes: List<AppTheme>? = null,
 ) {
     BasePreferenceWidget(
