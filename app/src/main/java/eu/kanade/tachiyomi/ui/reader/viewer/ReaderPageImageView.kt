@@ -38,6 +38,7 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_IN_OUT_QUAD
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.EASE_OUT_QUAD
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
+import com.davemorrissey.labs.subscaleview.provider.InputProvider
 import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.cropBordersAggressive
@@ -55,6 +56,8 @@ import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.ImageUtil
+import java.io.ByteArrayInputStream
+import java.io.InputStream
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -515,7 +518,27 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     isStandardImageStream(data)
                 if (!enhancementOn) {
                     setHardwareConfig(ImageUtil.canUseHardwareBitmap(data))
-                    setImage(ImageSource.inputStream(data.inputStream()))
+                    // Komiho: 这里不能再用 `ImageSource.inputStream(data.inputStream())` ——
+                    // SSIV 的 OpenStreamProvider 明确标注「not reusable」，每次 openStream() 都返回
+                    // 同一个流实例。只要 SSIV 二次打开（View 复用换页 / 尺寸变化重建 / 首帧失败
+                    // 重试），拿到的就是已读空的流 → 它的 Decoder.init 里 newInstance 返回 null →
+                    // 抛 "Image decoder failed to initialize and get image size"。
+                    // 开「拆分双页」时一页被拆成两半、View 复用与重建最频繁，最先暴露。
+                    // 改为「字节物化一次 + 每次 openStream 给一条新流」，彻底消掉这个失效模式。
+                    val bytes = runCatching { data.readByteArray() }.getOrNull()
+                    if (bytes == null || bytes.isEmpty()) {
+                        onImageLoadError(
+                            IllegalStateException("页面数据为空，无法交给查看器解码（page=$pageIndex）"),
+                        )
+                        return@apply
+                    }
+                    setImage(
+                        ImageSource.provider(
+                            object : InputProvider {
+                                override fun openStream(): InputStream = ByteArrayInputStream(bytes)
+                            },
+                        ),
+                    )
                     isVisible = true
                     return@apply
                 }
