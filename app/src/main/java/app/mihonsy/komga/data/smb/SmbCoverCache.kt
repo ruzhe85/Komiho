@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
+import eu.kanade.tachiyomi.data.coil.decodeCoverBitmap
 import eu.kanade.tachiyomi.util.mobi.MobiExtractor
 import eu.kanade.tachiyomi.util.pickCoverFirstImage
 import tachiyomi.source.local.io.Format
@@ -238,9 +239,9 @@ object SmbCoverCache {
         bmp.recycle()
     }
 
-    /** 采样解码统一走 [ImageUtil.decodeSampled]（AVIF/JXL 交给 ImageDecoder，见 issue #10）。 */
+    /** 采样解码统一走 [decodeCoverBitmap]（AVIF/JXL 交给 ImageDecoder；失败写一条诊断日志）。 */
     private fun decodeSampled(open: () -> ByteArrayInputStream, maxPx: Int): Bitmap? =
-        ImageUtil.decodeSampled(open, maxPx)
+        decodeCoverBitmap("smb cover", maxPx, open)
 
     private fun sha256(s: String): String {
         val md = MessageDigest.getInstance("SHA-256")

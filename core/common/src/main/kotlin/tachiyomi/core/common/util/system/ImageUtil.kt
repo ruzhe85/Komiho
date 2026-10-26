@@ -200,15 +200,32 @@ object ImageUtil {
      * @return true if the width is greater than the height
      */
     fun isWideImage(imageSource: BufferedSource): Boolean {
-        val options = extractImageOptions(imageSource)
-        return options.outWidth > options.outHeight
+        // Komiho: 尺寸读取带 JNI 兜底（部分机型系统 bounds 对 AVIF 恒给 0×0，会把宽页误判成单页）。
+        val (width, height) = readImageSize { imageSource.peek().inputStream() } ?: return false
+        return width > height
     }
+
+    // SY --> Komiho: 整图解出（保持原始像素，不采样）：系统解码优先，失败再走 fork 的
+    // ImageDecoder。用于双页拆分 / 旋转 / 合并这类「必须按原图几何操作」的场景 ——
+    // 这些地方原先直接用 BitmapFactory，AVIF 在部分机型上解出来是 null，一拆双页就崩页。
+    fun decodeFullBitmap(open: () -> InputStream?): Bitmap? {
+        val fast = runCatching {
+            open()?.use { BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+        return fast ?: decodeWithImageDecoder(open, Int.MAX_VALUE)
+    }
+
+    /** 从 [imageSource] 整图解出（不消耗源，取的是 peek 视图）。 */
+    fun decodeFullBitmap(imageSource: BufferedSource): Bitmap? =
+        decodeFullBitmap { imageSource.peek().inputStream() }
+    // SY <--
 
     /**
      * Extract the 'side' part from [BufferedSource] and return it as [BufferedSource].
      */
     fun splitInHalf(imageSource: BufferedSource, side: Side, sidePadding: Int): BufferedSource {
-        val imageBitmap = BitmapFactory.decodeStream(imageSource.inputStream())
+        // Komiho: 解不出就原样返回（宁可显示整页，也不要抛异常把这一页变成错误页）。
+        val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val height = imageBitmap.height
         val width = imageBitmap.width
 
@@ -229,7 +246,8 @@ object ImageUtil {
     }
 
     fun rotateImage(imageSource: BufferedSource, degrees: Float): BufferedSource {
-        val imageBitmap = BitmapFactory.decodeStream(imageSource.inputStream())
+        // Komiho: 解不出就原样返回，旋转失败不该变成错误页。
+        val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val rotated = rotateBitMap(imageBitmap, degrees)
 
         val output = Buffer()
@@ -248,7 +266,8 @@ object ImageUtil {
      * new vertically-aligned image.
      */
     fun splitAndMerge(imageSource: BufferedSource, upperSide: Side): BufferedSource {
-        val imageBitmap = BitmapFactory.decodeStream(imageSource.inputStream())
+        // Komiho: 解不出就原样返回（与 splitInHalf 同口径）。
+        val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val height = imageBitmap.height
         val width = imageBitmap.width
 
@@ -291,7 +310,8 @@ object ImageUtil {
         viewHeight: Int,
         backgroundContext: Context,
     ): BufferedSource {
-        val imageBitmap = ImageDecoder.newInstance(imageSource.inputStream())?.decode()!!
+        // Komiho: 原来这里是 `?.decode()!!` —— 解不出直接 NPE 崩页；改为原样返回。
+        val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val height = imageBitmap.height
         val width = imageBitmap.width
 

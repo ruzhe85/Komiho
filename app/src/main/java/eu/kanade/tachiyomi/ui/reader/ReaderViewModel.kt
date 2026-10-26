@@ -550,6 +550,12 @@ class ReaderViewModel @JvmOverloads constructor(
                 if (e is CancellationException) {
                     throw e
                 }
+                // Komiho: 章节打开失败要进导出日志 —— logcat 只在现场，用户导出的诊断日志里没有。
+                eu.kanade.tachiyomi.diagnostic.DiagLog.e(
+                    "ReaderLoad",
+                    "打开章节失败 chapter=${chapter.chapter.url}",
+                    e,
+                )
                 logcat(LogPriority.ERROR, e)
             }
         }
@@ -579,6 +585,12 @@ class ReaderViewModel @JvmOverloads constructor(
             if (e is CancellationException) {
                 throw e
             }
+            // Komiho: 上一卷/下一卷切换失败（续卷最常见的失败点）要进导出日志。
+            eu.kanade.tachiyomi.diagnostic.DiagLog.e(
+                "ReaderAdjacent",
+                "切换相邻章节失败 chapter=${chapter.chapter.url}",
+                e,
+            )
             logcat(LogPriority.ERROR, e)
         } finally {
             mutableState.update { it.copy(isLoadingAdjacentChapter = false) }
@@ -622,6 +634,13 @@ class ReaderViewModel @JvmOverloads constructor(
             if (e is CancellationException) {
                 throw e
             }
+            // Komiho: 预载（翻到卷末自动续卷走的就是这里）此前完全静默 —— 失败后界面只是停在
+            // 过渡页/报错页，导出的诊断日志里一个字都没有，无法判断是文件缺失还是连接断开。
+            eu.kanade.tachiyomi.diagnostic.DiagLog.e(
+                "ReaderPreload",
+                "预载章节失败 chapter=${chapter.chapter.url}",
+                e,
+            )
             return
         }
         eventChannel.trySend(Event.ReloadViewerChapters)

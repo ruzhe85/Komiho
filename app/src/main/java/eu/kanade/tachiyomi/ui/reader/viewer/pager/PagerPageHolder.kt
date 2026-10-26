@@ -40,7 +40,6 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.decoder.ImageDecoder
 import tachiyomi.i18n.MR
 import kotlin.math.max
 
@@ -724,7 +723,9 @@ class PagerPageHolder(
 
     private fun decodeImage(imageSource: BufferedSource): Bitmap? {
         return try {
-            ImageDecoder.newInstance(imageSource.inputStream())?.decode()
+            // Komiho: 走统一整图解码（系统解码失败再走 JNI）——AVIF 在部分机型系统解不出，
+            // 原先这里直接给 null，双页合并会退化成单页显示。
+            ImageUtil.decodeFullBitmap(imageSource)
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e) { "Cannot decode image" }
             null
@@ -800,6 +801,15 @@ class PagerPageHolder(
      */
     private fun setError(error: Throwable?) {
         progressIndicator?.hide()
+        // Komiho: 页级失败（解码 / 读取 / 拆页）原先只显示在屏幕上，导出的诊断日志里看不到。
+        // 带章节与页号记一条，才能区分「某页文件缺失」「解码器不支持」还是「章节已被回收」。
+        if (error != null) {
+            eu.kanade.tachiyomi.diagnostic.DiagLog.e(
+                "ReaderPage",
+                "页加载失败 page=${page.number} chapter=${page.chapter.chapter.url}",
+                error,
+            )
+        }
         showErrorLayout(error)
         // Komiho: 触发「正在打开」窗口的章节首图解码失败 → 收起提示（与 onImageLoaded 同源，避免卡在错误页上）。
         if (page.chapter.chapter.id != null &&

@@ -47,7 +47,14 @@ class SmbCoverFetcher(
         val bytes = cachedCoverBytes()
             ?: run {
                 val b = readCoverBytes()
-                    ?: throw IllegalStateException("SMB cover unavailable: ${data.relPath}")
+                    ?: run {
+                        // 解码失败已由 decodeCoverBitmap 记录；这里记录「连首图都没取到」。
+                        eu.kanade.tachiyomi.diagnostic.DiagLog.w(
+                            "CoverDecode",
+                            "无可用首图 smb path=${data.relPath}",
+                        )
+                        throw IllegalStateException("SMB cover unavailable: ${data.relPath}")
+                    }
                 writeCoverCache(b)
                 b
             }
@@ -223,9 +230,9 @@ class SmbCoverFetcher(
         }
     }
 
-    /** 采样解码统一走 [ImageUtil.decodeSampled]（AVIF/JXL 交给 ImageDecoder，见 issue #10）。 */
+    /** 采样解码统一走 [decodeCoverBitmap]（AVIF/JXL 交给 ImageDecoder；失败写一条诊断日志）。 */
     private fun decodeSampled(open: () -> InputStream, maxPx: Int): Bitmap? =
-        ImageUtil.decodeSampled(open, maxPx)
+        decodeCoverBitmap("smb path=${data.relPath}", maxPx, open)
 
     class Factory(private val context: Context) : Fetcher.Factory<SmbCoverData> {
         override fun create(data: SmbCoverData, options: Options, imageLoader: ImageLoader): Fetcher {

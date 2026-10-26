@@ -57,7 +57,15 @@ class LocalCoverFetcher(
         val bytes = cachedCoverBytes()
             ?: run {
                 val b = readCoverBytes()
-                    ?: throw IllegalStateException("Local cover unavailable: ${data.file.uri}")
+                    ?: run {
+                        // 解码失败已由 decodeCoverBitmap 记录；走到这里说明连「首图」都没取到
+                        //（目录里没图 / 归档为空 / 格式不在白名单），日志里要能与解码失败区分开。
+                        eu.kanade.tachiyomi.diagnostic.DiagLog.w(
+                            "CoverDecode",
+                            "无可用首图 local name=${data.file.name}",
+                        )
+                        throw IllegalStateException("Local cover unavailable: ${data.file.uri}")
+                    }
                 writeCoverCache(b)
                 b
             }
@@ -191,9 +199,9 @@ class LocalCoverFetcher(
         }
     }
 
-    /** 采样解码统一走 [ImageUtil.decodeSampled]（AVIF/JXL 交给 ImageDecoder，见 issue #10）。 */
+    /** 采样解码统一走 [decodeCoverBitmap]（AVIF/JXL 交给 ImageDecoder；失败写一条诊断日志）。 */
     private fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? =
-        ImageUtil.decodeSampled(open, maxPx)
+        decodeCoverBitmap("local name=${data.file.name}", maxPx, open)
 
     /** Komiho: 是否为 MOBI / AZW3 / AZW（Kindle 容器，共用 libmobi 抽图）。 */
     private fun isMobi(name: String?): Boolean =

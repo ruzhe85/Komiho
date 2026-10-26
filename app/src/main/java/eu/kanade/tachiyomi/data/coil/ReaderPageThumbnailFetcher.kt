@@ -18,7 +18,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okio.Buffer
-import tachiyomi.core.common.util.system.ImageUtil
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -105,9 +104,9 @@ class ReaderPageThumbnailFetcher(
         )
     }
 
-    /** 采样解码统一走 [ImageUtil.decodeSampled]（AVIF/JXL 交给 ImageDecoder，见 issue #10）。 */
+    /** 采样解码统一走 [decodeCoverBitmap]（AVIF/JXL 交给 ImageDecoder；失败写一条诊断日志）。 */
     private fun decodeSampled(open: () -> InputStream?, maxPx: Int): Bitmap? =
-        ImageUtil.decodeSampled(open, maxPx)
+        decodeCoverBitmap("reader page=${readerPage.index}", maxPx, open)
 
     class Factory : Fetcher.Factory<ReaderPageThumbnailRequest> {
         override fun create(
