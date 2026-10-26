@@ -7617,6 +7617,19 @@ private fun SmbBrowsePane(
     // 记忆键：与 WebDAV 共用偏好键，靠 `smb:` 前缀区分（WebDAV 侧按纯 connId 匹配，互不干扰）。
     val memKey = remember(conn.id) { "smb:" + conn.id }
     var trail by remember(conn.id) {
+        // 旧版本「历史/书签跳转」重建路径栈时把起始目录拼了两次（COMIC/COMIC/...），已落盘的
+        // 记忆可能带这种坏路径——启动时折掉一层，免得升级后第一次进来还是读不到目录。
+        val root = rootPath.trim('/')
+        fun heal(path: String): String {
+            val p = path.trim('/')
+            if (root.isEmpty()) return p
+            val doubled = "$root/$root"
+            return when {
+                p == doubled -> root
+                p.startsWith("$doubled/") -> root + p.removePrefix(doubled)
+                else -> p
+            }
+        }
         val saved = prefs.webdavBrowseLastPaths.get()
             .lines()
             .firstOrNull { it.substringBefore(' ') == memKey }
@@ -7626,22 +7639,38 @@ private fun SmbBrowsePane(
             .orEmpty()
         mutableStateOf(
             listOf(rootLabel to rootPath) + saved.map { path ->
-                path.substringAfterLast('/') to path
+                val healed = heal(path)
+                healed.substringAfterLast('/') to healed
             },
         )
     }
     val dirPath = trail.last().second
+
+    // SY --> Komiho: 目标路径 → 面包屑栈。目标口径统一为「章节 URL 里的共享内相对路径」，
+    // **已含连接起始目录**（见 SmbConnectionStore 的 URL 契约）；逐段重建前必须先剥掉起始
+    // 目录，否则会被拼两次（历史跳转后变成 COMIC/COMIC/xx.zip，列表读不到、文件打不开）。
+    fun trailFor(target: String): List<Pair<String, String>> {
+        val root = rootPath.trim('/')
+        val norm = target.trim('/')
+        // 目标不在起始目录之下（起始目录被改过 / 连接按路径兜底匹配）：当作共享内绝对路径，
+        // 从共享根起重建，比硬拼一遍当前起始目录更可能找得到东西。
+        val underRoot = root.isEmpty() || norm == root || norm.startsWith("$root/")
+        val rel = if (underRoot) norm.removePrefix(root).trim('/') else norm
+        var acc = if (underRoot) root else ""
+        val paths = rel.split('/')
+            .filter { it.isNotBlank() }
+            .map { seg -> acc = if (acc.isEmpty()) seg else "$acc/$seg"; acc }
+        return listOf(rootLabel to rootPath) + paths.map { p -> p.substringAfterLast('/') to p }
+    }
 
     // SY: 历史/书签「打开文件位置」跳转消费——按目标路径逐段重建面包屑栈。
     LaunchedEffect(navRequest) {
         val target = navRequest ?: return@LaunchedEffect
         onNavConsumed()
         if (target.isBlank()) return@LaunchedEffect
-        val segs = target.trim('/').split('/').filter { it.isNotBlank() }
-        var acc = rootPath.trim('/')
-        val paths = segs.map { seg -> acc = if (acc.isEmpty()) seg else "$acc/$seg"; acc }
-        trail = listOf(rootLabel to rootPath) + paths.map { p -> p.substringAfterLast('/') to p }
+        trail = trailFor(target)
     }
+    // SY <--
 
     LaunchedEffect(trail) {
         val saved = trail.drop(1).joinToString("\u001F") { it.second }
@@ -7713,12 +7742,10 @@ private fun SmbBrowsePane(
     }
 
     // SY --> Komiho: 递归搜索结果点击：目录→跳进该子目录；归档/图片→直接打开（按真实路径定位）。
+    // 命中项 path 已含起始目录，面包屑重建同样走 [trailFor]（否则会被拼两次）。
     val onSearchItemOpen: (SmbEntry) -> Unit = { e ->
         if (e.isDir) {
-            val segs = e.path.trim('/').split('/').filter { it.isNotBlank() }
-            var acc = rootPath.trim('/')
-            val paths = segs.map { seg -> acc = if (acc.isEmpty()) seg else "$acc/$seg"; acc }
-            trail = listOf(rootLabel to rootPath) + paths.map { p -> p.substringAfterLast('/') to p }
+            trail = trailFor(e.path)
         } else {
             onOpenFile(e.path)
         }
