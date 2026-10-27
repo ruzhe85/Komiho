@@ -39,14 +39,6 @@ private const val STYLE_SLIDE = 0
 private const val STYLE_COVER = 1
 private const val STYLE_FOLD = 2
 
-/**
- * Komiho (2026-10-27)：抓角吸附阈值 —— 按压点离上下边不足该比例时，视为抓住了角。
- *
- * 取自 `GarrettKK/Foldchiyomi` 的 `TransitionCurl.CORNER_SNAP = 0.14`：小比例让"抓角"成为
- * 一个明确的姿态，而不是连续可调的角度；中间区域仍然跟手。
- */
-private const val CORNER_SNAP = 0.14f
-
 
 
 /**
@@ -148,12 +140,6 @@ internal class PageFlipController(private val viewer: PagerViewer) {
      * 全屏，这一下切换在视觉上不可见，也就不存在任何「拽回」。
      */
     fun startTapFlip(pages: Int) {
-        // Komiho (2026-10-27)：点击/按键翻页固定从**底角**起手（抓角吸附到 1f）。
-        // 与 `GarrettKK/Foldchiyomi` 一致（"taps or volume keys curl the page from the bottom
-        // corner"）：点击没有拖动方向信息，从角起手的折线最稳定；从屏幕中间起手会得到一个
-        // 竖直折线，看着像"把纸对折"而不是"掀起一角"。拖动路径不受影响 —— 它有自己的
-        // [onTouchDown]，每次按下都会重算。
-        grabFraction = 1f
         // 先把上一次还没播完的落位（连点两次时 currentItem 会因此变化，target 必须在那之后算）。
         abortTapFlip()
 
@@ -229,20 +215,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
      *
      * 翻书的折线绕这个点旋转：抓上半部 → 折线倾角朝上，抓下半部 → 朝下，抓中间 → 竖直。
      * 这就是「捏住一角翻页」的手感来源（`PageFlipView.grabFraction`）。
-     *
-     * Komiho (2026-10-27)：**抓角吸附**。离上下边不足 [CORNER_SNAP] 时直接当作抓住了角 ——
-     * 真实的纸只有在角或边中点起手才是稳定姿态，中间那些角度基本是手抖。参考
-     * `GarrettKK/Foldchiyomi` 的 `TransitionCurl.CORNER_SNAP = 0.14`（同样取 14%）。
      */
     fun onTouchDown(y: Float) {
         val h = viewer.pager.height
-        if (h <= 0) return
-        val f = (y / h).coerceIn(0f, 1f)
-        grabFraction = when {
-            f < CORNER_SNAP -> 0f
-            f > 1f - CORNER_SNAP -> 1f
-            else -> f
-        }
+        if (h > 0) grabFraction = (y / h).coerceIn(0f, 1f)
     }
 
     private fun commitTapFlip(target: Int) {

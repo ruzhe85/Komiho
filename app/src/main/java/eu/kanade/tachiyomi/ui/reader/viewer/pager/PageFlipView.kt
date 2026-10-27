@@ -91,17 +91,6 @@ internal class PageFlipView(context: Context) : View(context) {
     private val sheetPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
     private val tintPaint = Paint()
     private val shadowPaint = Paint()
-
-    /**
-     * Komiho (2026-10-27)：卷起的纸**投在被揭开那页上**的影子。
-     *
-     * 与 [shadowPaint]（折痕自身的那道渐变）不是一回事：折痕阴影画在纸面上，这条画在
-     * 纸**下面**那页上 —— 纸抬起来才会在底下留影，纸贴平时没有。缺了它，翻书看着像
-     * 纸贴在屏幕上滑，而不是被掀起来。
-     */
-    private val castShadowPaint = Paint()
-    private var castReach = 0f
-
     private val backdropPaint = Paint()
     private val sheetDst = RectF()
     private val frontPath = Path()
@@ -133,18 +122,6 @@ internal class PageFlipView(context: Context) : View(context) {
             shadowRadius,
             intArrayOf(Color.TRANSPARENT, SHADOW_COLOR, Color.TRANSPARENT),
             floatArrayOf(0f, 0.5f, 1f),
-            Shader.TileMode.CLAMP,
-        )
-        // 投影：本地系里从折线（y=0）向**自由侧**（-y）衰减到透明。
-        // 与折痕阴影同一个套路 —— 坐标固定、逐帧只 translate+rotate。
-        castReach = w * CAST_SHADOW_FRACTION
-        castShadowPaint.shader = LinearGradient(
-            0f,
-            0f,
-            0f,
-            -castReach,
-            CAST_SHADOW_COLOR,
-            Color.TRANSPARENT,
             Shader.TileMode.CLAMP,
         )
     }
@@ -263,24 +240,6 @@ internal class PageFlipView(context: Context) : View(context) {
         sheetDst.set(0f, 0f, w, h)
         val deg = atan2(uy, ux) * 180f / PI.toFloat()
 
-        // ⓪ 投影（先画，后画的纸会盖住不该显示的部分）：卷起的纸在被揭开那页上留下的影。
-        //
-        // 为什么需要：折痕那道渐变只作用在纸面上，下面那页始终是全亮的 —— 观感是「纸贴着
-        // 屏幕滑」，不是「纸被掀起来」。这条投影随抬起程度淡入、纸快翻走时淡出。
-        //
-        // 只落在**自由侧**（新页露出来的那一侧）。本地 +y 指向书脊侧，所以书脊在右时
-        // 要再转 180° 让渐变朝自由侧衰减（水平方向对称，转 180° 不影响观感）。
-        val castFade = min(1f, p / SHADOW_FADE_IN) * min(1f, (1f - p) / CAST_FADE_OUT)
-        if (castFade > CAST_MIN_FADE && castShadowPaint.shader != null && castReach > 0f) {
-            castShadowPaint.alpha = (255 * castFade).toInt().coerceIn(0, 255)
-            val scCast = canvas.save()
-            canvas.translate(topX, 0f)
-            canvas.rotate(deg)
-            if (!spineOnLeft) canvas.rotate(180f)
-            canvas.drawRect(-ext, -castReach, ext, 0f, castShadowPaint)
-            canvas.restoreToCount(scCast)
-        }
-
         // ① 正面：折线靠书脊一侧的剩余平放部分。
         val sc1 = canvas.save()
         canvas.clipPath(frontPath)
@@ -383,21 +342,6 @@ internal class PageFlipView(context: Context) : View(context) {
 
         /** 折痕阴影峰值色（约 24% 黑）。 */
         const val SHADOW_COLOR = 0x3D000000
-
-        /**
-         * Komiho (2026-10-27)：纸的**投影**（压在被揭开那页上）—— 延伸占页宽比例。
-         * 这个值决定「纸悬空多高」的观感：太小像贴纸，太大会糊掉新页边缘。
-         */
-        const val CAST_SHADOW_FRACTION = 0.10f
-
-        /** 投影峰值色（约 30% 黑）。比折痕略重，因为它是投影而非折痕本身。 */
-        const val CAST_SHADOW_COLOR = 0x4D000000
-
-        /** 投影在终点附近的淡出区间（起点复用 [SHADOW_FADE_IN]）。 */
-        const val CAST_FADE_OUT = 0.18f
-
-        /** 低于此淡入值直接跳过绘制，省掉一次 save/restore。 */
-        const val CAST_MIN_FADE = 0.01f
 
         /** 覆盖模式投影宽度（占页宽比例）。 */
         const val COVER_SHADOW_FRACTION = 0.045f
