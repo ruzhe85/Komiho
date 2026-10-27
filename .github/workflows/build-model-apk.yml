@@ -231,9 +231,16 @@ jobs:
           [ -f "$APK" ] || { echo "::error::APK missing"; exit 1; }
           unzip -l "$APK" | grep -q 'assets/models.json' \
             || { echo "::error::models.json not bundled"; exit 1; }
-          GOT=$(unzip -l "$APK" | grep -c 'assets/qnn-contexts/.*\.bin' || true)
-          echo "contexts bundled: $GOT / expected ${BIN_COUNT}"
-          [ "$GOT" -eq "${BIN_COUNT}" ] || { echo "::error::context count mismatch"; exit 1; }
+          # Komiho (2026-10-27): MTK 包装的是 .tflite，不是 QNN context。
+          if [ "${SOC}" = "mediatek" ]; then
+            GOT=$(unzip -l "$APK" | grep -c 'assets/litert-models/.*\.tflite' || true)
+            echo "tflite bundled: $GOT / expected ${BIN_COUNT}"
+            [ "$GOT" -eq "${BIN_COUNT}" ] || { echo "::error::tflite count mismatch"; exit 1; }
+          else
+            GOT=$(unzip -l "$APK" | grep -c 'assets/qnn-contexts/.*\.bin' || true)
+            echo "contexts bundled: $GOT / expected ${BIN_COUNT}"
+            [ "$GOT" -eq "${BIN_COUNT}" ] || { echo "::error::context count mismatch"; exit 1; }
+          fi
           # AGP 9 still emits a stub classes.dex for hasCode=false application modules.
           # A *stub* is tiny (<200KB); real injected code (e.g. the desugar runtime the
           # shared convention used to pull in) is MBs — fail loudly on that.
