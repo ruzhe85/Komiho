@@ -139,18 +139,15 @@ class LiteRtSelfTestActivity : Activity() {
         if (isFlat(output)) return fail("输出是纯色（推理没生效或权重异常）")
 
         val channels = channelOrder(output, outW, outH)
-        log("INFO", "channel means left=${channels.left} mid=${channels.mid} right=${channels.right}")
+        log("INFO", "channel means $channels")
         if (!channels.ok) return fail("通道顺序异常（疑似 RGB↔BGR 或归一化写反）")
 
         val stride = LiteRtNative.tileSize() - 2 * model.padding
         if (stride <= 0) return fail("padding 过大：tile=${LiteRtNative.tileSize()} padding=${model.padding}")
         val boundaries = boundaryColumns(outW, stride * scale)
-        val seam = seamRatio(output, outW, outH, boundaries)
-        log(
-            "INFO",
-            "stride=$stride boundaries=$boundaries seamRatio=%.2f (阈值 3.0)".format(seam),
-        )
-        if (seam > SEAM_THRESHOLD) return fail("拼缝明显：ratio=%.2f".format(seam))
+        val seam = seamProfile(output, outW, outH, boundaries)
+        log("INFO", "stride=$stride boundaries=$boundaries $seam")
+        if (seam.ratio > SEAM_THRESHOLD) return fail("拼缝明显：%.2f（基线 %.2f）".format(seam.ratio, seam.baseline))
 
         // 5) 取消路径：大图 + 中途 abort
         val abortResult = abortCase(model.scale)
@@ -188,36 +185,24 @@ class LiteRtSelfTestActivity : Activity() {
     // ---- 合成图与指标 -------------------------------------------------------
 
     /**
-     * 三分区原色（左红/中绿/右蓝）+ 每 8px 一条 1px 深色网格。
+     * 平滑渐变测试图：R 随 x 上升、G 随 y 上升、B 随 x 下降。
      *
-     * 分区用来验通道顺序；细网格用来暴露拼缝（错位的 1px 线在边界处会出现双线/断线）。
+     * 刻意**不含任何高频纹理**（网格/棋盘）。拼缝指标要的是「边界处相邻差 ≈ 邻域基线」，
+     * 一旦图上自带周期纹理，分块边界恰好落在纹理上就会被量成 4 倍以上的假拼缝
+     * （第一版用 8px 网格实测踩到这个坑，见 commit 记录）。
+     *
+     * 单调渐变同时能验通道顺序：RGB↔BGR 或归一化写反都会破坏单调性。
      */
     private fun syntheticImage(width: Int, height: Int): ByteArray {
         val out = ByteArray(width * height * 4)
-        val third = width / 3
+        val maxX = max(1, width - 1)
+        val maxY = max(1, height - 1)
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val i = (y * width + x) * 4
-                val grid = x % 8 == 0 || y % 8 == 0
-                val r: Int
-                val g: Int
-                val b: Int
-                if (grid) {
-                    r = 30; g = 30; b = 30
-                } else when {
-                    x < third -> {
-                        r = 200; g = 70; b = 70
-                    }
-                    x < third * 2 -> {
-                        r = 70; g = 200; b = 70
-                    }
-                    else -> {
-                        r = 70; g = 70; b = 200
-                    }
-                }
-                out[i] = r.toByte()
-                out[i + 1] = g.toByte()
-                out[i + 2] = b.toByte()
+                out[i] = (40 + 160 * x / maxX).toByte()
+                out[i + 1] = (40 + 160 * y / maxY).toByte()
+                out[i + 2] = (200 - 120 * x / maxX).toByte()
                 out[i + 3] = 255.toByte()
             }
         }
@@ -243,19 +228,31 @@ class LiteRtSelfTestActivity : Activity() {
         return true
     }
 
-    private class Channels(val left: IntArray, val mid: IntArray, val right: IntArray) {
+    /** 渐变单调性检查结果（见 [channelOrder]）。 */
+    private class Channels(
+        val left: IntArray,
+        val mid: IntArray,
+        val right: IntArray,
+        val top: IntArray,
+        val bottom: IntArray,
+    ) {
+        /** R 随 x 升、B 随 x 降、G 随 y 升 —— 任何通道错位都会打破其中一条。 */
         val ok: Boolean
-            get() = left[0] > left[1] && left[0] > left[2] &&
-                mid[1] > mid[0] && mid[1] > mid[2] &&
-                right[2] > right[0] && right[2] > right[1]
+            get() = right[0] > left[0] + CHANNEL_DELTA &&
+                right[2] < left[2] - CHANNEL_DELTA &&
+                bottom[1] > top[1] + CHANNEL_DELTA
+
+        override fun toString(): String =
+            "L=${left.contentToString()} M=${mid.contentToString()} R=${right.contentToString()} " +
+                "T=${top.contentToString()} B=${bottom.contentToString()}"
     }
 
     private fun channelOrder(rgba: ByteArray, outW: Int, outH: Int): Channels {
-        fun regionMean(fromX: Int, toX: Int): IntArray {
+        fun mean(fromX: Int, toX: Int, fromY: Int, toY: Int): IntArray {
             val sum = LongArray(3)
             var n = 0L
-            var y = outH / 4
-            while (y < outH * 3 / 4) {
+            var y = fromY
+            while (y < toY) {
                 var x = fromX
                 while (x < toX) {
                     val i = (y * outW + x) * 4
@@ -269,12 +266,16 @@ class LiteRtSelfTestActivity : Activity() {
             }
             return IntArray(3) { (sum[it] / max(1L, n)).toInt() }
         }
-        // 避开分块与分区边界附近的过渡带，取各分区中间 60%
+        // 横向分区取中间 60%，纵向同样避开上下边缘（那边有 clamp 复制的边）。
         val third = outW / 3
+        val midY0 = outH / 5
+        val midY1 = outH * 4 / 5
         return Channels(
-            left = regionMean(third / 5, third * 4 / 5),
-            mid = regionMean(third + third / 5, third * 2 - third / 5),
-            right = regionMean(third * 2 + third / 5, outW - third / 5),
+            left = mean(third / 5, third * 4 / 5, midY0, midY1),
+            mid = mean(third + third / 5, third * 2 - third / 5, midY0, midY1),
+            right = mean(third * 2 + third / 5, outW - third / 5, midY0, midY1),
+            top = mean(outW / 5, outW * 4 / 5, 0, outH / 4),
+            bottom = mean(outW / 5, outW * 4 / 5, outH * 3 / 4, outH),
         )
     }
 
@@ -289,8 +290,23 @@ class LiteRtSelfTestActivity : Activity() {
         return result
     }
 
-    /** 边界处平均相邻差 ÷ 全图平均相邻差。拼缝越明显比值越大（正常 ≈ 1.0）。 */
-    private fun seamRatio(rgba: ByteArray, outW: Int, outH: Int, boundaries: List<Int>): Double {
+    /** 拼缝指标：边界列相邻差 vs **非边界列**基线（正常 ≈ 1.0）。 */
+    private class Seam(
+        val seam: Double,
+        val baseline: Double,
+        val ratio: Double,
+        val peak: Double,
+        val peakX: Int,
+    ) {
+        override fun toString(): String =
+            "seam=%.2f baseline=%.2f ratio=%.2f peak=%.2f@x%d".format(seam, baseline, ratio, peak, peakX)
+    }
+
+    /**
+     * 基线只取**远离分块边界**的列（±[SEAM_GUARD] 之外）—— 全图平均会把边界本身也算进去，
+     * 边界越多、基线越虚高，把真实拼缝稀释掉。
+     */
+    private fun seamProfile(rgba: ByteArray, outW: Int, outH: Int, boundaries: List<Int>): Seam {
         fun colDiff(x: Int): Double {
             if (x <= 0 || x >= outW) return 0.0
             var sum = 0L
@@ -308,18 +324,26 @@ class LiteRtSelfTestActivity : Activity() {
             return sum.toDouble() / max(1L, n)
         }
 
-        var globalSum = 0.0
-        var globalN = 0
+        var baselineSum = 0.0
+        var baselineN = 0
+        var peak = 0.0
+        var peakX = -1
         var x = 1
         while (x < outW) {
-            globalSum += colDiff(x)
-            globalN++
-            x += 5
+            val diff = colDiff(x)
+            if (diff > peak) {
+                peak = diff
+                peakX = x
+            }
+            if (boundaries.none { abs(it - x) <= SEAM_GUARD }) {
+                baselineSum += diff
+                baselineN++
+            }
+            x++
         }
-        val global = globalSum / max(1, globalN)
-        if (boundaries.isEmpty()) return 0.0
-        val seam = boundaries.map { colDiff(it) }.average()
-        return seam / max(0.5, global)
+        val baseline = baselineSum / max(1, baselineN)
+        val seam = if (boundaries.isEmpty()) 0.0 else boundaries.map { colDiff(it) }.average()
+        return Seam(seam, baseline, seam / max(0.5, baseline), peak, peakX)
     }
 
     // ---- 工具 ---------------------------------------------------------------
@@ -345,7 +369,16 @@ class LiteRtSelfTestActivity : Activity() {
 
     private companion object {
         const val TAG = "LiteRtSelfTest"
+
+        /** 拼缝判定阈值：边界列相邻差 ÷ 非边界基线。正常 ≈ 1，>3 说明拼接错位。 */
         const val SEAM_THRESHOLD = 3.0
+
+        /** 计算基线时跳过的边界邻域宽度（px）—— 边界附近的真实过渡不该算进基线。 */
+        const val SEAM_GUARD = 4
+
+        /** 渐变单调性要求的最小通道差（0~255）。留余量，避免量化噪声误判。 */
+        const val CHANNEL_DELTA = 15
+
         const val RESULT_PASS = 0
         const val RESULT_FAIL = 1
         const val RESULT_SKIP = 2
