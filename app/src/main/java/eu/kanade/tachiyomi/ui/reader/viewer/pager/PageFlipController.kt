@@ -3,12 +3,13 @@
 import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
-import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.core.animation.doOnEnd
 import androidx.viewpager.widget.ViewPager
@@ -315,8 +316,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // —— 宁可没有动画，也不要播一张空白纸或半成品。
             if (!PageCurlView.isSupported) return false
             end()
-            val front = captureView(leaving) ?: return false
-            val back = captureView(entering)
+            val front = snapshotPage(leaving, pager.width, pager.height) ?: return false
+            val back = snapshotPage(entering, pager.width, pager.height)
             leaving.alpha = 0f
             // 点击时 ViewPager 完全没滚，下一页还在屏幕外 —— 平移进视口当「被揭开的那页」。
             entering.translationX = -(entering.left - pager.scrollX).toFloat()
@@ -324,8 +325,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             curlOverlay.back = back
             val dual = viewer.isDoubleSpread(pager.currentItem)
             curlOverlay.dualPage = dual
-            // 单页：折轴跟滚动方向；跨页：脊线在中缝，翻动的是外侧半张，跟阅读方向。
-            curlOverlay.spineOnLeft = if (dual) viewer is L2RPagerViewer else pages > 0
+            // 方向 = 「前进/后退」叠加「阅读方向」：L2R 前进、R2L 后退都从右侧翻起。
+            curlOverlay.spineOnLeft = (pages > 0) == (viewer is L2RPagerViewer)
             // 点击翻页没有拖动方向信息：固定从**底角**起手（与他们 "taps curl from the
             // bottom corner" 一致）。拖动路径由 onTouchDown 的真实落点决定。
             curlOverlay.grabFraction = 1f
@@ -334,7 +335,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             DiagLog.d(
                 KOMIHA_FLIP_TAG,
                 "curl tap start style=${viewer.config.pageTurnStyle} dual=${curlOverlay.dualPage} " +
-                    "spine=${if (pages > 0) "left" else "right"}",
+                    "spine=${if (curlOverlay.spineOnLeft) "left" else "right"}",
             )
             session = Session(
                 pinnedView = entering,
@@ -404,9 +405,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             current.foldPinned?.let { it.translationX = -(it.left - scrollX).toFloat() }
             val w = viewer.pager.width.coerceAtLeast(1)
             val delta = (scrollX - current.startScrollX).toFloat() / w
-            // 跨页时镜像方向由**阅读方向**决定（脊线在中缝，翻动的是外侧那半张），
-            // 不能跟着滚动符号走 —— 否则拖动途中会整体左右翻转。
-            if (!curlOverlay.dualPage) curlOverlay.spineOnLeft = delta > 0f
+            // 方向 = 「前进/后退」叠加「阅读方向」：L2R 前进与 R2L 后退都从右侧翻起。
+            curlOverlay.spineOnLeft = (delta > 0f) == (viewer is L2RPagerViewer)
             curlOverlay.grabFraction = grabFraction
             curlOverlay.progress = kotlin.math.abs(delta).coerceIn(0f, 1f)
             curlOverlay.invalidate()
@@ -543,24 +543,39 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         sheetBitmap?.takeIf { !it.isRecycled && !capturePending && sheetIndex == index }
 
     /**
-     * Komiho (2026-10-27)：把一页**当前的画面**抓成位图（「翻书 2」的网格变形需要整页像素）。
+     * Komiho (2026-10-28)：给「翻书 2」取一页的位图。
      *
-     * 为什么不用 [prefetchSheet] 的 PixelCopy：那条只能抓**屏幕上**的内容，而翻书2 还需要
-     * 下一页（此刻在屏幕外）当纸背。`view.draw` 对硬件位图会失败，所以整段兜住 —— 失败就
-     * 返回 null，调用方退回 ViewPager 默认滑动（宁可没有动画，也不播一张空白纸）。
+     * **不能**用 `view.draw()` 抓页 View：页 View 里是 SSIV 的硬件位图
+     * （`Config.HARDWARE`），画进软件画布只会得到**全黑** —— 这就是"动画黑透无内容"的原因。
+     * 预载缓存里存的是真实解码结果（`PagerPreparedPage.decodedBitmap`），直接缩放到屏幕尺寸。
+     *
+     * 取不到就返回 null，调用方放弃动画、退回原生滑动（比播一张黑纸好）。
      */
-    private fun captureView(view: View): Bitmap? = try {
-        val w = view.width
-        val h = view.height
-        if (w <= 0 || h <= 0) {
+    private fun snapshotPage(holder: PagerPageHolder, w: Int, h: Int): Bitmap? = try {
+        val item = holder.item
+        val prepared = viewer.preparedCache.get(viewer.preparedCache.key(item.first, item.second))
+        val src = prepared?.decodedBitmap?.takeIf { !it.isRecycled }
+        if (src == null || src.width <= 0 || src.height <= 0 || w <= 0 || h <= 0) {
             null
         } else {
-            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { bmp ->
-                view.draw(Canvas(bmp))
-            }
+            val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            canvas.drawColor(viewer.config.pageCanvasColor)
+            val scale = min(w.toFloat() / src.width, h.toFloat() / src.height)
+            val dw = src.width * scale
+            val dh = src.height * scale
+            val left = (w - dw) * 0.5f
+            val top = (h - dh) * 0.5f
+            canvas.drawBitmap(
+                src,
+                null,
+                RectF(left, top, left + dw, top + dh),
+                Paint(Paint.FILTER_BITMAP_FLAG),
+            )
+            out
         }
     } catch (e: Throwable) {
-        DiagLog.w(KOMIHA_FLIP_TAG, "capture failed: ${e.javaClass.simpleName}: ${e.message}")
+        DiagLog.w(KOMIHA_FLIP_TAG, "snapshot failed: ${e.javaClass.simpleName}: ${e.message}")
         null
     }
 
@@ -591,8 +606,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             if (!PageCurlView.isSupported) return null
             val current = pinned
             val incoming = sheet
-            val front = captureView(current) ?: return null
-            val back = captureView(incoming)
+            val front = snapshotPage(current, pager.width, pager.height) ?: return null
+            val back = snapshotPage(incoming, pager.width, pager.height)
             current.alpha = 0f
             current.translationX = 0f
             incoming.translationX = 0f
@@ -600,7 +615,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             curlOverlay.back = back
             val dual = viewer.isDoubleSpread(position)
             curlOverlay.dualPage = dual
-            curlOverlay.spineOnLeft = if (dual) viewer is L2RPagerViewer else pinned === holderA
+            curlOverlay.spineOnLeft = (pinned === holderA) == (viewer is L2RPagerViewer)
             curlOverlay.grabFraction = grabFraction
             curlOverlay.progress = 0f
             curlOverlay.invalidate()
