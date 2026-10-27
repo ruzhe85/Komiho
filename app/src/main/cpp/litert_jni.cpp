@@ -69,7 +69,6 @@ Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeProbeRuntime(JNIEnv *, 
         "probe runtime: litert=%d plugin=%d dispatch=%d",
         runtime ? 1 : 0,
         plugin ? 1 : 0,
-        dispatch ? 1 : 0,
-    );
+        dispatch ? 1 : 0);
     return (runtime && plugin && dispatch) ? JNI_TRUE : JNI_FALSE;
 }
