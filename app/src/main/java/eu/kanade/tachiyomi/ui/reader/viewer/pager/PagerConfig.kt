@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.ui.reader.viewer.pager
+﻿package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.graphics.Color
 import androidx.annotation.ColorInt
@@ -110,8 +110,21 @@ class PagerConfig(
 
     var shiftDoublePage = false
 
-    var doublePages =
-        readerPreferences.pageLayout.get() == PageLayout.DOUBLE_PAGES && !readerPreferences.dualPageSplitPaged.get()
+    // Komiho (2026-10-28): 拆分双页**不再关掉双页合并** —— 这是两件独立的事：
+    // 「双页合并」决定一屏几页，「拆分双页」决定一张宽图要不要切成两页。
+    // 以前绑死的结果是：开着拆分就永远进不了双页（横屏也只剩单页，用户看到的就是
+    // 「双页无法合并」）。真正的互斥放在 [dualPageSplitActive]。
+    var doublePages = readerPreferences.pageLayout.get() == PageLayout.DOUBLE_PAGES
+
+    /**
+     * Komiho (2026-10-28): 拆分双页**实际生效**的条件。
+     *
+     * 开着「拆分双页」但当前是双页布局时**不拆** —— 一张宽图在跨页里本来就该整屏铺开
+     * （走 handleWideImage 的中缝逻辑），拆成两半会把左右页配错，也正好是用户看到的
+     * 「横屏开拆分后双页合不起来」。
+     */
+    val dualPageSplitActive: Boolean
+        get() = dualPageSplit && !doublePages
         set(value) {
             field = value
             if (!value) {
@@ -281,13 +294,13 @@ class PagerConfig(
                 {
                     autoDoublePages = it == PageLayout.AUTOMATIC
                     if (!autoDoublePages) {
-                        doublePages = it == PageLayout.DOUBLE_PAGES && dualPageSplit == false
+                        doublePages = it == PageLayout.DOUBLE_PAGES
                     }
                 },
                 {
                     autoDoublePages = it == PageLayout.AUTOMATIC
                     if (!autoDoublePages) {
-                        doublePages = it == PageLayout.DOUBLE_PAGES && dualPageSplit == false
+                        doublePages = it == PageLayout.DOUBLE_PAGES
                     }
                     reloadChapterListener?.invoke(doublePages)
                 },
@@ -297,7 +310,7 @@ class PagerConfig(
             .register({ centerMarginType = it }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.invertDoublePages
-            .register({ invertDoublePages = it && dualPageSplit == false }, { imagePropertyChangedListener?.invoke() })
+            .register({ invertDoublePages = it }, { imagePropertyChangedListener?.invoke() })
 
         // Komiho (2026-10-25): 预载页数已固定为 1（原因见 [offscreenPageLimit]），
         // 因此不再订阅 `pagerOffscreenLimit`；老用户存的值不再生效。
@@ -345,6 +358,10 @@ class PagerConfig(
         // MihonSY: pageTransitionsPager 不改位图输出（见上方 register 处注释），不进指纹。
         append('|').append(readerPreferences.centerMarginType.get())
         append('|').append(readerPreferences.invertDoublePages.get())
+        // Komiho (2026-10-28): 「拆分是否实际生效」取决于**当前**的布局（双页时不拆），
+        // 而布局在 AUTOMATIC 下会随方向/展开变化 —— 不进指纹的话，横竖切换会复用
+        // 上一方向切好/合并好的位图，表现就是"方向对了但页还是错的"。
+        append('|').append(if (dualPageSplitActive) "split" else "merged")
     }
 
     override fun defaultNavigation(): ViewerNavigation {

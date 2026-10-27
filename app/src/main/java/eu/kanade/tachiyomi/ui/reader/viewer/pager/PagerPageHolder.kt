@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.ui.reader.viewer.pager
+﻿package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -542,7 +542,8 @@ class PagerPageHolder(
                 } else {
                     null
                 }.use { source2 ->
-                    val itemSource = if (viewer.config.dualPageSplit) {
+                    // Komiho (2026-10-28): 双页布局下不拆（否则宽图被切成两页，跨页配错）。
+                    val itemSource = if (viewer.config.dualPageSplitActive) {
                         process(item.first, Buffer().readFrom(source))
                     } else {
                         mergePages(Buffer().readFrom(source), source2?.let { Buffer().readFrom(it) })
@@ -579,7 +580,7 @@ class PagerPageHolder(
     private suspend fun applyLegacyLayout(raw: PagerPreparedPage): PagerPreparedPage? {
         return try {
             val itemSource = withIOContext {
-                if (viewer.config.dualPageSplit) {
+                if (viewer.config.dualPageSplitActive) {
                     process(page, raw.source)
                 } else {
                     mergePages(raw.source, raw.source2)
@@ -615,7 +616,8 @@ class PagerPageHolder(
             return rotateDualPage(imageSource)
         }
 
-        if (!viewer.config.dualPageSplit) {
+        // 双页布局下整条拆分管线都不该走（见 PagerConfig.dualPageSplitActive）。
+        if (!viewer.config.dualPageSplitActive) {
             return imageSource
         }
 
