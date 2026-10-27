@@ -214,7 +214,7 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
     if (!pageTransitionsLocked && pageTransitionsPager) {
         val turnStyle by screenModel.preferences.pageTurnStyle.collectAsState()
         SettingsChipRow {
-            listOf(0, 1, 2, 3).forEach { style ->
+            listOf(0, 1, 2).forEach { style ->
                 FilterChip(
                     selected = turnStyle == style,
                     onClick = { screenModel.preferences.pageTurnStyle.set(style) },
@@ -224,7 +224,6 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
                                 when (style) {
                                     1 -> MR.strings.pref_page_flip
                                     2 -> MR.strings.pref_page_flip_fold
-                                    3 -> MR.strings.pref_page_flip_curl
                                     else -> MR.strings.pref_page_flip_translate
                                 },
                             ),

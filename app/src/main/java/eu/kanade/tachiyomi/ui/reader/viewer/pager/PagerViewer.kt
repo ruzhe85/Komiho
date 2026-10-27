@@ -186,12 +186,6 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             pageFlip.overlay,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
-        // Komiho (2026-10-27): 「翻书 2」的卷筒绘制层。与上面的叠加层并存、互斥使用：
-        // 只有选了那一档才会挂纸，平时 onDraw 直接返回（front == null）。
-        pagerFrame.addView(
-            pageFlip.curlOverlay,
-            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
-        )
         // Komiho: 点击翻页动画途中用户触摸 → 立刻落位，把控制权交回手势。
         // Komiho (2026-10-26): 折线不再跟按下位置（实测拖慢输入、点击/拖动常有掉帧般无响应）。
         // 恢复固定中点：倾角恒定，手势路径最短。
