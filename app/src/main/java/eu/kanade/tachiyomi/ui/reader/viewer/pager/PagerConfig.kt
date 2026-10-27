@@ -28,6 +28,14 @@ import uy.kohesive.injekt.api.get
 private const val TAP_FLIP_DURATION_MS = 400L
 
 /**
+ * Komiho (2026-10-28): 翻页方式的最大档位，必须与 `PageFlipController` 的 `STYLE_*` 保持一致。
+ *
+ * 之前这里写死 `coerceIn(0, 2)`，新增「翻书 2」(3) 后选择被静默夹回 2，卷曲分支从未执行。
+ * 以后加档位：改这个常量 + `STYLE_*` + 设置页的枚举，三处一起。
+ */
+private const val STYLE_MAX = 3
+
+/**
  * Configuration used by pager viewers.
  */
 class PagerConfig(
@@ -86,7 +94,10 @@ class PagerConfig(
      * - 升级时若旧开关是开着的、而新偏好还是 0，迁移成「覆盖」（见 init 的一次性迁移）；
      * - 之后每次切方式都会回写旧开关（平移 → false），迁移条件就不会再成立。
      */
-    var pageTurnStyle = readerPreferences.pageTurnStyle.get().coerceIn(0, 2)
+    // ⚠️ 上界必须跟着 [PageFlipController.STYLE_CURL] 走：这里曾写死 `coerceIn(0, 2)`，
+    // 于是新增的「翻书 2」(3) 每次都被夹回 2，卷曲分支永远不会执行 —— 表现就是
+    // "选了翻书2 但看起来还是翻书"。
+    var pageTurnStyle = readerPreferences.pageTurnStyle.get().coerceIn(0, STYLE_MAX)
         private set
 
     /** 是否走「非平移」的翻页动画（覆盖 / 翻书由叠加层接管拖动）。 */
@@ -253,7 +264,7 @@ class PagerConfig(
         // 不改位图输出，所以不接 imagePropertyChangedListener。
         readerPreferences.pageTurnStyle
             .register({ style ->
-                pageTurnStyle = style.coerceIn(0, 2)
+                pageTurnStyle = style.coerceIn(0, STYLE_MAX)
                 // 回写旧开关：让它只表示「非平移」，init 里的一次性迁移就不会重复触发。
                 readerPreferences.pageFlipAnimation.set(pageTurnStyle != 0)
             })

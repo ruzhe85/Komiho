@@ -329,6 +329,11 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             curlOverlay.grabFraction = 1f
             curlOverlay.progress = 0f
             curlOverlay.invalidate()
+            DiagLog.d(
+                KOMIHA_FLIP_TAG,
+                "curl tap start style=${viewer.config.pageTurnStyle} dual=${curlOverlay.dualPage} " +
+                    "spine=${if (pages > 0) "left" else "right"}",
+            )
             session = Session(
                 pinnedView = entering,
                 sheetView = leaving,
