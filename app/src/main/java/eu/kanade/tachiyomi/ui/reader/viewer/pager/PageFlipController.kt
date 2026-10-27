@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.ui.reader.viewer.pager
+﻿package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.animation.ValueAnimator
 import android.graphics.Bitmap
@@ -322,8 +322,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             entering.translationX = -(entering.left - pager.scrollX).toFloat()
             curlOverlay.front = front
             curlOverlay.back = back
-            curlOverlay.spineOnLeft = pages > 0
-            curlOverlay.dualPage = viewer.isDoubleSpread(pager.currentItem)
+            val dual = viewer.isDoubleSpread(pager.currentItem)
+            curlOverlay.dualPage = dual
+            // 单页：折轴跟滚动方向；跨页：脊线在中缝，翻动的是外侧半张，跟阅读方向。
+            curlOverlay.spineOnLeft = if (dual) viewer is L2RPagerViewer else pages > 0
             // 点击翻页没有拖动方向信息：固定从**底角**起手（与他们 "taps curl from the
             // bottom corner" 一致）。拖动路径由 onTouchDown 的真实落点决定。
             curlOverlay.grabFraction = 1f
@@ -402,7 +404,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             current.foldPinned?.let { it.translationX = -(it.left - scrollX).toFloat() }
             val w = viewer.pager.width.coerceAtLeast(1)
             val delta = (scrollX - current.startScrollX).toFloat() / w
-            curlOverlay.spineOnLeft = delta > 0f
+            // 跨页时镜像方向由**阅读方向**决定（脊线在中缝，翻动的是外侧那半张），
+            // 不能跟着滚动符号走 —— 否则拖动途中会整体左右翻转。
+            if (!curlOverlay.dualPage) curlOverlay.spineOnLeft = delta > 0f
             curlOverlay.grabFraction = grabFraction
             curlOverlay.progress = kotlin.math.abs(delta).coerceIn(0f, 1f)
             curlOverlay.invalidate()
@@ -594,8 +598,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             incoming.translationX = 0f
             curlOverlay.front = front
             curlOverlay.back = back
-            curlOverlay.spineOnLeft = pinned === holderA
-            curlOverlay.dualPage = viewer.isDoubleSpread(position)
+            val dual = viewer.isDoubleSpread(position)
+            curlOverlay.dualPage = dual
+            curlOverlay.spineOnLeft = if (dual) viewer is L2RPagerViewer else pinned === holderA
             curlOverlay.grabFraction = grabFraction
             curlOverlay.progress = 0f
             curlOverlay.invalidate()
