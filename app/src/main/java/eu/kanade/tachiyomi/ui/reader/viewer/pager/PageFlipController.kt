@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
+import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.core.animation.doOnEnd
 import androidx.viewpager.widget.ViewPager
@@ -39,6 +40,14 @@ private const val STYLE_SLIDE = 0
 private const val STYLE_COVER = 1
 private const val STYLE_FOLD = 2
 
+/**
+ * Komiho (2026-10-27)：**翻书 2** —— 带卷筒的翻页。
+ *
+ * 与 [STYLE_FOLD] 走同一套驱动（钉住两页、进度跟手），差别只在绘制层：那个把纸当平面对折，
+ * 这个用网格把折线附近卷成圆柱（见 [PageCurlView]）。两者互不影响，用户可以只选其一。
+ */
+private const val STYLE_CURL = 3
+
 
 
 /**
@@ -64,6 +73,14 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
     /** 叠在 pager 之上的绘制层。由 [PagerViewer] 放进容器。 */
     val overlay = PageFlipView(viewer.activity)
+
+    /**
+     * Komiho (2026-10-27)：「翻书 2」的绘制层（卷筒网格）。
+     *
+     * 与 [overlay] 并存但互斥使用：只有 `pageTurnStyle == STYLE_CURL` 时才挂纸，另一档时
+     * 它一直空着（`front == null` → `onDraw` 直接返回），不会影响现有翻书。
+     */
+    val curlOverlay = PageCurlView(viewer.activity)
 
     private var session: Session? = null
 
@@ -158,6 +175,23 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
     /** 会话已备好，真正开始播放。 */
     private fun startTapAnimator(target: Int) {
+        if (viewer.config.pageTurnStyle == STYLE_CURL) {
+            // 翻书2：与翻书同一个驱动（两页静止、只推进进度），只是画法换成卷筒网格。
+            tapAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = tapFlipDuration()
+                interpolator = AccelerateDecelerateInterpolator()
+                addUpdateListener {
+                    curlOverlay.progress = it.animatedValue as Float
+                    curlOverlay.invalidate()
+                }
+                doOnEnd {
+                    tapAnimator = null
+                    commitTapFlip(target)
+                }
+                start()
+            }
+            return
+        }
         if (viewer.config.pageTurnStyle == STYLE_FOLD) {
             // 翻书：两个页 View 都静止，只推进折线；落位时页面早已被折到书脊。
             tapAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -225,6 +259,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val current = session
         session = null
         overlay.reset()
+        // 翻书2：点击路径收尾时同样要回收快照（这一档滚完不会再有 IDLE 回调）。
+        curlOverlay.releaseBitmaps()
         // 先落位再复原：落位后新页就是 currentItem，恢复 alpha 不会闪。
         viewer.pager.setCurrentItem(target, false)
         current?.pinnedView?.translationX = 0f
@@ -273,6 +309,31 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val entering = findHolder(enteringItem) ?: return false
 
         end()
+        if (viewer.config.pageTurnStyle == STYLE_CURL) {
+            // 翻书2：纸的形变要靠网格算，必须有**整页位图**，所以这里抓两张快照
+            //（当前页 + 下一页）。抓不到就交回 ViewPager 的默认滑动 —— 宁可没有动画，
+            // 也不要播一张空白纸。
+            end()
+            val front = captureView(leaving) ?: return false
+            val back = captureView(entering)
+            leaving.alpha = 0f
+            // 点击时 ViewPager 完全没滚，下一页还在屏幕外 —— 平移进视口当「被揭开的那页」。
+            entering.translationX = -(entering.left - pager.scrollX).toFloat()
+            curlOverlay.front = front
+            curlOverlay.back = back
+            curlOverlay.spineOnLeft = pages > 0
+            curlOverlay.grabFraction = grabFraction
+            curlOverlay.progress = 0f
+            curlOverlay.invalidate()
+            session = Session(
+                pinnedView = entering,
+                sheetView = leaving,
+                foldPinned = leaving,
+                foldFromRight = pages > 0,
+                startScrollX = pager.scrollX,
+            )
+            return true
+        }
         val prepared = if (viewer.config.pageTurnStyle == STYLE_FOLD) {
             // 翻书：被折走的是**当前页**（藏起来由叠加层画），下一页保持静止。
             // 折线方向与拖动路径同一条规则（看两页在布局里的左右关系），不再用 `pages` 猜。
@@ -326,6 +387,18 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     }
 
     private fun applyFrame(current: Session, scrollX: Int, offset: Float) {
+        if (viewer.config.pageTurnStyle == STYLE_CURL) {
+            // 与翻书同一条驱动：两页都钉住（画面冻结），进度 = 实际滚动位移。
+            current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
+            current.foldPinned?.let { it.translationX = -(it.left - scrollX).toFloat() }
+            val w = viewer.pager.width.coerceAtLeast(1)
+            val delta = (scrollX - current.startScrollX).toFloat() / w
+            curlOverlay.spineOnLeft = delta > 0f
+            curlOverlay.grabFraction = grabFraction
+            curlOverlay.progress = kotlin.math.abs(delta).coerceIn(0f, 1f)
+            curlOverlay.invalidate()
+            return
+        }
         if (viewer.config.pageTurnStyle == STYLE_FOLD) {
             // 翻书：两页都钉住（画面完全冻结），折线完全由 offset 驱动 —— 这就是「跟手翻书」。
             current.pinnedView.translationX = -(current.pinnedView.left - scrollX).toFloat()
@@ -386,6 +459,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         current.foldPinned?.translationX = 0f
         current.sheetView.alpha = 1f
         overlay.reset()
+        // 翻书2 的快照只在一次会话内有效，收尾即回收（否则两次翻页就多两张全屏位图）。
+        curlOverlay.releaseBitmaps()
     }
 
     /** 释放（退出阅读器 / 切换阅读模式）。 */
@@ -454,6 +529,28 @@ internal class PageFlipController(private val viewer: PagerViewer) {
     private fun sheetFor(index: Int): Bitmap? =
         sheetBitmap?.takeIf { !it.isRecycled && !capturePending && sheetIndex == index }
 
+    /**
+     * Komiho (2026-10-27)：把一页**当前的画面**抓成位图（「翻书 2」的网格变形需要整页像素）。
+     *
+     * 为什么不用 [prefetchSheet] 的 PixelCopy：那条只能抓**屏幕上**的内容，而翻书2 还需要
+     * 下一页（此刻在屏幕外）当纸背。`view.draw` 对硬件位图会失败，所以整段兜住 —— 失败就
+     * 返回 null，调用方退回 ViewPager 默认滑动（宁可没有动画，也不播一张空白纸）。
+     */
+    private fun captureView(view: View): Bitmap? = try {
+        val w = view.width
+        val h = view.height
+        if (w <= 0 || h <= 0) {
+            null
+        } else {
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { bmp ->
+                view.draw(Canvas(bmp))
+            }
+        }
+    } catch (e: Throwable) {
+        DiagLog.w(KOMIHA_FLIP_TAG, "capture failed: ${e.javaClass.simpleName}: ${e.message}")
+        null
+    }
+
     // endregion
 
     /**
@@ -476,6 +573,36 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val pinned = if (distA <= distB) holderA else holderB
         val sheet = if (pinned === holderA) holderB else holderA
 
+        if (viewer.config.pageTurnStyle == STYLE_CURL) {
+            // 翻书2（拖动路径）：与点击同构 —— 当前页藏起来由网格画，下一页钉住当被揭开的底。
+            val current = pinned
+            val incoming = sheet
+            val front = captureView(current) ?: return null
+            val back = captureView(incoming)
+            current.alpha = 0f
+            current.translationX = 0f
+            incoming.translationX = 0f
+            curlOverlay.front = front
+            curlOverlay.back = back
+            curlOverlay.spineOnLeft = pinned === holderA
+            curlOverlay.grabFraction = grabFraction
+            curlOverlay.progress = 0f
+            curlOverlay.invalidate()
+            if (!loggedThisScroll) {
+                loggedThisScroll = true
+                DiagLog.d(
+                    KOMIHA_FLIP_TAG,
+                    "curl start current=${current.item.first.index} incoming=${incoming.item.first.index}",
+                )
+            }
+            return Session(
+                pinnedView = incoming,
+                sheetView = current,
+                foldPinned = current,
+                foldFromRight = pinned === holderA,
+                startScrollX = scrollX,
+            ).also { session = it }
+        }
         if (viewer.config.pageTurnStyle == STYLE_FOLD) {
             // 翻书：当前页（离原点近的那张）藏起来由叠加层折走，下一页留在下面当底。
             // 两页都要钉住 —— 画面冻结，折线完全由滚动 offset 驱动，才有「跟手」。
