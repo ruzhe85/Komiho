@@ -312,3 +312,9 @@
 -dontwarn org.bouncycastle.jsse.**
 -dontwarn org.bouncycastle.pqc.**
 # SY <--
+
+# Komiho (2026-10-27): MTK 后端（LiteRT）
+# JNI 符号名由「类全名 + 方法名」拼成（Java_eu_kanade_..._LiteRtNative_nativeXxx），
+# 类或方法被 R8 重命名就会 UnsatisfiedLinkError；自检 Activity 也按类名由 adb 启动。
+-keep class eu.kanade.tachiyomi.util.waifu2x.LiteRtNative { *; }
+-keep class eu.kanade.tachiyomi.util.waifu2x.LiteRtSelfTestActivity { *; }

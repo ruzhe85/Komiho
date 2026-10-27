@@ -119,6 +119,17 @@
             android:theme="@style/Theme.Tachiyomi.SplashScreen">
         </activity>
 
+        <!-- Komiho (2026-10-27): MTK 后端的 CPU 验证自检。**不在任何 UI 里出现**，
+             只用于 adb 触发（原生优化与正式一致，耗时数据才有意义）：
+                 adb shell am start -n cn.ruzhe.komiho/eu.kanade.tachiyomi.util.waifu2x.LiteRtSelfTestActivity
+                 adb logcat -s LiteRtSelfTest
+             exported 才能被 adb 启动；本身不读不写用户数据，只跑一次合成图推理。 -->
+        <activity
+            android:name="eu.kanade.tachiyomi.util.waifu2x.LiteRtSelfTestActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- Komiho M3: main tabbed activity (Home/Library/Lists/Settings).
              Replaces the removed single-screen KomgaHomeActivity.
              configChanges keeps tab/scroll state across orientation changes. -->

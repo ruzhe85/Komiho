@@ -12,15 +12,18 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * Komiho (2026-10-27): MTK 后端的 **CPU 验证通道**自检（仅 debug 变体）。
+ * Komiho (2026-10-27): MTK 后端的 **CPU 验证通道**自检。
  *
  * 为什么需要它：MTK NPU 只能在联发科机器上验，但**分块几何、ABI 用法、进度、取消、耗时**
  * 这些与芯片无关 —— `cpuOnly=true` 走的是同一套 native 代码，只是把加速器换成 CPU。
  * 于是任何 arm64 安卓机（含骁龙）都能把除「NPU 委托 / 加速比」以外的链路验完。
  *
- * 触发方式（见 `app/src/debug/AndroidManifest.xml`）：
+ * **放在 main 源集、但不在任何 UI 里出现**：只在 `adb` 里按类名启动。这样跑的是正式包
+ * （native `-O2`），耗时数据才有意义 —— debug 变体是 `-O0`，同一份推理会慢数倍。
+ *
+ * 触发方式（见 `app/src/main/AndroidManifest.xml`）：
  * ```
- * adb shell am start -n cn.ruzhe.komiho.debug/eu.kanade.tachiyomi.util.waifu2x.LiteRtSelfTestActivity
+ * adb shell am start -n cn.ruzhe.komiho/eu.kanade.tachiyomi.util.waifu2x.LiteRtSelfTestActivity
  * adb logcat -s LiteRtSelfTest
  * ```
  *
