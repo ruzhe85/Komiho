@@ -115,6 +115,12 @@ class PagerConfig(
     // 以前绑死的结果是：开着拆分就永远进不了双页（横屏也只剩单页，用户看到的就是
     // 「双页无法合并」）。真正的互斥放在 [dualPageSplitActive]。
     var doublePages = readerPreferences.pageLayout.get() == PageLayout.DOUBLE_PAGES
+        private set(value) {
+            field = value
+            if (!value) {
+                shiftDoublePage = false
+            }
+        }
 
     /**
      * Komiho (2026-10-28): 拆分双页**实际生效**的条件。
@@ -125,12 +131,6 @@ class PagerConfig(
      */
     val dualPageSplitActive: Boolean
         get() = dualPageSplit && !doublePages
-        set(value) {
-            field = value
-            if (!value) {
-                shiftDoublePage = false
-            }
-        }
 
     var invertDoublePages = false
 
