@@ -394,6 +394,13 @@ dependencies {
     // Logging
     implementation(libs.logcat)
 
+    // Komiho (2026-10-27): MTK NPU 扩展后端（LiteRT + NeuroPilot）。
+    // 纯增量：核心库带 libLiteRt.so（arm64 5.37MB），mediatek 包带
+    // libLiteRtCompilerPlugin_MediaTek.so / libLiteRtDispatch_MediaTek.so（共 0.74MB，仅 arm64）。
+    // 运行期由 litert-jni 用 dlopen 惰性加载 —— 非 MTK 设备永远不会打开它们。
+    implementation(libs.litert)
+    implementation(libs.litert.mediatek)
+
     // Crash reports/analytics: 已移除 —— 上游 Mihon 这条走 standard 变体的三个 firebase 依赖，
     // 本仓库不发布遥测（见文件顶部说明），依赖已整体删除。
 

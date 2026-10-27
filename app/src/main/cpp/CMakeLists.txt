@@ -162,3 +162,26 @@ if(KOMIHO_NCNN_FOUND)
         dl
     )
 endif()
+
+# ---------------------------------------------------------------------------
+# Komiho (2026-10-27): MTK NPU 后端（LiteRT + NeuroPilot）。
+#
+# **刻意独立成一个 .so**，不并进 waifu2x-jni：那边是全进程单例引擎
+# （g_lock / activeModel / abort 标记 / nativeInferenceMs 都在同一份全局状态里），
+# LiteRT 一旦 OOM 或初始化失败，绝不能把它带脏 —— 出问题只烂这一条腿。
+#
+# 不链接 libLiteRt.so：运行期用 dlopen 惰性加载（见 litert_jni.cpp），
+# 非 MTK 设备 / 未装 MTK 模型包时永远不会打开它。
+#
+# 仅 arm64-v8a：NeuroPilot 的 compiler-plugin / dispatch 只提供 arm64 版本。
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    add_library(litert-jni SHARED
+        litert_jni.cpp
+    )
+    target_include_directories(litert-jni PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(litert-jni
+        android
+        log
+        dl
+    )
+endif()

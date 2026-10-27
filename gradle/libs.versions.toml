@@ -48,6 +48,9 @@ kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktlint = "1.8.0"
 leakCanary = "2.14"
+# Komiho: LiteRT（原 TFLite）2.x —— MTK NPU 后端。核心库带 libLiteRt.so，
+# litert-npu-runtime-mediatek 带 NeuroPilot 的 compiler-plugin / dispatch 两个 so（仅 arm64）。
+litert = "2.3.0"
 logcat = "0.4"
 markdown = "0.43.0"
 material = "1.12.0"
@@ -146,6 +149,8 @@ kotlinx-serialization-protobuf = { module = "org.jetbrains.kotlinx:kotlinx-seria
 ktlint-bom = { module = "com.pinterest.ktlint:ktlint-bom", version.ref = "ktlint" }
 leakCanary-core = { module = "com.squareup.leakcanary:leakcanary-android", version.ref = "leakCanary" }
 leakCanary-plumber = { module = "com.squareup.leakcanary:plumber-android", version.ref = "leakCanary" }
+litert = { module = "com.google.ai.edge.litert:litert", version.ref = "litert" }
+litert-mediatek = { module = "com.google.ai.edge.litert:litert-npu-runtime-mediatek", version.ref = "litert" }
 logcat = { module = "com.squareup.logcat:logcat", version.ref = "logcat" }
 markdown-coil = { module = "com.mikepenz:multiplatform-markdown-renderer-coil3", version.ref = "markdown" }
 markdown-core = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdown" }
