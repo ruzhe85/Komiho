@@ -25,7 +25,7 @@ name: Build model package APK
   workflow_dispatch:
     inputs:
       soc:
-        description: 'HTP generation to package: v69 / v73 / v75 / v79 / v81'
+        description: 'Package target: v69 / v73 / v75 / v79 / v81 (QNN) or mediatek (LiteRT tflite, one package for all Dimensity)'
         required: true
         type: string
       model_version_name:
@@ -60,7 +60,10 @@ jobs:
         run: |
           case "$SOC" in
             v69|v73|v75|v79|v81) ;;
-            *) echo "::error::soc must be one of v69/v73/v75/v79/v81, got '$SOC'"; exit 1 ;;
+            # Komiho (2026-10-27): MTK 走 LiteRT —— 模型是通用 .tflite，由设备端编译，
+            # 所以一个包通吃所有 Dimensity，不分 HTP 代。
+            mediatek) ;;
+            *) echo "::error::soc must be one of v69/v73/v75/v79/v81/mediatek, got '$SOC'"; exit 1 ;;
           esac
           [ -d "model-sources/$SOC" ] || { echo "::error::missing model-sources/$SOC"; exit 1; }
           [ -f "model-sources/models.json" ] || { echo "::error::missing model-sources/models.json"; exit 1; }
@@ -73,32 +76,55 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, shutil, sys
-          soc = os.environ["SOC"]            # e.g. v79
-          arch = os.environ["ARCH"]          # e.g. 79
+          soc = os.environ["SOC"]            # e.g. v79 / mediatek
           src = "model-sources"
           registry = json.load(open(f"{src}/models.json", encoding="utf-8"))
           if registry.get("protocolVersion", 1) > 1:
               sys.exit("::error::registry protocol newer than the packager")
           by_stem = {m["stem"]: m for m in registry.get("models", [])}
-          bins = sorted(f for f in os.listdir(f"{src}/{soc}") if f.endswith(".bin"))
-          if not bins:
-              sys.exit(f"::error::no context bins under {src}/{soc}")
-          os.makedirs("modelapk/src/main/assets/qnn-contexts", exist_ok=True)
           models = []
-          for fname in bins:
-              suffix = f".{soc}.bin"
-              if not fname.endswith(suffix):
-                  sys.exit(f"::error::{fname} does not match the <stem>.{soc}.bin naming")
-              stem = fname[: -len(suffix)]
+
+          def entry_for(stem, extra):
               m = by_stem.get(stem)
               if m is None:
                   sys.exit(f"::error::{stem} has no entry in models.json registry")
               if not m.get("id") or not m.get("label") or m.get("padding", 0) <= 0:
                   sys.exit(f"::error::incomplete registry entry for {stem}: {m}")
-              shutil.copy2(f"{src}/{soc}/{fname}",
-                           f"modelapk/src/main/assets/qnn-contexts/{fname}")
-              models.append({"id": m["id"], "stem": stem, "scale": m.get("scale", 2),
-                             "padding": m["padding"], "arches": [arch], "label": m["label"]})
+              e = {"id": m["id"], "stem": stem, "scale": m.get("scale", 2),
+                   "padding": m["padding"], "label": m["label"]}
+              e.update(extra)
+              return e
+
+          if soc == "mediatek":
+              # Komiho (2026-10-27): LiteRT 模型是通用 .tflite，由设备端编译到具体芯片，
+              # 因此**不分代**、arches 留空（host 侧对 litert 也不要求 arches）。
+              files = sorted(f for f in os.listdir(f"{src}/mediatek") if f.endswith(".tflite"))
+              if not files:
+                  sys.exit(f"::error::no .tflite under {src}/mediatek")
+              os.makedirs("modelapk/src/main/assets/litert-models", exist_ok=True)
+              for fname in files:
+                  stem = fname[: -len(".tflite")]
+                  e = entry_for(stem, {"arches": [], "backend": "litert",
+                                       "assetDir": "litert-models"})
+                  shutil.copy2(f"{src}/mediatek/{fname}",
+                               f"modelapk/src/main/assets/litert-models/{fname}")
+                  models.append(e)
+          else:
+              arch = os.environ["ARCH"]      # e.g. 79
+              bins = sorted(f for f in os.listdir(f"{src}/{soc}") if f.endswith(".bin"))
+              if not bins:
+                  sys.exit(f"::error::no context bins under {src}/{soc}")
+              os.makedirs("modelapk/src/main/assets/qnn-contexts", exist_ok=True)
+              for fname in bins:
+                  suffix = f".{soc}.bin"
+                  if not fname.endswith(suffix):
+                      sys.exit(f"::error::{fname} does not match the <stem>.{soc}.bin naming")
+                  stem = fname[: -len(suffix)]
+                  e = entry_for(stem, {"arches": [arch]})
+                  shutil.copy2(f"{src}/{soc}/{fname}",
+                               f"modelapk/src/main/assets/qnn-contexts/{fname}")
+                  models.append(e)
+
           manifest = {"protocolVersion": 1, "models": models}
           with open("modelapk/src/main/assets/models.json", "w", encoding="utf-8") as f:
               json.dump(manifest, f, ensure_ascii=False, indent=2)

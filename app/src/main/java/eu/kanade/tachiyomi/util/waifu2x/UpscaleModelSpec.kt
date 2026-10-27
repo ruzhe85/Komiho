@@ -74,7 +74,26 @@ interface UpscaleModelSpec {
      */
     val sourcePackage: String?
 
-    enum class Backend { NCNN_VULKAN, QNN_HTP }
+    enum class Backend {
+        /** 内置 ncnn/Vulkan 模型（`AiUpscaleModel`）。 */
+        NCNN_VULKAN,
+
+        /** 骁龙 HTP：插件 APK 里按代分发的 QNN context（`<stem>.v<arch>.bin`）。 */
+        QNN_HTP,
+
+        /**
+         * 联发科 APU：插件 APK 里的 LiteRT `.tflite`（`litert-models/<stem>.tflite`）。
+         *
+         * 与 QNN 的两点差异：
+         *  - **不分代**：模型是通用 FlatBuffer，由 LiteRT 在设备首次运行时编译到具体芯片
+         *    （产物落 compiler-cache），所以一个包通吃所有 Dimensity；
+         *  - 因此 [qnnArches] 对它无意义（留空），能力判定交给 native 的全量委托校验。
+         *
+         * 目前**尚未接入引擎选择**（见 `UpscaleModelRegistry.selectableNpuModels`），
+         * 扫描/校验已生效，但不会出现在选择器里。
+         */
+        LITERT_NPU,
+    }
 }
 
 /**
@@ -94,7 +113,13 @@ data class PluginUpscaleModel(
     override val scale: Int = 2,
     override val assetDir: String = "qnn-contexts",
     override val group: String? = null,
+    override val backend: UpscaleModelSpec.Backend = UpscaleModelSpec.Backend.QNN_HTP,
 ) : UpscaleModelSpec {
-    override val backend: UpscaleModelSpec.Backend get() = UpscaleModelSpec.Backend.QNN_HTP
     override val labelRes: StringResource? get() = null
+
+    /** 包内模型文件：QNN 按代一文件，LiteRT 是单个 `.tflite`。 */
+    fun assetFileName(arch: Int): String = when (backend) {
+        UpscaleModelSpec.Backend.LITERT_NPU -> "$stem.tflite"
+        else -> "$stem.v$arch.bin"
+    }
 }

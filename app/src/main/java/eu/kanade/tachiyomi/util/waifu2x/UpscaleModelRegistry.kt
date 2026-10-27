@@ -49,8 +49,19 @@ object UpscaleModelRegistry {
     /** Built-in (Vulkan) models — the GPU group in the settings UI. */
     fun gpuModels(): List<AiUpscaleModel> = AiUpscaleModel.entries.toList()
 
-    /** NPU models from installed plugin APKs — empty until [ensureScanned]/[refresh]. */
-    fun npuModels(): List<PluginUpscaleModel> = pluginModels
+    /**
+     * NPU models offered in the picker — **目前只含 QNN**。
+     *
+     * Komiho (2026-10-27): LiteRT（MTK）模型会被扫描、校验并出现在 [litertModels] 里，但
+     * **暂不进入选择器** —— 引擎分派（`Backend.LITERT_NPU` → `LiteRtNative`）尚未接入，
+     * 提前放出来只会让用户选中一个必定回落的模型。接入后把这条过滤去掉即可。
+     */
+    fun npuModels(): List<PluginUpscaleModel> =
+        pluginModels.filter { it.backend != UpscaleModelSpec.Backend.LITERT_NPU }
+
+    /** LiteRT（MTK）模型：已解析校验，暂不参与选择器。 */
+    fun litertModels(): List<PluginUpscaleModel> =
+        pluginModels.filter { it.backend == UpscaleModelSpec.Backend.LITERT_NPU }
 
     /**
      * Resolves a persisted id against built-in **and** plugin models, falling back to

@@ -664,6 +664,18 @@ object Waifu2x {
             onQnnFallback?.invoke(model)
             return ensureEngineLocked(context, AiUpscaleModel.Default)
         }
+
+        // Komiho (2026-10-27): LiteRT（MTK）模型的引擎分派尚未接入（M2）。扫描器虽然会解析
+        // 它们，但[UpscaleModelRegistry.npuModels] 还没放出来，正常路径选不到；这里显式回落，
+        // 免得一个残留的偏好 id 掉进 ncnn 分支、白试一次必然失败的初始化。
+        if (model.backend == UpscaleModelSpec.Backend.LITERT_NPU) {
+            logcat(LogPriority.WARN) {
+                "Waifu2x: LITERT_NPU engine not wired yet for ${model.id}; " +
+                    "falling back to Vulkan Default"
+            }
+            requestedModel = AiUpscaleModel.Default
+            return ensureEngineLocked(context, AiUpscaleModel.Default)
+        }
         return ensureEngineLocked(context, model)
     }
 

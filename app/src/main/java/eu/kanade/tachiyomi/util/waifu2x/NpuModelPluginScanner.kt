@@ -63,6 +63,21 @@ object NpuModelPluginScanner {
     private const val MANIFEST_ASSET = "models.json"
     private const val DEFAULT_ASSET_DIR = "qnn-contexts"
 
+    /**
+     * Komiho (2026-10-27): LiteRT（MTK）模型包默认目录 —— 与 QNN 的 `qnn-contexts` 并列。
+     * 由 `build-model-apk.yml` 在 `soc=mediatek` 时写入。
+     */
+    private const val DEFAULT_LITERT_ASSET_DIR = "litert-models"
+
+    /** 包级后端标识（`models.json` 的可选字段，缺省 = qnn，保证旧包语义不变）。 */
+    private const val KEY_BACKEND = "backend"
+
+    /**
+     * 非数字代号的模型包后缀。QNN 按 HTP 代号命名（`v69`…），MTK 是**一个包通吃**
+     * （LiteRT 在设备端编译），所以用固定名字 `mediatek`。
+     */
+    private val EXTRA_PACKAGE_SUFFIXES = listOf("mediatek")
+
     /** Name of the trace file written only when a scan finds nothing (see [scan]). */
     private const val DIAG_FILE = "npu-diag.txt"
 
@@ -140,6 +155,15 @@ object NpuModelPluginScanner {
         var probed = 0
         for (arch in PROBE_ARCH_CODES) {
             val pkg = MODEL_PACKAGE_PREFIX + "v" + arch
+            if (names.contains(pkg)) continue
+            if (runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess) {
+                names += pkg
+                probed++
+            }
+        }
+        // 非数字代号（MTK）同样走按名探测，避免依赖包列表 API。
+        for (suffix in EXTRA_PACKAGE_SUFFIXES) {
+            val pkg = MODEL_PACKAGE_PREFIX + suffix
             if (names.contains(pkg)) continue
             if (runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess) {
                 names += pkg
@@ -272,7 +296,8 @@ object NpuModelPluginScanner {
                     continue
                 }
                 logcat(LogPriority.WARN) {
-                    "ModelPlugins: discovered ${model.id} (${model.qnnArches}) from $pkg"
+                    "ModelPlugins: discovered ${model.id} backend=${model.backend} " +
+                        "arches=${model.qnnArches} from $pkg"
                 }
                 result += model
             }
@@ -292,28 +317,56 @@ object NpuModelPluginScanner {
         val label = entry.optString(KEY_LABEL).trim()
         val padding = entry.optInt(KEY_PADDING, -1)
         val scale = entry.optInt(KEY_SCALE, 2)
-        val assetDir = entry.optString(KEY_ASSET_DIR).trim().ifEmpty { DEFAULT_ASSET_DIR }
         val group = entry.optString(KEY_GROUP).trim().ifEmpty { null }
         val arches = parseArches(entry)
 
-        if (id.isEmpty() || stem.isEmpty() || label.isEmpty() || padding <= 0 || arches.isEmpty()) {
+        // Komiho (2026-10-27): 后端字段缺省 = qnn —— 保证升级前打好的包语义完全不变。
+        val backend = when (val raw = entry.optString(KEY_BACKEND).trim().lowercase()) {
+            "", "qnn" -> UpscaleModelSpec.Backend.QNN_HTP
+            "litert" -> UpscaleModelSpec.Backend.LITERT_NPU
+            else -> {
+                diag.append("  entry '").append(id).append("' rejected: unknown backend=")
+                    .append(raw).append('\n')
+                logcat(LogPriority.WARN) { "ModelPlugins: unknown backend '$raw' in $pkg — skipped" }
+                return null
+            }
+        }
+        val assetDir = entry.optString(KEY_ASSET_DIR).trim().ifEmpty {
+            if (backend == UpscaleModelSpec.Backend.LITERT_NPU) {
+                DEFAULT_LITERT_ASSET_DIR
+            } else {
+                DEFAULT_ASSET_DIR
+            }
+        }
+
+        // QNN 必须按代分发（没有匹配的 context 就跑不了）；LiteRT 是通用 tflite，arches 应留空。
+        val archesRequired = backend == UpscaleModelSpec.Backend.QNN_HTP
+        if (id.isEmpty() || stem.isEmpty() || label.isEmpty() || padding <= 0 ||
+            (archesRequired && arches.isEmpty())
+        ) {
             diag.append("  entry '").append(id).append("' rejected: padding=").append(padding)
+                .append(" backend=").append(backend)
                 .append(" arches=").append(arches)
                 .append(" rawArches=").append(entry.optJSONArray(KEY_ARCHES))
                 .append('\n')
             logcat(LogPriority.WARN) { "ModelPlugins: incomplete entry in $pkg — skipped" }
             return null
         }
+        if (!archesRequired && arches.isNotEmpty()) {
+            diag.append("  entry '").append(id).append("': arches ignored for ").append(backend)
+                .append('\n')
+        }
         return PluginUpscaleModel(
             id = id,
             stem = stem,
             padding = padding,
-            qnnArches = arches,
+            qnnArches = if (archesRequired) arches else emptyList(),
             labelText = label,
             sourcePackage = pkg,
             scale = if (scale > 0) scale else 2,
             assetDir = assetDir,
             group = group,
+            backend = backend,
         )
     }
 
