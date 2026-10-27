@@ -260,7 +260,10 @@ internal class PageCurlView(context: Context) : View(context) {
         if (width <= 0 || height <= 0) return null
         if (shaderFailed) return null
         return runCatching {
-            RuntimeShader(AGSL).also { shader = it }
+            RuntimeShader(AGSL).also {
+                shader = it
+                eu.kanade.tachiyomi.diagnostic.DiagLog.d("PageCurl", "RuntimeShader 编译成功")
+            }
         }.onFailure { e ->
             // AGSL 是**运行期**编译的，写错不会在构建时报出来 —— 必须留一条可导出的日志。
             shaderFailed = true
@@ -335,7 +338,7 @@ float4 backColor(float2 src) {
     return float4(mix(through.rgb, float3(0.98, 0.98, 0.969), 0.86), 1.0);
 }
 
-float4 main(float2 fragCoord) {
+float4 shade(float2 fragCoord) {
     float2 p = float2(fragCoord.x / uSize.x, (fragCoord.y / uSize.y) * uAspect);
     float r = uRadius;
     float d = dot(p - uAxis, uNormal);
@@ -384,6 +387,11 @@ float4 main(float2 fragCoord) {
     }
     // 纸没盖住：透明 → 露出下面那一页。
     return float4(0.0);
+}
+
+// AGSL 的入口必须是 half4 main(float2)；内部统一用 float4 算完再转换。
+half4 main(float2 fragCoord) {
+    return half4(shade(fragCoord));
 }
 """
     }
