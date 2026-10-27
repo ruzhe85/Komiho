@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.util.waifu2x
 
+import android.graphics.Bitmap
 import android.os.Build
 import java.io.File
 
@@ -52,6 +53,8 @@ internal object LiteRtNative {
     private external fun nativeTileSize(): Int
 
     private external fun nativeProcess(rgba: ByteArray, width: Int, height: Int): ByteArray?
+
+    private external fun nativeProcessBitmap(bitmap: Bitmap): Bitmap?
 
     private external fun nativeGetProgress(): Int
 
@@ -130,9 +133,18 @@ internal object LiteRtNative {
     /**
      * 整页放大：输入 RGBA_8888（`width*height*4`），输出放大后的 RGBA_8888。
      * 失败/被中止返回 null，原因见 [lastError]。
+     *
+     * 只给自检/工具用；阅读器生产路径走 [processBitmap]（省一次上百 MB 的字节数组）。
      */
     fun process(rgba: ByteArray, width: Int, height: Int): ByteArray? =
         if (!isLoaded) null else runCatching { nativeProcess(rgba, width, height) }.getOrNull()
+
+    /**
+     * 生产路径：Bitmap 进 / Bitmap 出（native 侧逐行拷贝，避开大页的额外内存峰值）。
+     * 失败/被中止返回 null，原因见 [lastError]。
+     */
+    fun processBitmap(bitmap: Bitmap): Bitmap? =
+        if (!isLoaded) null else runCatching { nativeProcessBitmap(bitmap) }.getOrNull()
 
     fun progress(): Int = if (isLoaded) runCatching { nativeGetProgress() }.getOrDefault(0) else 0
 

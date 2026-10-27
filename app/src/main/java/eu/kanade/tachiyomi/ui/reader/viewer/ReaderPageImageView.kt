@@ -356,7 +356,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
             // CPU resampler modes (2 = Lanczos3, 3 = Catmull-Rom) never touch the native engines.
             2, 3 -> "CPU OK"
             else -> when (Waifu2x.engineFor(pageIndex)) {
+                // 骁龙 HTP 与 MTK APU 都算 NPU —— 两者都已校验「全量委托」，不会把 CPU 回退
+                // 标成 NPU（见 QNN/LiteRT 的初始化分支）。
                 Waifu2x.EngineKind.QNN_HTP -> "NPU OK"
+                Waifu2x.EngineKind.LITERT_NPU -> "NPU OK"
                 Waifu2x.EngineKind.NCNN_VULKAN -> "GPU OK"
                 // Komiho (2026-10-25): NONE 不再表示「CPU 兜底」—— 那条路径已删除。
                 // 它现在只表示「本页没有 AI 结果」，此时 `success` 必为 false、角标走

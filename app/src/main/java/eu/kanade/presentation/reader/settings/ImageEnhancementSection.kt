@@ -163,7 +163,8 @@ private fun EnhancementRootList(
     val activeModel = UpscaleModelRegistry.findById(modelId)
 
     val context = LocalContext.current
-    val npuAvailable = Waifu2x.isCdspAvailable && Waifu2x.isQnnRuntimeAvailable
+    // Komiho (2026-10-27): 骁龙（QNN）与联发科（LiteRT）都算 NPU 路线。
+    val npuAvailable = Waifu2x.isNpuAvailable()
 
     // 每个方式各自的「最后一次选择」：非当前方式的行也显示它们，而不是占位符
     // （见 [EnhancementMethodRow] 的说明）。
@@ -308,7 +309,9 @@ private fun compatibleNpuModels(context: Context): List<PluginUpscaleModel> {
         UpscaleModelRegistry.ensureScanned(context)
         UpscaleModelRegistry.npuModels()
     }
-    return models.filter { Waifu2x.detectedQnnArchitecture in it.qnnArches }
+    // Komiho (2026-10-27): 不再只按 HTP 代号过滤 —— QNN 看 arches、LiteRT 看平台，
+    // 统一交给 Waifu2x.isModelSupported（骁龙机上 LiteRT 模型自然为空）。
+    return models.filter { Waifu2x.isModelSupported(it) }
 }
 
 /** 详情页顶部统一的「返回」行；系统返回键由 [ImageEnhancementSection] 的 BackHandler 接管。 */

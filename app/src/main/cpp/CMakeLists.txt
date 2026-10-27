@@ -184,5 +184,8 @@ if(ANDROID_ABI STREQUAL "arm64-v8a")
         android
         log
         dl
+        # Bitmap ↔ RGBA 的直接读写（AndroidBitmap_*）：生产路径用，避免 Kotlin 侧
+        # 再开一份上百 MB 的字节数组。
+        jnigraphics
     )
 endif()

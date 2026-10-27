@@ -259,7 +259,7 @@ object Waifu2x {
      * [requestedModel] to [AiUpscaleModel.Default], so the next successful run reports
      * [EngineKind.NCNN_VULKAN] instead.
      */
-    enum class EngineKind { NONE, NCNN_VULKAN, QNN_HTP }
+    enum class EngineKind { NONE, NCNN_VULKAN, QNN_HTP, LITERT_NPU }
 
     /** Engine that ran the last successful [process] call; [EngineKind.NONE] if none yet. */
     @Volatile
@@ -399,13 +399,16 @@ object Waifu2x {
             // 用 eu.kanade.tachiyomi.diagnostic.DiagLog 而非项目 logcat()：release 构建下 XLog 级别是 WARN
             // （App.kt 的 setupExhLogging），logcat() 的 DEBUG/INFO 会被整条吞掉；DiagLog
             // 同时写 android.util.Log 与进程内缓冲，所以 logcat 与「导出诊断日志」都能拿到。
+            // Komiho (2026-10-27): 引擎不同，推理入口不同 —— LiteRT 走 Bitmap 直通（native 内
+            // 逐行拷贝，避免 Kotlin 侧为大页再开一份上百 MB 的紧凑缓冲）。
+            val litert = activeModel?.backend == UpscaleModelSpec.Backend.LITERT_NPU
             val waitStart = android.os.SystemClock.uptimeMillis()
             val out = prioritizeEnhancement(visible) {
-                nativeClearAbortProcessing()
+                if (litert) LiteRtNative.clearAbort() else nativeClearAbortProcessing()
                 waitMs = android.os.SystemClock.uptimeMillis() - waitStart
 
                 val procStart = android.os.SystemClock.uptimeMillis()
-                val result = nativeProcess(argb, id)
+                val result = if (litert) LiteRtNative.processBitmap(argb) else nativeProcess(argb, id)
                 procMs = android.os.SystemClock.uptimeMillis() - procStart
                 result
             }
@@ -420,9 +423,7 @@ object Waifu2x {
                 val kind = when (activeModel?.backend) {
                     UpscaleModelSpec.Backend.QNN_HTP -> EngineKind.QNN_HTP
                     UpscaleModelSpec.Backend.NCNN_VULKAN -> EngineKind.NCNN_VULKAN
-                    // Komiho (2026-10-27): LiteRT 的角标留给 M2（模型暂不进选择器），
-                    // 这里先不登记，避免出现一个还没有对应文案的引擎种类。
-                    UpscaleModelSpec.Backend.LITERT_NPU -> null
+                    UpscaleModelSpec.Backend.LITERT_NPU -> EngineKind.LITERT_NPU
                     null -> null
                 }
                 if (kind != null) {
@@ -436,7 +437,7 @@ object Waifu2x {
             // Komiho：原生自报的纯推理耗时（已剔除 nativeProcess 内部那次 g_lock 排队）。
             // 读不到就保持 -1，角标退回「只剔第一段等锁」的旧口径（fail-open，不会算错方向）。
             val pureMs = try {
-                nativeGetLastInferenceMs()
+                if (litert) LiteRtNative.lastInferenceMs() else nativeGetLastInferenceMs()
             } catch (e: Throwable) {
                 -1L
             }
@@ -471,6 +472,9 @@ object Waifu2x {
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "Waifu2x: destroy failed" }
         } finally {
+            // Komiho (2026-10-27): LiteRT 引擎与 waifu2x-jni 是两套独立状态，必须各自释放 ——
+            // `nativeDestroy()` 只清 ncnn/QNN 那一边。
+            runCatching { LiteRtNative.shutdown() }
             isInitialized = false
             activeModel = null
             appliedTileSize = -1
@@ -525,6 +529,12 @@ object Waifu2x {
             "Waifu2xAbort",
             "abort running=$running visible=$visiblePageIndex protect=$protectVisiblePage",
         )
+        // Komiho (2026-10-27): LiteRT 有自己的一套 abort 标志（native 侧注册成了 LiteRT 的
+        // 取消回调），两套互不相通，必须按当前引擎分别发。
+        if (activeModel?.backend == UpscaleModelSpec.Backend.LITERT_NPU) {
+            LiteRtNative.abort()
+            return
+        }
         try {
             nativeAbortProcessing()
         } catch (_: Exception) {
@@ -610,6 +620,12 @@ object Waifu2x {
     private fun applyTileSizeIfNeeded() {
         val size = requestedTileSize
         if (size == appliedTileSize) return
+        // LiteRT 的 tile 由张量固定为 256×256（见 litert_backend），设置项对它不生效 ——
+        // 直接标成已应用，避免每次 process 都白调一次 ncnn 的配置接口。
+        if (activeModel?.backend == UpscaleModelSpec.Backend.LITERT_NPU) {
+            appliedTileSize = size
+            return
+        }
         try {
             nativeUpdatePerformanceConfig(TILE_SLEEP_MS, size)
             appliedTileSize = size
@@ -668,15 +684,25 @@ object Waifu2x {
             return ensureEngineLocked(context, AiUpscaleModel.Default)
         }
 
-        // Komiho (2026-10-27): LiteRT（MTK）模型的引擎分派尚未接入（M2）。扫描器虽然会解析
-        // 它们，但[UpscaleModelRegistry.npuModels] 还没放出来，正常路径选不到；这里显式回落，
-        // 免得一个残留的偏好 id 掉进 ncnn 分支、白试一次必然失败的初始化。
+        // Komiho (2026-10-27): LiteRT（MTK APU）分支。与 QNN 同构：失败一律回落 Vulkan Default，
+        // 且**要求全量委托**（native 侧已校验，这里再兜一道）。
         if (model.backend == UpscaleModelSpec.Backend.LITERT_NPU) {
+            if (initLiteRtEngine(context, model)) {
+                isInitialized = true
+                activeModel = model
+                lastFailedQnnModel = null
+                // tile 由模型固定为 256、无法通过设置调整 —— 标记为「已应用」，
+                // 免得第一次 process 白调一次 nativeUpdatePerformanceConfig（那是 ncnn 的接口）。
+                appliedTileSize = requestedTileSize
+                logcat(LogPriority.WARN) { "Waifu2x: NPU ACTIVE (MTK/LiteRT) — ${model.id}" }
+                return true
+            }
             logcat(LogPriority.WARN) {
-                "Waifu2x: LITERT_NPU engine not wired yet for ${model.id}; " +
-                    "falling back to Vulkan Default"
+                "Waifu2x: NPU UNAVAILABLE — LiteRT init failed for ${model.id} " +
+                    "(device mtk=${LiteRtNative.isMtkDevice()}); falling back to Vulkan Default"
             }
             requestedModel = AiUpscaleModel.Default
+            onQnnFallback?.invoke(model)
             return ensureEngineLocked(context, AiUpscaleModel.Default)
         }
         return ensureEngineLocked(context, model)
@@ -745,6 +771,59 @@ object Waifu2x {
             logcat(LogPriority.WARN, e) { "Waifu2x: nativeInitQnn threw (missing symbol?)" }
             false
         }
+    }
+
+    /**
+     * Komiho (2026-10-27): LiteRT（MTK APU）引擎初始化。
+     *
+     * 与 QNN 的差异：
+     *  - 模型是**单个 `.tflite`**（不分 HTP 代），所以没有 arch 匹配这一步；
+     *  - `initialize` 会在 NPU 模式下**同步编译**模型（首次可达数十秒，产物落 compiler-cache），
+     *    调用方 [ensureEngine] ← [process] 本来就在后台线程；
+     *  - 编译缓存放 `noBackupFilesDir`（系统清理 `cacheDir` 时不会连带删掉，省一次重编译）。
+     *
+     * 失败一律返回 false —— 上层回落 Vulkan Default，绝不把 CPU 回退当 NPU。
+     */
+    private fun initLiteRtEngine(context: Context, model: UpscaleModelSpec): Boolean {
+        val modelFile = prepareLiteRtModel(context, model) ?: return false
+        val workDir = File(context.noBackupFilesDir, "mediatek-npu/${model.id}").apply { mkdirs() }
+        val error = LiteRtNative.initialize(
+            model = modelFile,
+            cacheDir = workDir,
+            libraryDir = context.applicationInfo.nativeLibraryDir,
+            scale = model.scale,
+            padding = model.padding,
+            cpuOnly = false,
+        )
+        if (error != null) {
+            logcat(LogPriority.WARN) { "Waifu2x: LiteRT init failed for ${model.id}: $error" }
+            return false
+        }
+        if (!LiteRtNative.isNpuActive()) {
+            // native 侧已经在「非全量委托」时失败了；这里再兜一道，确保角标不会撒谎。
+            logcat(LogPriority.WARN) {
+                "Waifu2x: LiteRT initialized but not fully delegated (${model.id}) — treating as failure"
+            }
+            runCatching { LiteRtNative.shutdown() }
+            return false
+        }
+        return true
+    }
+
+    /** 把插件包里的 `.tflite` 落到 `noBackupFilesDir/mediatek-npu/<id>/`（原子拷贝 + 版本标记）。 */
+    private fun prepareLiteRtModel(context: Context, model: UpscaleModelSpec): File? = try {
+        val dir = File(context.noBackupFilesDir, "mediatek-npu/${model.id}").apply { mkdirs() }
+        val out = File(dir, "${model.stem}.tflite")
+        val versionFile = File(dir, ".model-version")
+        val refresh = versionFile.takeIf { it.exists() }?.readText() != MODEL_CACHE_VERSION
+        if (refresh || !out.exists() || out.length() == 0L) {
+            extractAsset(assetsFor(context, model), "${model.assetDir}/${model.stem}.tflite", out)
+        }
+        if (refresh) versionFile.writeText(MODEL_CACHE_VERSION)
+        out.takeIf { it.exists() && it.length() > 0L }
+    } catch (e: Exception) {
+        logcat(LogPriority.WARN, e) { "Waifu2x: failed to prepare LiteRT model ${model.id}" }
+        null
     }
 
     /**
@@ -956,6 +1035,16 @@ object Waifu2x {
         // 再确认 litert-jni 随包可加载。真正的能力判定在 native 的全量委托校验。
         UpscaleModelSpec.Backend.LITERT_NPU -> LiteRtNative.isMtkDevice() && LiteRtNative.isLoaded
     }
+
+    /**
+     * Komiho (2026-10-27): 本机是否**存在**任何 NPU 路线（决定设置页是否显示「NPU」一行）。
+     *
+     * 骁龙看 CDSP + QNN runtime；联发科看平台 + litert-jni 能否加载。两条都不是「一定跑得动」，
+     * 只是「有这条路可试」—— 真正能不能跑由各模型的 [isModelSupported] 与初始化结果决定。
+     */
+    fun isNpuAvailable(): Boolean =
+        (isCdspAvailable && isQnnRuntimeAvailable) ||
+            (LiteRtNative.isMtkDevice() && LiteRtNative.isLoaded)
 
     /**
      * Extracts the given model's assets into the cache dir and returns its absolute path.

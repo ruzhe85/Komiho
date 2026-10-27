@@ -9,9 +9,11 @@
 
 #include <jni.h>
 
+#include <android/bitmap.h>
 #include <android/log.h>
 #include <dlfcn.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -155,6 +157,106 @@ Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeProcess(JNIEnv *env, jo
     if (result == nullptr) return nullptr;
     env->SetByteArrayRegion(result, 0, outLength, reinterpret_cast<const jbyte *>(output.data()));
     return result;
+}
+
+namespace {
+
+/** Bitmap(ARGB_8888) → 紧凑 RGBA（Bitmap 的 stride 常带 padding，不能直接当紧密缓冲用）。 */
+bool readBitmapRgba(JNIEnv *env, jobject bitmap, std::vector<uint8_t> *out, int *out_w,
+                    int *out_h) {
+    AndroidBitmapInfo info{};
+    if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "getInfo failed");
+        return false;
+    }
+    if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "unsupported bitmap format=%d", info.format);
+        return false;
+    }
+    void *pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS ||
+        pixels == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "lockPixels failed");
+        return false;
+    }
+    const int width = static_cast<int>(info.width);
+    const int height = static_cast<int>(info.height);
+    out->resize(static_cast<size_t>(width) * height * 4);
+    const auto *src = static_cast<const uint8_t *>(pixels);
+    for (int y = 0; y < height; ++y) {
+        std::memcpy(out->data() + static_cast<size_t>(y) * width * 4,
+                    src + static_cast<size_t>(y) * info.stride,
+                    static_cast<size_t>(width) * 4);
+    }
+    AndroidBitmap_unlockPixels(env, bitmap);
+    *out_w = width;
+    *out_h = height;
+    return true;
+}
+
+/** 紧凑 RGBA → 新建 ARGB_8888 Bitmap。 */
+jobject createBitmapFromRgba(JNIEnv *env, const std::vector<uint8_t> &rgba, int width,
+                             int height) {
+    jclass bitmap_cls = env->FindClass("android/graphics/Bitmap");
+    jclass config_cls = env->FindClass("android/graphics/Bitmap$Config");
+    if (bitmap_cls == nullptr || config_cls == nullptr) return nullptr;
+    jfieldID argb_field =
+        env->GetStaticFieldID(config_cls, "ARGB_8888", "Landroid/graphics/Bitmap$Config;");
+    jmethodID create = env->GetStaticMethodID(
+        bitmap_cls,
+        "createBitmap",
+        "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
+    if (argb_field == nullptr || create == nullptr) return nullptr;
+    jobject config = env->GetStaticObjectField(config_cls, argb_field);
+    jobject bitmap = env->CallStaticObjectMethod(bitmap_cls, create, width, height, config);
+    if (bitmap == nullptr) return nullptr;
+
+    AndroidBitmapInfo info{};
+    if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
+        return nullptr;
+    }
+    void *pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS ||
+        pixels == nullptr) {
+        return nullptr;
+    }
+    auto *dst = static_cast<uint8_t *>(pixels);
+    for (int y = 0; y < height; ++y) {
+        std::memcpy(dst + static_cast<size_t>(y) * info.stride,
+                    rgba.data() + static_cast<size_t>(y) * width * 4,
+                    static_cast<size_t>(width) * 4);
+    }
+    AndroidBitmap_unlockPixels(env, bitmap);
+    return bitmap;
+}
+
+}  // namespace
+
+/**
+ * Bitmap → 放大 → Bitmap（生产路径）。
+ *
+ * 为什么不复用 [nativeProcess] 的 ByteArray 接口：2× 放大的输出（例：2000×3000 → 4000×6000）
+ * 若在 Kotlin 侧再开一份紧凑字节数组就是 ~96MB 额外峰值，低内存机直接 OOM。
+ * 这里在 native 内逐行拷贝，峰值只有输入/输出 Bitmap + 分块缓冲。
+ */
+extern "C" JNIEXPORT jobject JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeProcessBitmap(JNIEnv *env, jobject,
+                                                                      jobject bitmap) {
+    if (bitmap == nullptr) return nullptr;
+    std::vector<uint8_t> input;
+    int width = 0;
+    int height = 0;
+    if (!readBitmapRgba(env, bitmap, &input, &width, &height)) return nullptr;
+
+    std::vector<uint8_t> output;
+    int out_w = 0;
+    int out_h = 0;
+    std::string error;
+    if (!litert_backend::process(input.data(), width, height, &output, &out_w, &out_h, &error)) {
+        __android_log_print(ANDROID_LOG_WARN, kTag, "processBitmap failed: %s", error.c_str());
+        return nullptr;
+    }
+    return createBitmapFromRgba(env, output, out_w, out_h);
 }
 
 extern "C" JNIEXPORT jint JNICALL

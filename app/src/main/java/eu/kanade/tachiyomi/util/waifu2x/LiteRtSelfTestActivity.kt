@@ -1,12 +1,14 @@
 package eu.kanade.tachiyomi.util.waifu2x
 
 import android.app.Activity
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import eu.kanade.tachiyomi.diagnostic.DiagLog
 import java.io.File
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.max
@@ -149,6 +151,10 @@ class LiteRtSelfTestActivity : Activity() {
         log("INFO", "stride=$stride boundaries=$boundaries $seam")
         if (seam.ratio > SEAM_THRESHOLD) return fail("拼缝明显：%.2f（基线 %.2f）".format(seam.ratio, seam.baseline))
 
+        // 4b) 生产入口（Bitmap 直通）：与上一步等价的校验，确保真正跑阅读器的这条路也通。
+        val bitmapOk = bitmapCase(width, height, outW, outH, stride, scale)
+        if (!bitmapOk) return fail("Bitmap 直通路径异常（生产路径不可用）")
+
         // 5) 取消路径：大图 + 中途 abort
         val abortResult = abortCase(model.scale)
         log("INFO", "abort case: $abortResult")
@@ -156,6 +162,55 @@ class LiteRtSelfTestActivity : Activity() {
 
         log("PASS", "全部通过（CPU 验证通道）")
         return RESULT_PASS
+    }
+
+    /**
+     * 生产路径校验：`LiteRtNative.processBitmap(Bitmap) → Bitmap`。
+     *
+     * 阅读器走的就是这条（native 用 AndroidBitmap_* 逐行拷贝，避免 Kotlin 侧为 2× 输出再开
+     * 一份上百 MB 的字节数组）；与前面的 ByteArray 路径共用同一套后端，但 JNI/stride 处理是
+     * 另一段代码，必须单独验。
+     */
+    private fun bitmapCase(
+        width: Int,
+        height: Int,
+        outW: Int,
+        outH: Int,
+        stride: Int,
+        scale: Int,
+    ): Boolean {
+        val rgba = syntheticImage(width, height)
+        val src = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        src.copyPixelsFromBuffer(ByteBuffer.wrap(rgba))
+        val start = SystemClock.elapsedRealtime()
+        val out = LiteRtNative.processBitmap(src)
+        val wall = SystemClock.elapsedRealtime() - start
+        src.recycle()
+        if (out == null) {
+            log("FAIL", "processBitmap 返回 null：${LiteRtNative.lastError()}")
+            return false
+        }
+        log(
+            "INFO",
+            "processBitmap ${width}x$height -> ${out.width}x${out.height} wall=${wall}ms " +
+                "inference=${LiteRtNative.lastInferenceMs()}ms",
+        )
+        val ok = out.width == outW && out.height == outH
+        if (!ok) {
+            log("FAIL", "processBitmap 尺寸不符：${out.width}x${out.height} != ${outW}x$outH")
+            out.recycle()
+            return false
+        }
+        val outBytes = ByteArray(outW * outH * 4)
+        out.copyPixelsToBuffer(ByteBuffer.wrap(outBytes))
+        out.recycle()
+        val seam = seamProfile(outBytes, outW, outH, boundaryColumns(outW, stride * scale))
+        log("INFO", "processBitmap seam=$seam")
+        if (!alphaAllOpaque(outBytes)) {
+            log("FAIL", "processBitmap 输出 alpha 异常")
+            return false
+        }
+        return seam.ratio <= SEAM_THRESHOLD
     }
 
     /** 大图跑到一半 abort，必须被打断；否则翻页抢占会卡住整页。 */

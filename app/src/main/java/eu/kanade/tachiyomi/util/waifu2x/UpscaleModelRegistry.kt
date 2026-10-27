@@ -50,16 +50,15 @@ object UpscaleModelRegistry {
     fun gpuModels(): List<AiUpscaleModel> = AiUpscaleModel.entries.toList()
 
     /**
-     * NPU models offered in the picker — **目前只含 QNN**。
+     * NPU models offered in the picker：QNN 与 LiteRT（MTK）都在内。
      *
-     * Komiho (2026-10-27): LiteRT（MTK）模型会被扫描、校验并出现在 [litertModels] 里，但
-     * **暂不进入选择器** —— 引擎分派（`Backend.LITERT_NPU` → `LiteRtNative`）尚未接入，
-     * 提前放出来只会让用户选中一个必定回落的模型。接入后把这条过滤去掉即可。
+     * Komiho (2026-10-27): 引擎分派已接入（`Backend.LITERT_NPU` → `LiteRtNative`），因此
+     * 不再过滤。**能不能选由 `Waifu2x.isModelSupported` 决定**：LiteRT 只在 MTK 且 litert-jni
+     * 可加载时为真，所以骁龙机上这些模型不会出现。
      */
-    fun npuModels(): List<PluginUpscaleModel> =
-        pluginModels.filter { it.backend != UpscaleModelSpec.Backend.LITERT_NPU }
+    fun npuModels(): List<PluginUpscaleModel> = pluginModels
 
-    /** LiteRT（MTK）模型：已解析校验，暂不参与选择器。 */
+    /** 仅 LiteRT（MTK）模型（自检/诊断用）。 */
     fun litertModels(): List<PluginUpscaleModel> =
         pluginModels.filter { it.backend == UpscaleModelSpec.Backend.LITERT_NPU }
 
