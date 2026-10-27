@@ -317,7 +317,14 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             // —— 宁可没有动画，也不要播一张空白纸或半成品。
             if (!PageCurlView.isSupported) return false
             end()
-            val front = snapshotPage(leaving, pager.width, pager.height) ?: return false
+            // 正面必须来自**屏幕像素**（PixelCopy）：页 View 里是硬件位图，view.draw 全黑，
+            // 预载缓存里的 decodedBitmap 也已被页持有者用掉（置 null）。
+            val front = sheetFor(pager.currentItem)?.copy(Bitmap.Config.ARGB_8888, false)
+                ?: snapshotPage(leaving, pager.width, pager.height)
+                ?: run {
+                    DiagLog.w(KOMIHA_FLIP_TAG, "curl skipped: no front snapshot")
+                    return false
+                }
             val back = snapshotPage(entering, pager.width, pager.height)
             leaving.alpha = 0f
             // 点击时 ViewPager 完全没滚，下一页还在屏幕外 —— 平移进视口当「被揭开的那页」。
@@ -450,6 +457,9 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         if (state == ViewPager.SCROLL_STATE_IDLE) {
             loggedThisScroll = false
             end()
+            // 停稳就预抓一张当前页快照（PixelCopy）：翻书2 要用真实屏幕像素，
+            // 等到手指按下再抓就来不及了（异步回调那一帧还没回来）。
+            prefetchSheet()
             // Komiho (2026-10-25): 停稳就预抓一张当前页快照 —— 翻书要真实像素，而 PixelCopy
             // 是异步的，等用户点下去再抓就晚了（那一帧还没回来，只能退回普通滑动）。
         }
@@ -607,7 +617,12 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             if (!PageCurlView.isSupported) return null
             val current = pinned
             val incoming = sheet
-            val front = snapshotPage(current, pager.width, pager.height) ?: return null
+            val front = sheetFor(position)?.copy(Bitmap.Config.ARGB_8888, false)
+                ?: snapshotPage(current, pager.width, pager.height)
+                ?: run {
+                    DiagLog.w(KOMIHA_FLIP_TAG, "curl drag skipped: no front snapshot")
+                    return null
+                }
             val back = snapshotPage(incoming, pager.width, pager.height)
             current.alpha = 0f
             current.translationX = 0f
