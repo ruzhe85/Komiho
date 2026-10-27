@@ -420,6 +420,9 @@ object Waifu2x {
                 val kind = when (activeModel?.backend) {
                     UpscaleModelSpec.Backend.QNN_HTP -> EngineKind.QNN_HTP
                     UpscaleModelSpec.Backend.NCNN_VULKAN -> EngineKind.NCNN_VULKAN
+                    // Komiho (2026-10-27): LiteRT 的角标留给 M2（模型暂不进选择器），
+                    // 这里先不登记，避免出现一个还没有对应文案的引擎种类。
+                    UpscaleModelSpec.Backend.LITERT_NPU -> null
                     null -> null
                 }
                 if (kind != null) {
@@ -949,6 +952,9 @@ object Waifu2x {
         UpscaleModelSpec.Backend.NCNN_VULKAN -> isVulkanAvailable
         // CDSP first: no compute DSP means no model could ever run on this device.
         UpscaleModelSpec.Backend.QNN_HTP -> isCdspAvailable && isQnnRuntimeAvailable
+        // Komiho (2026-10-27): MTK 走 LiteRT+NeuroPilot —— 先按平台判断（不触发 dlopen），
+        // 再确认 litert-jni 随包可加载。真正的能力判定在 native 的全量委托校验。
+        UpscaleModelSpec.Backend.LITERT_NPU -> LiteRtNative.isMtkDevice() && LiteRtNative.isLoaded
     }
 
     /**

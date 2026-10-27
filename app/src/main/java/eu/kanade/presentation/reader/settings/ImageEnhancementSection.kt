@@ -138,7 +138,11 @@ private fun setEnhancementModel(preferences: ReaderPreferences, model: UpscaleMo
     preferences.aiModelId.set(model.id)
     when (model.backend) {
         UpscaleModelSpec.Backend.NCNN_VULKAN -> preferences.enhancementLastGpuModelId.set(model.id)
-        UpscaleModelSpec.Backend.QNN_HTP -> preferences.enhancementLastNpuModelId.set(model.id)
+        // Komiho (2026-10-27): LiteRT/MTK 与 QNN 同属 NPU，共用同一个记忆槽
+        // （目前还没有入口能选到它，见 UpscaleModelRegistry.npuModels）。
+        UpscaleModelSpec.Backend.QNN_HTP,
+        UpscaleModelSpec.Backend.LITERT_NPU,
+        -> preferences.enhancementLastNpuModelId.set(model.id)
     }
     setEnhancementMode(preferences, 5)
 }
