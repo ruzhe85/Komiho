@@ -310,9 +310,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
 
         end()
         if (viewer.config.pageTurnStyle == STYLE_CURL) {
-            // 翻书2：纸的形变要靠网格算，必须有**整页位图**，所以这里抓两张快照
-            //（当前页 + 下一页）。抓不到就交回 ViewPager 的默认滑动 —— 宁可没有动画，
-            // 也不要播一张空白纸。
+            // 翻书2：逐像素卷曲需要整页位图，所以这里抓两张快照（当前页 + 下一页）。
+            // 抓不到、或系统没有 RuntimeShader（<Android 13），直接交回 ViewPager 默认滑动
+            // —— 宁可没有动画，也不要播一张空白纸或半成品。
+            if (!PageCurlView.isSupported) return false
             end()
             val front = captureView(leaving) ?: return false
             val back = captureView(entering)
@@ -322,7 +323,10 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             curlOverlay.front = front
             curlOverlay.back = back
             curlOverlay.spineOnLeft = pages > 0
-            curlOverlay.grabFraction = grabFraction
+            curlOverlay.dualPage = viewer.isDoubleSpread(pager.currentItem)
+            // 点击翻页没有拖动方向信息：固定从**底角**起手（与他们 "taps curl from the
+            // bottom corner" 一致）。拖动路径由 onTouchDown 的真实落点决定。
+            curlOverlay.grabFraction = 1f
             curlOverlay.progress = 0f
             curlOverlay.invalidate()
             session = Session(
@@ -574,7 +578,8 @@ internal class PageFlipController(private val viewer: PagerViewer) {
         val sheet = if (pinned === holderA) holderB else holderA
 
         if (viewer.config.pageTurnStyle == STYLE_CURL) {
-            // 翻书2（拖动路径）：与点击同构 —— 当前页藏起来由网格画，下一页钉住当被揭开的底。
+            // 翻书2（拖动路径）：与点击同构 —— 当前页藏起来由卷曲层画，下一页钉住当被揭开的底。
+            if (!PageCurlView.isSupported) return null
             val current = pinned
             val incoming = sheet
             val front = captureView(current) ?: return null
@@ -585,6 +590,7 @@ internal class PageFlipController(private val viewer: PagerViewer) {
             curlOverlay.front = front
             curlOverlay.back = back
             curlOverlay.spineOnLeft = pinned === holderA
+            curlOverlay.dualPage = viewer.isDoubleSpread(position)
             curlOverlay.grabFraction = grabFraction
             curlOverlay.progress = 0f
             curlOverlay.invalidate()
