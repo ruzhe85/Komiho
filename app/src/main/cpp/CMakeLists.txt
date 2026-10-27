@@ -177,6 +177,7 @@ endif()
 if(ANDROID_ABI STREQUAL "arm64-v8a")
     add_library(litert-jni SHARED
         litert_jni.cpp
+        litert_backend.cpp
     )
     target_include_directories(litert-jni PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(litert-jni

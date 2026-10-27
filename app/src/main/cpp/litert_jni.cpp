@@ -1,39 +1,32 @@
 // Komiho (2026-10-27): MTK NPU 后端（LiteRT + NeuroPilot）的 JNI 入口。
 //
-// 这是 **M0 脚手架**：只暴露「版本 / 运行时是否可 dlopen」两个探针，用来证明
-//   1) 独立 .so 能编译进 APK（仅 arm64-v8a）；
-//   2) 按需 dlopen 不产生任何启动期副作用。
-// 真正的初始化与推理（initialize / prepare / isActive / processTile / processRgba /
-// abort / shutdown）在 M1/M2 补齐，接口语义对齐上游 litert_backend。
+// 这一层只做「类型转换 + 参数校验」，所有引擎逻辑在 litert_backend.cpp。
+// 单独编成 `liblitert-jni.so`（见 CMakeLists）：与 waifu2x-jni 的全局引擎状态完全隔离，
+// 且 `libLiteRt.so` 走运行期 dlopen —— 非 MTK 设备永远不会打开它。
 //
-// 为什么不把 LIB_LITERT 静态链进来：`libLiteRt.so` 由 Maven 依赖提供、随包分发，
-// 但**只有真正用到 MTK NPU 的设备才该打开它**。dlopen 让非 MTK 设备/IPC 进程永远
-// 不加载这 5.37MB，也让加载失败退化成 "backend unavailable" 而不是启动崩溃。
+// M1 起提供完整接口：initialize / isActive / process / abort / progress / timing / shutdown。
+// 生产代码目前**没有任何调用点**（模型来源与会话化在 M2/M3），因此不会影响现有用户。
 
 #include <jni.h>
+
 #include <android/log.h>
 #include <dlfcn.h>
+
+#include <string>
+#include <vector>
+
+#include "litert_backend.h"
 
 namespace {
 
 constexpr const char *kTag = "LiteRtJni";
 
-// Maven 依赖 com.google.ai.edge.litert:litert 带进 APK 的文件名（lib/arm64-v8a/）。
 constexpr const char *kLiteRtLibrary = "libLiteRt.so";
-
-// NeuroPilot 的两个插件库：由 litert-npu-runtime-mediatek 带入。
-//   libLiteRtCompilerPlugin_MediaTek.so —— 编译期把 tflite 图映射成 APU 可执行格式
-//   libLiteRtDispatch_MediaTek.so       —— 运行期把算子调度到 MTK NPU
 constexpr const char *kMtkCompilerPlugin = "libLiteRtCompilerPlugin_MediaTek.so";
 constexpr const char *kMtkDispatch = "libLiteRtDispatch_MediaTek.so";
 
-/** 版本串，M1 起由真实的 litert_c API 版本代替。 */
 constexpr const char *kBackendVersion = "litert 2.3.0";
 
-/**
- * 探测某个 .so 能否 dlopen。只做「打开即关」，不取符号、不初始化任何运行时，
- * 因此即使插件库依赖厂商分区里的库，失败也只是返回 false。
- */
 bool canOpen(const char *name) {
     void *handle = dlopen(name, RTLD_NOW | RTLD_LOCAL);
     if (handle == nullptr) {
@@ -45,6 +38,19 @@ bool canOpen(const char *name) {
     return true;
 }
 
+std::string toStdString(JNIEnv *env, jstring value) {
+    if (value == nullptr) return std::string();
+    const char *chars = env->GetStringUTFChars(value, nullptr);
+    if (chars == nullptr) return std::string();
+    std::string result(chars);
+    env->ReleaseStringUTFChars(value, chars);
+    return result;
+}
+
+jstring toString(JNIEnv *env, const std::string &value) {
+    return env->NewStringUTF(value.c_str());
+}
+
 }  // namespace
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -54,21 +60,137 @@ Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeVersion(JNIEnv *env, jo
 
 /**
  * 运行时是否齐备（三个 .so 都在包内且可加载）。
- *
- * ⚠️ 返回 true **不代表 NPU 可用**：真正的判定是 M2 的 `isFullyAccelerated` + `isActive()`。
- * 这里只回答「包里的东西能不能打开」。
+ * ⚠️ true **不代表 NPU 可用** —— 那要 `nativeInitialize` 成功且 `nativeIsActive()` 为真。
  */
 extern "C" JNIEXPORT jboolean JNICALL
 Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeProbeRuntime(JNIEnv *, jobject) {
     const bool runtime = canOpen(kLiteRtLibrary);
     const bool plugin = canOpen(kMtkCompilerPlugin);
     const bool dispatch = canOpen(kMtkDispatch);
-    __android_log_print(
-        ANDROID_LOG_INFO,
-        kTag,
-        "probe runtime: litert=%d plugin=%d dispatch=%d",
-        runtime ? 1 : 0,
-        plugin ? 1 : 0,
-        dispatch ? 1 : 0);
+    __android_log_print(ANDROID_LOG_INFO,
+                        kTag,
+                        "probe runtime: litert=%d plugin=%d dispatch=%d",
+                        runtime ? 1 : 0,
+                        plugin ? 1 : 0,
+                        dispatch ? 1 : 0);
     return (runtime && plugin && dispatch) ? JNI_TRUE : JNI_FALSE;
+}
+
+/** 初始化引擎；返回 "" 表示成功，否则是错误描述（可直接写进诊断日志）。 */
+extern "C" JNIEXPORT jstring JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeInitialize(
+    JNIEnv *env, jobject, jstring jModelPath, jstring jCacheDir, jstring jLibraryDir, jint scale,
+    jint padding, jboolean cpuOnly) {
+    litert_backend::Config config;
+    config.model_path = toStdString(env, jModelPath);
+    config.cache_dir = toStdString(env, jCacheDir);
+    config.library_dir = toStdString(env, jLibraryDir);
+    config.scale = scale;
+    config.padding = padding;
+    config.cpu_only = cpuOnly == JNI_TRUE;
+
+    std::string error;
+    if (!litert_backend::initialize(config, &error)) {
+        if (error.empty()) error = litert_backend::last_error();
+        return toString(env, error);
+    }
+    return env->NewStringUTF("");
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeIsInitialized(JNIEnv *, jobject) {
+    return litert_backend::is_initialized() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeIsActive(JNIEnv *, jobject) {
+    return litert_backend::is_npu_active() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeScale(JNIEnv *, jobject) {
+    return litert_backend::scale_value();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeTileSize(JNIEnv *, jobject) {
+    return litert_backend::tile_size();
+}
+
+/**
+ * 整页放大。输入 RGBA_8888（`width*height*4`），返回放大后的 RGBA_8888
+ * （尺寸 `width*scale × height*scale`）；失败/被中止返回 null，原因用 [nativeLastError] 取。
+ */
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeProcess(JNIEnv *env, jobject,
+                                                                jbyteArray jRgba, jint width,
+                                                                jint height) {
+    if (jRgba == nullptr || width <= 0 || height <= 0) return nullptr;
+    const jsize length = env->GetArrayLength(jRgba);
+    const jsize expected = width * height * 4;
+    if (length < expected) {
+        __android_log_print(ANDROID_LOG_ERROR,
+                            kTag,
+                            "nativeProcess: input too small %d < %d",
+                            length,
+                            expected);
+        return nullptr;
+    }
+
+    std::vector<uint8_t> input(static_cast<size_t>(expected));
+    env->GetByteArrayRegion(jRgba, 0, expected, reinterpret_cast<jbyte *>(input.data()));
+
+    std::vector<uint8_t> output;
+    int out_w = 0;
+    int out_h = 0;
+    std::string error;
+    if (!litert_backend::process(
+            input.data(), width, height, &output, &out_w, &out_h, &error)) {
+        __android_log_print(ANDROID_LOG_WARN, kTag, "nativeProcess failed: %s", error.c_str());
+        return nullptr;
+    }
+
+    const jsize outLength = static_cast<jsize>(output.size());
+    jbyteArray result = env->NewByteArray(outLength);
+    if (result == nullptr) return nullptr;
+    env->SetByteArrayRegion(result, 0, outLength, reinterpret_cast<const jbyte *>(output.data()));
+    return result;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeGetProgress(JNIEnv *, jobject) {
+    return litert_backend::progress();
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeLastInferenceMs(JNIEnv *, jobject) {
+    return static_cast<jlong>(litert_backend::last_timing().inference_ms);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeLastTotalMs(JNIEnv *, jobject) {
+    return static_cast<jlong>(litert_backend::last_timing().total_ms);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeAbort(JNIEnv *, jobject) {
+    litert_backend::request_abort();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeClearAbort(JNIEnv *, jobject) {
+    litert_backend::clear_abort();
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeLastError(JNIEnv *env, jobject) {
+    const std::string error = litert_backend::last_error();
+    const std::string detail = litert_backend::last_error_detail();
+    if (detail.empty()) return toString(env, error);
+    return toString(env, error + ": " + detail);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_LiteRtNative_nativeShutdown(JNIEnv *, jobject) {
+    litert_backend::shutdown();
 }
