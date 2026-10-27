@@ -49,6 +49,10 @@ enum EnvOptionTag : int32_t {
     ENV_COMPILER_PLUGIN_LIBRARY_DIR = 0,
     ENV_DISPATCH_LIBRARY_DIR = 1,
     ENV_COMPILER_CACHE_DIR = 18,
+    /** 每个模型最多保留几份编译产物（转发/回滚时同一模型可能有多个 config）。 */
+    ENV_COMPILER_CACHE_MAX_CONFIGS_PER_MODEL = 26,
+    /** 编译缓存目录的总字节上限 —— MTK 的「编译」在设备端产生，不设上限会无界增长。 */
+    ENV_COMPILER_CACHE_MAX_TOTAL_SIZE = 27,
 };
 
 enum ElementType : int32_t {
@@ -67,6 +71,7 @@ enum LockMode : int32_t {
 
 enum AnyType : int32_t {
     ANY_NONE = 0,
+    ANY_INT = 2,
     ANY_STRING = 8,
 };
 

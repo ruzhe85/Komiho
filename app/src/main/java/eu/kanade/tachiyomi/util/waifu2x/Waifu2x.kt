@@ -783,8 +783,19 @@ object Waifu2x {
      *  - 编译缓存放 `noBackupFilesDir`（系统清理 `cacheDir` 时不会连带删掉，省一次重编译）。
      *
      * 失败一律返回 false —— 上层回落 Vulkan Default，绝不把 CPU 回退当 NPU。
+     *
+     * **失败记忆（必须有）**：MTK 的编译发生在设备端、可能耗时数十秒，而 `ensureEngine` 每次
+     * 都会按偏好重新发起 init —— 没有记忆的话，一台编译不过的设备会**每一页**都重试一次编译，
+     * 用户看到的是「选了 NPU 模型后彻底卡死」，日志里也只剩重复的失败刷屏。见 [liteRtFailureKey]。
      */
     private fun initLiteRtEngine(context: Context, model: UpscaleModelSpec): Boolean {
+        liteRtFailureReason(context, model.id)?.let { recorded ->
+            logcat(LogPriority.WARN) {
+                "Waifu2x: skip LiteRT init for ${model.id} — failed before on this exact build " +
+                    "($recorded); a new APK / OTA / backend change retries once"
+            }
+            return false
+        }
         val modelFile = prepareLiteRtModel(context, model) ?: return false
         val workDir = File(context.noBackupFilesDir, "mediatek-npu/${model.id}").apply { mkdirs() }
         val error = LiteRtNative.initialize(
@@ -797,6 +808,7 @@ object Waifu2x {
         )
         if (error != null) {
             logcat(LogPriority.WARN) { "Waifu2x: LiteRT init failed for ${model.id}: $error" }
+            recordLiteRtFailure(context, model.id, error)
             return false
         }
         if (!LiteRtNative.isNpuActive()) {
@@ -805,10 +817,62 @@ object Waifu2x {
                 "Waifu2x: LiteRT initialized but not fully delegated (${model.id}) — treating as failure"
             }
             runCatching { LiteRtNative.shutdown() }
+            recordLiteRtFailure(context, model.id, "not fully delegated")
             return false
         }
+        clearLiteRtFailure(context, model.id)
         return true
     }
+
+    /**
+     * 失败记忆的环境指纹：**系统指纹 + App 安装时间 + 后端版本**。
+     *
+     * 为什么是这三样：
+     *  - `FINGERPRINT` 变 = 系统 OTA，芯片侧驱动/固件可能已经不同，值得再试一次；
+     *  - `lastUpdateTime` 变 = 装了新 APK（同版本重装也算），我们的代码/模型可能已修；
+     *  - 后端版本变 = litert 运行时升级，编译能力可能变了。
+     * 三者任一变化即视为「新环境」，允许重试一次 —— 不需要额外的「重试」按钮，也不会永久拉黑。
+     */
+    private fun liteRtFailureKey(context: Context): String {
+        val installed = runCatching {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+        }.getOrDefault(-1L)
+        return "${android.os.Build.FINGERPRINT}|$installed|${LiteRtNative.version().orEmpty()}"
+    }
+
+    private fun liteRtFailureFile(context: Context, modelId: String): File =
+        File(File(context.noBackupFilesDir, "mediatek-npu/$modelId").apply { mkdirs() }, "failure.txt")
+
+    /** 本环境下这个模型之前失败过的话返回原因，否则 null。 */
+    private fun liteRtFailureReason(context: Context, modelId: String): String? = runCatching {
+        val file = liteRtFailureFile(context, modelId)
+        if (!file.exists()) return null
+        val lines = file.readLines()
+        if (lines.size < 1) return null
+        val key = lines.first().trim()
+        val reason = lines.drop(1).joinToString(" ").trim()
+        if (key == liteRtFailureKey(context)) reason.ifEmpty { "unknown" } else null
+    }.getOrNull()
+
+    private fun recordLiteRtFailure(context: Context, modelId: String, reason: String) {
+        runCatching {
+            liteRtFailureFile(context, modelId)
+                .writeText(liteRtFailureKey(context) + "\n" + reason.replace('\n', ' ').take(500))
+        }
+    }
+
+    private fun clearLiteRtFailure(context: Context, modelId: String) {
+        runCatching { liteRtFailureFile(context, modelId).takeIf { it.exists() }?.delete() }
+    }
+
+    /**
+     * 清掉某模型的 LiteRT 失败记忆，下一次 [process] 会重新尝试编译。
+     *
+     * 用途：自检（`LiteRtSelfTestActivity`）跑通后顺手清一次 —— 否则「后端其实没问题、但之前
+     * 记过一笔失败」的设备要等到装新包/OTA 才会重试。同时也给将来的设置页留了「重试」入口。
+     */
+    fun clearLiteRtFailureRecord(context: Context, modelId: String) = clearLiteRtFailure(context, modelId)
 
     /** 把插件包里的 `.tflite` 落到 `noBackupFilesDir/mediatek-npu/<id>/`（原子拷贝 + 版本标记）。 */
     private fun prepareLiteRtModel(context: Context, model: UpscaleModelSpec): File? = try {

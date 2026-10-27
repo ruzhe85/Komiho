@@ -160,7 +160,9 @@ class LiteRtSelfTestActivity : Activity() {
         log("INFO", "abort case: $abortResult")
         if (!abortResult) return fail("取消未生效（process 应返回 null 且原因为 aborted）")
 
-        log("PASS", "全部通过（CPU 验证通道）")
+        // 后端在这台机器上确实可用 → 清掉可能存在的失败记忆，让阅读器下次重新尝试。
+        Waifu2x.clearLiteRtFailureRecord(applicationContext, model.id)
+        log("PASS", "全部通过（CPU 验证通道）；已清除 ${model.id} 的失败记忆")
         return RESULT_PASS
     }
 

@@ -34,6 +34,16 @@ constexpr const char *kRuntimeLibrary = "libLiteRt.so";
 constexpr int kTileSize = 256;
 constexpr int kDefaultPadding = 10;
 
+/**
+ * 编译缓存上限（NPU 模式下 LiteRT 会把 tflite 编成 APU 可执行格式，产物落在 cache_dir）。
+ *
+ * 与 QNN 的 context 不同，这些产物是**设备端生成的**，不清就有无限增长的可能：每个模型
+ * 几 MB 到十几 MB，模型一多、或同一模型因设备指纹变化重新编译，目录会越滚越大。
+ * 256MB / 每模型 2 份是足够宽裕的上限 —— 真触顶时 LiteRT 自己按 LRU 淘汰，不会失败。
+ */
+constexpr int64_t kCompilerCacheMaxBytes = 256LL * 1024 * 1024;
+constexpr int64_t kCompilerCacheMaxConfigsPerModel = 2;
+
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, kTag, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, kTag, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, kTag, __VA_ARGS__)
@@ -103,6 +113,13 @@ Any stringOption(const char *value) {
     Any any{};
     any.type = ANY_STRING;
     any.str_value = value;
+    return any;
+}
+
+Any intOption(int64_t value) {
+    Any any{};
+    any.type = ANY_INT;
+    any.int_value = value;
     return any;
 }
 
@@ -264,13 +281,16 @@ bool initialize(const Config &config, std::string *error) {
         return false;
     }
 
-    // 1) 环境：三个目录选项是 NeuroPilot「编译器插件 / 调度器 / 编译缓存」的唯一入口。
-    const EnvOption env_options[3] = {
+    // 1) 环境：目录选项是 NeuroPilot「编译器插件 / 调度器 / 编译缓存」的唯一入口；
+    //    后两个是缓存上限 —— 编译产物由设备端生成，不设闸就会无界增长。
+    const EnvOption env_options[5] = {
         {ENV_COMPILER_PLUGIN_LIBRARY_DIR, stringOption(config.library_dir.c_str())},
         {ENV_DISPATCH_LIBRARY_DIR, stringOption(config.library_dir.c_str())},
         {ENV_COMPILER_CACHE_DIR, stringOption(config.cache_dir.c_str())},
+        {ENV_COMPILER_CACHE_MAX_TOTAL_SIZE, intOption(kCompilerCacheMaxBytes)},
+        {ENV_COMPILER_CACHE_MAX_CONFIGS_PER_MODEL, intOption(kCompilerCacheMaxConfigsPerModel)},
     };
-    LiteRtStatus status = rt.api.create_environment(3, env_options, &rt.env);
+    LiteRtStatus status = rt.api.create_environment(5, env_options, &rt.env);
     if (status != STATUS_OK || rt.env == nullptr) {
         return fail("LiteRtCreateEnvironment failed", where("create_environment", status));
     }
