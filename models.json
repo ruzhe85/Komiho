@@ -56,6 +56,20 @@
       "scale": 2,
       "padding": 18,
       "label": "Real-CUGAN SE Denoise3x"
+    },
+    {
+      "id": "mtk-span-nomosuni-x2",
+      "stem": "span-nomosuni-x2",
+      "scale": 2,
+      "padding": 24,
+      "label": "NomosUni Span (MTK)"
+    },
+    {
+      "id": "mtk-w2xex-photo-small-x2",
+      "stem": "w2xex-photo-small-x2",
+      "scale": 2,
+      "padding": 10,
+      "label": "W2xEX Photo Small (MTK)"
     }
   ]
 }
