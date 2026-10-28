@@ -1,5 +1,23 @@
 # Komiho Changelog
 
+## v1.6.0 (2026-10-28)
+
+- New Paged-mode page animation: choose between Slide / Cover / Page-curl
+- New Paged-mode double-tap zoom toggle; turning it off removes the double-tap delay so taps respond immediately, zoom with a two-finger pinch instead
+- New (experimental) Image enhancement — MediaTek NPU upscaling ([MTK model package](https://github.com/ruzhe85/Komiho/releases/download/qnn-model/komiho-model-mediatek.apk))
+- Improved E-Ink skin is now a solid-color design
+- Improved Double-page split logic
+- Fixed Komga reading progress occasionally resetting when a book was opened from the chapter list
+- Fixed AVIF covers not showing on some OEM ROMs missing the underlying codec
+- Fixed image enhancement being dropped when turning pages quickly in paged mode
+- Fixed SMB browsing starting directory being duplicated when opened from history
+
+### MediaTek NPU upscaling — notes
+- The developer has no MediaTek device; this feature is experimental
+- The model is compiled on first use; after that it is reused and there is no further wait
+- The official support list is too vague: in theory any SoC from MT6878 onward works, but whether compilation actually succeeds depends on the NeuroPilot and NPU driver shipped in the vendor firmware
+- On failure it falls back to Vulkan; the badge shows GPU
+
 ## v1.5.0 (2026-10-14)
 
 - New E-Ink mode (Settings → Appearance): the reader switches to a dedicated E-Ink grayscale mode. Tested on a limited set of devices — feedback and suggestions are welcome

@@ -34,8 +34,8 @@ android {
 
         // Komiho: 正式版按 `chore: 版本号 x.y.z 并同步 changelog [release]` 发 ——
         // 工作流用这里的 versionName 组 tag（v{versionName}）并从 CHANGELOG*.md 抽该版本段落当说明，所以两者必须一致。
-        versionCode = 14
-        versionName = "1.5.0"
+        versionCode = 15
+        versionName = "1.6.0"
 
         buildConfigField("String", "UPSTREAM_VERSION", """"0.20.1"""")
 
