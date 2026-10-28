@@ -8,7 +8,7 @@
 
 Supports **Komga, local files, WebDAV, SMB** and more comic sources
 
-Package `cn.ruzhe.komiho` ｜ Version 1.5.0 (14) ｜ Android 8.0+
+Package `cn.ruzhe.komiho` ｜ Version 1.6.0 (15) ｜ Android 8.0+
 
 [English](./README.en.md) | [中文](./README.md)
 
@@ -53,7 +53,7 @@ Full-featured history, reading progress and bookmarks, so you can quickly resume
 
 ### 🖼️ Image enhancement
 
-Built-in image enhancement runs on CPU / GPU / NPU (Qualcomm SoC only; requires downloading the matching model pack).
+Built-in image enhancement runs on CPU / GPU / NPU (requires downloading the matching model pack).
 
 Tuned for manga line art, balancing quality, speed and memory usage.
 
