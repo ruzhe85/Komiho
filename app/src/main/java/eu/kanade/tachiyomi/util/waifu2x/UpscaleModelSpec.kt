@@ -89,8 +89,9 @@ interface UpscaleModelSpec {
          *    （产物落 compiler-cache），所以一个包通吃所有 Dimensity；
          *  - 因此 [qnnArches] 对它无意义（留空），能力判定交给 native 的全量委托校验。
          *
-         * 目前**尚未接入引擎选择**（见 `UpscaleModelRegistry.selectableNpuModels`），
-         * 扫描/校验已生效，但不会出现在选择器里。
+         * 引擎分派已接入（见 `Waifu2x` 的 LiteRT 初始化分支）：选择器里是否出现由
+         * `ImageEnhancementSection.npuModelCompatible` 判定 —— MTK 平台 + litert-jni 可加载即可选，
+         * 与骁龙「装模型包 → 选 NPU 模型」的流程完全一致。
          */
         LITERT_NPU,
     }

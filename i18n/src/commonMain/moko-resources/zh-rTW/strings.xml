@@ -427,6 +427,9 @@
     <string name="ai_model_omni_turbo">Omni-Turbo</string>
     <string name="ai_model_omni_mini">Omni-Mini</string>
     <string name="ai_model_plugin_hint">模型包下載</string>
+    <string name="ai_npu_compiling">正在為你的晶片編譯模型，請稍候…</string>
+    <string name="ai_npu_compile_done">NPU模型編譯完成，已保存可使用</string>
+    <string name="ai_npu_compile_failed">模型編譯失敗，將回落到 GPU 增強</string>
     <string name="ai_bypass_fit">高解析度圖強制增強</string>
     <string name="ai_area_downscale">降低摩爾紋</string>
     <string name="pref_show_enhancement_status">顯示增強狀態</string>

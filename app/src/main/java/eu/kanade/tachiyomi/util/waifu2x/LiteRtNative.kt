@@ -93,8 +93,12 @@ internal object LiteRtNative {
         } else {
             ""
         }
-        return manufacturer.contains("mediatek", ignoreCase = true) ||
-            Build.HARDWARE.startsWith("mt", ignoreCase = true)
+        if (manufacturer.contains("mediatek", ignoreCase = true)) return true
+        // API < 31 拿不到 SOC_MANUFACTURER，只能看板级命名：联发科是 `mt6893` / `mt6989` 这种。
+        // 用 `^mt\d` 而不是 startsWith("mt")：宁可漏判（MTK 机型少看到一个模型），也不能误判
+        // （把非 MTK 机型当成 MTK，进而在骁龙机上列出只能编译失败的 tflite 模型）。
+        val mtBoard = Regex("^mt\\d", RegexOption.IGNORE_CASE)
+        return mtBoard.containsMatchIn(Build.HARDWARE) || mtBoard.containsMatchIn(Build.BOARD)
     }
 
     /**

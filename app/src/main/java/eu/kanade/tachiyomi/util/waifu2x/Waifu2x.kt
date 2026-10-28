@@ -238,6 +238,25 @@ object Waifu2x {
     }
 
     /**
+     * Komiho (2026-10-28): 预热模型 —— 选中 MTK 模型时立刻编译，别让用户在第一页干等。
+     *
+     * 只对 LiteRT（MTK）有意义：它的编译发生在设备端（几秒到几十秒），产物落 compiler-cache，
+     * 编译成功后引擎常驻（[activeModel] 就是它），阅读器第一次 [process] 直接复用，不再付这笔钱 ——
+     * 这也是设置页那句「已保存可使用」的依据。
+     *
+     * 返回 false = 这台机器跑不了（非 MTK / 运行时缺失 / 编译不过 / 之前已记过失败），阅读器届时
+     * 照样会回落到 Vulkan；本函数只把结果交给调用方决定怎么提示。
+     *
+     * **必须在 IO 线程调用**：NPU 模式下 [ensureEngine] 内部是同步编译。
+     */
+    fun warmUp(context: Context, model: UpscaleModelSpec): Boolean {
+        if (!libraryLoaded) return false
+        if (model.backend != UpscaleModelSpec.Backend.LITERT_NPU) return false
+        setModel(model)
+        return ensureEngine(context)
+    }
+
+    /**
      * Last QNN model whose context failed to initialise on this device, or null if the most
      * recent attempt succeeded. Diagnostic only — nothing consults it to change behaviour.
      */

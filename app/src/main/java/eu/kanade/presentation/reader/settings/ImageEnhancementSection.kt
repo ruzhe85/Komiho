@@ -1,6 +1,7 @@
 package eu.kanade.presentation.reader.settings
 
 import android.content.Context
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +40,9 @@ import eu.kanade.tachiyomi.util.waifu2x.PluginUpscaleModel
 import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelRegistry
 import eu.kanade.tachiyomi.util.waifu2x.UpscaleModelSpec
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.SettingsChipRow
@@ -257,7 +262,14 @@ private fun EnhancementRootList(
 
         // NPU：门控与详情页共用同一条件（CDSP 优先）。没有可用模型时不改设置，只进详情页看提示。
         if (npuAvailable) {
-            val npuActive = mode == 5 && activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP
+            // Komiho (2026-10-28): 骁龙（QNN）与联发科（LiteRT）都算 NPU —— 只认 QNN 的话，
+            // MTK 机器选了 LiteRT 模型后这一行会一直显示成「未选中」。
+            // 还要再核一次「本机可用」：跨平台恢复备份后偏好里可能存着另一家的模型 id
+            // （骁龙机的 QNN 模型被带到 MTK 机上），只看 backend 会把它显示成已选中。
+            val npuActive = mode == 5 &&
+                (activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP ||
+                    activeModel.backend == UpscaleModelSpec.Backend.LITERT_NPU) &&
+                npuCompatible.any { it.id == activeModel.id }
             // 点击目标：这个后端上次选的 → 当前生效的那个（属于 NPU 且在本机可用列表里）→ 第一个可用。
             // 与显示分开：显示要诚实，切换却必须有一个能落地的目标。
             val npuTarget = npuRemembered
@@ -297,7 +309,26 @@ private fun EnhancementRootList(
 }
 
 /**
- * 本机 HTP 代次可用的 NPU 模型。
+ * 某个 NPU 模型在这台机器上**真的能跑**吗（一级列表与详情页共用这一份判定）。
+ *
+ * Komiho (2026-10-28): 详情页原先只按 `detectedQnnArchitecture in qnnArches` 过滤，而 LiteRT
+ * （MTK）模型的 `qnnArches` 恒为空、MTK 机器的代次恒为 0 —— 结果是模型包装上了也永远选不到，
+ * 列表直接退回「未安装模型包」的提示。现在按后端分开判：
+ *  - **LiteRT**：只看平台 + 运行时能否加载（[Waifu2x.isModelSupported]），真正的能力判定交给
+ *    native 的全量委托校验 —— 模型是通用 tflite，不分芯片代次，一个包通吃所有 Dimensity；
+ *  - **QNN**：除了运行时可用，还要求本机 HTP 代次在包内 context 里有对应文件（`qnnArches`），
+ *    否则选中必然回落 Vulkan，不如不出现。
+ */
+private fun npuModelCompatible(model: PluginUpscaleModel): Boolean {
+    if (!Waifu2x.isModelSupported(model)) return false
+    return when (model.backend) {
+        UpscaleModelSpec.Backend.LITERT_NPU -> true
+        else -> Waifu2x.detectedQnnArchitecture in model.qnnArches
+    }
+}
+
+/**
+ * 本机可用的 NPU 模型。
  *
  * 一级列表**不做重扫**（重扫只在 NPU 详情页的 ON_RESUME 进行）。但"没扫过"与"没装包"从
  * 列表角度看是一样的，所以这里在空结果时补一次 [UpscaleModelRegistry.ensureScanned] ——
@@ -309,9 +340,7 @@ private fun compatibleNpuModels(context: Context): List<PluginUpscaleModel> {
         UpscaleModelRegistry.ensureScanned(context)
         UpscaleModelRegistry.npuModels()
     }
-    // Komiho (2026-10-27): 不再只按 HTP 代号过滤 —— QNN 看 arches、LiteRT 看平台，
-    // 统一交给 Waifu2x.isModelSupported（骁龙机上 LiteRT 模型自然为空）。
-    return models.filter { Waifu2x.isModelSupported(it) }
+    return models.filter(::npuModelCompatible)
 }
 
 /** 详情页顶部统一的「返回」行；系统返回键由 [ImageEnhancementSection] 的 BackHandler 接管。 */
@@ -445,6 +474,31 @@ private fun NpuDetail(
     val context = LocalContext.current
     var npuModels by remember { mutableStateOf(UpscaleModelRegistry.npuModels()) }
 
+    // Komiho (2026-10-28): 选中 MTK（LiteRT）模型即刻在设备端编译 —— 首次几秒到几十秒。编完提示
+    // 「已保存可使用」；编译期间在模型区上方挂一行提示，别让这几十秒看起来像卡死。
+    // 骁龙（QNN）加载的是预编译 context，选中即用，不需要这一步。
+    val scope = rememberCoroutineScope()
+    var compilingModelId by remember { mutableStateOf<String?>(null) }
+    val compilingText = stringResource(MR.strings.ai_npu_compiling)
+    val compileDoneText = stringResource(MR.strings.ai_npu_compile_done)
+    val compileFailedText = stringResource(MR.strings.ai_npu_compile_failed)
+
+    fun selectNpuModel(model: PluginUpscaleModel) {
+        setEnhancementModel(preferences, model)
+        if (model.backend != UpscaleModelSpec.Backend.LITERT_NPU) return
+        if (compilingModelId != null) return
+        compilingModelId = model.id
+        scope.launch {
+            val ready = withContext(Dispatchers.IO) { Waifu2x.warmUp(context, model) }
+            compilingModelId = null
+            Toast.makeText(
+                context,
+                if (ready) compileDoneText else compileFailedText,
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
     // Refresh on first composition AND every time the screen comes back to the foreground, so
     // installing (or uninstalling) a model package and returning updates the list immediately —
     // no app restart, no preference churn.
@@ -466,7 +520,23 @@ private fun NpuDetail(
 
     EnhancementParamLabel(MR.strings.enhancement_detail_model)
 
-    val compatible = npuModels.filter { Waifu2x.detectedQnnArchitecture in it.qnnArches }
+    if (compilingModelId != null) {
+        Text(
+            text = compilingText,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(
+                start = SettingsItemsPaddings.Horizontal,
+                end = SettingsItemsPaddings.Horizontal,
+                top = 4.dp,
+                bottom = 4.dp,
+            ),
+        )
+    }
+
+    // Komiho (2026-10-28): 与一级列表同一份判定 —— MTK 的 LiteRT 模型在这里才算得上「可用」，
+    // 不再被 HTP 代次过滤静默吃掉（见 [npuModelCompatible]）。
+    val compatible = npuModels.filter(::npuModelCompatible)
     if (compatible.isEmpty()) {
         // 没装模型包（或没覆盖本机代次）：一行可点击的下划线提示，跳到模型包发布页。
         Text(
@@ -489,7 +559,7 @@ private fun NpuDetail(
                 series = series,
                 members = members,
                 activeModel = activeModel,
-                onSelect = { model -> setEnhancementModel(preferences, model) },
+                onSelect = { model -> selectNpuModel(model) },
             )
         }
     }
