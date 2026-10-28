@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.6.0" changeDate="October 28,2026">
+        <changelogtext>[b]Komiho 1.6.0[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 页漫模式翻页动画，现在可选「平移 / 覆盖 / 翻书」</changelogtext>
+        <changelogtext>[b]新增[/b] 页漫模式双击缩放开关，关闭后提升点击跟手度，缩放使用双指捏合</changelogtext>
+        <changelogtext>[b]新增[/b] （实验性）图像增强-联发科 NPU 超分，需安装 MTK 模型包</changelogtext>
+        <changelogtext>[b]优化[/b] E-Ink 皮肤，现在改成纯色设计</changelogtext>
+        <changelogtext>[b]优化[/b] 双页拆分逻辑</changelogtext>
+        <changelogtext>[b]修复[/b] Komga 从章节列表开始阅读偶发进度重置</changelogtext>
+        <changelogtext>[b]修复[/b] 部分 OEM 系统底层缺失无法显示 avif 封面图的问题</changelogtext>
+        <changelogtext>[b]修复[/b] 页漫模式快速翻页导致图像增强失效的问题</changelogtext>
+        <changelogtext>[b]修复[/b] SMB 浏览从历史跳转时起始目录被重复拼接</changelogtext>
+        <changelogtext>[b]MTK NPU 特别说明[/b] 开发者没有 MTK 设备，该功能仅实验性；首次使用需要编译，完成后直接使用无须再次等待；理论上 MT6878 之后机型均支持，实际能否编译成功取决于厂商固件里打包的 NeuroPilot 和 NPU 驱动；失败会回落到 Vulkan 模式，角标显示 GPU</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.5.0" changeDate="October 14,2026">
         <changelogtext>[b]Komiho 1.5.0[/b]</changelogtext>
         <changelogtext>[b]新增[/b] E-Ink 模式，入口：设置-外观；启动后阅读器切换 EINK 专用灰度模式，测试设备有限，欢迎反馈建议</changelogtext>
