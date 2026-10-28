@@ -8,7 +8,7 @@
 
 支持 **Komga、本地文件、WebDAV、SMB** 等多种漫画来源
 
-包名 `cn.ruzhe.komiho` ｜ 版本 1.5.0 (14) ｜ Android 8.0+
+包名 `cn.ruzhe.komiho` ｜ 版本 1.6.0 (15) ｜ Android 8.0+
 
 [中文](./README.md) | [English](./README.en.md)
 
@@ -54,7 +54,7 @@ Komiho 将不同来源的漫画统一到同一套浏览与阅读体验中：
 
 ### 🖼️ 图像增强
 
-内置图像增强，基于CPU/GPU/NPU（高通SOC专用，需下载配套模型包）
+内置图像增强，基于CPU/GPU/NPU
 
 针对漫画线条进行优化，在画质、速度和内存占用之间取得平衡。
 
