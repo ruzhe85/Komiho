@@ -226,9 +226,13 @@ internal class PdfPageLoader private constructor(
                 if (img != null && img.filter == "DCTDecode") {
                     val raw = parser!!.rawStreamBytes(img.objNum)
                     if (raw != null && raw.isNotEmpty()) {
+                        // 直通即「拆原图」：落到这里的字节就是 PDF 内嵌 JPEG 的原样，
+                        // 另存图片/增强拿到的都是这个尺寸，不再经过栅格化。
+                        Log.d(TAG, "page ${index + 1}: DCT passthrough ${img.width}x${img.height} (${raw.size}B)")
                         return ByteArrayInputStream(raw)
                     }
                 }
+                Log.d(TAG, "page ${index + 1}: no passable DCT image (filter=${img?.filter}), render fallback")
             } catch (e: Exception) {
                 Log.w(TAG, "PDF extract page ${index + 1} failed, render fallback: ${e.message}")
             }

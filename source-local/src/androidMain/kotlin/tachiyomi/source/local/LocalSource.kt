@@ -438,6 +438,25 @@ actual class LocalSource(
     // Filters
     override fun getFilterList() = FilterList(OrderBy.Popular(context))
 
+    /**
+     * Komiho: 目录里「实际存在」的章节标识集合（与 [getChapterList] 生成的 `chapter.url` 同源）。
+     *
+     * 供阅读器剔除「DB 里还有记录、文件已被删/移走」的章节——否则「下一章」指向不存在的
+     * 文件，翻到卷末直接报错。一次目录列举 + 路径拼接，比逐章 [getFormat] 便宜，也比
+     * `File(url).exists()` 可靠：仅 SAF 授权时 File API 一律访问不到真实路径。
+     *
+     * 返回 null = 判不了（浏览根解析不出来 / 目录列不出），调用方按「全部存在」处理。
+     */
+    fun existingChapterUrls(manga: SManga): Set<String>? {
+        val dir = fileSystem.getMangaDirectory(manga.url) ?: return null
+        val files = dir.listFiles() ?: return null
+        return files.mapNotNull { file ->
+            // 与 getChapterList 的 url 构造保持完全一致（真实路径优先，解不出时用
+            // "manga.url/文件名" 兜底），否则两边对不上会把存在的章节误判成已删除。
+            fileSystem.realPathOf(file) ?: file.name?.let { "${manga.url}/$it" }
+        }.toSet()
+    }
+
     // Unused stuff
     override suspend fun getPageList(chapter: SChapter): List<Page> = throw UnsupportedOperationException("Unused")
 

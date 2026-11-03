@@ -85,6 +85,7 @@ object ProcessExitDiagnostics {
             } else {
                 DiagLog.d(TAG, "进程退出: $line")
             }
+            if (isAbnormal(info.reason)) logTrace(info)
         }
         // 自解释：免得看导出文件的人（和后来接手的人）要回代码里查这张表。
         DiagLog.d(
@@ -94,6 +95,46 @@ object ProcessExitDiagnostics {
                 "USER_REQUESTED=用户自己划掉(日志断掉≠崩溃); EXIT_SELF/OTHER=正常或未知",
         )
     }
+
+    /**
+     * Komiho: 把系统为这次退出保存的原始 trace 落进诊断日志。
+     *
+     * 这是唯一能拿到 **native 栈**的地方（`#00 pc 0000xxxx  /data/app/…/libwaifu2x-jni.so`）：
+     * [ApplicationExitInfo] 的 reason/status 只能告诉我们「SIGSEGV」或「SIGABRT」，指不到具体
+     * 哪个 .so、哪个函数；而 adb 在不少设备上拿不到（鸿蒙、家长控制/企业管控机型）。
+     * 系统没给（老版本、部分厂商裁剪）就静默跳过，不影响其余日志。
+     */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun logTrace(info: ApplicationExitInfo) {
+        val text = runCatching {
+            info.traceInputStream?.use { input ->
+                val buf = ByteArray(MAX_TRACE_BYTES)
+                var n = 0
+                while (n < buf.size) {
+                    val read = input.read(buf, n, buf.size - n)
+                    if (read <= 0) break
+                    n += read
+                }
+                String(buf, 0, n, Charsets.UTF_8)
+            }
+        }.getOrNull()
+        if (text.isNullOrBlank()) return
+
+        // 逐行写：一行一条便于按 tag/关键字过滤，也避免超长单条把缓冲撑爆。
+        val lines = text.lineSequence()
+            .map { it.trimEnd() }
+            .filter { it.isNotBlank() }
+            .take(MAX_TRACE_LINES)
+            .toList()
+        DiagLog.w(TAG, "退出 trace(${reasonName(info.reason)}, time=${TIME_FORMAT.format(Date(info.timestamp))}) ${lines.size} 行:")
+        lines.forEach { DiagLog.w(TAG, it) }
+    }
+
+    /** 单条 trace 最多读这么多字节：native 栈通常几 KB，ANR trace 会到几十 KB。 */
+    private const val MAX_TRACE_BYTES = 64 * 1024
+
+    /** 最多写这么多行（防止极端 trace 把导出文件刷成几十 MB）。 */
+    private const val MAX_TRACE_LINES = 1500
 
     /** 需要特别标红的退出原因（用 WARN 级别写，便于在导出文件里一眼看到）。 */
     private fun isAbnormal(reason: Int): Boolean = when (reason) {

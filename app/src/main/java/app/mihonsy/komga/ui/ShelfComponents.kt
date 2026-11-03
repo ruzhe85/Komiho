@@ -18,7 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -274,10 +276,15 @@ fun SeriesShelf(
     mode: LibraryDisplayMode,
     columns: Int = 0,
     onSeriesLongClick: ((String) -> Unit)? = null,
+    // Komiho: 滚动状态由调用方持有 —— 列表在「加载中 → 有数据」之间会离开组合，
+    // 状态建在内部就会连同位置一起丢掉（从阅读器返回永远回到顶部）。
+    listState: LazyListState = rememberLazyListState(),
+    gridState: LazyGridState = rememberLazyGridState(),
     onSeriesClick: (String) -> Unit,
 ) {
     if (mode == LibraryDisplayMode.List) {
         LazyColumn(
+            state = listState,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
@@ -301,6 +308,7 @@ fun SeriesShelf(
         val vSpace = if (isCompact) 6.dp else 12.dp
         val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
         LazyVerticalGrid(
+            state = gridState,
             columns = cells,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(hSpace),
@@ -342,6 +350,9 @@ fun BookShelf(
     showDownload: Boolean = false,
     downloadState: (String) -> DownloadUiState = { DownloadUiState.NONE },
     onDownloadClick: (String) -> Unit = {},
+    // Komiho: 滚动状态由调用方持有（同 [SeriesShelf]：避免「加载中」把列表移出组合时丢位置）。
+    listState: LazyListState = rememberLazyListState(),
+    gridState: LazyGridState = rememberLazyGridState(),
     // 可选头部（如系列详情的简介区）：手机端作为列表首个 item 随书籍一起滚动。
     header: @Composable (() -> Unit)? = null,
     // 选择模式变化上报宿主：宿主据此隐藏右下角 FAB。否则 FAB 会压住底部选择栏
@@ -444,7 +455,6 @@ fun BookShelf(
         }
 
         if (mode == LibraryDisplayMode.List) {
-            val listState = rememberLazyListState()
             LazyColumn(
                 state = listState,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
@@ -478,7 +488,6 @@ fun BookShelf(
             val hSpace = if (isCompact) 4.dp else 8.dp
             val vSpace = if (isCompact) 6.dp else 12.dp
             val cells = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(minSize = minSize)
-            val gridState = rememberLazyGridState()
             LazyVerticalGrid(
                 state = gridState,
                 columns = cells,

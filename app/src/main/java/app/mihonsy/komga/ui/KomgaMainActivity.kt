@@ -44,6 +44,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -994,6 +995,10 @@ private fun KomgaMainScreen(
     // Refresh counter: bumped by tab re-tap and by Activity onResume (returning
     // from the reader). Passed to tabs to trigger data reload.
     val refreshTick by refreshSignal.collectAsState()
+    // Komiho: 书架（系列网格/列表）滚动位置挂在主界面级 —— LibraryTab 会在刷新、切 tab 时
+    // 离开组合，状态放 tab 内就跟着丢，返回书架总是回到顶部。
+    val libraryShelfListState = rememberLazyListState()
+    val libraryShelfGridState = rememberLazyGridState()
     // Komga 连接状态跟随 onResume 复查（从 KomgaConnectActivity 添加完返回时生效）。
     LaunchedEffect(refreshTick) { komgaConnected = prefs.hasConnection() }
     // M3.12: search collapsed to an icon in the title row; expands the field.
@@ -1426,6 +1431,8 @@ private fun KomgaMainScreen(
                                     filterSignal.value = null
                                 }
                             },
+                            listState = libraryShelfListState,
+                            gridState = libraryShelfGridState,
                         ) { seriesId ->
                             context.startActivity(Intent(context, KomgaSeriesActivity::class.java).putExtra("seriesId", seriesId))
                         }
@@ -2591,6 +2598,9 @@ private fun LibraryTab(
     filterType: String? = null,
     filterValue: String? = null,
     onFilterClear: () -> Unit = {},
+    // Komiho: 滚动位置由主界面持有 —— 本 tab 会在切 tab / 刷新时离开组合，状态放这里就丢。
+    listState: LazyListState = rememberLazyListState(),
+    gridState: LazyGridState = rememberLazyGridState(),
     onSeriesClick: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -2780,7 +2790,6 @@ private fun LibraryTab(
                 Text(composeStringResource(R.string.no_series_in_library))
             }
             else -> if (displayMode == LibraryDisplayMode.List) {
-                val listState = rememberLazyListState()
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
@@ -2813,7 +2822,6 @@ private fun LibraryTab(
                 } else {
                     GridCells.Adaptive(minSize = adaptiveMin)
                 }
-                val gridState = rememberLazyGridState()
                 LazyVerticalGrid(
                     state = gridState,
                     columns = cells,
@@ -5879,6 +5887,22 @@ private fun storageRootLabel(rootPath: String): String {
     }
 }
 
+/**
+ * Komiho: 本地浏览页每个目录各自的滚动位置（key = 卷 URI + 相对路径栈）。
+ *
+ * 进程内静态缓存而不是 remember：进子目录再按返回、从阅读器回来、甚至 Activity 被重建，
+ * 都能停回原来的位置；key 里带卷 URI，多存储卷之间不会串位。
+ */
+private val localBrowseScrollMemory = mutableMapOf<String, Pair<Int, Int>>()
+
+/**
+ * Komiho: 远程（WebDAV / SMB）浏览页每个目录各自的滚动位置。
+ *
+ * key = "webdav:<connId>|<目录URL>" / "smb:<connId>|<目录相对路径>"，与本地浏览的记忆互不干扰；
+ * 同样是进程内静态缓存，用来扛「列目录 loading 换页 / 从阅读器返回 / Activity 重建」。
+ */
+private val remoteBrowseScrollMemory = mutableMapOf<String, Pair<Int, Int>>()
+
 @Composable
 private fun LocalFileBrowser(
     base: UniFile,
@@ -5932,6 +5956,12 @@ private fun LocalFileBrowser(
         else stack.fold(base) { dir, seg -> dir.findFile(seg) ?: base }
     }
 
+    // Komiho: 滚动状态提到浏览器级 —— 列目录时会短暂 loading，列表会离开组合，状态若建在
+    // 下面的分支里就随位置一起丢掉（返回上级 / 从阅读器回来都从最上面开始）。
+    val browseListState = rememberLazyListState()
+    val browseGridState = rememberLazyGridState()
+    val scrollKey = remember(base, stack) { "${base.uri}|${stack.joinToString("/")}" }
+
     // SY --> Komiho: 全权限模式「记住上次访问路径」——除首次启用（localBrowseLastPath 为空
     // → 落在根目录），默认恢复到最后一次访问的目录；若上次路径在别的存储卷，自动切到那卷。
     // 仅在 base（卷）变化时触发：用户手动下钻/面包屑跳层只改 stack，不重跑，避免与导航打架。
@@ -5962,6 +5992,14 @@ private fun LocalFileBrowser(
     // SY --> Komiho: 统一导航入口——改栈并（全权限模式）记最后一次访问目录的完整路径，
     // 供下次进浏览 tab 恢复。手动下钻/面包屑/返回键/打开文件位置都走这里。
     fun navigateTo(newStack: List<String>) {
+        if (newStack != stack) {
+            // 离开当前目录前记下滚动位置，返回这一级时恢复（见下方 LaunchedEffect）。
+            localBrowseScrollMemory[scrollKey] = if (displayMode == LibraryDisplayMode.List) {
+                browseListState.firstVisibleItemIndex to browseListState.firstVisibleItemScrollOffset
+            } else {
+                browseGridState.firstVisibleItemIndex to browseGridState.firstVisibleItemScrollOffset
+            }
+        }
         stack = newStack
         if (hasAllFilesAccess) {
             val dir = newStack.fold(base) { d, seg -> d.findFile(seg) ?: d }
@@ -5990,6 +6028,21 @@ private fun LocalFileBrowser(
         }
         entries = list
         loading = false
+    }
+
+    // Komiho: 目录加载完成后恢复该目录上次的滚动位置。必须等 loading 结束 —— 空列表上
+    // scrollToItem 不会生效，滚了也白滚。
+    LaunchedEffect(scrollKey, loading, displayMode) {
+        if (loading) return@LaunchedEffect
+        // 没有记忆（第一次进这个目录）= 回到顶部；两个状态对象跨目录复用，不显式归零会
+        // 停在上一个目录的索引上。
+        val index = localBrowseScrollMemory[scrollKey]?.first ?: 0
+        val offset = localBrowseScrollMemory[scrollKey]?.second ?: 0
+        if (displayMode == LibraryDisplayMode.List) {
+            browseListState.scrollToItem(index, offset)
+        } else {
+            browseGridState.scrollToItem(index, offset)
+        }
     }
 
     // SY --> Komiho: 「搜索下级目录」开启时，按关键词 BFS 递归遍历当前目录整棵子树，命中项流式回传。
@@ -6295,7 +6348,7 @@ private fun LocalFileBrowser(
                 )
             }
             displayMode == LibraryDisplayMode.List -> {
-                LazyColumn(Modifier.fillMaxSize()) {
+                LazyColumn(state = browseListState, modifier = Modifier.fillMaxSize()) {
                     items(displayList, key = { it.uni.uri.toString() }) { file ->
                         FileRow(
                             entry = file,
@@ -6312,9 +6365,8 @@ private fun LocalFileBrowser(
                 val isCompact = displayMode != LibraryDisplayMode.List
                 val adaptiveMin = if (isCompact) 96.dp else 168.dp
                 val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = adaptiveMin)
-                val gridState = rememberLazyGridState()
                 LazyVerticalGrid(
-                    state = gridState,
+                    state = browseGridState,
                     columns = cells,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 8.dp),
@@ -6892,6 +6944,26 @@ private fun WebDavBrowsePane(
     }
     val dirUrl = trail.last().second
 
+    // Komiho: 滚动状态提到面板级 + 按目录记忆 —— 列目录会先 loading，列表离开组合，状态
+    // 建在下面分支里就会连同位置一起丢掉（返回上级 / 从阅读器回来都从最上面开始）。
+    val browseListState = rememberLazyListState()
+    val browseGridState = rememberLazyGridState()
+    val scrollKey = remember(conn.id, dirUrl) { "webdav:${conn.id}|$dirUrl" }
+
+    fun rememberScrollPosition() {
+        remoteBrowseScrollMemory[scrollKey] = if (displayMode == LibraryDisplayMode.List) {
+            browseListState.firstVisibleItemIndex to browseListState.firstVisibleItemScrollOffset
+        } else {
+            browseGridState.firstVisibleItemIndex to browseGridState.firstVisibleItemScrollOffset
+        }
+    }
+
+    /** 目录跳转统一入口：离开当前目录前先记下滚动位置。 */
+    fun navigateTo(newTrail: List<Pair<String, String>>) {
+        if (newTrail != trail) rememberScrollPosition()
+        trail = newTrail
+    }
+
     // SY: 历史/书签「打开文件位置」跳转消费——从 baseUrl 逐段重建路径栈定位到目标目录。
     // 目标不在当前连接之下（理论不会发生，路由层已按连接选择来源）时忽略；目录已被移走时
     // PROPFIND 报错，面包屑可跳回。
@@ -6903,7 +6975,7 @@ private fun WebDavBrowsePane(
         val urls = target.removePrefix(conn.baseUrl).trim('/').split('/')
             .filter { it.isNotBlank() }
             .map { seg -> acc = "$acc/$seg"; acc }
-        trail = listOf(rootLabel to conn.baseUrl) + urls.map { url -> webDavCrumbName(url) to url }
+        navigateTo(listOf(rootLabel to conn.baseUrl) + urls.map { url -> webDavCrumbName(url) to url })
     }
 
     // SY: 目录变化即记忆（按连接一行存储，其余连接记录保留）。
@@ -6941,6 +7013,19 @@ private fun WebDavBrowsePane(
         loading = false
     }
 
+    // Komiho: 目录加载完成后再恢复该目录上次的滚动位置（空列表上 scrollToItem 不生效）。
+    LaunchedEffect(scrollKey, loading, displayMode) {
+        if (loading) return@LaunchedEffect
+        val saved = remoteBrowseScrollMemory[scrollKey]
+        val index = saved?.first ?: 0
+        val offset = saved?.second ?: 0
+        if (displayMode == LibraryDisplayMode.List) {
+            browseListState.scrollToItem(index, offset)
+        } else {
+            browseGridState.scrollToItem(index, offset)
+        }
+    }
+
     // SY --> Komiho: 「搜索下级目录」开启时，BFS 递归遍历当前目录子树，命中项流式回传。防抖 300ms。
     LaunchedEffect(searchActive, searchRecursive, searchQuery) {
         if (searchActive && searchRecursive && searchQuery.isNotBlank()) {
@@ -6972,12 +7057,12 @@ private fun WebDavBrowsePane(
 
     // 返回键回上一层；已在根目录时不拦截（交还外层）。
     BackHandler(enabled = trail.size > 1) {
-        trail = trail.dropLast(1)
+        navigateTo(trail.dropLast(1))
     }
 
     // 统一点击行为：目录 → 压栈下钻；归档 → 打开（同目录归档自动建为章节续读）。
     val onItemOpen: (WebDavEntry) -> Unit = { e ->
-        if (e.isDir) trail = trail + (e.name to e.url) else onOpenFile(e.url)
+        if (e.isDir) navigateTo(trail + (e.name to e.url)) else onOpenFile(e.url)
     }
 
     // SY --> Komiho: 递归搜索结果点击：目录→跳进该子目录；归档/图片→直接打开（按真实 URL 定位）。
@@ -6987,7 +7072,7 @@ private fun WebDavBrowsePane(
             val urls = e.url.removePrefix(conn.baseUrl).trim('/').split('/')
                 .filter { it.isNotBlank() }
                 .map { seg -> acc = "$acc/$seg"; acc }
-            trail = listOf(rootLabel to conn.baseUrl) + urls.map { url -> webDavCrumbName(url) to url }
+            navigateTo(listOf(rootLabel to conn.baseUrl) + urls.map { url -> webDavCrumbName(url) to url })
         } else {
             onOpenFile(e.url)
         }
@@ -7130,7 +7215,7 @@ private fun WebDavBrowsePane(
                     }
                     // SY: 同本地浏览——面包屑要「X/XX/XXX」紧凑结构，清掉 TextButton 默认内边距。
                     TextButton(
-                        onClick = { trail = trail.take(index + 1) },
+                        onClick = { navigateTo(trail.take(index + 1)) },
                         contentPadding = PaddingValues(horizontal = 0.dp),
                     ) {
                         Text(
@@ -7202,7 +7287,7 @@ private fun WebDavBrowsePane(
                 }
             }
             displayMode == LibraryDisplayMode.List -> {
-                LazyColumn(Modifier.fillMaxSize()) {
+                LazyColumn(state = browseListState, modifier = Modifier.fillMaxSize()) {
                     items(displayList, key = { it.url }) { e ->
                         WebDavFileRow(conn = conn, entry = e, showCover = showCover, onOpen = { onOpenItem(e) })
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -7213,6 +7298,7 @@ private fun WebDavBrowsePane(
                 // 网格模式：与本地浏览同一套列密度逻辑（紧凑网格 96dp Adaptive）。
                 val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = 96.dp)
                 LazyVerticalGrid(
+                    state = browseGridState,
                     columns = cells,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -7646,6 +7732,26 @@ private fun SmbBrowsePane(
     }
     val dirPath = trail.last().second
 
+    // Komiho: 滚动状态提到面板级 + 按目录记忆 —— 列目录会先 loading（SMB 还会建会话），列表
+    // 离开组合，状态建在下面分支里就会连同位置一起丢掉。
+    val browseListState = rememberLazyListState()
+    val browseGridState = rememberLazyGridState()
+    val scrollKey = remember(conn.id, dirPath) { "smb:${conn.id}|$dirPath" }
+
+    fun rememberScrollPosition() {
+        remoteBrowseScrollMemory[scrollKey] = if (displayMode == LibraryDisplayMode.List) {
+            browseListState.firstVisibleItemIndex to browseListState.firstVisibleItemScrollOffset
+        } else {
+            browseGridState.firstVisibleItemIndex to browseGridState.firstVisibleItemScrollOffset
+        }
+    }
+
+    /** 目录跳转统一入口：离开当前目录前先记下滚动位置。 */
+    fun navigateTo(newTrail: List<Pair<String, String>>) {
+        if (newTrail != trail) rememberScrollPosition()
+        trail = newTrail
+    }
+
     // SY --> Komiho: 目标路径 → 面包屑栈。目标口径统一为「章节 URL 里的共享内相对路径」，
     // **已含连接起始目录**（见 SmbConnectionStore 的 URL 契约）；逐段重建前必须先剥掉起始
     // 目录，否则会被拼两次（历史跳转后变成 COMIC/COMIC/xx.zip，列表读不到、文件打不开）。
@@ -7668,7 +7774,7 @@ private fun SmbBrowsePane(
         val target = navRequest ?: return@LaunchedEffect
         onNavConsumed()
         if (target.isBlank()) return@LaunchedEffect
-        trail = trailFor(target)
+        navigateTo(trailFor(target))
     }
     // SY <--
 
@@ -7704,6 +7810,19 @@ private fun SmbBrowsePane(
         loading = false
     }
 
+    // Komiho: 目录加载完成后再恢复该目录上次的滚动位置（空列表上 scrollToItem 不生效）。
+    LaunchedEffect(scrollKey, loading, displayMode) {
+        if (loading) return@LaunchedEffect
+        val saved = remoteBrowseScrollMemory[scrollKey]
+        val index = saved?.first ?: 0
+        val offset = saved?.second ?: 0
+        if (displayMode == LibraryDisplayMode.List) {
+            browseListState.scrollToItem(index, offset)
+        } else {
+            browseGridState.scrollToItem(index, offset)
+        }
+    }
+
     // SY --> Komiho: 「搜索下级目录」开启时，BFS 递归遍历当前目录子树，命中项流式回传。防抖 300ms。
     LaunchedEffect(searchActive, searchRecursive, searchQuery) {
         if (searchActive && searchRecursive && searchQuery.isNotBlank()) {
@@ -7734,18 +7853,18 @@ private fun SmbBrowsePane(
     // SY <--
 
     BackHandler(enabled = trail.size > 1) {
-        trail = trail.dropLast(1)
+        navigateTo(trail.dropLast(1))
     }
 
     val onItemOpen: (SmbEntry) -> Unit = { e ->
-        if (e.isDir) trail = trail + (e.name to e.path) else onOpenFile(e.path)
+        if (e.isDir) navigateTo(trail + (e.name to e.path)) else onOpenFile(e.path)
     }
 
     // SY --> Komiho: 递归搜索结果点击：目录→跳进该子目录；归档/图片→直接打开（按真实路径定位）。
     // 命中项 path 已含起始目录，面包屑重建同样走 [trailFor]（否则会被拼两次）。
     val onSearchItemOpen: (SmbEntry) -> Unit = { e ->
         if (e.isDir) {
-            trail = trailFor(e.path)
+            navigateTo(trailFor(e.path))
         } else {
             onOpenFile(e.path)
         }
@@ -7858,7 +7977,7 @@ private fun SmbBrowsePane(
                         )
                     }
                     TextButton(
-                        onClick = { trail = trail.take(index + 1) },
+                        onClick = { navigateTo(trail.take(index + 1)) },
                         contentPadding = PaddingValues(horizontal = 0.dp),
                     ) {
                         Text(text = name, style = MaterialTheme.typography.bodySmall, maxLines = 1)
@@ -7935,7 +8054,7 @@ private fun SmbBrowsePane(
                 }
             }
             displayMode == LibraryDisplayMode.List -> {
-                LazyColumn(Modifier.fillMaxSize()) {
+                LazyColumn(state = browseListState, modifier = Modifier.fillMaxSize()) {
                     items(displayList, key = { it.path }) { e ->
                         SmbFileRow(conn = conn, entry = e, showCover = showCover, onOpen = { onOpenItem(e) })
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -7945,6 +8064,7 @@ private fun SmbBrowsePane(
             else -> {
                 val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = 96.dp)
                 LazyVerticalGrid(
+                    state = browseGridState,
                     columns = cells,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),

@@ -5,8 +5,10 @@ import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.File
+import kotlin.math.sqrt
 
 /**
  * 系统 PdfRenderer 兜底：当某页无法走「内嵌图字节直通」（CCITT/JPX/Flate/矢量/无内嵌图）
@@ -21,6 +23,18 @@ object PdfRenderFallback {
     /** 阅读器兜底渲染的目标长边：低分辨率矢量/文本页（约 595×842 @72DPI）上采样到此值保证清晰。 */
     private const val TARGET_LONG_SIDE = 2000
 
+    /** 长条页判定（高宽比）：与解码器 [eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder] 的条漫口径一致。 */
+    private const val TALL_ASPECT_RATIO = 2.5f
+
+    /** 长条页渲染宽度目标：宽度是条漫页的显示关键维度（1440 覆盖主流屏宽且不放大过度）。 */
+    private const val TARGET_TALL_WIDTH = 1440
+
+    /** 长条页输出像素上限（≈96MB ARGB_8888）：超预算才按面积回缩，避免单页 OOM。 */
+    private const val MAX_TALL_PIXELS = 24_000_000.0
+
+    /** 长条页输出长边上限：PDFium/位图分配对大尺寸有上限，极端窄长页不能无限拉高。 */
+    private const val MAX_TALL_LONG_SIDE = 24_000
+
     /** 渲染指定页为 Bitmap：
      *  - 先填白底，避免矢量/文本 PDF 无色块区域透出（原先透明 → 底色消失）。
      *  - 按 [maxLongSide] 等比缩放：小页面（低 DPI 矢量/文本）上采样到该值保证清晰；
@@ -34,7 +48,7 @@ object PdfRenderFallback {
         password: String? = null,
     ): Bitmap? {
         return ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
-            renderPageBitmap(pfd, pageIndex, maxLongSide, password)
+            renderBitmap(pfd, pageIndex, maxLongSide, password, tallWidthDriven = false)
         }
     }
 
@@ -47,12 +61,21 @@ object PdfRenderFallback {
         pageIndex: Int,
         maxLongSide: Int = TARGET_LONG_SIDE,
         password: String? = null,
+    ): Bitmap? = renderBitmap(pfd, pageIndex, maxLongSide, password, tallWidthDriven = false)
+
+    private fun renderBitmap(
+        pfd: ParcelFileDescriptor,
+        pageIndex: Int,
+        maxLongSide: Int,
+        password: String?,
+        tallWidthDriven: Boolean,
     ): Bitmap? {
         val renderer = openRenderer(pfd, password)
         try {
             if (pageIndex < 0 || pageIndex >= renderer.pageCount) return null
             val page = renderer.openPage(pageIndex)
-            val (tw, th) = fit(page.width, page.height, maxLongSide)
+            val (tw, th) = fit(page.width, page.height, maxLongSide, tallWidthDriven)
+            Log.d(TAG, "render page=$pageIndex page=${page.width}x${page.height} -> ${tw}x$th")
             val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
             bmp.eraseColor(Color.WHITE)
             page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -65,7 +88,9 @@ object PdfRenderFallback {
 
     /** 渲染指定页为 PNG 字节流（供既有解码+增强管线消费）。 */
     fun renderPage(path: String, pageIndex: Int, password: String? = null): ByteArray? {
-        val bmp = renderPageBitmap(path, pageIndex, password = password) ?: return null
+        val bmp = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+            .use { pfd -> renderBitmap(pfd, pageIndex, TARGET_LONG_SIDE, password, tallWidthDriven = true) }
+            ?: return null
         val out = ByteArrayOutputStream()
         bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
         bmp.recycle()
@@ -140,8 +165,20 @@ object PdfRenderFallback {
     private const val TAG = "KomihoPdfRender"
 
     /** 按目标长边等比缩放：小则上采样（矢量/文本更清晰），大则下采样（控制内存/封面缩略）。 */
-    private fun fit(w: Int, h: Int, target: Int): Pair<Int, Int> {
+    private fun fit(w: Int, h: Int, target: Int, tallWidthDriven: Boolean = false): Pair<Int, Int> {
         if (w <= 0 || h <= 0) return target to target
+        // 长条页（如 1440×15050 的条漫单页）：按长边等比缩会把宽度一起压到 2000/10.45 ≈ 191px，
+        // 交回阅读器再按屏宽放大就是一片糊。这类页宽度才是显示关键维度（与解码器 isTallStrip 同口径），
+        // 改按宽度定尺度；只有总面积超过预算时才按面积回缩。
+        if (tallWidthDriven && h.toFloat() / w.toFloat() > TALL_ASPECT_RATIO) {
+            var scale = TARGET_TALL_WIDTH.toFloat() / w.toFloat()
+            scale = minOf(scale, MAX_TALL_LONG_SIDE.toFloat() / maxOf(w, h).toFloat())
+            val pixels = w.toDouble() * h.toDouble() * scale * scale
+            if (pixels > MAX_TALL_PIXELS) {
+                scale *= sqrt(MAX_TALL_PIXELS / pixels).toFloat()
+            }
+            return (w * scale).toInt().coerceAtLeast(1) to (h * scale).toInt().coerceAtLeast(1)
+        }
         val long = maxOf(w, h)
         val scale = target.toFloat() / long
         return (w * scale).toInt().coerceAtLeast(1) to (h * scale).toInt().coerceAtLeast(1)

@@ -19,6 +19,7 @@ import eu.kanade.domain.chapter.model.toDbChapter
 import eu.kanade.domain.manga.interactor.SetMangaViewerFlags
 import eu.kanade.domain.manga.model.readerOrientation
 import eu.kanade.domain.manga.model.readingMode
+import eu.kanade.domain.manga.model.toSManga
 import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.data.database.models.toDomainChapter
@@ -37,6 +38,7 @@ import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import mihon.core.common.archive.ArchivePasswordException
+import mihon.core.common.archive.RemoteScheme
 import eu.kanade.tachiyomi.util.pdf.PdfPasswordException
 import eu.kanade.tachiyomi.util.pdf.PdfPasswordHolder
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
@@ -99,6 +101,7 @@ import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.source.local.LocalSource
 import tachiyomi.source.local.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -229,6 +232,8 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     private val chapterList by lazy {
         val manga = manga!!
+        // Komiho: 打开阅读器时列一次目录，用来剔除「DB 里还有、文件已被删/移走」的章节。
+        val existingLocalChapters = localExistingChapterUrls(manga)
         // SY -->
         val chapters = runBlocking {
             getChaptersByMangaId.await(manga.id, applyScanlatorFilter = true)
@@ -297,9 +302,29 @@ class ReaderViewModel @JvmOverloads constructor(
                     this
                 }
             }
+            // Komiho: 本地章节的文件已被删除/移走时，从阅读器的相邻章节序列里剔除 —— 否则
+            // 「下一章」仍指向一个不存在的文件，翻到卷末直接报错。判不了（目录列不出来 /
+            // 远程章节）的一律保留，见 [localExistingChapterUrls]。
+            // DB 记录本身仍由「更新库 / 下拉刷新书籍」同步，这里只修阅读器内的导航序列。
+            .filter { existingLocalChapters == null || chapterExistsLocally(it.url, existingLocalChapters) }
             .map { it.toDbChapter() }
             .map(::ReaderChapter)
     }
+
+    /**
+     * Komiho: 本地漫画目录里「实际存在」的章节 url 集合；null = 无法判定。
+     *
+     * 一次目录列举即可，不能直接 `File(url).exists()`：仅 SAF 授权（未拿「所有文件访问」）时，
+     * 真实路径用 File API 一律访问不到，整个书架都会被误判成「已删除」。远程章节（webdav/smb）
+     * 不在本地目录里，由 [chapterExistsLocally] 单独放行。
+     */
+    private fun localExistingChapterUrls(manga: Manga): Set<String>? {
+        val source = sourceManager.get(manga.source) as? LocalSource ?: return null
+        return runCatching { source.existingChapterUrls(manga.toSManga()) }.getOrNull()
+    }
+
+    private fun chapterExistsLocally(url: String, existing: Set<String>): Boolean =
+        RemoteScheme.isRemote(url) || url in existing
 
     private val incognitoMode: Boolean by lazy { getIncognitoState.await(manga?.source) }
     private val downloadAheadAmount = downloadPreferences.autoDownloadWhileReading.get()
@@ -429,9 +454,19 @@ class ReaderViewModel @JvmOverloads constructor(
                         // SY <--
                     )
 
+                    // Komiho: 续读章节的文件已被删/移走时（本地章节已从列表剔除），退到第一条
+                    // 仍存在的章节；否则 first{} 会抛 NoSuchElementException，阅读器直接关掉。
+                    val initialChapter = chapterList.firstOrNull { chapterId == it.chapter.id }
+                        ?: chapterList.firstOrNull()
+                    if (initialChapter == null) {
+                        error("没有可读的章节（本地文件可能已被移走）")
+                    }
+                    if (chapterId != initialChapter.chapter.id) {
+                        chapterId = initialChapter.chapter.id!!
+                    }
                     loadChapter(
                         loader!!,
-                        chapterList.first { chapterId == it.chapter.id },
+                        initialChapter,
                         /* SY --> */page, /* SY <-- */
                     )
                     Result.success(true)
@@ -592,9 +627,50 @@ class ReaderViewModel @JvmOverloads constructor(
                 e,
             )
             logcat(LogPriority.ERROR, e)
+            // Komiho: 失败原因是「本地文件已被删除/移走」时，不把用户钉在报错页 ——
+            // 沿同一方向继续找第一个仍存在的章节并打开（列表是打开阅读器时的快照，
+            // 阅读期间被删的章节仍在里面）。
+            if (openNextExistingLocalChapter(loader, chapter)) return
         } finally {
             mutableState.update { it.copy(isLoadingAdjacentChapter = false) }
         }
+    }
+
+    /**
+     * Komiho: [failed] 确认已从磁盘消失时，沿原方向（下一章 / 上一章）跳到第一个仍存在的
+     * 章节并打开。返回 true = 已经改打开别的章节。
+     *
+     * 只在「确认不存在」时生效：判不了的情况按原来的失败处理，避免把权限问题、损坏文件
+     * 误当成「这章没了」静默跳过。
+     */
+    private suspend fun openNextExistingLocalChapter(loader: ChapterLoader, failed: ReaderChapter): Boolean {
+        val existing = localExistingChapterUrls(manga ?: return false) ?: return false
+        if (chapterExistsLocally(failed.chapter.url, existing)) return false
+        val failedIndex = chapterList.indexOf(failed)
+        if (failedIndex < 0) return false
+        val currentIndex = getCurrentChapter()?.let { chapterList.indexOf(it) } ?: -1
+        val step = if (failedIndex > currentIndex) 1 else -1
+        var i = failedIndex + step
+        while (i in chapterList.indices) {
+            val candidate = chapterList[i]
+            if (chapterExistsLocally(candidate.chapter.url, existing)) {
+                return try {
+                    withIOContext { loadChapter(loader, candidate) }
+                    logcat { "跳过已删除的本地章节 ${failed.chapter.url} → ${candidate.chapter.url}" }
+                    true
+                } catch (e: Throwable) {
+                    if (e is CancellationException) throw e
+                    eu.kanade.tachiyomi.diagnostic.DiagLog.e(
+                        "ReaderAdjacent",
+                        "跳过缺失章节后仍失败 chapter=${candidate.chapter.url}",
+                        e,
+                    )
+                    false
+                }
+            }
+            i += step
+        }
+        return false
     }
 
     /**

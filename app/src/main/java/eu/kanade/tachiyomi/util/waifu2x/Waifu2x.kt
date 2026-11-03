@@ -97,6 +97,16 @@ object Waifu2x {
     private const val FP16_ARITHMETIC = true
 
     /**
+     * Komiho 诊断:原生边界 breadcrumb 的 tag。
+     *
+     * 引擎初始化（QNN context / Vulkan 驱动 / LiteRT 委托）与单次推理是整个阅读链路里
+     * 唯一会 SIGSEGV 的几段，而它们成功后才有的日志在崩溃时一条都看不到 —— 于是一次 native
+     * 崩溃在导出日志里只剩「打开第 0 页图片」然后凭空断掉。这里在**进原生之前**先落一行，
+     * grep `Waifu2xEngine` 就能分清死在 init 还是死在推理、死在哪个引擎。
+     */
+    private const val TAG_ENGINE = "Waifu2xEngine"
+
+    /**
      * Bump when the bundled model assets change so existing installs re-extract.
      *
      * 2026-09-17 v2: QNN contexts moved from a single v81 target to a per-arch set
@@ -426,6 +436,11 @@ object Waifu2x {
                 if (litert) LiteRtNative.clearAbort() else nativeClearAbortProcessing()
                 waitMs = android.os.SystemClock.uptimeMillis() - waitStart
 
+                eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+                    TAG_ENGINE,
+                    "infer begin page=$id ${argb.width}x${argb.height} " +
+                        "engine=${if (litert) "litert" else activeModel?.backend}",
+                )
                 val procStart = android.os.SystemClock.uptimeMillis()
                 val result = if (litert) LiteRtNative.processBitmap(argb) else nativeProcess(argb, id)
                 procMs = android.os.SystemClock.uptimeMillis() - procStart
@@ -673,6 +688,10 @@ object Waifu2x {
     private fun ensureEngine(context: Context): Boolean = synchronized(this) {
         val model = requestedModel
         if (isInitialized && activeModel == model) return true
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+            TAG_ENGINE,
+            "engine init begin model=${model.id} backend=${model.backend}",
+        )
 
         if (model.backend == UpscaleModelSpec.Backend.QNN_HTP) {
             val ok = initQnnEngine(context, model)
@@ -741,12 +760,14 @@ object Waifu2x {
             return false
         }
 
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(TAG_ENGINE, "ncnn init begin stem=${model.stem}")
         val ok = try {
             nativeInitW2xEx(dir, model.stem, model.scale, PRECISION, FP16_ARITHMETIC, model.padding)
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "Waifu2x: native init threw" }
             false
         }
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(TAG_ENGINE, "ncnn init end ok=$ok")
         isInitialized = ok
         activeModel = if (ok) model else null
         if (ok) {
@@ -784,12 +805,18 @@ object Waifu2x {
         }
         val contextPath = prepareQnnContext(context, model, asset) ?: return false
         val libraryDir = context.applicationInfo.nativeLibraryDir
-        return try {
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+            TAG_ENGINE,
+            "qnn init begin model=${model.id} arch=$arch context=$contextPath",
+        )
+        val ok = try {
             nativeInitQnn(contextPath, libraryDir, model.padding)
         } catch (e: Throwable) {
             logcat(LogPriority.WARN, e) { "Waifu2x: nativeInitQnn threw (missing symbol?)" }
             false
         }
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(TAG_ENGINE, "qnn init end ok=$ok")
+        return ok
     }
 
     /**
@@ -817,6 +844,10 @@ object Waifu2x {
         }
         val modelFile = prepareLiteRtModel(context, model) ?: return false
         val workDir = File(context.noBackupFilesDir, "mediatek-npu/${model.id}").apply { mkdirs() }
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+            TAG_ENGINE,
+            "litert init begin model=${model.id} model=$modelFile",
+        )
         val error = LiteRtNative.initialize(
             model = modelFile,
             cacheDir = workDir,
@@ -825,6 +856,7 @@ object Waifu2x {
             padding = model.padding,
             cpuOnly = false,
         )
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(TAG_ENGINE, "litert init end error=$error")
         if (error != null) {
             logcat(LogPriority.WARN) { "Waifu2x: LiteRT init failed for ${model.id}: $error" }
             recordLiteRtFailure(context, model.id, error)

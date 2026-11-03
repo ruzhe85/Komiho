@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import eu.kanade.presentation.util.isTabletUi
 import eu.kanade.tachiyomi.util.system.EinkMotion
 import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
@@ -190,6 +192,12 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
     // 由 BookShelf 通过 onSelectionModeChange 上报。
     var shelfInSelection by remember { mutableStateOf(false) }
 
+    // Komiho: 书籍列表的滚动位置提到屏幕级。onResume（从阅读器返回）会 load()，把 loading
+    // 置 true，列表在「加载中 → 有数据」之间离开组合；状态若建在列表内部，位置随之丢失，
+    // 每次回来都从最上面开始。
+    val bookListState = rememberLazyListState()
+    val bookGridState = rememberLazyGridState()
+
     fun openBook(bookId: String) {
         loadScope.launch {
             runCatching { KomgaReaderLauncher.open(context, client, bookId) }
@@ -328,6 +336,8 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                                 books = books,
                                 mode = mode,
                                 columns = columns,
+                                listState = bookListState,
+                                gridState = bookGridState,
                             header = {
                                 Column {
                                     Text(
@@ -357,6 +367,8 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
                             books = books,
                             mode = mode,
                             columns = columns,
+                            listState = bookListState,
+                            gridState = bookGridState,
                             header = {
                                 Column {
                                     SeriesDetailHeader(
