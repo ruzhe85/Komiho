@@ -293,6 +293,9 @@ object ImageUtil {
             Side.LEFT -> Rect(0, 0, width / 2, height)
         }
         half.applyCanvas {
+            // Komiho (2026-11-04): 先铺纯白。输出是 JPEG（无 alpha），不铺的话
+            // 带透明底的图（调色板 PNG 的 tRNS、普通 RGBA）整片会变成不透明黑。
+            drawColor(Color.WHITE)
             drawBitmap(imageBitmap, part, singlePage, null)
         }
         val output = Buffer()
@@ -306,8 +309,10 @@ object ImageUtil {
         val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
         val rotated = rotateBitMap(imageBitmap, degrees)
 
+        // 输出 JPEG，同样先压白底（透明区否则变黑）。
+        val flattened = flattenOnWhite(rotated) ?: rotated
         val output = Buffer()
-        rotated.compress(Bitmap.CompressFormat.JPEG, 100, output.outputStream())
+        flattened.compress(Bitmap.CompressFormat.JPEG, 100, output.outputStream())
 
         return output
     }
@@ -329,6 +334,8 @@ object ImageUtil {
 
         val result = createBitmap(width / 2, height * 2)
         result.applyCanvas {
+            // Komiho (2026-11-04): 输出 JPEG，先铺纯白，避免透明区变黑。
+            drawColor(Color.WHITE)
             // right -> upper
             val rightPart = when (upperSide) {
                 Side.RIGHT -> Rect(width - width / 2, 0, width, height)
@@ -559,6 +566,55 @@ object ImageUtil {
         val type = runCatching { findImageType { imageSource.peek().inputStream() } }.getOrNull()
             ?: return null
         return if (type == ImageType.JPEG) null else Color.WHITE.toDrawable()
+    }
+
+    /**
+     * Komiho (2026-11-04): 位图里是否存在**真正透明**的像素。
+     *
+     * 只看 `hasAlpha()` 没用 —— ARGB_8888 恒为 true。这里按网格采样（外加四角），
+     * 命中一次 `alpha < 255` 就返回。用于「解码后、增强前」判断这张图要不要压白底。
+     */
+    fun hasTransparentPixels(bitmap: Bitmap): Boolean {
+        if (bitmap.isRecycled || bitmap.config != Bitmap.Config.ARGB_8888) return false
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w <= 0 || h <= 0) return false
+        // 四角最容易是透明的（logo/标题卡），先看
+        val corners = intArrayOf(0, 0, w - 1, 0, 0, h - 1, w - 1, h - 1)
+        for (i in corners.indices step 2) {
+            if (Color.alpha(bitmap[corners[i], corners[i + 1]]) < 255) return true
+        }
+        val stepX = (w / 24).coerceAtLeast(1)
+        val stepY = (h / 24).coerceAtLeast(1)
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                if (Color.alpha(bitmap[x, y]) < 255) return true
+                x += stepX
+            }
+            y += stepY
+        }
+        return false
+    }
+
+    /**
+     * Komiho (2026-11-04): 把带透明通道的位图压到**纯白**底上，返回新位图（不回收入参）。
+     *
+     * 与 PDF 渲染兜底保持同一口径（那边是 `eraseColor(Color.WHITE)` 后再画）。
+     * 透明图（logo、标题卡、透明插画）在增强 / 编码 / 缩放链路里很容易丢掉 alpha
+     * （RGB 内核会把 alpha 写成 255，透明区随即变成不透明黑），提前压白就一劳永逸。
+     */
+    fun flattenOnWhite(bitmap: Bitmap): Bitmap? {
+        if (bitmap.isRecycled) return null
+        return runCatching {
+            val out = createBitmap(bitmap.width, bitmap.height)
+            out.applyCanvas {
+                drawColor(Color.WHITE)
+                drawBitmap(bitmap, 0f, 0f, null)
+            }
+            out
+        }.getOrNull()
     }
 
     /** 四角采样里是否含透明像素（带透明底的素材图，不能拿角上的颜色当页面背景）。 */

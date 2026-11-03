@@ -81,27 +81,48 @@ class PdfParser(path: String) {
             runCatching { parseXref(sx) }
                 .onFailure { DiagLog.w(TAG, "xref parse failed: ${it.message}") }
         }
-        // Komiho (2026-11-03): xref 不可用时退回「全文件扫描重建对象表」。
+
+        // 第一轮：直接用 xref 结果解析页树。任何异常都只记日志，不中断。
+        resolveAndCollect()
+
+        // Komiho (2026-11-03): 拿不到任何页面就**整表扫描重建**，再用重建结果解析一遍。
         //
         // 典型来源是用工具「解锁 / 精简」过的 PDF：xref 流被写成 `/Length 0`（或偏移全错），
-        // 于是 xref 一条对象都读不出来 —— 我们的解析器拿不到页面，PDFium 更是直接报
-        // 「需要密码」，而文件里既没有 /Encrypt、页面和 JPEG 也全都完好。
-        // 这种时候只能不信任 xref，靠扫 `N G obj` 重建（PDF 阅读器普遍都这么兜底）。
-        if (objStart.isEmpty() || rootRef == null) {
-            DiagLog.w(TAG, "xref unusable (objs=${objStart.size}, root=$rootRef), rebuild by scanning")
+        // 于是 xref 里的对象偏移全是垃圾 —— 拿它解析页树要么抛越界、要么 0 页，PDFium 那边更是
+        // 直接报「需要密码」，而文件里既没有 /Encrypt、页面和 JPEG 也全都完好。
+        // 判据用「有没有解析出页面」而不是「objStart 空不空」：垃圾 xref 同样会让 objStart 非空，
+        // 之前就是因为这个判据太弱，重建根本没被触发（日志里连一行都没有）。
+        if (pageList.isEmpty()) {
+            DiagLog.w(TAG, "no pages via xref (objs=${objStart.size}, root=$rootRef), rebuild by scanning")
             objStart.clear()
             objStmInner.clear()
             fromObjStm.clear()
             loadedObjStm.clear()
             pageList.clear()
             pageResources.clear()
+            pagesRootRef = null
             trailerPrev = null
             runCatching { scanWholeFile() }
                 .onFailure { DiagLog.w(TAG, "scan rebuild failed: ${it.message}") }
-            DiagLog.d(TAG, "scan rebuild: objs=${objStart.size} root=$rootRef pages=${pageList.size}")
+            DiagLog.d(TAG, "scan rebuild: objs=${objStart.size} root=$rootRef, retry pages")
+            resolveAndCollect()
         }
-        resolveRoot()
-        collectPages()
+
+        if (pageList.isEmpty()) {
+            // 两条路都拿不到页面：交给上层回落系统渲染（不是「加密」，别弹密码框）。
+            parseOk = false
+            DiagLog.w(TAG, "PDF parse: still no pages after rebuild, give up")
+        } else {
+            DiagLog.d(TAG, "PDF parse ok: pages=${pageList.size} objs=${objStart.size}")
+        }
+    }
+
+    /** 解析页树；xref 结果里有垃圾偏移时 `objectBytesAt` 会抛越界，这里吞掉并记日志。 */
+    private fun resolveAndCollect() {
+        runCatching {
+            resolveRoot()
+            collectPages()
+        }.onFailure { DiagLog.w(TAG, "collect pages failed: ${it.message}") }
     }
 
     private fun findStartXref(): Int {
@@ -174,7 +195,7 @@ class PdfParser(path: String) {
     private fun parseXrefStream(offset: Int) {
         val objStartPos = data.lastIndexOfBytes("obj".toByteArray(ISO), offset + 16)
         if (objStartPos < 0) return
-        val bytes = objectBytesAt(objStartPos)
+        val bytes = objectBytesAt(objStartPos) ?: return
         val dict = parseDict(bytes, firstDictStart(bytes), dictEnd(bytes)) ?: return
         val w = dict["/W"]?.let { parseIntArray(it) } ?: return
         if (w.isEmpty()) return
@@ -414,10 +435,13 @@ class PdfParser(path: String) {
 
     // ---------- 对象模型 ----------
 
-    private fun objectBytesAt(offset: Int): ByteArray {
+    /** 取对象字节。偏移非法（xref 是垃圾时会出现）返回 null，绝不抛越界给上层。 */
+    private fun objectBytesAt(offset: Int): ByteArray? {
+        if (offset < 0 || offset >= data.size) return null
         val e = data.indexOfBytes("endobj".toByteArray(ISO), offset)
         val end = if (e >= 0) e else data.size
-        return data.copyOfRange(offset, end)
+        if (end <= offset || end > data.size) return null
+        return runCatching { data.copyOfRange(offset, end) }.getOrNull()
     }
 
     private fun dictOf(objNum: Int): Map<String, ByteArray>? {
