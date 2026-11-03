@@ -711,16 +711,36 @@ class PagerPageHolder(
     }
 
     private fun handleWideImage(imageSource: BufferedSource): BufferedSource {
-        return if (
-            !ImageUtil.isAnimatedAndSupported(imageSource) &&
-            ImageUtil.isWideImage(imageSource) &&
-            viewer.config.centerMarginType and PagerConfig.CenterMarginType.WIDE_PAGE_CENTER_MARGIN > 0 &&
-            !viewer.config.imageCropBorders
+        if (
+            ImageUtil.isAnimatedAndSupported(imageSource) ||
+            !ImageUtil.isWideImage(imageSource) ||
+            viewer.config.centerMarginType and PagerConfig.CenterMarginType.WIDE_PAGE_CENTER_MARGIN == 0 ||
+            viewer.config.imageCropBorders
         ) {
-            ImageUtil.addHorizontalCenterMargin(imageSource, height, context)
-        } else {
-            imageSource
+            return imageSource
         }
+
+        // Komiho: 宽页（4:1 的 logo、跨页插图）会被重复 setImage —— 打开、adapter 重建、预载、
+        // 翻页各来一次，而补白要「整图解码 + 补边 + 整图重编码」。不缓存的话翻到这张图就是
+        // 连着几次几百毫秒的卡。按「页号 + 视图高度」缓存处理结果。
+        val cacheKey = "wide:${page.index}:$height:${viewer.config.pageCanvasColor}"
+        viewer.cachedWidePage(cacheKey)?.let { cached ->
+            imageSource.close()
+            return okio.Buffer().write(cached)
+        }
+
+        val startedAt = android.os.SystemClock.uptimeMillis()
+        val processed = ImageUtil.addHorizontalCenterMargin(imageSource, height, viewer.config.pageCanvasColor)
+        val bytes = runCatching { processed.readByteArray() }.getOrNull()
+        if (bytes == null || bytes.isEmpty()) return processed
+
+        viewer.cacheWidePage(cacheKey, bytes)
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+            "KomihoPageShow",
+            "wide-page margin page=${page.index} height=$height " +
+                "cost=${android.os.SystemClock.uptimeMillis() - startedAt}ms bytes=${bytes.size}",
+        )
+        return okio.Buffer().write(bytes)
     }
 
     private fun decodeImage(imageSource: BufferedSource): Bitmap? {

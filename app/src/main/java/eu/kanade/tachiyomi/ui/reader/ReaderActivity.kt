@@ -436,12 +436,20 @@ class ReaderActivity : BaseActivity() {
                     totalPages = state.totalPages,
                     modifier = Modifier
                         .align(indicatorAlignment)
-                        // 靠边时留一点边距，避免贴着屏幕边缘；居中时保持原样。
+                        // Komiho: 靠边时的退让量。圆角屏（R 角）上贴边会被弧线切掉一角，
+                        // 所以横向多让一点、底部略抬，避免「左下/右下」看不到完整页码；
+                        // 居中保持原样。
                         .then(
-                            if (pageNumberPosition == ReaderPreferences.PageNumberPosition.CENTER) {
-                                Modifier
-                            } else {
-                                Modifier.padding(horizontal = 16.dp)
+                            when (pageNumberPosition) {
+                                ReaderPreferences.PageNumberPosition.LEFT -> Modifier.padding(
+                                    start = PAGE_NUMBER_EDGE_INSET,
+                                    bottom = PAGE_NUMBER_EDGE_LIFT,
+                                )
+                                ReaderPreferences.PageNumberPosition.RIGHT -> Modifier.padding(
+                                    end = PAGE_NUMBER_EDGE_INSET,
+                                    bottom = PAGE_NUMBER_EDGE_LIFT,
+                                )
+                                else -> Modifier
                             },
                         )
                         .navigationBarsPadding(),
@@ -1968,3 +1976,12 @@ class ReaderActivity : BaseActivity() {
         }
     }
 }
+/**
+ * Komiho: 页码靠边时的退让量。
+ *
+ * 圆角屏（R 角）上把页码贴到屏幕边缘，会被圆角弧线切掉一角，「左下 / 右下」就会看不全。
+ * 所以横向让出 [PAGE_NUMBER_EDGE_INSET]、底部再抬 [PAGE_NUMBER_EDGE_LIFT]，
+ * 让文字整体落在弧线之外。居中不受影响。
+ */
+private val PAGE_NUMBER_EDGE_INSET = 28.dp
+private val PAGE_NUMBER_EDGE_LIFT = 10.dp

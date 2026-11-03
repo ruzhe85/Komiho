@@ -621,6 +621,11 @@ class WebtoonViewer(
             eu.kanade.tachiyomi.diagnostic.DiagLog.d(KOMIHA_REBUILD_TAG, "skip rebuild: image settings unchanged")
             return
         }
+        // Komiho 诊断：重建会把可见页重新解码一遍（很卡），记下指纹前后值才能知道是哪个设置晚到。
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+            KOMIHA_REBUILD_TAG,
+            "fingerprint changed: old=${lastImageFingerprint} new=$fingerprint",
+        )
         lastImageFingerprint = fingerprint
 
         // 合并连续触发：一串真变更并成一次重建（理由同上，代价与上面一致）。

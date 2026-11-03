@@ -366,7 +366,7 @@ object PagerPagePreparer {
             config.centerMarginType and PagerConfig.CenterMarginType.WIDE_PAGE_CENTER_MARGIN > 0 &&
             !config.imageCropBorders
         ) {
-            ImageUtil.addHorizontalCenterMargin(imageSource, viewHeight, viewer.activity)
+            ImageUtil.addHorizontalCenterMargin(imageSource, viewHeight, viewer.config.pageCanvasColor)
         } else {
             imageSource
         }

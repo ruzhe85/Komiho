@@ -5,7 +5,7 @@ import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import android.util.Log
+import eu.kanade.tachiyomi.diagnostic.DiagLog
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.math.sqrt
@@ -75,7 +75,7 @@ object PdfRenderFallback {
             if (pageIndex < 0 || pageIndex >= renderer.pageCount) return null
             val page = renderer.openPage(pageIndex)
             val (tw, th) = fit(page.width, page.height, maxLongSide, tallWidthDriven)
-            Log.d(TAG, "render page=$pageIndex page=${page.width}x${page.height} -> ${tw}x$th")
+            DiagLog.d(TAG, "render page=$pageIndex page=${page.width}x${page.height} -> ${tw}x$th")
             val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
             bmp.eraseColor(Color.WHITE)
             page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -193,7 +193,7 @@ object PdfRenderFallback {
             withCachedRenderer(path, password) { it.pageCount } ?: 0
         } catch (e: Exception) {
             if (password != null) throw e
-            android.util.Log.w(TAG, "getPageCount failed: ${e.message}")
+            DiagLog.w(TAG, "getPageCount failed: ${e.message}")
             0
         }
     }
@@ -209,7 +209,7 @@ object PdfRenderFallback {
             }
         } catch (e: Exception) {
             if (password != null) throw e
-            android.util.Log.w(TAG, "getPageCount failed: ${e.message}")
+            DiagLog.w(TAG, "getPageCount failed: ${e.message}")
             0
         }
     }
@@ -225,6 +225,9 @@ object PdfRenderFallback {
             // 首页渲染都能直接用它，不必再让 PDFium 解析一遍。
             withCachedRenderer(path, null) { true } ?: false
         } catch (e: SecurityException) {
+            // Komiho: 把 PDFium 的原话记下来 —— 「明明没密码却要密码」时就看这一行：
+            // 真正的加密文档报 password required/incorrect，结构损坏的文档报的往往是别的东西。
+            DiagLog.w(TAG, "PDFium requires password: ${e.message}")
             true
         }
     }

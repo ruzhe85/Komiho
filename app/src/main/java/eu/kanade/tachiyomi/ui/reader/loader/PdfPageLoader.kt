@@ -1,8 +1,8 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
 import android.content.Context
-import android.util.Log
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.util.pdf.PdfPasswordException
@@ -66,14 +66,14 @@ internal class PdfPageLoader private constructor(
 
     override suspend fun getPages(): List<ReaderPage> = withIOContext {
         path = resolvePath()
-        Log.d(TAG, "PDF open: path=$path")
+        DiagLog.d(TAG, "PDF open: path=$path")
 
         // 超大 PDF（>200MB）不整文件载入内存解析（避免 OOM），直接走系统渲染兜底；
         // 仍用运行时探测判定加密，保证加密 PDF 弹密码框。
         val openStartedAt = android.os.SystemClock.elapsedRealtime()
         val fileSize = File(path).length()
         val probe = if (fileSize <= MAX_PARSER_FILE_BYTES) runCatching { PdfParser(path) }.getOrNull() else null
-        Log.d(
+        DiagLog.d(
             TAG,
             "PDF probe: ${fileSize / 1024 / 1024}MB parser=${probe?.parseOk == true} pages=${probe?.pageCount} " +
                 "耗时=${android.os.SystemClock.elapsedRealtime() - openStartedAt}ms",
@@ -88,7 +88,17 @@ internal class PdfPageLoader private constructor(
         //   hasEncrypt=false + 探测=true  → 解析器漏判，仍按加密处理（弹框）
         //   hasEncrypt=true  + 探测=false → 权限型，不弹框、直接整页渲染
         // 探测本身失败（非 SecurityException）时沿用旧口径 = hasEncrypt。
-        val needsPassword = runCatching { PdfRenderFallback.isEncryptedPdf(path) }.getOrElse { hasEncrypt }
+        // Komiho (2026-11-03): 解析器已经确认「结构能解析 + trailer 里没有 /Encrypt」时，不再让
+        // PDFium 的 SecurityException 推翻它。有一类 PDF（「解锁」工具处理过的、加密字典残留的、
+        // 或 PDFium 拒绝解析的）会让 PdfRenderer 一律抛 SecurityException，但文档其实一个密码都没有
+        // —— 以前据此弹密码框，输什么都会失败，于是「没密码却反复要密码」。
+        val parserTrusted = probe != null && probe.parseOk && probe.pageCount > 0
+        val needsPassword = if (parserTrusted && !hasEncrypt) {
+            false
+        } else {
+            runCatching { PdfRenderFallback.isEncryptedPdf(path) }.getOrElse { hasEncrypt }
+        }
+        DiagLog.d(TAG, "PDF encrypt: parserEncrypt=$hasEncrypt parserTrusted=$parserTrusted needsPassword=$needsPassword")
         // 是否按加密文档处理 —— 决定能不能走「内嵌图直通」：加密文档的流是 RC4/AES 密文，
         // 直通只会把密文当 JPEG 交下去，解出乱码。
         val encrypted = hasEncrypt || needsPassword
@@ -100,7 +110,7 @@ internal class PdfPageLoader private constructor(
             // 要的是证书私钥而不是密码，弹密码框只会让用户反复「密码错误」又退不出去 → 直接给专门提示。
             val encryptFilter = if (hasEncrypt) probe?.encryptFilter() else null
             if (encryptFilter != null && !encryptFilter.equals("Standard", ignoreCase = true)) {
-                Log.w(TAG, "PDF certificate DRM, filter=$encryptFilter")
+                DiagLog.w(TAG, "PDF certificate DRM, filter=$encryptFilter")
                 throw Exception(context.withAppLanguage().stringResource(MR.strings.pdf_drm_certificate_error))
             }
             if (needsPassword) {
@@ -118,27 +128,27 @@ internal class PdfPageLoader private constructor(
                     .getOrElse { throw PdfPasswordException(wrongPassword = true) }
                 if (n <= 0) throw PdfPasswordException(wrongPassword = true)
                 effectivePassword = pw
-                Log.d(TAG, "PDF encrypted, render-only with password, pages=$n")
+                DiagLog.d(TAG, "PDF encrypted, render-only with password, pages=$n")
             } else {
                 // 权限型加密：无密码渲染即可。currentPassword 保持 null —— 下面「SecurityException
                 // 转 wrongPassword」只在真给过密码时才成立，权限型的不该被报成「密码错误」。
-                Log.d(TAG, "PDF permission-only encryption, render-only without password")
+                DiagLog.d(TAG, "PDF permission-only encryption, render-only without password")
             }
             renderOnly = true
         } else if (probe != null && probe.parseOk && probe.pageCount > 0) {
             parser = probe
             renderOnly = false
-            Log.d(TAG, "PDF extract mode, pages=${probe.pageCount}")
+            DiagLog.d(TAG, "PDF extract mode, pages=${probe.pageCount}")
         } else {
             renderOnly = true
-            Log.d(TAG, "PDF parse incomplete / 超大文件, fallback to render-only")
+            DiagLog.d(TAG, "PDF parse incomplete / 超大文件, fallback to render-only")
         }
 
         currentPassword = effectivePassword
 
         val pages = if (renderOnly) {
             val n = PdfRenderFallback.getPageCount(path, currentPassword)
-            Log.d(TAG, "PDF render-only mode, pages=$n")
+            DiagLog.d(TAG, "PDF render-only mode, pages=$n")
             if (n <= 0) throw Exception("PDF 无法解析（可能已损坏或已加密）")
             List(n) { i ->
                 ReaderPage(i).apply {
@@ -160,7 +170,7 @@ internal class PdfPageLoader private constructor(
                 }
             }
         }
-        Log.d(
+        DiagLog.d(
             TAG,
             "PDF open done: mode=${if (renderOnly) "render" else "extract"} pages=${pages.size} " +
                 "dct直通=${pages.count { !it.skipEnhance }} " +
@@ -245,13 +255,13 @@ internal class PdfPageLoader private constructor(
                     if (raw != null && raw.isNotEmpty()) {
                         // 直通即「拆原图」：落到这里的字节就是 PDF 内嵌 JPEG 的原样，
                         // 另存图片/增强拿到的都是这个尺寸，不再经过栅格化。
-                        Log.d(TAG, "page ${index + 1}: DCT passthrough ${img.width}x${img.height} (${raw.size}B)")
+                        DiagLog.d(TAG, "page ${index + 1}: DCT passthrough ${img.width}x${img.height} (${raw.size}B)")
                         return ByteArrayInputStream(raw)
                     }
                 }
-                Log.d(TAG, "page ${index + 1}: no passable DCT image (filter=${img?.filter}), render fallback")
+                DiagLog.d(TAG, "page ${index + 1}: no passable DCT image (filter=${img?.filter}), render fallback")
             } catch (e: Exception) {
-                Log.w(TAG, "PDF extract page ${index + 1} failed, render fallback: ${e.message}")
+                DiagLog.w(TAG, "PDF extract page ${index + 1} failed, render fallback: ${e.message}")
             }
         }
         // 兜底：系统渲染（含加密带密码；密码错误时系统抛 SecurityException → 转 wrongPassword）

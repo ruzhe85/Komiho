@@ -149,6 +149,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
      */
     var skipEnhance: Boolean = false
 
+    /** Komiho 诊断：本次 setImage 的起始时刻（uptimeMillis，0 = 无进行中的请求）。 */
+    private var showStartedAt: Long = 0L
+
+    /** Komiho 诊断：本次显示的来源（stream / animated / bitmap）。 */
+    private var showKind: String = ""
+
     /**
      * Komiho (2026-10-13): 当前屏上图是否**真出过增强图**。false = 未增强
      * （被抢占打断 / 增强失败 / 门禁跳过）。预解码位图路径由 holder 置位
@@ -169,6 +175,20 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     @CallSuper
     open fun onImageLoaded() {
+        // Komiho 诊断：从 setImage 到首帧的耗时 + 实际解码出的尺寸。
+        val started = showStartedAt
+        if (started > 0L) {
+            showStartedAt = 0L
+            val size = (pageView as? SubsamplingScaleImageView)
+                ?.takeIf { it.sWidth > 0 }
+                ?.let { "${it.sWidth}x${it.sHeight}" }
+                .orEmpty()
+            eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+                "KomihoPageShow",
+                "page=$pageIndex 首帧 ${android.os.SystemClock.uptimeMillis() - started}ms " +
+                    "kind=$showKind size=$size",
+            )
+        }
         onImageLoaded?.invoke()
         background = pageBackground
     }
@@ -252,6 +272,14 @@ open class ReaderPageImageView @JvmOverloads constructor(
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config, skipEnhance: Boolean = false) {
         this.config = config
         this.skipEnhance = skipEnhance
+        // Komiho 诊断：记下「发起显示」的时刻，首帧回调时打一行耗时 —— 「某页特别卡」时用来
+        // 分清是解码慢（耗时在大头）还是绘制卡（耗时很小但掉帧），也能看出同一页被重复 setImage。
+        showStartedAt = android.os.SystemClock.uptimeMillis()
+        showKind = if (isAnimated) "animated" else "stream"
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+            "KomihoPageShow",
+            "page=$pageIndex setImage kind=$showKind skipEnhance=$skipEnhance",
+        )
         // MihonSY: hide any leftover enhancement status from the previous image.
         enhanceStatusView?.visibility = View.GONE
         if (isAnimated) {
@@ -502,6 +530,11 @@ open class ReaderPageImageView @JvmOverloads constructor(
             // Enhancement now applies to every reading mode (webtoon/strip included).
             is BufferedSource -> {
                 val preferences = Injekt.get<ReaderPreferences>()
+                // Komiho 诊断：这一页到底是什么格式。JPEG/PNG/WebP/GIF 走标准链，AVIF/JXL/HEIF
+                // 只有 JNI 解码器认得 —— 「某页特别卡」时格式是第一嫌疑（AVIF/HEIF 软解很慢）。
+                val detectedType = runCatching {
+                    ImageUtil.findImageType { data.peek().inputStream() }?.name ?: "UNKNOWN"
+                }.getOrNull() ?: "?"
                 // Komiho: E-Ink 灰阶化也必须走这条 Coil / 自定义解码器链 ——
                 // 下面那条 SSIV 直解路径完全绕过位图处理，灰阶化会形同虚设。
                 // 这与「必须强制 customDecoder」是同一个原因。
@@ -529,6 +562,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     // 开「拆分双页」时一页被拆成两半、View 复用与重建最频繁，最先暴露。
                     // 改为「字节物化一次 + 每次 openStream 给一条新流」，彻底消掉这个失效模式。
                     val bytes = runCatching { data.readByteArray() }.getOrNull()
+                    eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+                        "KomihoPageShow",
+                        "page=$pageIndex engine=ssiv type=$detectedType bytes=${bytes?.size ?: 0}",
+                    )
                     if (bytes == null || bytes.isEmpty()) {
                         onImageLoadError(
                             IllegalStateException("页面数据为空，无法交给查看器解码（page=$pageIndex）"),
@@ -547,6 +584,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 }
 
                 val startTime = android.os.SystemClock.uptimeMillis()
+                eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+                    "KomihoPageShow",
+                    "page=$pageIndex engine=coil type=$detectedType enhanced=${preferences.enhancementMode.get() != 0 && !this@ReaderPageImageView.skipEnhance}",
+                )
                 ImageRequest.Builder(context)
                     .data(data)
                     .memoryCachePolicy(CachePolicy.DISABLED)

@@ -360,11 +360,15 @@ object ImageUtil {
      * Split the image into left and right parts, then merge them into a
      * new image with added center padding scaled relative to the height of the display view
      * to compensate for scaling.
+     *
+     * [canvasColor] 是阅读页的底色（`PagerConfig.pageCanvasColor`）：画布先铺这个颜色再画两半，
+     * 于是透明像素与中间留白都落成页面底色。输出是 JPEG（无 alpha 通道），不铺的话 PNG 的透明区
+     * 会被压成黑色。
      */
     fun addHorizontalCenterMargin(
         imageSource: BufferedSource,
         viewHeight: Int,
-        backgroundContext: Context,
+        canvasColor: Int = Color.WHITE,
     ): BufferedSource {
         // Komiho: 原来这里是 `?.decode()!!` —— 解不出直接 NPE 崩页；改为原样返回。
         val imageBitmap = decodeFullBitmap(imageSource) ?: return imageSource
@@ -378,14 +382,16 @@ object ImageUtil {
         val leftTargetPart = Rect(0, 0, width / 2, height)
         val rightTargetPart = Rect(width / 2 + centerPadding, 0, width + centerPadding, height)
 
-        val bgColor = chooseBackground(backgroundContext, imageSource)
-        bgColor.setBounds(width / 2, 0, width / 2 + centerPadding, height)
         val result = createBitmap(width + centerPadding, height)
 
         result.applyCanvas {
+            // Komiho: 先铺页面底色，再画两半 —— 透明像素自然合成为底色，不再变黑。
+            // 中间那条留白也由这次填充决定：它和页面四周同色，接缝看不出来。
+            // （旧实现用 chooseBackground 采样边角上色，但此时流已被 decodeFullBitmap 读空，
+            //   实际永远拿到白色 —— 深色页上反而会有一条突兀的白缝。）
+            drawColor(canvasColor)
             drawBitmap(imageBitmap, leftSourcePart, leftTargetPart, null)
             drawBitmap(imageBitmap, rightSourcePart, rightTargetPart, null)
-            bgColor.draw(this)
         }
 
         val output = Buffer()
