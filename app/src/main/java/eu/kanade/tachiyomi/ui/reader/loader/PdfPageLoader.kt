@@ -70,8 +70,14 @@ internal class PdfPageLoader private constructor(
 
         // 超大 PDF（>200MB）不整文件载入内存解析（避免 OOM），直接走系统渲染兜底；
         // 仍用运行时探测判定加密，保证加密 PDF 弹密码框。
+        val openStartedAt = android.os.SystemClock.elapsedRealtime()
         val fileSize = File(path).length()
         val probe = if (fileSize <= MAX_PARSER_FILE_BYTES) runCatching { PdfParser(path) }.getOrNull() else null
+        Log.d(
+            TAG,
+            "PDF probe: ${fileSize / 1024 / 1024}MB parser=${probe?.parseOk == true} pages=${probe?.pageCount} " +
+                "耗时=${android.os.SystemClock.elapsedRealtime() - openStartedAt}ms",
+        )
         // 文档里有没有 /Encrypt（离线判据，解析器偶发漏判）。
         val hasEncrypt = probe?.parseOk == true && probe.isEncrypted()
         // Komiho:「有 /Encrypt」≠「必须输密码」。权限型加密（只有所有者密码、**用户密码为空**，
@@ -138,7 +144,9 @@ internal class PdfPageLoader private constructor(
                 ReaderPage(i).apply {
                     stream = { openStream(i) }
                     status = Page.State.Ready
-                    skipEnhance = false
+                    // Komiho: 渲染出来的页不再跑 AI 2x —— 像素本来就是 PDFium 栅格化的结果，
+                    // 增强只会把每页从 ~200ms 拖到 1-2s，画质收益接近零（见 ReaderPage.skipEnhance）。
+                    skipEnhance = true
                 }
             }
         } else {
@@ -146,9 +154,18 @@ internal class PdfPageLoader private constructor(
                 ReaderPage(i).apply {
                     stream = { openStream(i) }
                     status = Page.State.Ready
+                    // Komiho: 只有 DCT 直通页（真原图）值得增强；其余会在取页时回落成渲染图，
+                    // 同样是栅格化结果，跳过 AI。这一步只解析页面字典，不碰像素，打开时开销可忽略。
+                    skipEnhance = parser!!.bestImageForPage(i)?.filter != "DCTDecode"
                 }
             }
         }
+        Log.d(
+            TAG,
+            "PDF open done: mode=${if (renderOnly) "render" else "extract"} pages=${pages.size} " +
+                "dct直通=${pages.count { !it.skipEnhance }} " +
+                "耗时=${android.os.SystemClock.elapsedRealtime() - openStartedAt}ms",
+        )
         pages
     }
 
@@ -248,6 +265,8 @@ internal class PdfPageLoader private constructor(
     }
 
     override fun recycle() {
+        // Komiho: 释放复用的 PdfRenderer（否则整份文档会一直被 PDFium 持有到进程结束）。
+        runCatching { PdfRenderFallback.releaseCachedRenderer() }
         super.recycle()
     }
 

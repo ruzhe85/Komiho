@@ -86,14 +86,99 @@ object PdfRenderFallback {
         }
     }
 
-    /** 渲染指定页为 PNG 字节流（供既有解码+增强管线消费）。 */
+    /*
+     * Komiho (2026-11-03): 复用 PdfRenderer —— 每取一页都 new 一个 PdfRenderer 等于让 PDFium 把
+     * 整份文档重新解析一遍（扫描本每页多花几十到上百毫秒，翻页明显发涩，和「秒开」的阅读器
+     * 差距就在这）。这里按「路径 + 密码」缓存一个实例，只在换文件/换密码时重建；
+     * 由 [PdfPageLoader.recycle] 调 [releaseCachedRenderer] 释放。
+     *
+     * PdfRenderer 非线程安全：整段渲染都在同一把锁里，天然把并发翻页的渲染排队。
+     */
+    private val rendererLock = Any()
+    private var cachedPath: String? = null
+    private var cachedPassword: String? = null
+    private var cachedPfd: ParcelFileDescriptor? = null
+    private var cachedRenderer: PdfRenderer? = null
+
+    /** 释放缓存里的渲染器（阅读器回收章节时调用；重复调用安全）。 */
+    fun releaseCachedRenderer() = synchronized(rendererLock) { closeCachedLocked() }
+
+    private fun closeCachedLocked() {
+        runCatching { cachedRenderer?.close() }
+        runCatching { cachedPfd?.close() }
+        cachedRenderer = null
+        cachedPfd = null
+        cachedPath = null
+        cachedPassword = null
+    }
+
+    private fun <T> withCachedRenderer(path: String, password: String?, block: (PdfRenderer) -> T?): T? =
+        synchronized(rendererLock) {
+            if (cachedRenderer == null || cachedPath != path || cachedPassword != password) {
+                closeCachedLocked()
+                val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+                val renderer = try {
+                    openRenderer(pfd, password)
+                } catch (e: Throwable) {
+                    runCatching { pfd.close() }
+                    throw e
+                }
+                cachedPfd = pfd
+                cachedRenderer = renderer
+                cachedPath = path
+                cachedPassword = password
+            }
+            val renderer = cachedRenderer ?: return null
+            block(renderer)
+        }
+
+    /** 渲染指定页为图片字节流（供既有解码+增强管线消费）。 */
     fun renderPage(path: String, pageIndex: Int, password: String? = null): ByteArray? {
-        val bmp = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
-            .use { pfd -> renderBitmap(pfd, pageIndex, TARGET_LONG_SIDE, password, tallWidthDriven = true) }
-            ?: return null
-        val out = ByteArrayOutputStream()
-        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
-        bmp.recycle()
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        val bytes = withCachedRenderer(path, password) { renderer ->
+            if (pageIndex < 0 || pageIndex >= renderer.pageCount) return@withCachedRenderer null
+            val page = renderer.openPage(pageIndex)
+            try {
+                val (tw, th) = fit(page.width, page.height, TARGET_LONG_SIDE, tallWidthDriven = true)
+                val renderStart = android.os.SystemClock.elapsedRealtime()
+                val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+                try {
+                    bmp.eraseColor(Color.WHITE)
+                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    val renderMs = android.os.SystemClock.elapsedRealtime() - renderStart
+                    val encodeStart = android.os.SystemClock.elapsedRealtime()
+                    val encoded = encodePage(bmp)
+                    eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+                        TAG,
+                        "render page=$pageIndex ${tw}x$th page=${page.width}x${page.height} " +
+                            "render=${renderMs}ms encode=${android.os.SystemClock.elapsedRealtime() - encodeStart}ms " +
+                            "bytes=${encoded.size} total=${android.os.SystemClock.elapsedRealtime() - startedAt}ms",
+                    )
+                    encoded
+                } finally {
+                    bmp.recycle()
+                }
+            } finally {
+                page.close()
+            }
+        }
+        return bytes
+    }
+
+    /**
+     * 页面像素 → 图片字节。
+     *
+     * API 30+ 用 **WebP 无损** 而不是 PNG：两者都是无损，但 Skia 的 WebP 编码器比 libpng 快
+     * 一大截，而这一层编码正是「渲染兜底页」除 PDFium 之外的第二个大头（3MP 扫描页 PNG
+     * 动辄几百毫秒/页）。低版本没有 WebP 无损常量，继续 PNG。
+     */
+    private fun encodePage(bmp: Bitmap): ByteArray {
+        val out = ByteArrayOutputStream(1 shl 20)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            bmp.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 100, out)
+        } else {
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
         return out.toByteArray()
     }
 
@@ -103,9 +188,9 @@ object PdfRenderFallback {
      */
     fun getPageCount(path: String, password: String? = null): Int {
         return try {
-            ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
-                getPageCount(pfd, password)
-            }
+            // Komiho: 走同一个缓存实例 —— 打开一本 PDF 会连着探加密、读页数，再逐页渲染；
+            // 以前这三次各 new 一个 PdfRenderer（= PDFium 整份解析三遍），是「打开慢」的一半。
+            withCachedRenderer(path, password) { it.pageCount } ?: 0
         } catch (e: Exception) {
             if (password != null) throw e
             android.util.Log.w(TAG, "getPageCount failed: ${e.message}")
@@ -136,13 +221,9 @@ object PdfRenderFallback {
      */
     fun isEncryptedPdf(path: String): Boolean {
         return try {
-            val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
-            try {
-                PdfRenderer(pfd).close()
-            } finally {
-                pfd.close()
-            }
-            false
+            // Komiho: 复用缓存实例。探测成功时顺手留下这个 renderer —— 紧接着的 getPageCount /
+            // 首页渲染都能直接用它，不必再让 PDFium 解析一遍。
+            withCachedRenderer(path, null) { true } ?: false
         } catch (e: SecurityException) {
             true
         }

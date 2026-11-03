@@ -102,13 +102,14 @@ object ImageUtil {
     // SY --> Komiho: 只读宽高（不解像素）。系统 bounds 在部分机型上对 AVIF 恒给 0×0
     // （骁龙 8 Elite 实测），此时改用 fork 的 ImageDecoder 取容器元数据 —— 仍然不解像素，
     // 只多一次流打开与头部解析。返回 null = 两条路都读不出尺寸。
+    //
+    // ⚠️ 绝对不能把 Java 流交给 BitmapFactory.decodeStream（原因见下方常量区的说明）。
     fun readImageSize(open: () -> InputStream?): Pair<Int, Int>? {
         val bounds = runCatching {
-            open()?.use { stream ->
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeStream(stream, null, options)
-                options.outWidth to options.outHeight
-            }
+            val head = readHead(open, BOUNDS_HEAD_BYTES) ?: return@runCatching null
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(head, 0, head.size, options)
+            options.outWidth to options.outHeight
         }.getOrNull()
         if (bounds != null && bounds.first > 0 && bounds.second > 0) return bounds
         return runCatching {
@@ -121,18 +122,71 @@ object ImageUtil {
         }.getOrNull()
     }
 
-    /** 系统解码：先 inJustDecodeBounds 探尺寸，再按 inSampleSize 采样解码（省内存）。 */
-    private fun decodeWithBitmapFactory(open: () -> InputStream?, maxPx: Int): Bitmap? = runCatching {
-        open()?.use { first ->
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeStream(first, null, opts)
-            if (opts.outWidth <= 0 || opts.outHeight <= 0) return@use null
-            val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
-            open()?.use { second ->
-                val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
-                BitmapFactory.decodeStream(second, null, opts2)
+    /*
+     * Komiho (2026-11-03): 为什么这里宁可多读一次字节，也不直接 BitmapFactory.decodeStream(stream)。
+     *
+     * 现场：OPPO PKJ110 / Android 17 上打开一本 EPUB，进程必崩 SIGSEGV（开不开图像增强都一样）。
+     * 系统给的 native 栈：
+     * ```
+     * __memmove_aarch64_nt
+     * art::JNI<false>::GetByteArrayRegion
+     * JavaInputStreamAdaptor::read          (libhwui.so)
+     * FrontBufferedStream::peek / SkCodec::MakeFromStream
+     * BitmapFactory.nativeDecodeStream
+     * android.graphics.BitmapFactory.decodeStream
+     * ImageUtil.readImageSize
+     * ReaderViewModel.measurePageAspectRatio   ← 自动条漫检测
+     * ```
+     * 崩点在框架「Java 流 → native」的适配层（GetByteArrayRegion 的 memmove 越界），与图片数据
+     * 本身无关；decodeByteArray 直接吃字节数组，完全不走那条适配层。
+     *
+     * 代价：只读尺寸时多读一次头部（BOUNDS_HEAD_BYTES，远小于一页图），换掉一处必崩的系统调用。
+     */
+
+    /** 探测尺寸只读这么多字节：JPEG 的 SOF、PNG 的 IHDR、WebP 的 VP8X 都在这个范围内。 */
+    private const val BOUNDS_HEAD_BYTES = 1024 * 1024
+
+    /** 整图解码的字节上限：超过按「解不了」处理，绝不为了解一张图把内存吃穿。 */
+    private const val MAX_DECODE_BYTES = 64 * 1024 * 1024
+
+    /** 读流的前 [maxBytes] 字节（读到 EOF 就提前停）。 */
+    private fun readHead(open: () -> InputStream?, maxBytes: Int): ByteArray? = runCatching {
+        open()?.use { stream ->
+            val buf = ByteArray(maxBytes)
+            var n = 0
+            while (n < maxBytes) {
+                val read = stream.read(buf, n, maxBytes - n)
+                if (read <= 0) break
+                n += read
             }
+            if (n == 0) null else buf.copyOf(n)
         }
+    }.getOrNull()
+
+    /** 读入整段图片字节（超过 [MAX_DECODE_BYTES] 直接放弃，返回 null）。 */
+    private fun readAllBytes(open: () -> InputStream?): ByteArray? = runCatching {
+        open()?.use { stream ->
+            val out = java.io.ByteArrayOutputStream()
+            val chunk = ByteArray(64 * 1024)
+            while (true) {
+                val read = stream.read(chunk)
+                if (read <= 0) break
+                if (out.size() + read > MAX_DECODE_BYTES) return@use null
+                out.write(chunk, 0, read)
+            }
+            out.toByteArray()
+        }
+    }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+    /** 系统解码：先探尺寸，再按 inSampleSize 采样解码（省内存）。走字节路径，不用 decodeStream。 */
+    private fun decodeWithBitmapFactory(open: () -> InputStream?, maxPx: Int): Bitmap? = runCatching {
+        val bytes = readAllBytes(open) ?: return@runCatching null
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) return@runCatching null
+        val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
+        val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts2)
     }.getOrNull()
 
     /** fork 的 ImageDecoder 解码（libavif/libjxl/libheif）：按长边算采样比，解不出返回 null。 */
@@ -209,8 +263,10 @@ object ImageUtil {
     // ImageDecoder。用于双页拆分 / 旋转 / 合并这类「必须按原图几何操作」的场景 ——
     // 这些地方原先直接用 BitmapFactory，AVIF 在部分机型上解出来是 null，一拆双页就崩页。
     fun decodeFullBitmap(open: () -> InputStream?): Bitmap? {
+        // 同样走字节路径，不用 decodeStream（原因见常量区说明）。
         val fast = runCatching {
-            open()?.use { BitmapFactory.decodeStream(it) }
+            val bytes = readAllBytes(open) ?: return@runCatching null
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         }.getOrNull()
         return fast ?: decodeWithImageDecoder(open, Int.MAX_VALUE)
     }
@@ -705,7 +761,12 @@ object ImageUtil {
      */
     private fun extractImageOptions(imageSource: BufferedSource): BitmapFactory.Options {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeStream(imageSource.peek().inputStream(), null, options)
+        // 不把 Java 流塞进 BitmapFactory（原因见常量区说明），尺寸读取统一走 readImageSize。
+        val size = readImageSize { imageSource.peek().inputStream() }
+        if (size != null) {
+            options.outWidth = size.first
+            options.outHeight = size.second
+        }
         return options
     }
 

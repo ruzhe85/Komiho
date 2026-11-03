@@ -38,6 +38,9 @@ class PdfParser(path: String) {
     private var encryptRef: String? = null
     private val pageList = mutableListOf<Int>()
 
+    /** 页对象号 → 该页生效的 /Resources 原始值（页字典优先，缺省取父 /Pages 继承的）。 */
+    private val pageResources = mutableMapOf<Int, ByteArray>()
+
     val pageCount: Int get() = pageList.size
     fun isEncrypted(): Boolean = encryptRef != null
 
@@ -193,8 +196,18 @@ class PdfParser(path: String) {
         applyTrailer(dict)
     }
 
+    /**
+     * 已展开的对象流（按**流对象号**记账）。
+     *
+     * Komiho (2026-11-03): 之前这里用 `fromObjStm.contains(stmObjNum)` 当幂等判据，但那集合里装的是
+     * 「流内的对象号」，几乎不会包含流自己 —— 于是一份对象全塞在对象流里的现代 PDF，会被
+     * **每个对象都重新 inflate 一遍整条流**（xref 里 N 条 type-2 项 = N 次解压），页数/对象数越多
+     * 越慢，打开一本书就能吃掉好几秒。这里按流对象号单独记一笔，一条流只解一次。
+     */
+    private val loadedObjStm = mutableSetOf<Int>()
+
     private fun loadObjStm(stmObjNum: Int) {
-        if (fromObjStm.contains(stmObjNum) && objStmInner.containsKey(stmObjNum)) return
+        if (stmObjNum in loadedObjStm) return
         val bytes = objStart[stmObjNum]?.let { objectBytesAt(it) } ?: return
         val dict = parseDict(bytes, firstDictStart(bytes), dictEnd(bytes)) ?: return
         val raw = streamBytesOf(bytes) ?: return
@@ -210,6 +223,8 @@ class PdfParser(path: String) {
             objStmInner[onum] = seg
             fromObjStm.add(onum)
         }
+        // 只在真正展开成功后记账：中途 return（偏移未知等）时下次还能重试。
+        loadedObjStm.add(stmObjNum)
     }
 
     private fun applyTrailer(dict: Map<String, ByteArray>) {
@@ -240,14 +255,25 @@ class PdfParser(path: String) {
         walkPages(num, pageList)
     }
 
-    private fun walkPages(objNum: Int, out: MutableList<Int>) {
+    /**
+     * Komiho (2026-11-03): 顺带把**可继承的 `/Resources`** 传下去。
+     *
+     * `/Resources` 是页树的可继承属性：大量 PDF（WPS/Word 导出、部分 img2pdf 输出）把资源挂在
+     * 父 `/Pages` 上，页字典里根本没有这个键。以前只读页字典 → 拿不到 `/XObject` → 整本回落
+     * 渲染，明明是整页 JPEG 也拆不出来。
+     */
+    private fun walkPages(objNum: Int, out: MutableList<Int>, inheritedResources: ByteArray? = null) {
         val dict = dictOf(objNum) ?: return
+        val resources = dict["/Resources"] ?: inheritedResources
         when (val t = dict["/Type"]?.let { String(it, ISO) }) {
             "/Pages" -> {
                 val kids = dict["/Kids"]?.let { findRefs(it) } ?: emptyList()
-                for (k in kids) walkPages(k, out)
+                for (k in kids) walkPages(k, out, resources)
             }
-            "/Page" -> out.add(objNum)
+            "/Page" -> {
+                out.add(objNum)
+                resources?.let { pageResources[objNum] = it }
+            }
         }
     }
 
@@ -258,48 +284,89 @@ class PdfParser(path: String) {
         if (pageIndex !in pageList.indices) return null
         val pageNum = pageList[pageIndex]
         val pageDict = dictOf(pageNum) ?: return null
-        val resRaw = pageDict["/Resources"]
-        val resDict = if (resRaw != null) {
-            val s = String(resRaw, ISO)
-            if (s.trim().startsWith("/")) {
-                deref(s)?.let { dictOf(it) }
-            } else if (s.trim().startsWith("<<")) {
-                // 内联 Resources 字典（常见于扫描漫画页）：就地解析出 /XObject
-                val ds = resRaw.indexOf('<'.code.toByte())
-                val de = dictEnd(resRaw)
-                parseDict(resRaw, ds, de)
-            } else {
-                null
-            }
-        } else null
+        // Komiho: /Resources 可继承 —— 页字典没有时用父 /Pages 上继承下来的那份。
+        val resRaw = pageDict["/Resources"] ?: pageResources[pageNum]
+        if (resRaw == null) {
+            // 退化情况：XObject 直接挂在页字典上（极少见）
+            val direct = pageDict["/XObject"] ?: return null
+            val xdict = resolveDict(direct) ?: return null
+            return bestImageInXObjectDict(xdict, mutableSetOf(), 0, ownerRes = null)
+        }
+        val resDict = resolveDict(resRaw) ?: return null
+        return bestImageInResources(resDict, visited = mutableSetOf(), depth = 0)
+    }
 
-        val xobjRaw = resDict?.get("/XObject")
-            ?: pageDict["/XObject"] // 内联 Resources 退化情况（极少）
-            ?: return null
-        val xobjStr = String(xobjRaw, ISO)
-        // XObject 可能是 "<< ... >>" 内联，或 "N G R" 引用
-        val xdict = if (xobjStr.trim().startsWith("<<")) {
-            val ds = xobjRaw.indexOf('<'.code.toByte()); val de = dictEnd(xobjRaw)
-            parseDict(xobjRaw, ds, de)
-        } else {
-            deref(xobjStr)?.let { dictOf(it) }
-        } ?: return null
+    private fun bestImageInResources(
+        resDict: Map<String, ByteArray>,
+        visited: MutableSet<Int>,
+        depth: Int,
+    ): PdfImage? {
+        if (depth > MAX_XOBJECT_DEPTH) return null
+        val xobjRaw = resDict["/XObject"] ?: return null
+        val xdict = resolveDict(xobjRaw) ?: return null
+        return bestImageInXObjectDict(xdict, visited, depth, ownerRes = resDict)
+    }
+
+    /**
+     * 在一个 `/XObject` 名字表里挑面积最大的图。
+     *
+     * Komiho (2026-11-03): `/Subtype /Form` 会递归进去 —— 「整页一张 JPEG」的 PDF 很多会把图包在
+     * Form XObject 里（`/Fm0 → /Resources → /XObject → /Im0`），只查页级资源就会漏掉，
+     * 于是明明能直通也退回渲染。
+     */
+    private fun bestImageInXObjectDict(
+        xdict: Map<String, ByteArray>,
+        visited: MutableSet<Int>,
+        depth: Int,
+        /** 当前这一层的资源字典：Form 自己没带 /Resources 时沿用它。 */
+        ownerRes: Map<String, ByteArray>?,
+    ): PdfImage? {
+        if (depth > MAX_XOBJECT_DEPTH) return null
 
         var best: PdfImage? = null
         for ((_, refBytes) in xdict) {
             val ref = String(refBytes, ISO)
             if (!ref.contains("R")) continue
             val num = deref(ref) ?: continue
+            // 同一对象只解析一次，防 Form XObject 互相引用的环。
+            if (!visited.add(num)) continue
             val idict = dictOf(num) ?: continue
-            if (idict["/Subtype"]?.let { String(it, ISO) } != "/Image") continue
-            val w = idict["/Width"]?.firstInt() ?: 0
-            val h = idict["/Height"]?.firstInt() ?: 0
-            val filter = idict["/Filter"]?.let { String(it, ISO) }?.trim()
-            val img = PdfImage(num, w, h, normalizeFilter(filter))
-            if (best == null || w * h > best.width * best.height) best = img
+            when (String(idict["/Subtype"] ?: continue, ISO)) {
+                "/Image" -> {
+                    val w = idict["/Width"]?.firstInt() ?: 0
+                    val h = idict["/Height"]?.firstInt() ?: 0
+                    val filter = idict["/Filter"]?.let { String(it, ISO) }?.trim()
+                    val img = PdfImage(num, w, h, normalizeFilter(filter))
+                    val current = best
+                    if (current == null || w * h > current.width * current.height) best = img
+                }
+                "/Form" -> {
+                    val formRes = idict["/Resources"]?.let { resolveDict(it) }
+                        ?: ownerRes
+                        ?: continue
+                    val nested = bestImageInResources(formRes, visited, depth + 1) ?: continue
+                    val current = best
+                    if (current == null || nested.width * nested.height > current.width * current.height) {
+                        best = nested
+                    }
+                }
+            }
         }
         return best
     }
+
+    /** 把「内联字典 `<<…>>`」或「`N G R` 引用」解析成字典；两种都不是就返回 null。 */
+    private fun resolveDict(raw: ByteArray): Map<String, ByteArray>? {
+        val s = String(raw, ISO).trim()
+        return if (s.startsWith("<<")) {
+            parseDict(raw, raw.indexOf('<'.code.toByte()), dictEnd(raw))
+        } else {
+            deref(s)?.let { dictOf(it) }
+        }
+    }
+
+    /** Form XObject 递归上限（正常文档一层就到底，三层足够容错）。 */
+    private val MAX_XOBJECT_DEPTH = 3
 
     private fun normalizeFilter(f: String?): String? {
         if (f == null) return null

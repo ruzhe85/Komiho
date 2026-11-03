@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.KeyboardActions
@@ -410,6 +412,8 @@ class ReaderActivity : BaseActivity() {
     private fun ReaderActivityBinding.setComposeOverlay(): Unit = composeOverlay.setComposeContent {
         val state by viewModel.state.collectAsState()
         val showPageNumber by readerPreferences.showPageNumber.collectAsState()
+        // Komiho: 页码位置（左下 / 居中 / 右下），仅「显示页码」开启时才会用到。
+        val pageNumberPosition by readerPreferences.pageNumberPosition.collectAsState()
         val settingsScreenModel = remember {
             ReaderSettingsScreenModel(
                 readerState = viewModel.state,
@@ -420,11 +424,26 @@ class ReaderActivity : BaseActivity() {
 
         Box(modifier = Modifier.fillMaxSize()) {
             if (!state.menuVisible && showPageNumber) {
+                // Komiho: 页码位置可配（默认居中）。用 AbsoluteAlignment 表达「物理左右」，
+                // 不随排版方向（RTL 日漫）翻转 —— 设置项写的是「左下 / 右下」。
+                val indicatorAlignment: Alignment = when (pageNumberPosition) {
+                    ReaderPreferences.PageNumberPosition.LEFT -> AbsoluteAlignment.BottomLeft
+                    ReaderPreferences.PageNumberPosition.RIGHT -> AbsoluteAlignment.BottomRight
+                    else -> Alignment.BottomCenter
+                }
                 ReaderPageIndicator(
                     currentPage = state.currentPage,
                     totalPages = state.totalPages,
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        .align(indicatorAlignment)
+                        // 靠边时留一点边距，避免贴着屏幕边缘；居中时保持原样。
+                        .then(
+                            if (pageNumberPosition == ReaderPreferences.PageNumberPosition.CENTER) {
+                                Modifier
+                            } else {
+                                Modifier.padding(horizontal = 16.dp)
+                            },
+                        )
                         .navigationBarsPadding(),
                 )
             }

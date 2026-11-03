@@ -91,6 +91,8 @@ object SettingsReaderScreen : SearchableSettings {
         // Komiho: E-Ink 模式下阅读背景恒为白（见 ReaderPreferences.effectiveReaderTheme），
         // 这一项直接隐藏 —— 留着只会让人以为「改了没生效」。
         val einkMode by remember { Injekt.get<UiPreferences>() }.einkMode.collectAsState()
+        // Komiho: 「页码位置」只在显示页码时出现。
+        val showPageNumber by readerPreferences.showPageNumber.collectAsState()
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_category_display),
             preferenceItems = buildList {
@@ -143,6 +145,17 @@ object SettingsReaderScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_show_page_number),
                     ),
                 )
+                // Komiho: 页码位置（左下 / 居中 / 右下）—— 仅在开启「显示页码」时出现，默认居中。
+                if (showPageNumber) {
+                    add(
+                        Preference.PreferenceItem.ListPreference(
+                            preference = readerPreferences.pageNumberPosition,
+                            entries = ReaderPreferences.PageNumberPosition.entries
+                                .associateWith { stringResource(it.titleRes) },
+                            title = stringResource(MR.strings.pref_page_number_position),
+                        ),
+                    )
+                }
             },
         )
     }
