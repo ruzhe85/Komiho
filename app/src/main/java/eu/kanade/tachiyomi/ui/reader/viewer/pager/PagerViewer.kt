@@ -92,7 +92,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * 一次，同一页能被处理很多遍 —— 现象就是一翻到那张图就卡住。这里按「页号 + 视图高度」缓存
      * 处理后的字节，只付一次代价。
      */
-    private val widePageCache = android.util.LruCache<String, ByteArray>(MAX_WIDE_PAGE_CACHE_BYTES) {
+    private val widePageCache = object : android.util.LruCache<String, ByteArray>(MAX_WIDE_PAGE_CACHE_BYTES) {
         override fun sizeOf(key: String, value: ByteArray): Int = value.size
     }
 
