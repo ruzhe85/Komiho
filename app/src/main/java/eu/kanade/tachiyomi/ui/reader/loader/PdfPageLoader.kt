@@ -93,15 +93,24 @@ internal class PdfPageLoader private constructor(
         // 或 PDFium 拒绝解析的）会让 PdfRenderer 一律抛 SecurityException，但文档其实一个密码都没有
         // —— 以前据此弹密码框，输什么都会失败，于是「没密码却反复要密码」。
         val parserTrusted = probe != null && probe.parseOk && probe.pageCount > 0
-        val needsPassword = if (parserTrusted && !hasEncrypt) {
+        // Komiho (2026-11-03 之二): 内容判据优先于「加密标志」。有的 PDF 带着 /Encrypt（解锁工具
+        // 改坏、或加密字典残留），但流其实是明文 —— PDFium 一律报「需要密码」，而同类文件在别的
+        // 阅读器里直接能开。判据：抽查前几页的 DCT 流，头是 FF D8（JPEG SOI）就说明没加密
+        // （RC4/AES 处理过的流不可能正好以 FFD8 开头）。是明文就完全不问密码，直接走内嵌图直通。
+        val streamsLookPlain = probe != null && parserTrusted && looksLikePlainJpeg(probe)
+        val needsPassword = if (parserTrusted && (!hasEncrypt || streamsLookPlain)) {
             false
         } else {
             runCatching { PdfRenderFallback.isEncryptedPdf(path) }.getOrElse { hasEncrypt }
         }
-        DiagLog.d(TAG, "PDF encrypt: parserEncrypt=$hasEncrypt parserTrusted=$parserTrusted needsPassword=$needsPassword")
+        DiagLog.d(
+            TAG,
+            "PDF encrypt: parserEncrypt=$hasEncrypt parserTrusted=$parserTrusted " +
+                "streamsLookPlain=$streamsLookPlain needsPassword=$needsPassword",
+        )
         // 是否按加密文档处理 —— 决定能不能走「内嵌图直通」：加密文档的流是 RC4/AES 密文，
         // 直通只会把密文当 JPEG 交下去，解出乱码。
-        val encrypted = hasEncrypt || needsPassword
+        val encrypted = !streamsLookPlain && (hasEncrypt || needsPassword)
 
         var effectivePassword: String? = null
 
@@ -274,6 +283,31 @@ internal class PdfPageLoader private constructor(
         return ByteArrayInputStream(rendered)
     }
 
+    /**
+     * 抽查前几页的 DCT 流是不是明文 JPEG。
+     *
+     * RC4/AES 加密后的流头是随机字节，不可能正好是 `FF D8`；能读出 SOI 就说明这本文档的
+     * 图像流没有被加密（只是带着 /Encrypt 标记），可以放心走内嵌图直通、不必问密码。
+     */
+    private fun looksLikePlainJpeg(parser: PdfParser): Boolean = runCatching {
+        for (i in 0 until min(parser.pageCount, PLAINTEXT_PROBE_PAGES)) {
+            val img = parser.bestImageForPage(i) ?: continue
+            if (img.filter != "DCTDecode") continue
+            val raw = parser.rawStreamBytes(img.objNum) ?: continue
+            if (raw.size < 3) continue
+            val soi = raw[0] == 0xFF.toByte() && raw[1] == 0xD8.toByte()
+            DiagLog.d(
+                TAG,
+                "plaintext probe page ${i + 1}: ${img.width}x${img.height} head=${hexHead(raw)} soi=$soi",
+            )
+            if (soi) return@runCatching true
+        }
+        false
+    }.getOrDefault(false)
+
+    private fun hexHead(bytes: ByteArray, count: Int = 4): String =
+        bytes.take(count).joinToString("") { "%02X".format(it) }
+
     override fun recycle() {
         // Komiho: 释放复用的 PdfRenderer（否则整份文档会一直被 PDFium 持有到进程结束）。
         runCatching { PdfRenderFallback.releaseCachedRenderer() }
@@ -285,5 +319,8 @@ internal class PdfPageLoader private constructor(
 
         /** 解析器整文件载入内存的阈值：超过则跳过内存解析、直接走系统渲染兜底，避免大文件 OOM。 */
         private const val MAX_PARSER_FILE_BYTES = 200L * 1024 * 1024 // 200MB
+
+        /** 「流是否明文」抽查页数：前几页都是明文就够了，不必整本扫。 */
+        private const val PLAINTEXT_PROBE_PAGES = 3
     }
 }

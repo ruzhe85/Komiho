@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.util.pdf
 
 import android.util.Log
+import eu.kanade.tachiyomi.diagnostic.DiagLog
 import java.io.RandomAccessFile
 import java.util.zip.Inflater
 
@@ -76,10 +77,28 @@ class PdfParser(path: String) {
 
     private fun parse() {
         val sx = findStartXref()
-        if (sx < 0) {
-            scanWholeFile()
-        } else {
-            parseXref(sx)
+        if (sx >= 0) {
+            runCatching { parseXref(sx) }
+                .onFailure { DiagLog.w(TAG, "xref parse failed: ${it.message}") }
+        }
+        // Komiho (2026-11-03): xref 不可用时退回「全文件扫描重建对象表」。
+        //
+        // 典型来源是用工具「解锁 / 精简」过的 PDF：xref 流被写成 `/Length 0`（或偏移全错），
+        // 于是 xref 一条对象都读不出来 —— 我们的解析器拿不到页面，PDFium 更是直接报
+        // 「需要密码」，而文件里既没有 /Encrypt、页面和 JPEG 也全都完好。
+        // 这种时候只能不信任 xref，靠扫 `N G obj` 重建（PDF 阅读器普遍都这么兜底）。
+        if (objStart.isEmpty() || rootRef == null) {
+            DiagLog.w(TAG, "xref unusable (objs=${objStart.size}, root=$rootRef), rebuild by scanning")
+            objStart.clear()
+            objStmInner.clear()
+            fromObjStm.clear()
+            loadedObjStm.clear()
+            pageList.clear()
+            pageResources.clear()
+            trailerPrev = null
+            runCatching { scanWholeFile() }
+                .onFailure { DiagLog.w(TAG, "scan rebuild failed: ${it.message}") }
+            DiagLog.d(TAG, "scan rebuild: objs=${objStart.size} root=$rootRef pages=${pageList.size}")
         }
         resolveRoot()
         collectPages()
@@ -544,19 +563,21 @@ class PdfParser(path: String) {
     // ---------- 全文件扫描兜底 ----------
 
     private fun scanWholeFile() {
-        val re = Regex("""(\d+)\s+(\d+)\s+obj""").findAll(String(data, ISO))
-        for (m in re) {
+        // ISO-8859-1 是 1:1 字节映射，字符串下标 == 字节下标，可以直接用 match.range 当对象偏移。
+        // 用 indexOfBytes 找 "N 0 obj" 会命中同样内容的**第一次**出现处（可能在别的流里），
+        // 偏移就错了 —— 这里按匹配位置取，后出现的覆盖先出现的（与增量更新语义一致）。
+        val text = String(data, ISO)
+        for (m in Regex("""(\d+)\s+(\d+)\s+obj""").findAll(text)) {
             val num = m.groupValues[1].toInt()
-            // 定位 "obj" 起点
-            val at = data.indexOfBytes(m.value.toByteArray(ISO))
-            if (at >= 0) objStart[num] = at
+            objStart[num] = m.range.first
         }
         // 末一个 trailer 的 Root
         val tl = Regex("""trailer\s*<<(.*?)>>""", RegexOption.DOT_MATCHES_ALL)
-            .findAll(String(data, ISO)).lastOrNull()
+            .findAll(text).lastOrNull()
         tl?.let { applyTrailer(parseInlineDict(it.groupValues[1].toByteArray(ISO))) }
         if (rootRef == null) {
-            val r = Regex("""/Root\s+(\d+\s+\d+\s+R)""").find(String(data, ISO))
+            // 没有 trailer 关键字（xref 流文档就是这样）：/Root 在 xref 流字典里，取最后一个。
+            val r = Regex("""/Root\s+(\d+\s+\d+\s+R)""").findAll(text).lastOrNull()
             rootRef = r?.groupValues?.getOrNull(1)
         }
     }
