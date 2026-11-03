@@ -68,7 +68,9 @@ class PdfParser(path: String) {
         try {
             parse()
         } catch (e: Exception) {
-            Log.w(TAG, "parse failed: ${e.message}")
+            // 走 DiagLog：这一步以前是 android.util.Log，失败原因根本不出现在导出日志里，
+            // 「parser=false pages=0」永远看不到到底抛了什么。
+            DiagLog.e(TAG, "parse failed: ${e.message}", e)
             parseOk = false
         }
     }
@@ -76,7 +78,11 @@ class PdfParser(path: String) {
     // ---------- 入口 ----------
 
     private fun parse() {
-        val sx = findStartXref()
+        DiagLog.d(TAG, "parse begin: size=${data.size}")
+        val sx = runCatching { findStartXref() }
+            .onFailure { DiagLog.w(TAG, "findStartXref failed: ${it.message}") }
+            .getOrDefault(-1)
+        DiagLog.d(TAG, "startxref=$sx")
         if (sx >= 0) {
             runCatching { parseXref(sx) }
                 .onFailure { DiagLog.w(TAG, "xref parse failed: ${it.message}") }

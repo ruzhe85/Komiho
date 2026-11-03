@@ -66,7 +66,8 @@ internal class PdfPageLoader private constructor(
 
     override suspend fun getPages(): List<ReaderPage> = withIOContext {
         path = resolvePath()
-        DiagLog.d(TAG, "PDF open: path=$path")
+        // impl= 是本版实现标记：用来确认装到的包到底有没有「xref 扫描重建」这条路径。
+        DiagLog.d(TAG, "PDF open: path=$path impl=$IMPL_MARK")
 
         // 超大 PDF（>200MB）不整文件载入内存解析（避免 OOM），直接走系统渲染兜底；
         // 仍用运行时探测判定加密，保证加密 PDF 弹密码框。
@@ -322,5 +323,8 @@ internal class PdfPageLoader private constructor(
 
         /** 「流是否明文」抽查页数：前几页都是明文就够了，不必整本扫。 */
         private const val PLAINTEXT_PROBE_PAGES = 3
+
+        /** 实现标记：出现在 `PDF open` 日志里，用来判断装到的包是否包含最新解析逻辑。 */
+        private const val IMPL_MARK = "20261104b"
     }
 }
