@@ -261,8 +261,8 @@ object PagerPagePreparer {
         pageIndex: Int,
         skipEnhance: Boolean,
     ): PagerPreparedPage {
-        val background = if (!isAnimated && config.automaticBackground) {
-            ImageUtil.chooseBackground(viewer.activity, itemSource.peek())
+        val background = if (!isAnimated) {
+            ImageUtil.pageBackground(viewer.activity, itemSource, config.automaticBackground)
         } else {
             null
         }

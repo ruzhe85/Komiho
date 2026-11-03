@@ -536,6 +536,51 @@ object ImageUtil {
     }
 
     /**
+     * Komiho (2026-11-04): 页面背景的统一入口。
+     *
+     * - 开「自动背景」（阅读主题=自动）：按图片内容挑白/黑，与原行为一致；
+     * - 关自动背景：只要图片格式**可能带透明通道**（PNG/WebP/GIF/AVIF/HEIF…，JPEG 不可能），
+     *   就给一个纯白底 —— 与 PDF 渲染同口径（`PdfRenderFallback` 是 eraseColor(WHITE) 后再画）。
+     *   这样深色主题下「黑字 + 透明底」的素材图（logo、标题卡）也不会整页看不见。
+     *   不透明像素会被图片自己盖住，所以对普通 PNG 页没有可见副作用。
+     */
+    fun pageBackground(
+        context: Context,
+        imageSource: BufferedSource,
+        automaticBackground: Boolean,
+    ): Drawable? = if (automaticBackground) {
+        chooseBackground(context, imageSource)
+    } else {
+        transparentPageBackground(imageSource)
+    }
+
+    /** 图片格式是否可能带透明通道；是则返回纯白底，JPEG 返回 null（保持主题底色）。 */
+    private fun transparentPageBackground(imageSource: BufferedSource): Drawable? {
+        val type = runCatching { findImageType { imageSource.peek().inputStream() } }.getOrNull()
+            ?: return null
+        return if (type == ImageType.JPEG) null else Color.WHITE.toDrawable()
+    }
+
+    /** 四角采样里是否含透明像素（带透明底的素材图，不能拿角上的颜色当页面背景）。 */
+    private fun hasTransparentCorner(image: Bitmap): Boolean {
+        if (!image.hasAlpha()) return false
+        val xs = intArrayOf(
+            (image.width * 0.03f).toInt().coerceIn(0, image.width - 1),
+            (image.width * 0.97f).toInt().coerceIn(0, image.width - 1),
+        )
+        val ys = intArrayOf(
+            (image.height * 0.02f).toInt().coerceIn(0, image.height - 1),
+            (image.height * 0.98f).toInt().coerceIn(0, image.height - 1),
+        )
+        for (x in xs) {
+            for (y in ys) {
+                if (Color.alpha(image[x, y]) == 0) return true
+            }
+        }
+        return false
+    }
+
+    /**
      * Algorithm for determining what background to accompany a comic/manga page
      */
     fun chooseBackground(context: Context, imageSource: BufferedSource): Drawable {
@@ -546,6 +591,18 @@ object ImageUtil {
         val whiteColor = Color.WHITE
         if (image == null) return whiteColor.toDrawable()
         if (image.width < 50 || image.height < 50) {
+            return whiteColor.toDrawable()
+        }
+
+        // Komiho (2026-11-04): 带透明底的图不能按「四角颜色」判页面背景。
+        //
+        // 透明像素读出来是 (0,0,0,0)，isDark() 会判成纯黑 —— 于是整页背景被设成黑色。
+        // 放大时透明区跟着铺满屏幕，看起来「整屏全黑」，连点击有没有生效都看不出来
+        // （典型就是带透明底的 logo、标题卡）。
+        // 带透明底的图按「常规阅读器 / PDF 查看器」的做法：一律铺纯白底，
+        // 不去猜它该配黑还是配白（透明的角会被 isDark() 判成黑，之前整页发黑就是这条）。
+        // 与 PDF 渲染兜底保持一致（PdfRenderFallback 里就是 eraseColor(WHITE) 后再画）。
+        if (hasTransparentCorner(image)) {
             return whiteColor.toDrawable()
         }
 

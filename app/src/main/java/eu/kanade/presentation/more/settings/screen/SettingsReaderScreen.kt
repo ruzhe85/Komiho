@@ -740,8 +740,11 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.centerMarginType,
                     title = stringResource(SYMR.strings.center_margin),
                     subtitle = stringResource(SYMR.strings.pref_center_margin_summary),
+                    // Komiho: 这里的 key 必须就是偏好存的 0..3 —— 原来写的是 index + 1，
+                    // 与阅读器内 chip（0..3）差一档：选「无」会存成「双页留白」，
+                    // 选「两个都添加」会存成 4（谁都不匹配），选项看着「没反应」。
                     entries = ReaderPreferences.CenterMarginTypes
-                        .mapIndexed { index, it -> index + 1 to stringResource(it) }
+                        .mapIndexed { index, it -> index to stringResource(it) }
                         .toMap(),
                 ),
                 Preference.PreferenceItem.ListPreference(

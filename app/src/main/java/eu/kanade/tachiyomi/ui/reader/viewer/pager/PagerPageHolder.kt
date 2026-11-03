@@ -550,8 +550,8 @@ class PagerPageHolder(
                     }
                     // SY <--
                     val isAnimated = ImageUtil.isAnimatedAndSupported(itemSource)
-                    val background = if (!isAnimated && viewer.config.automaticBackground) {
-                        ImageUtil.chooseBackground(context, itemSource.peek())
+                    val background = if (!isAnimated) {
+                        ImageUtil.pageBackground(context, itemSource, viewer.config.automaticBackground)
                     } else {
                         null
                     }
@@ -587,8 +587,8 @@ class PagerPageHolder(
                 }
             }
             val isAnimated = ImageUtil.isAnimatedAndSupported(itemSource)
-            val background = if (!isAnimated && viewer.config.automaticBackground) {
-                ImageUtil.chooseBackground(context, itemSource.peek())
+            val background = if (!isAnimated) {
+                ImageUtil.pageBackground(context, itemSource, viewer.config.automaticBackground)
             } else {
                 null
             }
