@@ -99,15 +99,22 @@ internal class PdfPageLoader private constructor(
         // 阅读器里直接能开。判据：抽查前几页的 DCT 流，头是 FF D8（JPEG SOI）就说明没加密
         // （RC4/AES 处理过的流不可能正好以 FFD8 开头）。是明文就完全不问密码，直接走内嵌图直通。
         val streamsLookPlain = probe != null && parserTrusted && looksLikePlainJpeg(probe)
-        val needsPassword = if (parserTrusted && (!hasEncrypt || streamsLookPlain)) {
+        val pdfiumNeedsPassword = if (parserTrusted && (!hasEncrypt || streamsLookPlain)) {
             false
         } else {
             runCatching { PdfRenderFallback.isEncryptedPdf(path) }.getOrElse { hasEncrypt }
         }
+        // Komiho (2026-11-04): 裸 PdfRenderer 报「需要密码」时，先用「空密码 + LoadParams」再确认一次。
+        // xref 损坏的文档走 LoadParams 路径往往能直接打开（实际一个密码都没有），
+        // 之前一律弹框，用户只能靠乱猜 —— 猜中了才「可读」。
+        val readableWithEmptyPassword = pdfiumNeedsPassword &&
+            runCatching { PdfRenderFallback.isReadableWithEmptyPassword(path) }.getOrDefault(false)
+        val needsPassword = pdfiumNeedsPassword && !readableWithEmptyPassword
         DiagLog.d(
             TAG,
             "PDF encrypt: parserEncrypt=$hasEncrypt parserTrusted=$parserTrusted " +
-                "streamsLookPlain=$streamsLookPlain needsPassword=$needsPassword",
+                "streamsLookPlain=$streamsLookPlain pdfiumNeedsPassword=$pdfiumNeedsPassword " +
+                "readableWithEmptyPassword=$readableWithEmptyPassword needsPassword=$needsPassword",
         )
         // 是否按加密文档处理 —— 决定能不能走「内嵌图直通」：加密文档的流是 RC4/AES 密文，
         // 直通只会把密文当 JPEG 交下去，解出乱码。
@@ -142,6 +149,8 @@ internal class PdfPageLoader private constructor(
             } else {
                 // 权限型加密：无密码渲染即可。currentPassword 保持 null —— 下面「SecurityException
                 // 转 wrongPassword」只在真给过密码时才成立，权限型的不该被报成「密码错误」。
+                // 但若裸构造打不开、只有 LoadParams 能开，就把空密码带上（否则渲染页会再抛 SecurityException）。
+                if (readableWithEmptyPassword) effectivePassword = ""
                 DiagLog.d(TAG, "PDF permission-only encryption, render-only without password")
             }
             renderOnly = true
@@ -151,6 +160,8 @@ internal class PdfPageLoader private constructor(
             DiagLog.d(TAG, "PDF extract mode, pages=${probe.pageCount}")
         } else {
             renderOnly = true
+            // 同上：解析器吃不下、但 LoadParams 能用空密码打开 → 不弹框，带上空密码去渲染。
+            if (readableWithEmptyPassword) effectivePassword = ""
             DiagLog.d(TAG, "PDF parse incomplete / 超大文件, fallback to render-only")
         }
 

@@ -597,7 +597,10 @@ class PdfParser(path: String) {
         // 用 indexOfBytes 找 "N 0 obj" 会命中同样内容的**第一次**出现处（可能在别的流里），
         // 偏移就错了 —— 这里按匹配位置取，后出现的覆盖先出现的（与增量更新语义一致）。
         val text = String(data, ISO)
-        for (m in Regex("""(\d+)\s+(\d+)\s+obj""").findAll(text)) {
+        // 必须锚定行首：不加 `(?m)^` 时，二进制流里恰好出现的 "123 0 obj" 也会命中，
+        // 而且后出现的会覆盖真偏移 —— 对象表被写坏，页树照样解析不出来（这次的「重建后仍 0 页」
+        // 就是这类脏匹配导致的）。
+        for (m in Regex("""(?m)^(\d+)\s+(\d+)\s+obj""").findAll(text)) {
             val num = m.groupValues[1].toInt()
             objStart[num] = m.range.first
         }

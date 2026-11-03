@@ -35,6 +35,9 @@ object PdfRenderFallback {
     /** 长条页输出长边上限：PDFium/位图分配对大尺寸有上限，极端窄长页不能无限拉高。 */
     private const val MAX_TALL_LONG_SIDE = 24_000
 
+    /** 超过这个像素量（百万像素）就改用 JPEG 编码：无损编码在超大页上要几秒，翻页会卡死。 */
+    private const val LARGE_PAGE_MP = 10L
+
     /** 渲染指定页为 Bitmap：
      *  - 先填白底，避免矢量/文本 PDF 无色块区域透出（原先透明 → 底色消失）。
      *  - 按 [maxLongSide] 等比缩放：小页面（低 DPI 矢量/文本）上采样到该值保证清晰；
@@ -174,7 +177,13 @@ object PdfRenderFallback {
      */
     private fun encodePage(bmp: Bitmap): ByteArray {
         val out = ByteArrayOutputStream(1 shl 20)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val megapixels = bmp.width.toLong() * bmp.height / 1_000_000L
+        if (megapixels >= LARGE_PAGE_MP) {
+            // Komiho (2026-11-04): 超大页（1440×15049 这种长条扫图 = 21MP）用无损编码一次要 5 秒
+            // （实测 encode=4921ms / render 只有 209ms），整本翻不动。这类页本来就是 PDFium
+            // 栅格化的结果，改用高质量 JPEG（q95）换速度，肉眼无可辨差异。
+            bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             bmp.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 100, out)
         } else {
             bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
@@ -219,6 +228,22 @@ object PdfRenderFallback {
      * 加密 PDF 在缺少密码时必然抛 SecurityException，借此可靠判定加密，
      * 作为手写解析器 /Encrypt 探测的兜底（解析器偶发漏判时仍能弹出密码框，而非误报「无法解析」）。
      */
+    /**
+     * Komiho (2026-11-04): 用「空密码 + [LoadParams]」再试一次能否打开。
+     *
+     * 现场：xref 损坏的 PDF 用裸 [PdfRenderer] 打开会抛 SecurityException（Android 把它归成
+     * 「需要密码」），但改走 Android 15 的 LoadParams 路径就能正常打开 —— 这类文件其实一个密码
+     * 都没有，不该让用户去猜。返回 true 表示「可读，且应走带密码参数的那条构造」。
+     */
+    fun isReadableWithEmptyPassword(path: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return false
+        return try {
+            withCachedRenderer(path, "") { true } ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun isEncryptedPdf(path: String): Boolean {
         return try {
             // Komiho: 复用缓存实例。探测成功时顺手留下这个 renderer —— 紧接着的 getPageCount /
