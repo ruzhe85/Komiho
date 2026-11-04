@@ -12,7 +12,12 @@ import kotlin.math.sqrt
 
 /**
  * 系统 PdfRenderer 兜底：当某页无法走「内嵌图字节直通」（CCITT/JPX/Flate/矢量/无内嵌图）
- * 时，用系统 PDFium 渲染成 Bitmap 再编码为 PNG 字节流交给既有解码+增强管线。
+ * 时，用系统 PDFium 栅格化。
+ *
+ * 输出有两种形态：
+ * - [renderBitmapForDisplay]：直接给位图，显示层不再编码/解码（阅读器主路径，最省）；
+ * - [renderPage]：编码成 WebP 无损（API 30+）/ JPEG（≥10MP 大页）/ PNG（低版本）字节流，
+ *   供「另存图片」或仍有字节需求的调用方使用。
  *
  * 加密 PDF：Android 15（API 35）起 PdfRenderer 支持 [android.graphics.pdf.LoadParams]
  * 带密码加载；[password] 非 null 且系统版本足够时使用密码构造，否则走无密码构造。
@@ -29,8 +34,24 @@ object PdfRenderFallback {
     /** 长条页渲染宽度目标：宽度是条漫页的显示关键维度（1440 覆盖主流屏宽且不放大过度）。 */
     private const val TARGET_TALL_WIDTH = 1440
 
-    /** 长条页输出像素上限（≈96MB ARGB_8888）：超预算才按面积回缩，避免单页 OOM。 */
+    /** 长条页输出像素的**硬**上限（24MP ≈ 96MB ARGB）；实际预算按可用堆动态给，见 [tallPixelBudget]。 */
     private const val MAX_TALL_PIXELS = 24_000_000.0
+
+    /** 长条页输出像素的**下限**：再省也不能低于 6MP，否则 1440 宽的长条会被压到 640 宽。 */
+    private const val MIN_TALL_PIXELS = 6_000_000.0
+
+    /**
+     * 长条页的输出预算（像素）。
+     *
+     * Komiho (2026-11-04): 不再固定 12MP 一刀切（那是拿画质换稳定），改成**按当前可用堆**算：
+     * 只占用可用堆的 1/8（4 字节/像素），上限 24MP。堆宽裕时 1440×15050 原尺寸渲染，
+     * 堆紧张时自动降档；真分配失败还有 [renderWithOomRetry] 减半兜底。
+     */
+    private fun tallPixelBudget(): Double {
+        val freeBytes = Runtime.getRuntime().let { it.maxMemory() - (it.totalMemory() - it.freeMemory()) }
+        val byHeap = (freeBytes / 8).toDouble()
+        return byHeap.coerceIn(MIN_TALL_PIXELS, MAX_TALL_PIXELS)
+    }
 
     /** 长条页输出长边上限：PDFium/位图分配对大尺寸有上限，极端窄长页不能无限拉高。 */
     private const val MAX_TALL_LONG_SIDE = 24_000
@@ -77,16 +98,45 @@ object PdfRenderFallback {
         try {
             if (pageIndex < 0 || pageIndex >= renderer.pageCount) return null
             val page = renderer.openPage(pageIndex)
-            val (tw, th) = fit(page.width, page.height, maxLongSide, tallWidthDriven)
-            DiagLog.d(TAG, "render page=$pageIndex page=${page.width}x${page.height} -> ${tw}x$th")
-            val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
-            bmp.eraseColor(Color.WHITE)
-            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            page.close()
-            return bmp
+            try {
+                val (tw, th) = fit(page.width, page.height, maxLongSide, tallWidthDriven)
+                DiagLog.d(TAG, "render page=$pageIndex page=${page.width}x${page.height} -> ${tw}x$th")
+                return renderWithOomRetry(page, tw, th)
+            } finally {
+                page.close()
+            }
         } finally {
             renderer.close()
         }
+    }
+
+    /**
+     * 分配 + 渲染，OOM 时把尺寸减半重试一次。
+     *
+     * 单页位图是 4 字节/像素：1522×2000 只有 12MB，但长条页（1440×15050）是 86MB；
+     * 再叠加预取与解析器持有的整份 PDF 字节，堆很容易打满。宁可这一页糊一半，
+     * 也不能让进程被系统干掉（用户看到的就是「闪退 / OOM」）。
+     */
+    private fun renderWithOomRetry(page: PdfRenderer.Page, targetW: Int, targetH: Int): Bitmap? {
+        var w = targetW.coerceAtLeast(1)
+        var h = targetH.coerceAtLeast(1)
+        repeat(2) { attempt ->
+            var bmp: Bitmap? = null
+            try {
+                bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                bmp.eraseColor(Color.WHITE)
+                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                DiagLog.d(TAG, "render draw -> ${w}x$h (try=${attempt + 1})")
+                return bmp
+            } catch (e: OutOfMemoryError) {
+                // 半成品位图要立刻还回去，否则重试时堆更紧，必然再次失败。
+                runCatching { if (bmp != null && !bmp.isRecycled) bmp.recycle() }
+                DiagLog.w(TAG, "render OOM at ${w}x$h, retry half size")
+                w = (w / 2).coerceAtLeast(1)
+                h = (h / 2).coerceAtLeast(1)
+            }
+        }
+        return null
     }
 
     /*
@@ -135,6 +185,51 @@ object PdfRenderFallback {
             block(renderer)
         }
 
+    /**
+     * 按阅读器的显示策略给出一页的目标像素尺寸：竖长页按宽度、普通页按长边。
+     *
+     * 供自带 PDFium（[PdfiumDoc]/`PdfPageLoader`）复用同一套尺寸口径，避免两套引擎下
+     * 长条页一会儿 1440 宽、一会儿 191 宽。
+     */
+    fun displaySize(pageWidth: Int, pageHeight: Int): Pair<Int, Int> =
+        fit(pageWidth, pageHeight, TARGET_LONG_SIDE, tallWidthDriven = true)
+
+    /** 位图 → 显示用字节流（编码后立即回收位图）。仅「需要字节」的路径使用（如增强开启时）。 */
+    fun encodeForDisplay(bitmap: Bitmap): ByteArray = try {
+        encodePage(bitmap)
+    } finally {
+        runCatching { bitmap.recycle() }
+    }
+
+    /**
+     * Komiho (2026-11-04): 直接渲染成位图交给显示层（不编码、不解码）。
+     *
+     * 与 [renderPage] 完全相同的尺寸策略（竖长页按宽度 / 普通页按长边）与白底，只是省掉
+     * 「位图 → WebP/JPEG 字节」这一步 —— 实测每页 250–470ms，是渲染路线里最大的一块；
+     * 省下的字节随后也不用再解码一次（~40ms/页）。整段仍在缓存渲染器的锁内。
+     */
+    fun renderBitmapForDisplay(path: String, pageIndex: Int, password: String? = null): Bitmap? =
+        withCachedRenderer(path, password) { renderer ->
+            if (pageIndex < 0 || pageIndex >= renderer.pageCount) return@withCachedRenderer null
+            val page = renderer.openPage(pageIndex)
+            try {
+                val (tw, th) = fit(page.width, page.height, TARGET_LONG_SIDE, tallWidthDriven = true)
+                val startedAt = android.os.SystemClock.elapsedRealtime()
+                val bmp = renderWithOomRetry(page, tw, th)
+                if (bmp != null) {
+                    eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+                        TAG,
+                        "render(bitmap) page=$pageIndex ${bmp.width}x${bmp.height} " +
+                            "page=${page.width}x${page.height} " +
+                            "耗时=${android.os.SystemClock.elapsedRealtime() - startedAt}ms",
+                    )
+                }
+                bmp
+            } finally {
+                page.close()
+            }
+        }
+
     /** 渲染指定页为图片字节流（供既有解码+增强管线消费）。 */
     fun renderPage(path: String, pageIndex: Int, password: String? = null): ByteArray? {
         val startedAt = android.os.SystemClock.elapsedRealtime()
@@ -144,10 +239,9 @@ object PdfRenderFallback {
             try {
                 val (tw, th) = fit(page.width, page.height, TARGET_LONG_SIDE, tallWidthDriven = true)
                 val renderStart = android.os.SystemClock.elapsedRealtime()
-                val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+                val bmp = renderWithOomRetry(page, tw, th)
+                    ?: return@withCachedRenderer null
                 try {
-                    bmp.eraseColor(Color.WHITE)
-                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                     val renderMs = android.os.SystemClock.elapsedRealtime() - renderStart
                     val encodeStart = android.os.SystemClock.elapsedRealtime()
                     val encoded = encodePage(bmp)
@@ -282,9 +376,10 @@ object PdfRenderFallback {
         if (tallWidthDriven && h.toFloat() / w.toFloat() > TALL_ASPECT_RATIO) {
             var scale = TARGET_TALL_WIDTH.toFloat() / w.toFloat()
             scale = minOf(scale, MAX_TALL_LONG_SIDE.toFloat() / maxOf(w, h).toFloat())
+            val budget = tallPixelBudget()
             val pixels = w.toDouble() * h.toDouble() * scale * scale
-            if (pixels > MAX_TALL_PIXELS) {
-                scale *= sqrt(MAX_TALL_PIXELS / pixels).toFloat()
+            if (pixels > budget) {
+                scale *= sqrt(budget / pixels).toFloat()
             }
             return (w * scale).toInt().coerceAtLeast(1) to (h * scale).toInt().coerceAtLeast(1)
         }

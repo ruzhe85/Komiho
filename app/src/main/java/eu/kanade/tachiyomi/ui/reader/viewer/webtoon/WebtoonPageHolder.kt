@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
 import android.content.res.Resources
+import android.graphics.drawable.BitmapDrawable
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -157,6 +158,24 @@ class WebtoonPageHolder(
         }
     }
 
+    /** 图片显示配置 —— 字节流与预渲染位图两条路径共用同一套。 */
+    private fun imageConfig() = ReaderPageImageView.Config(
+        zoomDuration = viewer.config.doubleTapAnimDuration,
+        minimumScaleType = if (viewer.config.originalSize) {
+            SubsamplingScaleImageView.SCALE_TYPE_ORIGINAL_SIZE
+        } else {
+            SubsamplingScaleImageView.SCALE_TYPE_FIT_WIDTH
+        },
+        cropBorders =
+        (viewer.config.imageCropBorders && viewer.isContinuous) ||
+            (viewer.config.continuousCropBorders && !viewer.isContinuous),
+        // Komiho: 深度裁剪边缘只在裁边开启的那条分支上有意义。
+        cropBordersAggressive = viewer.config.imageCropBordersAggressive && (
+            (viewer.config.imageCropBorders && viewer.isContinuous) ||
+                (viewer.config.continuousCropBorders && !viewer.isContinuous)
+            ),
+    )
+
     /**
      * Called when the view is recycled and added to the view pool.
      */
@@ -261,6 +280,42 @@ class WebtoonPageHolder(
 
         progressIndicator.setProgress(0)
 
+        // Komiho (2026-11-05): PDF 渲染兜底页直接给位图 —— 与分页模式同一条旁路，
+        // 省掉「栅格化 → 编码成 WebP/JPEG → 再解码」的往返（编码 250–470ms/页 + 解码 ~40ms）。
+        // 返回 null（渲染失败 / 超预算）时继续走下面的字节路径。
+        currentPage.preRenderedBitmap?.let { provider ->
+            val raw = withIOContext { runCatching { provider() }.getOrNull() }
+            if (raw != null && !raw.isRecycled) {
+                // 增强 / E-Ink 直接对渲染位图做，省掉「编码成字节 → 再解码」的往返。
+                val metrics = viewer.activity.resources.displayMetrics
+                val bitmap = runCatching {
+                    withIOContext {
+                        eu.kanade.tachiyomi.util.PdfRenderPostProcess.process(
+                            raw,
+                            viewWidth = metrics.widthPixels,
+                            viewHeight = metrics.heightPixels,
+                            pageIndex = currentPage.index,
+                        )
+                    }
+                }.getOrDefault(raw)
+                withUIContext {
+                    frame.pageIndex = currentPage.index
+                    frame.pageBackground = null
+                    frame.setImage(BitmapDrawable(frame.resources, bitmap), imageConfig())
+                    removeErrorLayout()
+                }
+                renderedPage = currentPage
+                renderedEnhancementMode = enhancementMode
+                renderedEnhancementKey = enhancementKey
+                eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+                    KOMIHA_WEBTOON_TAG,
+                    "render page=${currentPage.index} source=preRendered " +
+                        "id=${System.identityHashCode(this)}",
+                )
+                return
+            }
+        }
+
         val streamFn = currentPage.stream ?: return
 
         try {
@@ -275,22 +330,7 @@ class WebtoonPageHolder(
                 frame.setImage(
                     source,
                     isAnimated,
-                    ReaderPageImageView.Config(
-                        zoomDuration = viewer.config.doubleTapAnimDuration,
-                        minimumScaleType = if (viewer.config.originalSize) {
-                            SubsamplingScaleImageView.SCALE_TYPE_ORIGINAL_SIZE
-                        } else {
-                            SubsamplingScaleImageView.SCALE_TYPE_FIT_WIDTH
-                        },
-                        cropBorders =
-                        (viewer.config.imageCropBorders && viewer.isContinuous) ||
-                            (viewer.config.continuousCropBorders && !viewer.isContinuous),
-                        // Komiho: 深度裁剪边缘只在裁边开启的那条分支上有意义。
-                        cropBordersAggressive = viewer.config.imageCropBordersAggressive && (
-                            (viewer.config.imageCropBorders && viewer.isContinuous) ||
-                                (viewer.config.continuousCropBorders && !viewer.isContinuous)
-                            ),
-                    ),
+                    imageConfig(),
                     page?.skipEnhance ?: false,
                 )
                 removeErrorLayout()

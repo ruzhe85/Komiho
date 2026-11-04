@@ -17,18 +17,21 @@ import java.util.zip.Inflater
  *  - 字典可能无空格（`/Type/Pages` 合法），且 name 值（`/Type /Pages` 中 Pages 是值）必须按值捕获；
  *  - 损坏 xref 时回退全文件扫描 `obj…endobj`。
  *
- * 内存说明：骨架阶段整文件读入 ByteArray；超大 PDF 的随机读取优化留待补齐步。
+ * 内存说明：**不整份读入内存**。所有访问都经 [PdfSource]（mmap + 分块扫描），
+ * 常驻内存只与「当前访问的对象/流」有关，与文件总大小无关。
  */
 class PdfParser(path: String) {
 
-    private val data: ByteArray = RandomAccessFile(path, "r").use { raf ->
-        val len = raf.length()
-        val buf = ByteArray(len.toInt())
-        raf.readFully(buf)
-        buf
-    }
+    /**
+     * Komiho (2026-11-04): 改成**按需随机读取**（mmap，堆外）。
+     *
+     * 以前这里是 `File.readBytes()`：整份文件进堆并整章常驻 —— 352MB 的画集就是 352MB 常驻，
+     * 再叠加渲染位图必然 OOM，而且 2GB 的扫描本根本没有那么多堆可用。现在内存只随「当前访问
+     * 的对象/流」增长，与文件总大小无关。
+     */
+    private val src = PdfSource(path)
 
-    /** objnum -> 对象在 data 中的起始偏移（"N G obj" 起点） */
+    /** objnum -> 对象在文件中的起始偏移（"N G obj" 起点） */
     private val objStart = mutableMapOf<Int, Int>()
     /** objnum -> 在对象流(ObjStm)内的原始字节（压缩存储对象） */
     private val objStmInner = mutableMapOf<Int, ByteArray>()
@@ -74,7 +77,7 @@ class PdfParser(path: String) {
     // ---------- 入口 ----------
 
     private fun parse() {
-        DiagLog.d(TAG, "parse begin: size=${data.size}")
+        DiagLog.d(TAG, "parse begin: size=${src.size}")
         val sx = runCatching { findStartXref() }
             .onFailure { DiagLog.w(TAG, "findStartXref failed: ${it.message}") }
             .getOrDefault(-1)
@@ -106,8 +109,13 @@ class PdfParser(path: String) {
             }
         }
 
-        if (pageList.isEmpty()) {
-            DiagLog.w(TAG, "no pages via xref (objs=${objStart.size}, root=$rootRef), rebuild by scanning")
+        // 页树没走全（或一页都没有）也要重建：205MB 那本的 xref 只读出 869 个对象，
+        // 遍历到缺失的分支就静默停下 —— 日志里 `pages=3`、实际 166 页，就是这种情况。
+        if (pageList.isEmpty() || pageTreeIncomplete) {
+            DiagLog.w(
+                TAG,
+                "page tree incomplete (pages=${pageList.size}/$expectedPageCount, objs=${objStart.size}), rebuild by scanning",
+            )
             objStart.clear()
             objStmInner.clear()
             fromObjStm.clear()
@@ -116,16 +124,38 @@ class PdfParser(path: String) {
             pageResources.clear()
             pagesRootRef = null
             trailerPrev = null
+            pageTreeIncomplete = false
+            expectedPageCount = 0
             runCatching { scanWholeFile() }
                 .onFailure { DiagLog.w(TAG, "scan rebuild failed: ${it.message}") }
             DiagLog.d(TAG, "scan rebuild: objs=${objStart.size} root=$rootRef, retry pages")
             resolveAndCollect()
         }
 
-        if (pageList.isEmpty()) {
-            // 两条路都拿不到页面：交给上层回落系统渲染（不是「加密」，别弹密码框）。
+        // 仍不完整：放宽扫描（不再要求行首）**只补缺失对象**，不覆盖已有偏移，再试一次。
+        // 有些 PDF 的对象头不在行首（跟在 `>>` 或 `stream...endstream` 之后），严格模式会漏掉。
+        if (pageTreeIncomplete) {
+            DiagLog.w(
+                TAG,
+                "still incomplete (pages=${pageList.size}/$expectedPageCount), relaxed scan to fill missing objects",
+            )
+            indexObjectOffsets(requireLineStart = false, onlyMissing = true)
+            pageList.clear()
+            pageResources.clear()
+            pagesRootRef = null
+            pageTreeIncomplete = false
+            expectedPageCount = 0
+            resolveAndCollect()
+            DiagLog.d(TAG, "relaxed scan: objs=${objStart.size} pages=${pageList.size}/$expectedPageCount")
+        }
+
+        if (pageList.isEmpty() || pageTreeIncomplete) {
+            // 拿不到完整页树：交给上层回落系统渲染（页数才对，只是慢；不是「加密」，别弹密码框）。
             parseOk = false
-            DiagLog.w(TAG, "PDF parse: still no pages after rebuild, give up")
+            DiagLog.w(
+                TAG,
+                "PDF parse: pages=${pageList.size}/$expectedPageCount incomplete after rebuild, fallback to render",
+            )
         } else {
             DiagLog.d(TAG, "PDF parse ok: pages=${pageList.size} objs=${objStart.size}")
         }
@@ -141,16 +171,16 @@ class PdfParser(path: String) {
 
     private fun findStartXref(): Int {
         // 最后一个 startxref 之后是 EOF 偏移
-        var idx = data.lastIndexOfBytes("startxref".toByteArray(ISO))
+        var idx = src.lastIndexOf("startxref".toByteArray(ISO))
         if (idx < 0) return -1
-        val len = (data.size - idx).coerceAtMost(64)
-        val tail = String(data, idx, len, ISO)
+        val len = (src.size - idx).coerceAtMost(64)
+        val tail = String(src.read(idx, len), ISO)
         val m = Regex("""startxref\s+(\d+)""").find(tail) ?: return -1
         return m.groupValues[1].toIntOrNull() ?: -1
     }
 
     private fun parseXref(offset: Int) {
-        if (data.startsWith("xref".toByteArray(ISO), offset)) {
+        if (src.startsWith("xref".toByteArray(ISO), offset)) {
             parseXrefTable(offset)
         } else {
             parseXrefStream(offset)
@@ -162,7 +192,7 @@ class PdfParser(path: String) {
             prev = null
             val savedRoot = rootRef
             val savedEnc = encryptRef
-            if (data.startsWith("xref".toByteArray(ISO), p)) {
+            if (src.startsWith("xref".toByteArray(ISO), p)) {
                 parseXrefTable(p)
             } else {
                 parseXrefStream(p)
@@ -179,7 +209,7 @@ class PdfParser(path: String) {
         var i = offset
         // 跳过 "xref"
         i = skipLine(i)
-        while (i < data.size) {
+        while (i < src.size) {
             val line = readLine(i)
             val hdr = line.trim().splitWs()
             if (hdr.size == 2 && hdr[0].all { it.isDigit() } && hdr[1].all { it.isDigit() }) {
@@ -207,7 +237,7 @@ class PdfParser(path: String) {
     }
 
     private fun parseXrefStream(offset: Int) {
-        val objStartPos = data.lastIndexOfBytes("obj".toByteArray(ISO), offset + 16)
+        val objStartPos = src.lastIndexOf("obj".toByteArray(ISO), offset + 16)
         if (objStartPos < 0) return
         val bytes = objectBytesAt(objStartPos) ?: return
         val dict = parseDict(bytes, firstDictStart(bytes), dictEnd(bytes)) ?: return
@@ -231,7 +261,12 @@ class PdfParser(path: String) {
                 for (wi in w.indices) {
                     val v = if (w[wi] > 0) {
                         var acc = 0
-                        for (b in 0 until w[wi]) { acc = (acc shl 8) or (dec[p].toInt() and 0xFF); p++ }
+                        for (b in 0 until w[wi]) {
+                            // 流被截断/长度为 0 时直接放弃，别靠越界异常（那会把整条 xref 链断掉）。
+                            if (p >= dec.size) return
+                            acc = (acc shl 8) or (dec[p].toInt() and 0xFF)
+                            p++
+                        }
                         acc
                     } else 0
                     when (wi) {
@@ -288,10 +323,13 @@ class PdfParser(path: String) {
     }
 
     private fun parseTrailerAt(i: Int): Map<String, ByteArray> {
-        val td = data.indexOfBytes("<<".toByteArray(ISO), i)
+        val td = src.indexOf(DICT_OPEN, i)
         if (td < 0) return emptyMap()
-        val te = data.indexOfBytes(">>".toByteArray(ISO), td)
-        return parseDict(data, td, te + 2) ?: emptyMap()
+        // 用嵌套感知的 dictEnd，而不是 indexOf(">>")：trailer 里可能出现内联字典
+        // （`/Encrypt << ... >>`、`/ID [...]` 等），简单找第一个 ">>" 会截断。
+        val slice = src.read(td, 64 * 1024)
+        if (slice.isEmpty()) return emptyMap()
+        return parseDict(slice, 0, dictEnd(slice)) ?: emptyMap()
     }
 
     private fun resolveRoot() {
@@ -303,10 +341,26 @@ class PdfParser(path: String) {
 
     private var pagesRootRef: String? = null
 
+    /** 根 `/Pages` 声明的总页数（`/Count`），用来判断页树是否遍历完整。 */
+    private var expectedPageCount: Int = 0
+
+    /**
+     * 页树是否「不完整」—— 遍历时遇到解不出的对象，或结果少于 `/Count`。
+     *
+     * Komiho (2026-11-04): 205MB 那本 xref 只读出 869 个对象，页树引用到其中缺失的对象时
+     * `dictOf` 返回 null，遍历会**静默停下**：日志显示 `pages=3`，实际有 166 页。
+     * 现在把这种情况显式记下来，交给上层重建对象表后重试。
+     */
+    private var pageTreeIncomplete: Boolean = false
+
     private fun collectPages() {
         val ref = pagesRootRef ?: return
         val num = deref(ref) ?: return
+        dictOf(num)?.get("/Count")?.firstInt()?.let { if (it in 1..1_000_000) expectedPageCount = it }
         walkPages(num, pageList)
+        if (expectedPageCount > 0 && pageList.size < expectedPageCount) {
+            pageTreeIncomplete = true
+        }
     }
 
     /**
@@ -316,13 +370,27 @@ class PdfParser(path: String) {
      * 父 `/Pages` 上，页字典里根本没有这个键。以前只读页字典 → 拿不到 `/XObject` → 整本回落
      * 渲染，明明是整页 JPEG 也拆不出来。
      */
-    private fun walkPages(objNum: Int, out: MutableList<Int>, inheritedResources: ByteArray? = null) {
-        val dict = dictOf(objNum) ?: return
+    private fun walkPages(
+        objNum: Int,
+        out: MutableList<Int>,
+        inheritedResources: ByteArray? = null,
+        depth: Int = 0,
+    ) {
+        // 页树理论上只有几层；循环引用（损坏文件）会把这里变成无限递归 → StackOverflow。
+        if (depth > MAX_PAGE_TREE_DEPTH) {
+            pageTreeIncomplete = true
+            return
+        }
+        val dict = dictOf(objNum) ?: run {
+            // 对象表里没有这个分支 → 页树残缺，交给上层重建后重试。
+            pageTreeIncomplete = true
+            return
+        }
         val resources = dict["/Resources"] ?: inheritedResources
         when (val t = dict["/Type"]?.let { String(it, ISO) }) {
             "/Pages" -> {
                 val kids = dict["/Kids"]?.let { findRefs(it) } ?: emptyList()
-                for (k in kids) walkPages(k, out, resources)
+                for (k in kids) walkPages(k, out, resources, depth + 1)
             }
             "/Page" -> {
                 out.add(objNum)
@@ -432,11 +500,55 @@ class PdfParser(path: String) {
     }
 
     /** 抽取内嵌图的原始流字节（DCTDecode 即 JPEG，可交解码器直解）。 */
+    /**
+     * 取对象流的原始字节。
+     *
+     * Komiho (2026-11-04): 改成「先读对象头定位 `/Length`，再精确读那一段」—— 图像流动辄几 MB，
+     * 以前是先 `objectBytesAt`（扫 endobj）+ `streamBytesOf`（再找 endstream）把整段复制两遍，
+     * 现在只多读一个 64KB 的头部窗口。`/Length` 不是直接数字时退回旧路径。
+     */
     fun rawStreamBytes(objNum: Int): ByteArray? {
-        val bytes = objStart[objNum]?.let { objectBytesAt(it) }
-            ?: objStmInner[objNum]
-            ?: return null
-        return streamBytesOf(bytes)
+        objStmInner[objNum]?.let { return streamBytesOf(it) }
+        val start = objStart[objNum] ?: return null
+        val head = src.read(start, OBJECT_HEAD_BYTES)
+        if (head.isEmpty()) return null
+        val streamIdx = head.indexOfBytes(STREAM_KEY)
+        if (streamIdx < 0) {
+            return objectBytesAt(start)?.let { streamBytesOf(it) }
+        }
+        var p = streamIdx + STREAM_KEY.size
+        if (head.getOrElse(p) { 0 } == '\r'.code.toByte()) p++
+        if (head.getOrElse(p) { 0 } == '\n'.code.toByte()) p++
+        // 注意 `/Length` 可能是间接引用（`/Length 12 0 R`）：正则必须排除这种，否则会把
+        // 对象号 12 当成长度，读出 12 字节的“图片”直接解不出来。
+        val length = Regex("""/Length\s+(\d+)(?!\s+\d+\s+R)""")
+            .find(String(head, 0, streamIdx, ISO))
+            ?.groupValues?.get(1)?.toIntOrNull()
+        if (length != null && length > 0 && start + p + length <= src.size) {
+            // 校验：数据末尾紧跟 endstream 才认为 /Length 可信（有些工具写错 /Length）。
+            val tail = src.read(start + p + length, 16)
+            if (tail.indexOfBytes(ENDSTREAM_KEY) >= 0) {
+                return src.read(start + p, length)
+            }
+        }
+        return objectBytesAt(start)?.let { streamBytesOf(it) }
+    }
+
+    /** 只读流的前 [count] 字节（判断「流是明文 JPEG 还是密文」用，不必把整页图读进来）。 */
+    fun rawStreamHead(objNum: Int, count: Int = 16): ByteArray? {
+        objStmInner[objNum]?.let { bytes ->
+            val stream = streamBytesOf(bytes) ?: return null
+            return stream.copyOfRange(0, minOf(count, stream.size))
+        }
+        val start = objStart[objNum] ?: return null
+        val head = src.read(start, OBJECT_HEAD_BYTES)
+        if (head.isEmpty()) return null
+        val streamIdx = head.indexOfBytes(STREAM_KEY)
+        if (streamIdx < 0) return null
+        var p = streamIdx + STREAM_KEY.size
+        if (head.getOrElse(p) { 0 } == '\r'.code.toByte()) p++
+        if (head.getOrElse(p) { 0 } == '\n'.code.toByte()) p++
+        return src.read(start + p, count)
     }
 
     fun pageMediaBox(pageIndex: Int): Pair<Int, Int>? {
@@ -450,12 +562,31 @@ class PdfParser(path: String) {
     // ---------- 对象模型 ----------
 
     /** 取对象字节。偏移非法（xref 是垃圾时会出现）返回 null，绝不抛越界给上层。 */
+    /**
+     * 读一个对象的字节（到 `endobj` 为止）。
+     *
+     * Komiho (2026-11-04): 先读 **32KB** 窗口找 `endobj`，找不到再 ×4 扩张。以前直接用
+     * `indexOf("endobj")`，每次都要读 4MB 块 —— 打开时页树每页至少查三次对象字典，
+     * 536 页就是 1600 次 × 4MB 的无谓 I/O。
+     */
     private fun objectBytesAt(offset: Int): ByteArray? {
-        if (offset < 0 || offset >= data.size) return null
-        val e = data.indexOfBytes("endobj".toByteArray(ISO), offset)
-        val end = if (e >= 0) e else data.size
-        if (end <= offset || end > data.size) return null
-        return runCatching { data.copyOfRange(offset, end) }.getOrNull()
+        if (offset < 0 || offset >= src.size) return null
+        var window = 32 * 1024
+        while (true) {
+            val bytes = src.read(offset, window)
+            if (bytes.isEmpty()) return null
+            val e = bytes.indexOfBytes(ENDOBJ_KEY)
+            if (e >= 0) return bytes.copyOfRange(0, e)
+            if (offset + bytes.size >= src.size) return bytes
+            if (window >= MAX_OBJECT_WINDOW) {
+                // 超大对象（含大图流）：退回「找 endobj + 全段读」。
+                val idx = src.indexOf(ENDOBJ_KEY, offset)
+                val end = if (idx >= 0) idx else src.size
+                if (end <= offset) return null
+                return runCatching { src.read(offset, end - offset) }.getOrNull()
+            }
+            window *= 4
+        }
     }
 
     private fun dictOf(objNum: Int): Map<String, ByteArray>? {
@@ -604,6 +735,21 @@ class PdfParser(path: String) {
     private val B_CHAR = 'b'.code.toByte()
     private val J_CHAR = 'j'.code.toByte()
     private val R_CHAR = 'R'.code.toByte()
+    /** 扫描块大小与块间重叠：重叠要盖住「N G obj」这串头（≤ 32 字节，取 64 有富余）。 */
+    private val SCAN_CHUNK = 4 * 1024 * 1024
+    private val SCAN_OVERLAP = 64
+
+    /** 读对象头用的小窗口：字典 + `stream` 关键字基本都在这个范围内。 */
+    private val OBJECT_HEAD_BYTES = 64 * 1024
+    private val STREAM_KEY = "stream".toByteArray(Charsets.ISO_8859_1)
+    private val ENDOBJ_KEY = "endobj".toByteArray(Charsets.ISO_8859_1)
+    private val ENDSTREAM_KEY = "endstream".toByteArray(Charsets.ISO_8859_1)
+    /** `objectBytesAt` 的窗口扩张上限：到这儿还找不到 endobj 就退回全段扫描。 */
+    private val MAX_OBJECT_WINDOW = 8 * 1024 * 1024
+
+    /** 页树最大递归深度（正常文档 2–3 层；防损坏文件循环引用）。 */
+    private val MAX_PAGE_TREE_DEPTH = 64
+
     private val TRAILER_KEY = "trailer".toByteArray(Charsets.ISO_8859_1)
     private val DICT_OPEN = "<<".toByteArray(Charsets.ISO_8859_1)
 
@@ -626,17 +772,35 @@ class PdfParser(path: String) {
         }
     }
 
-    /** 扫 `N G obj`（只认行首），记录对象偏移。后出现的覆盖先出现的 = 增量更新语义。 */
-    private fun indexObjectOffsets() {
-        var i = 0
-        val last = data.size - 3
-        while (i <= last) {
-            if (data[i] != O_CHAR || data[i + 1] != B_CHAR || data[i + 2] != J_CHAR) {
-                i++
-                continue
+    /**
+     * 扫 `N G obj` 记录对象偏移。
+     *
+     * @param requireLineStart true = 只认「换行/文件首」之后的对象头（第一批首选，抗二进制流假匹配）；
+     *                         false = 宽松模式，任何位置的对象头都收。
+     * @param onlyMissing true = 只补对象表里**没有**的号，绝不覆盖已有偏移（宽松补漏用）。
+     */
+    private fun indexObjectOffsets(requireLineStart: Boolean = true, onlyMissing: Boolean = false) {
+        var base = 0
+        while (base < src.size) {
+            // 分块读 + 块间重叠：既保证跨块的对象头不会被切断，也避免逐字节调 src.get（那会把
+            // 300MB 变成 3 亿次映射访问，慢到不可用）。
+            val block = src.read(base, SCAN_CHUNK + SCAN_OVERLAP)
+            if (block.isEmpty()) break
+            var i = 0
+            val last = block.size - 3
+            while (i <= last) {
+                if (block[i] != O_CHAR || block[i + 1] != B_CHAR || block[i + 2] != J_CHAR) {
+                    i++
+                    continue
+                }
+                parseObjectHeaderBefore(block, i, requireLineStart)?.let { (num, localStart) ->
+                    val abs = base + localStart
+                    if (!onlyMissing || !objStart.containsKey(num)) objStart[num] = abs
+                }
+                i += 3
             }
-            parseObjectHeaderBefore(i)?.let { (num, start) -> objStart[num] = start }
-            i += 3
+            if (block.size <= SCAN_OVERLAP) break
+            base += block.size - SCAN_OVERLAP
         }
     }
 
@@ -646,24 +810,28 @@ class PdfParser(path: String) {
      * 只接受「行首」出现的对象头（前一字节是换行或文件开头）：二进制流里恰好出现的同样字节串
      * 不是对象头，认了会把真偏移覆盖掉，页树就又解析不出来了。
      */
-    private fun parseObjectHeaderBefore(keywordIdx: Int): Pair<Int, Int>? {
+    private fun parseObjectHeaderBefore(
+        block: ByteArray,
+        keywordIdx: Int,
+        requireLineStart: Boolean = true,
+    ): Pair<Int, Int>? {
         var p = keywordIdx - 1
-        if (p < 0 || !isWsByte(data[p])) return null
-        while (p >= 0 && isWsByte(data[p])) p--
+        if (p < 0 || !isWsByte(block[p])) return null
+        while (p >= 0 && isWsByte(block[p])) p--
         val genEnd = p
-        while (p >= 0 && isDigitByte(data[p])) p--
+        while (p >= 0 && isDigitByte(block[p])) p--
         if (p == genEnd) return null // 没读到代数
-        if (p < 0 || !isWsByte(data[p])) return null
-        while (p >= 0 && isWsByte(data[p])) p--
+        if (p < 0 || !isWsByte(block[p])) return null
+        while (p >= 0 && isWsByte(block[p])) p--
         val numEnd = p
-        while (p >= 0 && isDigitByte(data[p])) p--
+        while (p >= 0 && isDigitByte(block[p])) p--
         if (p == numEnd) return null // 没读到对象号
         val numStart = p + 1
-        if (p >= 0) {
-            val prev = data[p]
+        if (requireLineStart && p >= 0) {
+            val prev = block[p]
             if (prev != '\n'.code.toByte() && prev != '\r'.code.toByte()) return null
         }
-        val num = String(data, numStart, numEnd - numStart + 1, ISO).toIntOrNull() ?: return null
+        val num = String(block, numStart, numEnd - numStart + 1, ISO).toIntOrNull() ?: return null
         return num to numStart
     }
 
@@ -672,14 +840,14 @@ class PdfParser(path: String) {
         var lastDictStart = -1
         var from = 0
         while (true) {
-            val idx = data.indexOfBytes(TRAILER_KEY, from)
+            val idx = src.indexOf(TRAILER_KEY, from)
             if (idx < 0) break
-            val ds = data.indexOfBytes(DICT_OPEN, idx)
+            val ds = src.indexOf(DICT_OPEN, idx)
             if (ds >= 0 && ds - idx < 32) lastDictStart = ds
             from = idx + TRAILER_KEY.size
         }
         if (lastDictStart < 0) return
-        val sub = data.copyOfRange(lastDictStart, minOf(data.size, lastDictStart + 64 * 1024))
+        val sub = src.read(lastDictStart, minOf(src.size, lastDictStart + 64 * 1024) - lastDictStart)
         val dict = parseDict(sub, 0, dictEnd(sub)) ?: return
         applyTrailer(dict)
     }
@@ -690,7 +858,7 @@ class PdfParser(path: String) {
         var result: String? = null
         var from = 0
         while (true) {
-            val idx = data.indexOfBytes(kw, from)
+            val idx = src.indexOf(kw, from)
             if (idx < 0) break
             readRefAfter(idx + kw.size)?.let { result = it }
             from = idx + kw.size
@@ -701,18 +869,18 @@ class PdfParser(path: String) {
     /** 从 [start] 起读 `N G R`，成功返回 "N G R"。 */
     private fun readRefAfter(start: Int): String? {
         var p = start
-        while (p < data.size && isWsByte(data[p])) p++
+        while (p < src.size && isWsByte(src.get(p))) p++
         val n1Start = p
-        while (p < data.size && isDigitByte(data[p])) p++
+        while (p < src.size && isDigitByte(src.get(p))) p++
         if (p == n1Start) return null
-        val n1 = String(data, n1Start, p - n1Start, ISO)
-        while (p < data.size && isWsByte(data[p])) p++
+        val n1 = String(src.read(n1Start, p - n1Start), ISO)
+        while (p < src.size && isWsByte(src.get(p))) p++
         val n2Start = p
-        while (p < data.size && isDigitByte(data[p])) p++
+        while (p < src.size && isDigitByte(src.get(p))) p++
         if (p == n2Start) return null
-        val n2 = String(data, n2Start, p - n2Start, ISO)
-        while (p < data.size && isWsByte(data[p])) p++
-        if (p >= data.size || data[p] != R_CHAR) return null
+        val n2 = String(src.read(n2Start, p - n2Start), ISO)
+        while (p < src.size && isWsByte(src.get(p))) p++
+        if (p >= src.size || src.get(p) != R_CHAR) return null
         return "$n1 $n2 R"
     }
 
@@ -756,7 +924,7 @@ class PdfParser(path: String) {
 
     private fun readLine(i: Int): String {
         val e = lineEnd(i)
-        return String(data, i, e - i, ISO)
+        return String(src.read(i, e - i), ISO)
     }
 
     /**
@@ -765,18 +933,18 @@ class PdfParser(path: String) {
      */
     private fun lineEnd(i: Int): Int {
         var j = i
-        while (j < data.size) {
-            val c = data[j]
+        while (j < src.size) {
+            val c = src.get(j)
             if (c == '\n'.code.toByte() || c == '\r'.code.toByte()) {
                 // \r\n 连发：跳过两个字节
-                if (c == '\r'.code.toByte() && j + 1 < data.size && data[j + 1] == '\n'.code.toByte()) {
+                if (c == '\r'.code.toByte() && j + 1 < src.size && src.get(j + 1) == '\n'.code.toByte()) {
                     return j + 2
                 }
                 return j + 1
             }
             j++
         }
-        return data.size
+        return src.size
     }
 
     private fun skipLine(i: Int): Int = lineEnd(i)
@@ -810,6 +978,11 @@ class PdfParser(path: String) {
 
     private fun ByteArray.firstInt(): Int? {
         return Regex("""-?\d+""").find(String(this, ISO))?.value?.toIntOrNull()
+    }
+
+    /** 关闭底层文件句柄（mmap / file descriptor）—— 阅读器回收章节时调用，避免句柄泄漏。 */
+    fun close() {
+        runCatching { src.close() }
     }
 
     /**

@@ -18,6 +18,7 @@ import eu.kanade.tachiyomi.data.coil.prewarm
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.util.PdfRenderPostProcess
 import eu.kanade.tachiyomi.ui.reader.viewer.isStandardImageStream
 import eu.kanade.tachiyomi.util.EnhanceTimings
 import kotlinx.coroutines.CompletableDeferred
@@ -185,6 +186,18 @@ class PagerPreparedCache(private val maxSize: Int = 3) {
 object PagerPagePreparer {
 
     /**
+     * 预渲染位图能进缓存的像素上限 —— 按**当前可用堆**动态给，不写死。
+     *
+     * 位图 4 字节/像素；预处理缓存默认 3 份、外加正在显示的 1 份，所以按可用堆的 1/16 取
+     * （×4 份 ≈ 1/4 堆），再夹在 4MP–24MP 之间。超限的页回落到「编码成字节」路径
+     * （那类大页改用 JPEG 编码，只有几 MB），显示效果不受影响。
+     */
+    private fun prerenderPixelBudget(): Long {
+        val freeBytes = Runtime.getRuntime().let { it.maxMemory() - (it.totalMemory() - it.freeMemory()) }
+        return (freeBytes / 16).coerceIn(4_000_000L, 24_000_000L)
+    }
+
+    /**
      * 处理一页并返回预处理结果；返回 null 仅表示流不可用或管线异常（此时 holder 走完整旧管线）。
      * [viewHeight] 用于宽页居中边距计算；holder 传自身高度，预热传 pager 高度（两者等高）。
      */
@@ -194,6 +207,46 @@ object PagerPagePreparer {
         extraPage: ReaderPage?,
         viewHeight: Int,
     ): PagerPreparedPage? {
+        // Komiho (2026-11-04): 已渲染好的位图（PDF 渲染兜底页）直接产出结果，跳过
+        // 「栅格化 → 编码成 WebP/JPEG → 再解码」的往返（实测省 250–470ms/页）。
+        // 这类页不做双页合并/拆分：PDF 渲染页本来就是单页栅格图，没有跨页语义。
+        page.preRenderedBitmap?.let { provider ->
+            val raw = runCatching { withIOContext { provider() } }.getOrNull()
+            if (raw != null && !raw.isRecycled) {
+                // 增强 / E-Ink 直接在这张位图上做 —— 不再把渲染结果编码成 WebP/JPEG 再交给
+                // Coil 解码（那一步每页 250–470ms，是渲染页最贵的开销）。
+                val viewWidth = viewer.activity.resources.displayMetrics.widthPixels
+                val bitmap = runCatching {
+                    withIOContext {
+                        PdfRenderPostProcess.process(
+                            raw,
+                            viewWidth = viewWidth,
+                            viewHeight = viewHeight,
+                            pageIndex = page.index,
+                        )
+                    }
+                }.getOrDefault(raw)
+                if (bitmap.width.toLong() * bitmap.height > prerenderPixelBudget()) {
+                    // 超大页（如 1440×15050 = 21MP ≈ 86MB ARGB）：缓存里放不下几张，回落字节路径。
+                    runCatching { bitmap.recycle() }
+                } else if (!bitmap.isRecycled) {
+                    return PagerPreparedPage(
+                        source = Buffer(),
+                        source2 = null,
+                        isAnimated = false,
+                        background = null,
+                        decodedBitmap = bitmap,
+                        enhancementMode = Injekt.get<ReaderPreferences>().enhancementMode.get(),
+                        cropBorders = viewer.config.imageCropBorders,
+                        enhanceElapsedMillis = -1L,
+                        layoutApplied = true,
+                        // enhanced=true：源字节为空，不能让「停顿补算」拿空 buffer 去重建。
+                        enhanced = true,
+                        retryable = false,
+                    )
+                }
+            }
+        }
         val streamFn = page.stream ?: return null
         val config = viewer.config
         val enhancementMode = Injekt.get<ReaderPreferences>().enhancementMode.get()

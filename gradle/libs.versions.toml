@@ -59,6 +59,7 @@ mockk = "1.14.11"
 moko-resources = "0.26.4"
 okhttp = "5.4.0"
 okio = "3.17.0"
+pdfiumAndroid = "2.0.3"
 photoView = "2.3.0"
 quickJs = "547f5b1597"
 dcerpc = "0.12.13"
@@ -80,6 +81,7 @@ xmlutil = "1.0.1"
 
 [libraries]
 aboutLibraries-compose = { module = "com.mikepenz:aboutlibraries-compose-m3", version.ref = "aboutLibraries" }
+pdfium-android = { module = "io.legere:pdfiumandroid", version.ref = "pdfiumAndroid" }
 android-desugar = { module = "com.android.tools:desugar_jdk_libs", version.ref = "android-desugar" }
 android-gradle = { module = "com.android.tools.build:gradle", version.ref = "android-gradle" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }

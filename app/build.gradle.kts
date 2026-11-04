@@ -447,6 +447,13 @@ dependencies {
     // SMB 慢/失败时无法从 logcat 看到发生在哪一环。
     implementation(libs.slf4j.simple)
     // SY <--
+
+    // Komiho (2026-11-04): 打包 PDFium（io.legere/pdfiumandroid，Apache-2.0）。
+    // 系统自带的 android.graphics.pdf.PdfRenderer 封装太薄：xref 损坏的 PDF 一律抛
+    // SecurityException（被我们当成「需要密码」），页树解析失败就只能整本渲染。
+    // 换成自带 PDFium 后，解析/容错交给它，我们自己的 PdfParser 只作为「内嵌 JPEG 直通」的
+    // 可选加速路径（失败即回落，不影响打开）。
+    implementation(libs.pdfium.android)
 }
 
 androidComponents {
