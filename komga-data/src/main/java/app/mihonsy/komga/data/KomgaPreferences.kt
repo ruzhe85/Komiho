@@ -326,6 +326,28 @@ class KomgaPreferences(context: Context) {
         prefs.edit().clear().apply()
     }
 
+    /**
+     * Komiho (2026-11-04): 远程缓存总量上限（MB，0 = 不限制）。
+     *
+     * 和「设置-存储」里那条 200MB~4GB 滑条不是一回事：滑条是各缓存目录**写入时**的分预算
+     * （StoragePreferences.webdavCacheMaxBytes）；这里是 **App 启动时**对
+     * webdav_fallback / remote_pages / remote_pdf 三个目录做一次总量兜底，用户可随意填任意 MB，
+     * 超限就从最旧的开始删（见 CacheAutoTrim）。
+     */
+    var cacheLimitMb: Int
+        get() = prefs.getInt(KEY_CACHE_LIMIT_MB, 0)
+        set(v) = prefs.edit().putInt(KEY_CACHE_LIMIT_MB, v.coerceIn(0, 1_048_576)).apply()
+
+    /**
+     * Komiho (2026-11-04): 是否显示 Komga 的系列标题 / 书籍标题（设置-Komga，默认开）。
+     *
+     * 关掉后书架、主页、系列详情一律显示**原始文件夹名 / 原始文件名**（`url` 末段 / `BookDto.name`），
+     * 便于核对磁盘上的实际目录。只影响显示，不动 DB 里的漫画名与阅读记录。
+     */
+    var showTitles: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_TITLES, true)
+        set(v) = prefs.edit().putBoolean(KEY_SHOW_TITLES, v).apply()
+
     companion object {
         /**
          * 设备本地「外观与语言」偏好键——主题 / 明暗模式 / AMOLED / 应用语言 / 导航栏位置。
@@ -415,6 +437,12 @@ class KomgaPreferences(context: Context) {
         const val KEY_HOME_SECTION_ORDER = "home_section_order"
         const val KEY_HOME_SECTION_LAYOUT = "home_section_layout"
         const val KEY_READER_DOUBLE_PAGE = "reader_double_page"
+        /** Komiho: 远程缓存总量上限（MB，0 = 不限制），见 [cacheLimitMb]。 */
+        const val KEY_CACHE_LIMIT_MB = "cache_limit_mb"
+
+        /** Komiho: 是否显示系列/书籍标题（false = 显示原始文件夹/文件名），见 [showTitles]。 */
+        const val KEY_SHOW_TITLES = "show_titles"
+
         const val KEY_READER_MODE = "reader_mode"
         const val KEY_READER_PROGRESS_BUBBLE_ENABLED = "reader_progress_bubble_enabled"
         const val KEY_THEME_MODE = "theme_mode"

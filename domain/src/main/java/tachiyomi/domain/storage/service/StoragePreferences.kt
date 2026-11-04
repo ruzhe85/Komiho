@@ -130,8 +130,11 @@ class StoragePreferences(
     )
 
     /**
-     * WebDAV 整本缓存（rar/7z 强制回退等）磁盘上限，字节。默认 1GB，可调 200MB~4GB
-     * （设置-存储滑条，200MB 一档）。超限按 lastModified LRU 淘汰（WebDavRandomAccessSource）。
+     * 远程缓存（整本回退 / 页级缓存 / PDF 整本）的**写入预算**，字节。
+     *
+     * Komiho: 这条偏好已经没有 UI 入口（设置-存储里 200MB~4GB 的滑条已撤掉），现在只在
+     * 「用户没填缓存上限」时作为回落默认值使用 —— 真正的取值统一走 `CacheLimits.maxBytes(context)`，
+     * 它优先采用用户填写的「缓存上限（MB）」。超限仍按 lastModified LRU 淘汰。
      */
     val webdavCacheMaxBytes: Preference<Long> = preferenceStore.getLong(
         Preference.appStateKey("webdav_cache_max_bytes"),

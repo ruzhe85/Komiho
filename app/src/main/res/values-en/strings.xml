@@ -190,6 +190,8 @@
     <string name="settings_section_limit">Items per section</string>
     <string name="settings_home_sections">Home sections</string>
     <string name="settings_block_adjust">Section layout</string>
+    <string name="settings_show_titles">Show series / book titles</string>
+    <string name="settings_show_titles_summary">When off, show original folder / file names instead (display only, library data is untouched)</string>
     <string name="settings_cache_title">Cache</string>
     <string name="settings_hidden">Hidden zone</string>
     <string name="settings_show">Show</string>
@@ -367,9 +369,14 @@
     <string name="storage_perm_denied_desc">Not granted: local browsing uses SAF. Granting speeds it up greatly</string>
     <string name="storage_webdav_cache">Clear remote cache</string>
     <string name="storage_webdav_cache_desc">Pages you have read from WebDAV/SMB zip/cbz are cached on disk (zero network on revisit); rar/7z archives are cached whole when opened;\nshared limit, oldest entries evicted above it. Lowering the limit applies on next write.</string>
-    <string name="storage_cache_limit">Limit: </string>
     <string name="storage_cache_range">200 MB – 4 GB, 200 MB steps (default 1 GB)</string>
     <string name="storage_cache_usage">Used: </string>
+    <string name="storage_cache_limit_title">Cache limit (MB)</string>
+    <string name="storage_cache_limit_unlimited">Unlimited (tap to set)</string>
+    <string name="storage_cache_limit_hint">oldest trimmed at startup</string>
+    <string name="storage_cache_limit_desc">On app start, if total remote cache exceeds this value, the oldest entries are deleted. 0 = unlimited.</string>
+    <string name="storage_cache_limit_input">Limit (MB)</string>
+    <string name="storage_cache_limit_saved">Saved: %1$d MB (0 = unlimited)</string>
     <string name="storage_cover_cache">Clear cover cache</string>
     <string name="storage_cover_cache_desc">Local / SMB / WebDAV cover thumbnails. Rebuilt automatically while browsing; reading progress is unaffected. Komga covers are managed separately under Library → Previews.</string>
     <string name="label_webdav">WebDAV</string>

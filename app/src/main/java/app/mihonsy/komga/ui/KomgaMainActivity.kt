@@ -173,6 +173,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -1888,7 +1889,7 @@ private fun HomeBookRow(
     when (mode) {
         "LIST" -> HomeListColumn {
             books.forEach { b ->
-                HomeBookListItem(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                HomeBookListItem(client, b, onClick = { onBookClick(b.id, KomgaTitles.book(b)) })
             }
         }
         else -> {
@@ -1900,7 +1901,7 @@ private fun HomeBookRow(
                     minCellWidth = if (mode == "COMPACT_GRID") 80.dp else 100.dp,
                 ) { cellModifier ->
                     books.forEach { b ->
-                        HomeBookCard(client, b, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                        HomeBookCard(client, b, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, KomgaTitles.book(b)) })
                     }
                 }
             } else {
@@ -1910,7 +1911,7 @@ private fun HomeBookRow(
                 ) {
                     items(books.size) { i ->
                         val b = books[i]
-                        HomeBookCard(client, b, cardModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                        HomeBookCard(client, b, cardModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, KomgaTitles.book(b)) })
                     }
                 }
             }
@@ -2001,7 +2002,7 @@ private fun HomeBookCard(client: KomgaApiClient, b: BookDto, modifier: Modifier 
                             )
                         }
                         Text(
-                            text = b.metadata.title ?: b.name,
+                            text = KomgaTitles.book(b),
                             color = Color.White,
                             style = MaterialTheme.typography.labelSmall,
                             maxLines = 1,
@@ -2014,7 +2015,7 @@ private fun HomeBookCard(client: KomgaApiClient, b: BookDto, modifier: Modifier 
         if (!compact) {
             Spacer(Modifier.height(4.dp))
             Text(
-                text = b.metadata.title ?: b.name,
+                text = KomgaTitles.book(b),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -2056,7 +2057,7 @@ private fun HomeBookListItem(client: KomgaApiClient, b: BookDto, onClick: () -> 
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = b.metadata.title ?: b.name,
+                text = KomgaTitles.book(b),
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -2087,7 +2088,7 @@ private fun HomeContinueReadingRow(
     when (mode) {
         "LIST" -> HomeListColumn {
             books.forEach { b ->
-                HomeContinueReadingListItem(client, b, onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                HomeContinueReadingListItem(client, b, onClick = { onBookClick(b.id, KomgaTitles.book(b)) })
             }
         }
         else -> {
@@ -2099,7 +2100,7 @@ private fun HomeContinueReadingRow(
                     minCellWidth = if (mode == "COMPACT_GRID") 80.dp else 100.dp,
                 ) { cellModifier ->
                     books.forEach { b ->
-                        HomeContinueReadingCard(client, b, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                        HomeContinueReadingCard(client, b, cellModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, KomgaTitles.book(b)) })
                     }
                 }
             } else {
@@ -2109,7 +2110,7 @@ private fun HomeContinueReadingRow(
                 ) {
                     items(books.size) { i ->
                         val b = books[i]
-                        HomeContinueReadingCard(client, b, cardModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, b.metadata.title ?: b.name) })
+                        HomeContinueReadingCard(client, b, cardModifier, compact = mode == "COMPACT_GRID", onClick = { onBookClick(b.id, KomgaTitles.book(b)) })
                     }
                 }
             }
@@ -2159,7 +2160,7 @@ private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, modifier
                             )
                         }
                         Text(
-                            text = b.metadata.title ?: b.name,
+                            text = KomgaTitles.book(b),
                             color = Color.White,
                             style = MaterialTheme.typography.labelSmall,
                             maxLines = 1,
@@ -2182,7 +2183,7 @@ private fun HomeContinueReadingCard(client: KomgaApiClient, b: BookDto, modifier
         }
         if (!compact) {
             Text(
-                text = b.metadata.title ?: b.name,
+                text = KomgaTitles.book(b),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -2233,7 +2234,7 @@ private fun HomeContinueReadingListItem(client: KomgaApiClient, b: BookDto, onCl
                 )
             }
             Text(
-                text = b.metadata.title ?: b.name,
+                text = KomgaTitles.book(b),
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -2367,7 +2368,7 @@ private fun HomeSeriesCard(
                         .padding(horizontal = 5.dp, vertical = 4.dp),
                 ) {
                     Text(
-                        text = s.name,
+                        text = KomgaTitles.series(s),
                         color = Color.White,
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 2,
@@ -2379,7 +2380,7 @@ private fun HomeSeriesCard(
         if (!compact) {
             Spacer(Modifier.height(4.dp))
             Text(
-                text = s.name,
+                text = KomgaTitles.series(s),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -2428,7 +2429,7 @@ private fun HomeSeriesListItem(
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = s.name,
+                text = KomgaTitles.series(s),
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -2998,7 +2999,7 @@ fun LibrarySeriesListRow(
             )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(series.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                Text(KomgaTitles.series(series), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
                 Text(
                     text = composeStringResource(R.string.series_books_summary, series.booksCount, series.booksReadCount, series.booksUnreadCount),
                     style = MaterialTheme.typography.bodySmall,
@@ -3101,7 +3102,7 @@ fun LibrarySeriesCard(
                             .padding(horizontal = 6.dp, vertical = 5.dp),
                     ) {
                         Text(
-                            text = series.name,
+                            text = KomgaTitles.series(series),
                             color = Color.White,
                             style = MaterialTheme.typography.labelMedium,
                             maxLines = 2,
@@ -3112,7 +3113,7 @@ fun LibrarySeriesCard(
             }
             if (!titleInside) {
                 Text(
-                    text = series.name,
+                    text = KomgaTitles.series(series),
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -4044,6 +4045,21 @@ private fun SettingsTab(
                         onPreferenceClick = { showHomePage = true },
                     )
                 }
+                // Komiho (2026-11-04): 「显示系列标题 / 书籍标题」开关 —— 位于「主页」与「清除预览图」之间。
+                item {
+                    val titlePrefs = remember { KomgaPreferences(context.applicationContext) }
+                    var showTitles by remember { mutableStateOf(titlePrefs.showTitles) }
+                    SwitchPreferenceWidget(
+                        title = composeStringResource(R.string.settings_show_titles),
+                        subtitle = composeStringResource(R.string.settings_show_titles_summary),
+                        checked = showTitles,
+                        onCheckedChanged = { enabled ->
+                            showTitles = enabled
+                            // 写偏好 + 刷新进程内缓存，回到书架立即生效。
+                            KomgaTitles.update(context, enabled)
+                        },
+                    )
+                }
                 item {
                     TextPreferenceWidget(
                         title = composeStringResource(R.string.settings_preview_images),
@@ -4375,7 +4391,9 @@ private fun KomgaBackupSettings(modifier: Modifier = Modifier) {
 
 /** 存储设置：所有文件访问权限（MANAGE_EXTERNAL_STORAGE）授权入口。
  *  仅此页是 Komga 用户可达的授权入口（Mihon 的"数据存储"页在 Komga 模式下不暴露）。
- *  Phase4-②：新增 WebDAV 整本缓存管理（上限滑条 200MB~4GB / 当前占用 / 清除缓存）。 */
+ *  Phase4-② 的「上限滑条 200MB~4GB」已撤掉，改为「缓存上限（MB）」自定义输入 + 启动时总量兜底
+ *  （见 CacheAutoTrim / CacheLimits）：滑条只能按 200MB 档位走，且只在写入时按目录生效，
+ *  用户要的「总量超了就清最旧的」它给不了。 */
 @Composable
 private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.content.Context) {
     val webdavCacheDir = remember { File(context.cacheDir, "webdav_fallback") }
@@ -4402,6 +4420,11 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
     var usageTick by remember { mutableStateOf(0) }
     var showRemoteConfirm by remember { mutableStateOf(false) }
     var showCoverConfirm by remember { mutableStateOf(false) }
+    // Komiho (2026-11-04): 缓存自定义上限（MB，0 = 不限制）。启动时由 CacheAutoTrim 兜底清理。
+    val komgaPrefs = remember { KomgaPreferences(context.applicationContext) }
+    var cacheLimitMb by remember { mutableStateOf(komgaPrefs.cacheLimitMb) }
+    var showCacheLimitDialog by remember { mutableStateOf(false) }
+    var cacheLimitInput by remember { mutableStateOf("") }
     LaunchedEffect(usageTick) {
         usageBytes = withContext(Dispatchers.IO) {
             val fallbackBytes = webdavCacheDir.listFiles()
@@ -4457,6 +4480,34 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             }
         }
         // SY <--
+        // Komiho (2026-11-04): 缓存自定义上限 —— 启动时总量超限就按最旧优先清理。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    cacheLimitInput = cacheLimitMb.toString()
+                    showCacheLimitDialog = true
+                }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    composeStringResource(R.string.storage_cache_limit_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    if (cacheLimitMb <= 0) {
+                        composeStringResource(R.string.storage_cache_limit_unlimited)
+                    } else {
+                        "$cacheLimitMb MB · " + composeStringResource(R.string.storage_cache_limit_hint)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         // SY: 封面缓存（本地 / SMB / WebDAV 三套 filesDir 缓存）清除入口。
         // Komga 的 Coil 磁盘池不在此列——它独立存在，归「书库 → 预览图」管理。
         Row(
@@ -4519,6 +4570,49 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             },
             dismissButton = {
                 TextButton(onClick = { showRemoteConfirm = false }) { Text(composeStringResource(R.string.storage_cancel)) }
+            },
+        )
+    }
+    if (showCacheLimitDialog) {
+        AlertDialog(
+            onDismissRequest = { showCacheLimitDialog = false },
+            title = { Text(composeStringResource(R.string.storage_cache_limit_title)) },
+            text = {
+                Column {
+                    Text(
+                        composeStringResource(R.string.storage_cache_limit_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = cacheLimitInput,
+                        onValueChange = { input -> cacheLimitInput = input.filter { it.isDigit() }.take(7) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = { Text(composeStringResource(R.string.storage_cache_limit_input)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    // 空输入 / 0 都等于「不限制」；上限 1TB，防止误填成天文数字。
+                    val value = cacheLimitInput.toIntOrNull()?.coerceIn(0, 1_048_576) ?: 0
+                    komgaPrefs.cacheLimitMb = value
+                    cacheLimitMb = value
+                    showCacheLimitDialog = false
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.storage_cache_limit_saved, value),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }) { Text(composeStringResource(R.string.storage_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCacheLimitDialog = false }) {
+                    Text(composeStringResource(R.string.storage_cancel))
+                }
             },
         )
     }
@@ -9998,7 +10092,7 @@ fun SeriesCard(client: KomgaApiClient, series: SeriesDto, onClick: () -> Unit) {
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                text = series.name,
+                text = KomgaTitles.series(series),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 modifier = Modifier.padding(horizontal = 2.dp),

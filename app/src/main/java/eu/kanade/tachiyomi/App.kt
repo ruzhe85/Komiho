@@ -31,6 +31,9 @@ import coil3.request.crossfade
 import coil3.util.DebugLogger
 // SY --> Komiho: 进程启动时把「应用语言」对齐到平台 per-app locale（阅读器走 AppCompat 的那条路）
 import app.mihonsy.komga.applyAppLanguageToPlatform
+import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.data.remote.CacheAutoTrim
+import app.mihonsy.komga.ui.KomgaTitles
 import app.mihonsy.komga.data.webdav.WebDavCoverCache
 // SY <--
 import eu.kanade.domain.DomainModule
@@ -173,6 +176,24 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         Thread(
             { ProcessExitDiagnostics.logRecentExitReasons(applicationContext) },
             "process-exit-diag",
+        ).start()
+
+        // Komiho (2026-11-04): 设置-Komga「显示系列标题/书籍标题」开关的进程内缓存。
+        // 标题在列表/卡片/回调里到处取值，启动时读一次，开关切换时由设置页直接刷新。
+        runCatching { KomgaTitles.init(applicationContext) }
+
+        // Komiho (2026-11-04): 设置-存储 的「缓存上限（自定义 MB）」。启动时若
+        // webdav_fallback / remote_pages / remote_pdf 三个目录的总量超过用户设定值，
+        // 就按 lastModified 从最旧的开始清理到上限的 90%（见 CacheAutoTrim）。
+        // 独立线程：要遍历目录算大小，不能占主线程；0 = 不限制，直接跳过。
+        Thread(
+            {
+                runCatching {
+                    val limitMb = KomgaPreferences(applicationContext).cacheLimitMb
+                    if (limitMb > 0) CacheAutoTrim.trimIfNeeded(applicationContext, limitMb)
+                }
+            },
+            "cache-auto-trim",
         ).start()
 
         setupNotificationChannels()

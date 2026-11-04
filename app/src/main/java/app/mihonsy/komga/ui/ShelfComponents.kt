@@ -710,7 +710,7 @@ val BookDto.displayNumber: String?
 /** Komiho: 书籍列表标题（有序号时前缀 "序号 · "）。列表行与网格卡片共用，保证两处序号口径一致。
  *  序号来源见 [displayNumber]；标题沿用 Komga 的 `metadata.title`，取不到回退文件名。 */
 fun BookDto.titledWithNumber(): String {
-    val title = metadata.title ?: name
+    val title = KomgaTitles.book(this)
     val n = displayNumber ?: return title
     return "$n · $title"
 }

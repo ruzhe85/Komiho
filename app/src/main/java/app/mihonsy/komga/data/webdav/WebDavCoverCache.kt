@@ -3,6 +3,7 @@ package app.mihonsy.komga.data.webdav
 import android.content.Context
 import android.graphics.Bitmap
 // SY --> Komiho Phase7: 页缓存上提为共用实现（data.remote 包），需显式导入。
+import app.mihonsy.komga.data.remote.CacheLimits
 import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
 // SY <--
@@ -248,7 +249,7 @@ object WebDavCoverCache {
             // 连接级「忽略 HTTPS 证书校验」。
             insecureTls = insecureTls,
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
-            cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+            cacheMaxBytes = CacheLimits.maxBytes(context),
         )
         val delegate: ArchiveHandle = try {
             RemoteZipReader(source)
@@ -265,7 +266,7 @@ object WebDavCoverCache {
             delegate = delegate,
             cache = RemotePageCache(
                 root = File(context.cacheDir, "remote_pages"),
-                maxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+                maxBytes = CacheLimits.maxBytes(context),
             ),
             metaKey = {
                 source.remoteFingerprint?.let { fp -> "${source.normalizedUrl}|$fp" }
@@ -314,7 +315,7 @@ object WebDavCoverCache {
                     password = credentials?.second?.ifBlank { null },
                     insecureTls = insecureTls,
                     fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
-                    cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+                    cacheMaxBytes = CacheLimits.maxBytes(context),
                 )
                 src.use { s ->
                     val len = s.size
@@ -355,7 +356,7 @@ object WebDavCoverCache {
                     password = credentials?.second?.ifBlank { null },
                     insecureTls = insecureTls,
                     fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
-                    cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+                    cacheMaxBytes = CacheLimits.maxBytes(context),
                 )
                 src.use { s ->
                     val len = s.size

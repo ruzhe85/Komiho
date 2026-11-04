@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.data.download.DownloadProvider
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavCoverCache
+import app.mihonsy.komga.data.remote.CacheLimits
 import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
 import app.mihonsy.komga.data.smb.SmbConnectionStore
@@ -32,12 +33,9 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.model.StubSource
-import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.LocalSource
 import tachiyomi.source.local.io.Format
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 /**
  * Loader used to retrieve the [PageLoader] for a given chapter.
@@ -220,7 +218,7 @@ class ChapterLoader(
     // 凭据按章节 URL 双格式解析（D2.A）：新格式 `webdav://<connId>/<URL>` 按 connId 精确取，
     // 旧格式 `webdav:<URL>` 回落 baseUrl 最长前缀匹配的连接（历史章节不改 DB）。
     // 服务器不支持 Range 时整本缓存回退目录 cacheDir/webdav_fallback；
-    // 磁盘上限设置-存储可调（webdavCacheMaxBytes，默认 1GB），超限 LRU 淘汰。
+    // 磁盘上限取「设置-存储 → 缓存上限（MB）」（CacheLimits）：用户没设时回落默认 1GB，超限 LRU 淘汰。
     private fun webDavSource(remoteUrl: String): WebDavRandomAccessSource {
         val credentials = WebDavConnectionStore.credentialsFor(remoteUrl)
         return WebDavRandomAccessSource(
@@ -230,7 +228,7 @@ class ChapterLoader(
             // 连接级「忽略 HTTPS 证书校验」（自签名证书服务器，用户显式开启）。
             insecureTls = WebDavConnectionStore.insecureTlsFor(remoteUrl),
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
-            cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+            cacheMaxBytes = CacheLimits.maxBytes(context),
             // SY --> Komiho: 把整本下载（rar/7z 强制回退 / 非 Range 回退）进度回传上层进度通道。
             onProgress = onCacheProgress,
             // SY <--
@@ -296,7 +294,7 @@ class ChapterLoader(
             delegate = delegate,
             cache = RemotePageCache(
                 root = File(context.cacheDir, "remote_pages"),
-                maxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+                maxBytes = CacheLimits.maxBytes(context),
             ),
             metaKey = {
                 source.remoteFingerprint?.let { fp -> "${source.normalizedUrl}|$fp" }
@@ -327,7 +325,7 @@ class ChapterLoader(
             delegate = delegate,
             cache = RemotePageCache(
                 root = File(context.cacheDir, "remote_pages"),
-                maxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+                maxBytes = CacheLimits.maxBytes(context),
             ),
             metaKey = {
                 source.remoteFingerprint?.let { fp -> "${source.normalizedUrl}|$fp" }

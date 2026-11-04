@@ -211,7 +211,8 @@ private fun KomgaSeriesScreen(seriesId: String, modifier: Modifier = Modifier) {
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text(series?.name ?: stringResource(MR.strings.label_series)) },
+                // Komiho: 顶栏标题同样尊重「显示系列标题」开关（关闭时显示原始文件夹名）。
+        title = { Text(series?.let { KomgaTitles.series(it) } ?: stringResource(MR.strings.label_series)) },
                 actions = {
                     if (series != null) {
                         // SY: 与库页同款的三合一菜单（阅读状态 / 排序 / 显示模式）。

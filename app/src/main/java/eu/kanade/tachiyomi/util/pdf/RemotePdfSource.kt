@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.util.pdf
 
 import android.content.Context
+import app.mihonsy.komga.data.remote.CacheLimits
 import app.mihonsy.komga.data.smb.SmbConnectionStore
 import app.mihonsy.komga.data.smb.SmbRandomAccessSource
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
@@ -9,9 +10,6 @@ import java.io.IOException
 import mihon.core.common.archive.RandomAccessSource
 import mihon.core.common.archive.RemoteScheme
 import mihon.core.common.archive.WebDavRandomAccessSource
-import tachiyomi.domain.storage.service.StoragePreferences
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 /**
  * 由远程章节 url（`webdav://<connId>/...` 或 `smb://<connId>/...`）构造随机访问源。
@@ -34,7 +32,7 @@ internal fun remotePdfSource(remoteUrl: String, context: Context): RandomAccessS
             // 连接级「忽略 HTTPS 证书校验」。
             insecureTls = WebDavConnectionStore.insecureTlsFor(remoteUrl),
             fallbackCacheDir = File(context.cacheDir, "webdav_fallback"),
-            cacheMaxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+            cacheMaxBytes = CacheLimits.maxBytes(context),
         )
     }
 }

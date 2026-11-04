@@ -2,6 +2,7 @@ package app.mihonsy.komga.data.smb
 
 import android.content.Context
 import android.graphics.Bitmap
+import app.mihonsy.komga.data.remote.CacheLimits
 import app.mihonsy.komga.data.remote.CachingArchiveHandle
 import app.mihonsy.komga.data.remote.RemotePageCache
 import eu.kanade.tachiyomi.data.coil.decodeCoverBitmap
@@ -16,9 +17,6 @@ import mihon.core.common.archive.ArchiveHandle
 import mihon.core.common.archive.ArchiveReader
 import mihon.core.common.archive.RemoteZipReader
 import tachiyomi.core.common.util.system.ImageUtil
-import tachiyomi.domain.storage.service.StoragePreferences
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -115,7 +113,7 @@ object SmbCoverCache {
             delegate = delegate,
             cache = RemotePageCache(
                 root = File(context.cacheDir, "remote_pages"),
-                maxBytes = Injekt.get<StoragePreferences>().webdavCacheMaxBytes.get(),
+                maxBytes = CacheLimits.maxBytes(context),
             ),
             metaKey = {
                 source.remoteFingerprint?.let { fp -> "${source.normalizedUrl}|$fp" }

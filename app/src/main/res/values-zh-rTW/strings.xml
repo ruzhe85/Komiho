@@ -188,6 +188,8 @@
     <string name="settings_section_limit">每區塊顯示數量</string>
     <string name="settings_home_sections">主頁區塊</string>
     <string name="settings_block_adjust">區塊調整</string>
+    <string name="settings_show_titles">顯示系列標題 / 書籍標題</string>
+    <string name="settings_show_titles_summary">關閉後顯示原始資料夾名稱 / 原始檔名（僅影響顯示，不會更動書庫資料）</string>
     <string name="settings_cache_title">快取</string>
     <string name="settings_hidden">隱藏區</string>
     <string name="settings_show">顯示</string>
@@ -362,7 +364,12 @@
     <string name="storage_perm_denied_desc">未授權：本地瀏覽使用 SAF。授權後可大幅提速</string>
     <string name="storage_webdav_cache">清除遠端快取</string>
     <string name="storage_webdav_cache_desc">WebDAV/SMB 的 zip/cbz 按頁快取已讀圖片（回翻/重開零流量）；rar/7z 開啟時整本快取到本地；\n共用上限，超限自動淘汰最舊，降低上限後在下一次寫入時生效。</string>
-    <string name="storage_cache_limit">上限：</string>
+    <string name="storage_cache_limit_title">遠端快取上限（MB）</string>
+    <string name="storage_cache_limit_unlimited">不限制（點擊設定）</string>
+    <string name="storage_cache_limit_hint">啟動時優先清理最舊</string>
+    <string name="storage_cache_limit_desc">App 啟動時，若遠端快取總量超過此值，自動從最舊的開始清理。0 = 不限制。</string>
+    <string name="storage_cache_limit_input">上限（MB）</string>
+    <string name="storage_cache_limit_saved">已儲存：%1$d MB（0 = 不限制）</string>
     <string name="storage_cache_range">200 MB — 4 GB，200 MB 一檔（預設 1 GB）</string>
     <string name="storage_cache_usage">已使用：</string>
     <string name="storage_cover_cache">清除封面快取</string>

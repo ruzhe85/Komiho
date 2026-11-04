@@ -201,6 +201,8 @@
     <string name="settings_section_limit">每区块显示数量</string>
     <string name="settings_home_sections">主页区块</string>
     <string name="settings_block_adjust">区块调整</string>
+    <string name="settings_show_titles">显示系列标题 / 书籍标题</string>
+    <string name="settings_show_titles_summary">关闭后显示原始文件夹名 / 原始文件名（只影响显示，不改动书库数据）</string>
     <string name="settings_cache_title">缓存</string>
     <string name="settings_hidden">隐藏区</string>
     <string name="settings_show">显示</string>
@@ -378,9 +380,14 @@
     <string name="storage_perm_denied_desc">未授权：本地浏览使用 SAF。授权后可大幅提速</string>
     <string name="storage_webdav_cache">清除远程缓存</string>
     <string name="storage_webdav_cache_desc">WebDAV/SMB 的 zip/cbz 按页缓存已读图片（回翻/重开零流量）；rar/7z 打开时整本缓存到本地；\n共用上限，超限自动淘汰最旧，降低上限后在下一次写入时生效。</string>
-    <string name="storage_cache_limit">上限：</string>
     <string name="storage_cache_range">200 MB — 4 GB，200 MB 一档（默认 1 GB）</string>
     <string name="storage_cache_usage">已使用：</string>
+    <string name="storage_cache_limit_title">缓存上限（MB）</string>
+    <string name="storage_cache_limit_unlimited">不限制（点击设置）</string>
+    <string name="storage_cache_limit_hint">启动时按最旧优先清理</string>
+    <string name="storage_cache_limit_desc">App 启动时，若远程缓存总量超过该值，自动从最旧的开始清理。0 = 不限制。</string>
+    <string name="storage_cache_limit_input">上限（MB）</string>
+    <string name="storage_cache_limit_saved">已保存：%1$d MB（0 = 不限制）</string>
     <string name="storage_cover_cache">清除封面缓存</string>
     <string name="storage_cover_cache_desc">本地 / SMB / WebDAV 三套封面缩略图；清除后浏览时自动重建，不影响阅读进度。Komga 封面缓存独立管理（书库 → 预览图）。</string>
     <string name="label_webdav">WebDAV</string>
