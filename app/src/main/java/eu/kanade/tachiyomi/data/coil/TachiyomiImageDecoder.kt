@@ -90,7 +90,7 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             inSampleSize = sampleSize.coerceAtLeast(1)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        resources.peek().inputStream().use {
+        resources.source().peek().inputStream().use {
             android.graphics.BitmapFactory.decodeStream(it, null, opts)
         }
     }.getOrNull()
@@ -154,7 +154,7 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         // 的 logo 整块变黑，后面再怎么压白底也救不回来（alpha 在解码这一步就没了）。
         // BitmapFactory 对 tRNS/PLTE 处理正确，代价只是一次平台解码。
         val isPng = runCatching {
-            ImageUtil.findImageType { resources.peek().inputStream() } == ImageUtil.ImageType.PNG
+            ImageUtil.findImageType { resources.source().peek().inputStream() } == ImageUtil.ImageType.PNG
         }.getOrDefault(false)
 
         var bitmap = if (isPng) {
