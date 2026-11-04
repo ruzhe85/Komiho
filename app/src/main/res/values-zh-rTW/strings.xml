@@ -189,7 +189,7 @@
     <string name="settings_home_sections">主頁區塊</string>
     <string name="settings_block_adjust">區塊調整</string>
     <string name="settings_show_titles">顯示系列標題 / 書籍標題</string>
-    <string name="settings_show_titles_summary">關閉後顯示原始資料夾名稱 / 原始檔名（僅影響顯示，不會更動書庫資料）</string>
+    <string name="settings_show_original_names">顯示原始資料夾 / 檔名</string>
     <string name="settings_cache_title">快取</string>
     <string name="settings_hidden">隱藏區</string>
     <string name="settings_show">顯示</string>

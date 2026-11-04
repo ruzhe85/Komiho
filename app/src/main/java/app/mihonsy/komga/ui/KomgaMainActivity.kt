@@ -4058,8 +4058,14 @@ private fun SettingsTab(
                     val titlePrefs = remember { KomgaPreferences(context.applicationContext) }
                     var showTitles by remember { mutableStateOf(titlePrefs.showTitles) }
                     SwitchPreferenceWidget(
-                        title = composeStringResource(R.string.settings_show_titles),
-                        subtitle = composeStringResource(R.string.settings_show_titles_summary),
+                        // 文案跟随状态：开 = 显示系列/书籍标题，关 = 显示原始文件夹/文件名。
+                        title = composeStringResource(
+                            if (showTitles) {
+                                R.string.settings_show_titles
+                            } else {
+                                R.string.settings_show_original_names
+                            },
+                        ),
                         checked = showTitles,
                         onCheckedChanged = { enabled ->
                             showTitles = enabled

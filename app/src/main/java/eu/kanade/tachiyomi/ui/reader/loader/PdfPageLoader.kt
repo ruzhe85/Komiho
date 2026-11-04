@@ -342,6 +342,6 @@ internal class PdfPageLoader private constructor(
         private const val PLAINTEXT_PROBE_PAGES = 3
 
         /** 实现标记：出现在 `PDF open` 日志里，用来判断装到的包是否包含最新解析逻辑。 */
-        private const val IMPL_MARK = "20261104c"
+        private const val IMPL_MARK = "20261104d"
     }
 }

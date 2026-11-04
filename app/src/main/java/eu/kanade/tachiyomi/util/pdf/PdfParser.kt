@@ -94,6 +94,18 @@ class PdfParser(path: String) {
         // 直接报「需要密码」，而文件里既没有 /Encrypt、页面和 JPEG 也全都完好。
         // 判据用「有没有解析出页面」而不是「objStart 空不空」：垃圾 xref 同样会让 objStart 非空，
         // 之前就是因为这个判据太弱，重建根本没被触发（日志里连一行都没有）。
+        // 便宜的一步先试：xref 已经读出对象表、只缺 /Root（xref 流文档常见：/Root 在 xref 流字典里，
+        // 而字典解析偶尔拿不到）。扫一遍 /Root 再试即可，不必整本重建对象表 ——
+        // 205MB 的扫描本正是这种情况（`objs=869, root=null`），整本重建反而是最贵的一步。
+        if (pageList.isEmpty() && objStart.isNotEmpty() && rootRef == null) {
+            val recovered = scanLastRef("/Root")
+            if (recovered != null) {
+                rootRef = recovered
+                DiagLog.d(TAG, "root recovered by scan: $rootRef, retry pages")
+                resolveAndCollect()
+            }
+        }
+
         if (pageList.isEmpty()) {
             DiagLog.w(TAG, "no pages via xref (objs=${objStart.size}, root=$rootRef), rebuild by scanning")
             objStart.clear()
@@ -588,36 +600,125 @@ class PdfParser(path: String) {
 
     // ---------- 全文件扫描兜底 ----------
 
+    private val O_CHAR = 'o'.code.toByte()
+    private val B_CHAR = 'b'.code.toByte()
+    private val J_CHAR = 'j'.code.toByte()
+    private val R_CHAR = 'R'.code.toByte()
+    private val TRAILER_KEY = "trailer".toByteArray(Charsets.ISO_8859_1)
+    private val DICT_OPEN = "<<".toByteArray(Charsets.ISO_8859_1)
+
+    /**
+     * Komiho (2026-11-04): 改成**纯字节扫描**，不再把整份文件转成 String。
+     *
+     * 之前 `String(data, ISO)` + 正则有两个硬伤（新日志里都能看到）：
+     * - 内存翻倍：UTF-16 字符串是 2 字节/字符，205MB 的 PDF 要分配 431MB，直接
+     *   `Failed to allocate a 431100608 byte allocation ... until OOM`，大文件重建必然失败；
+     * - 慢：16MB 的文件跑一次正则要 3 秒（`PDF probe ... 耗时=3109ms`）。
+     *
+     * 改成按字节线性扫后内存是 O(1)，16MB 应回到百毫秒级。
+     */
     private fun scanWholeFile() {
-        // ISO-8859-1 是 1:1 字节映射，字符串下标 == 字节下标，可以直接用 match.range 当对象偏移。
-        // 用 indexOfBytes 找 "N 0 obj" 会命中同样内容的**第一次**出现处（可能在别的流里），
-        // 偏移就错了 —— 这里按匹配位置取，后出现的覆盖先出现的（与增量更新语义一致）。
-        val text = String(data, ISO)
-        // 必须锚定行首：不加 `(?m)^` 时，二进制流里恰好出现的 "123 0 obj" 也会命中，
-        // 而且后出现的会覆盖真偏移 —— 对象表被写坏，页树照样解析不出来（这次的「重建后仍 0 页」
-        // 就是这类脏匹配导致的）。
-        for (m in Regex("""(?m)^(\d+)\s+(\d+)\s+obj""").findAll(text)) {
-            val num = m.groupValues[1].toInt()
-            objStart[num] = m.range.first
-        }
-        // 末一个 trailer 的 Root
-        val tl = Regex("""trailer\s*<<(.*?)>>""", RegexOption.DOT_MATCHES_ALL)
-            .findAll(text).lastOrNull()
-        tl?.let { applyTrailer(parseInlineDict(it.groupValues[1].toByteArray(ISO))) }
+        indexObjectOffsets()
+        applyTrailerFromScan()
         if (rootRef == null) {
             // 没有 trailer 关键字（xref 流文档就是这样）：/Root 在 xref 流字典里，取最后一个。
-            val r = Regex("""/Root\s+(\d+\s+\d+\s+R)""").findAll(text).lastOrNull()
-            rootRef = r?.groupValues?.getOrNull(1)
+            rootRef = scanLastRef("/Root")
         }
     }
 
-    private fun parseInlineDict(b: ByteArray): Map<String, ByteArray> {
-        // b 为 trailer 内联字典内容（首字符是 /Size 之类，外层 << >> 已被正则剥离），直接从 0 起解析；
-        // 不能从首个 '<' 起——/ID 的十六进制串 <...> 会让起点错进字典内部，漏掉 /Encrypt。
-        var s = 0
-        while (s < b.size && b[s] in WHITESPACE) s++
-        return parseDict(b, s, b.size) ?: emptyMap()
+    /** 扫 `N G obj`（只认行首），记录对象偏移。后出现的覆盖先出现的 = 增量更新语义。 */
+    private fun indexObjectOffsets() {
+        var i = 0
+        val last = data.size - 3
+        while (i <= last) {
+            if (data[i] != O_CHAR || data[i + 1] != B_CHAR || data[i + 2] != J_CHAR) {
+                i++
+                continue
+            }
+            parseObjectHeaderBefore(i)?.let { (num, start) -> objStart[num] = start }
+            i += 3
+        }
     }
+
+    /**
+     * 从 `obj` 关键字往前解析 `对象号 代数`，返回 (对象号, 对象号起始偏移)。
+     *
+     * 只接受「行首」出现的对象头（前一字节是换行或文件开头）：二进制流里恰好出现的同样字节串
+     * 不是对象头，认了会把真偏移覆盖掉，页树就又解析不出来了。
+     */
+    private fun parseObjectHeaderBefore(keywordIdx: Int): Pair<Int, Int>? {
+        var p = keywordIdx - 1
+        if (p < 0 || !isWsByte(data[p])) return null
+        while (p >= 0 && isWsByte(data[p])) p--
+        val genEnd = p
+        while (p >= 0 && isDigitByte(data[p])) p--
+        if (p == genEnd) return null // 没读到代数
+        if (p < 0 || !isWsByte(data[p])) return null
+        while (p >= 0 && isWsByte(data[p])) p--
+        val numEnd = p
+        while (p >= 0 && isDigitByte(data[p])) p--
+        if (p == numEnd) return null // 没读到对象号
+        val numStart = p + 1
+        if (p >= 0) {
+            val prev = data[p]
+            if (prev != '\n'.code.toByte() && prev != '\r'.code.toByte()) return null
+        }
+        val num = String(data, numStart, numEnd - numStart + 1, ISO).toIntOrNull() ?: return null
+        return num to numStart
+    }
+
+    /** 取最后一个 `trailer << … >>` 里的键（老式 xref 表文档才有）。 */
+    private fun applyTrailerFromScan() {
+        var lastDictStart = -1
+        var from = 0
+        while (true) {
+            val idx = data.indexOfBytes(TRAILER_KEY, from)
+            if (idx < 0) break
+            val ds = data.indexOfBytes(DICT_OPEN, idx)
+            if (ds >= 0 && ds - idx < 32) lastDictStart = ds
+            from = idx + TRAILER_KEY.size
+        }
+        if (lastDictStart < 0) return
+        val sub = data.copyOfRange(lastDictStart, minOf(data.size, lastDictStart + 64 * 1024))
+        val dict = parseDict(sub, 0, dictEnd(sub)) ?: return
+        applyTrailer(dict)
+    }
+
+    /** 找 `keyword` 之后出现的**最后一个** `N G R` 引用。 */
+    private fun scanLastRef(keyword: String): String? {
+        val kw = keyword.toByteArray(ISO)
+        var result: String? = null
+        var from = 0
+        while (true) {
+            val idx = data.indexOfBytes(kw, from)
+            if (idx < 0) break
+            readRefAfter(idx + kw.size)?.let { result = it }
+            from = idx + kw.size
+        }
+        return result
+    }
+
+    /** 从 [start] 起读 `N G R`，成功返回 "N G R"。 */
+    private fun readRefAfter(start: Int): String? {
+        var p = start
+        while (p < data.size && isWsByte(data[p])) p++
+        val n1Start = p
+        while (p < data.size && isDigitByte(data[p])) p++
+        if (p == n1Start) return null
+        val n1 = String(data, n1Start, p - n1Start, ISO)
+        while (p < data.size && isWsByte(data[p])) p++
+        val n2Start = p
+        while (p < data.size && isDigitByte(data[p])) p++
+        if (p == n2Start) return null
+        val n2 = String(data, n2Start, p - n2Start, ISO)
+        while (p < data.size && isWsByte(data[p])) p++
+        if (p >= data.size || data[p] != R_CHAR) return null
+        return "$n1 $n2 R"
+    }
+
+    private fun isWsByte(b: Byte): Boolean = b in WHITESPACE
+
+    private fun isDigitByte(b: Byte): Boolean = b >= 0x30 && b <= 0x39
 
     // ---------- 小工具 ----------
 

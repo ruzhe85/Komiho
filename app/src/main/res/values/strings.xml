@@ -202,7 +202,7 @@
     <string name="settings_home_sections">主页区块</string>
     <string name="settings_block_adjust">区块调整</string>
     <string name="settings_show_titles">显示系列标题 / 书籍标题</string>
-    <string name="settings_show_titles_summary">关闭后显示原始文件夹名 / 原始文件名（只影响显示，不改动书库数据）</string>
+    <string name="settings_show_original_names">显示原始文件夹 / 文件名</string>
     <string name="settings_cache_title">缓存</string>
     <string name="settings_hidden">隐藏区</string>
     <string name="settings_show">显示</string>
