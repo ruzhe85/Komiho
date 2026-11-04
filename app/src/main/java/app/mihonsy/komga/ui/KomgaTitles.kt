@@ -44,7 +44,7 @@ object KomgaTitles {
         if (showTitles) {
             return series.metadata.title?.takeIf { it.isNotBlank() } ?: series.name
         }
-        return originalName(series.url) ?: series.name
+        return lastPathSegment(series.url) ?: series.name
     }
 
     /** 书籍显示名：开=标题（回退文件名），关=原始文件名。 */
@@ -52,12 +52,26 @@ object KomgaTitles {
         if (showTitles) {
             return book.metadata.title?.takeIf { it.isNotBlank() } ?: book.name
         }
-        return book.name
+        // 关掉标题时用原始文件名；若服务端给的是带路径的名字，只保留最后一段。
+        return lastPathSegment(book.name) ?: book.name
     }
 
-    /** 从 Komga 的 url 里取最后一段（原始文件夹/文件名），失败返回 null。 */
-    private fun originalName(url: String?): String? {
-        val segment = url?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: return null
-        return runCatching { Uri.decode(segment) }.getOrDefault(segment)
+    /**
+     * 从 Komga 给的路径里取最后一段（原始文件夹 / 文件名），失败返回 null。
+     *
+     * Komiho (2026-11-04): **必须先解码再切分**。Komga 的 `url` 是 URL 编码过的路径，斜杠常被编成
+     * `%2F`（`/data/Comics%2F%E6%9C%80...`），先前先 `substringAfterLast('/')` 就切不开，
+     * 解码后整条路径原样显示出来——就是「原始文件夹名把路径也显示了」。
+     * 同时兼容 Windows 风格的反斜杠（Komga 跑在 Windows 上时可能出现）。
+     */
+    private fun lastPathSegment(raw: String?): String? {
+        val text = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        val decoded = runCatching { Uri.decode(text) }.getOrDefault(text)
+        val segment = decoded
+            .trimEnd('/', '\\')
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .trim()
+        return segment.takeIf { it.isNotBlank() }
     }
 }

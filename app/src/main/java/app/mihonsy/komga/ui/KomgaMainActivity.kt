@@ -4045,7 +4045,15 @@ private fun SettingsTab(
                         onPreferenceClick = { showHomePage = true },
                     )
                 }
-                // Komiho (2026-11-04): 「显示系列标题 / 书籍标题」开关 —— 位于「主页」与「清除预览图」之间。
+                // Komiho (2026-11-04): 「显示系列标题 / 书籍标题」开关 —— 放在最末（清除预览图之后）。
+                item {
+                    TextPreferenceWidget(
+                        title = composeStringResource(R.string.settings_preview_images),
+                        subtitle = composeStringResource(R.string.storage_cache_usage) + formatCacheSize(previewUsedBytes),
+                        icon = Icons.Filled.Delete,
+                        onPreferenceClick = { showClearPreview = true },
+                    )
+                }
                 item {
                     val titlePrefs = remember { KomgaPreferences(context.applicationContext) }
                     var showTitles by remember { mutableStateOf(titlePrefs.showTitles) }
@@ -4058,14 +4066,6 @@ private fun SettingsTab(
                             // 写偏好 + 刷新进程内缓存，回到书架立即生效。
                             KomgaTitles.update(context, enabled)
                         },
-                    )
-                }
-                item {
-                    TextPreferenceWidget(
-                        title = composeStringResource(R.string.settings_preview_images),
-                        subtitle = composeStringResource(R.string.storage_cache_usage) + formatCacheSize(previewUsedBytes),
-                        icon = Icons.Filled.Delete,
-                        onPreferenceClick = { showClearPreview = true },
                     )
                 }
             }

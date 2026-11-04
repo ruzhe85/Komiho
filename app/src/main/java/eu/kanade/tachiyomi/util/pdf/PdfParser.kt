@@ -64,16 +64,12 @@ class PdfParser(path: String) {
     var parseOk = true
         private set
 
-    init {
-        try {
-            parse()
-        } catch (e: Exception) {
-            // 走 DiagLog：这一步以前是 android.util.Log，失败原因根本不出现在导出日志里，
-            // 「parser=false pages=0」永远看不到到底抛了什么。
-            DiagLog.e(TAG, "parse failed: ${e.message}", e)
-            parseOk = false
-        }
-    }
+    // Komiho (2026-11-04): 解析入口 `init` 必须放在**类体最后**（见文件末尾）。
+    //
+    // Kotlin 按声明顺序初始化：属性初始化器与 `init` 块混排执行。这里原先写在类中部，而
+    // `ISO` / `WHITESPACE` / `loadedObjStm` 等 val 声明在类尾 —— 于是 parse() 执行时它们还是
+    // null，`findStartXref` 直接抛 NullPointerException（message 为 null），对外表现就是
+    // `PDF probe: parser=false pages=0`，所有 PDF 都降级成整本渲染。
 
     // ---------- 入口 ----------
 
@@ -713,6 +709,24 @@ class PdfParser(path: String) {
 
     private fun ByteArray.firstInt(): Int? {
         return Regex("""-?\d+""").find(String(this, ISO))?.value?.toIntOrNull()
+    }
+
+    /**
+     * 解析入口 —— **必须留在类体最后**。
+     *
+     * Kotlin 的属性初始化器与 init 块按书写顺序执行；`ISO`、`WHITESPACE`、`VALUE_STOP`、
+     * `ATOM_STOP`、`loadedObjStm` 等 val 都声明在上面，只有把 init 放在它们之后，
+     * parse() 里用到它们时才不会是 null。
+     */
+    init {
+        try {
+            parse()
+        } catch (e: Exception) {
+            // 走 DiagLog：这一步以前是 android.util.Log，失败原因根本不出现在导出日志里，
+            // 「parser=false pages=0」永远看不到到底抛了什么。
+            DiagLog.e(TAG, "parse failed: ${e.message}", e)
+            parseOk = false
+        }
     }
 
     companion object {

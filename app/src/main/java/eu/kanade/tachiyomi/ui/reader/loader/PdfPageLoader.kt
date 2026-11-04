@@ -167,6 +167,7 @@ internal class PdfPageLoader private constructor(
 
         currentPassword = effectivePassword
 
+        var dctPassthroughPages = 0
         val pages = if (renderOnly) {
             val n = PdfRenderFallback.getPageCount(path, currentPassword)
             DiagLog.d(TAG, "PDF render-only mode, pages=$n")
@@ -175,26 +176,24 @@ internal class PdfPageLoader private constructor(
                 ReaderPage(i).apply {
                     stream = { openStream(i) }
                     status = Page.State.Ready
-                    // Komiho: 渲染出来的页不再跑 AI 2x —— 像素本来就是 PDFium 栅格化的结果，
-                    // 增强只会把每页从 ~200ms 拖到 1-2s，画质收益接近零（见 ReaderPage.skipEnhance）。
-                    skipEnhance = true
+                    // Komiho (2026-11-04): 渲染页同样允许走 AI 增强 —— 之前把它们标成
+                    // skipEnhance 是为了省时间，但用户期望 PDF 也能用 NPU 模型（扫描本正是
+                    // 最需要放大的场景），所以这里恢复默认管线。
                 }
             }
         } else {
             List(parser!!.pageCount) { i ->
+                if (parser!!.bestImageForPage(i)?.filter == "DCTDecode") dctPassthroughPages++
                 ReaderPage(i).apply {
                     stream = { openStream(i) }
                     status = Page.State.Ready
-                    // Komiho: 只有 DCT 直通页（真原图）值得增强；其余会在取页时回落成渲染图，
-                    // 同样是栅格化结果，跳过 AI。这一步只解析页面字典，不碰像素，打开时开销可忽略。
-                    skipEnhance = parser!!.bestImageForPage(i)?.filter != "DCTDecode"
                 }
             }
         }
         DiagLog.d(
             TAG,
             "PDF open done: mode=${if (renderOnly) "render" else "extract"} pages=${pages.size} " +
-                "dct直通=${pages.count { !it.skipEnhance }} " +
+                "dct直通=$dctPassthroughPages " +
                 "耗时=${android.os.SystemClock.elapsedRealtime() - openStartedAt}ms",
         )
         pages
@@ -329,13 +328,20 @@ internal class PdfPageLoader private constructor(
     companion object {
         private const val TAG = "KomihoPdfLoader"
 
-        /** 解析器整文件载入内存的阈值：超过则跳过内存解析、直接走系统渲染兜底，避免大文件 OOM。 */
-        private const val MAX_PARSER_FILE_BYTES = 200L * 1024 * 1024 // 200MB
+        /**
+         * 解析器整文件载入内存的阈值：超过则跳过内存解析、直接走系统渲染兜底，避免大文件 OOM。
+         *
+         * Komiho (2026-11-04): 200MB → 320MB。清单里 `android:largeHeap="true"`，实测 171MB
+         * 的扫描本完全可以解析（只是以前解析器自身有初始化顺序 bug，一进来就 NPE）。放宽后
+         * 「200MB 出头的画集」也能走内嵌图直通，而不是整本栅格化。
+         * 解析异常（含 OOM）由上层 runCatching 兜住，失败仍自动回落渲染，不会崩。
+         */
+        private const val MAX_PARSER_FILE_BYTES = 320L * 1024 * 1024 // 320MB
 
         /** 「流是否明文」抽查页数：前几页都是明文就够了，不必整本扫。 */
         private const val PLAINTEXT_PROBE_PAGES = 3
 
         /** 实现标记：出现在 `PDF open` 日志里，用来判断装到的包是否包含最新解析逻辑。 */
-        private const val IMPL_MARK = "20261104b"
+        private const val IMPL_MARK = "20261104c"
     }
 }
