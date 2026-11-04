@@ -136,7 +136,8 @@ internal class PdfPageLoader private constructor(
             ?.message
             ?.contains("password", ignoreCase = true) == true
         if (!passwordIssue) {
-            DiagLog.w(TAG, "PDF open failed: ${error?.message}", error)
+            // 带 throwable 的重载是 e()；w() 只有 (tag, msg) 两个参数。
+            DiagLog.e(TAG, "PDF open failed: ${error?.message}", error)
             throw Exception("PDF 打开失败：${error?.message ?: "未知错误"}")
         }
         // 需要密码：没给过 → 弹框；给过还失败 → 密码错误。
