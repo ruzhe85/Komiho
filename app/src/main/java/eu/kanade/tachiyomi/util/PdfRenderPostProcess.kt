@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.util
 
 import android.graphics.Bitmap
+import android.os.SystemClock
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.eink.EinkGray
@@ -12,12 +13,10 @@ import uy.kohesive.injekt.api.get
  * Komiho (2026-11-04): 「已经是位图」的页面在显示前要做的处理。
  *
  * 与 [eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder] 解码之后那一段保持一致：
- * ① AI/Lanczos 增强（含跳过门）→ ② 透明压白 → ③ E-Ink 灰阶。
+ * ① AI/Lanczos 增强 → ② 透明压白 → ③ E-Ink 灰阶。
  *
  * 存在的理由：PDF 渲染页由 PDFium 直接出位图，本来不必再「编码成 WebP/JPEG → 解码」；
  * 但增强逻辑原本只挂在解码器里，于是那条路径要么丢 AI、要么白付一次编码+解码。
- * 把处理搬到「位图入口」后，两条路径都不必编码 —— 这也是 Comicscreen 那类阅读器
- * （渲染即显示）与我们现在的差距所在。
  */
 object PdfRenderPostProcess {
 
@@ -25,18 +24,27 @@ object PdfRenderPostProcess {
     private const val TALL_ASPECT_RATIO = 2.5f
 
     /**
+     * 处理结果。
+     *
+     * [enhanceMillis] 是**真实**的计算耗时（-1 = 没有跑增强，例如增强关闭或被跳过门命中），
+     * 调用方要把它传给 `PagerPreparedPage.enhanceElapsedMillis` —— 否则角标会显示成「跳过」，
+     * 即使 AI 其实已经跑过（之前 PDF 页被误判成「没走 NPU」就是这个原因）。
+     */
+    data class Result(val bitmap: Bitmap, val enhanceMillis: Long)
+
+    /**
      * 处理一张「已解码/已渲染」的位图，返回最终用于显示的位图（入参可能被回收）。
      *
-     * @param viewWidth / viewHeight 当前视图尺寸，用于 AI 跳过门（r ≤ 1 = 屏幕只会缩小，不必 2x）。
+     * @param viewWidth / viewHeight 当前视图尺寸，仅用于长条页判定与面积回缩。
      */
     fun process(
         bitmap: Bitmap,
         viewWidth: Int,
         viewHeight: Int,
         pageIndex: Int,
-    ): Bitmap {
+    ): Result {
         var bmp = bitmap
-        if (bmp.isRecycled) return bmp
+        if (bmp.isRecycled) return Result(bmp, -1L)
 
         val prefs = Injekt.get<ReaderPreferences>()
         val mode = prefs.enhancementMode.get()
@@ -45,56 +53,51 @@ object PdfRenderPostProcess {
         // 必须在增强**之前**判断：增强按 RGB 处理会把 alpha 写成 255，透明区变黑就分辨不出来了。
         val srcTransparent = ImageUtil.hasTransparentPixels(bmp)
 
-        // ① 增强（门限与解码器一致）
+        var enhanceMillis = -1L
+
+        // ① 增强：渲染页**不做「放大门限」跳过**。
+        //
+        // 解码器里那条 `fitRatio <= 1 就跳过` 的门是给原始扫描图用的（源图已比屏幕细就不必 2x）。
+        // 但 PDF 渲染页的像素是 PDFium 按 2000 长边栅格化出来的，本身已经丢过细节，
+        // 交给 AI 正是它的价值所在；老路径（字节 → Coil）也因为解码时按 2 的幂采样，
+        // 解出的宽度略小于视图宽，r 常常 > 1，所以一直是有 AI 的。这里保持同等行为。
         if (mode != 0 || denoise != 0) {
             val tall = bmp.height > 0 && bmp.width > 0 &&
                 bmp.height.toFloat() / bmp.width.toFloat() > TALL_ASPECT_RATIO
-            val fitRatio = if (tall) {
-                viewWidth.toFloat() / bmp.width.toFloat()
-            } else {
-                minOf(
-                    viewWidth.toFloat() / bmp.width.toFloat(),
-                    viewHeight.toFloat() / bmp.height.toFloat(),
+            val startedAt = SystemClock.uptimeMillis()
+            val enhancedOrNull = runCatching {
+                MihonSyEnhancer.enhance(
+                    bmp,
+                    prefs,
+                    onComplete = { _, _, _ -> },
+                    sourceTag = "pdf#$pageIndex",
+                    pageIndex = pageIndex,
                 )
-            }
-            val bypassGate = prefs.aiBypassFitGate.get()
-            val skipAi = mode == 5 && !bypassGate && fitRatio <= 1f
-            if (skipAi) {
-                // 与解码器同口径：登记「跳过」，角标显示跳过而不是空白。
-                EnhanceTimings.markSkipped(pageIndex)
-            } else {
-                runCatching {
-                    val enhanced = MihonSyEnhancer.enhance(
-                        bmp,
-                        prefs,
-                        onComplete = { _, _, _ -> },
-                        sourceTag = "pdf#$pageIndex",
-                        pageIndex = pageIndex,
-                    )
-                    var result = enhanced
-                    // 与解码器一致：开了「AI 面积回缩」时把 2x 结果压回显示尺寸（防摩尔纹）。
-                    if (result != null && result !== bmp && !result.isRecycled &&
-                        mode == 5 && prefs.aiAreaDownscale.get()
-                    ) {
-                        val downscaled = runCatching {
-                            MihonSyEnhancer.areaDownscaleToDisplay(
-                                result,
-                                viewWidth = viewWidth,
-                                viewHeight = viewHeight,
-                                isTallStrip = tall,
-                                strength = prefs.aiAreaDownscaleStrength.get() / 100f,
-                            )
-                        }.getOrNull()
-                        if (downscaled != null && downscaled !== result) {
-                            result.recycle()
-                            result = downscaled
-                        }
-                    }
-                    if (result != null && result !== bmp && !result.isRecycled) {
-                        bmp.recycle()
-                        bmp = result
+            }.getOrNull()
+
+            if (enhancedOrNull != null && enhancedOrNull !== bmp && !enhancedOrNull.isRecycled) {
+                var result = enhancedOrNull
+                // 与解码器一致：开了「AI 面积回缩」时把 2x 结果压回显示尺寸（防摩尔纹）。
+                if (mode == 5 && prefs.aiAreaDownscale.get()) {
+                    val downscaled = runCatching {
+                        MihonSyEnhancer.areaDownscaleToDisplay(
+                            result,
+                            viewWidth = viewWidth,
+                            viewHeight = viewHeight,
+                            isTallStrip = tall,
+                            strength = prefs.aiAreaDownscaleStrength.get() / 100f,
+                        )
+                    }.getOrNull()
+                    if (downscaled != null && downscaled !== result) {
+                        result.recycle()
+                        result = downscaled
                     }
                 }
+                bmp.recycle()
+                bmp = result
+                enhanceMillis = SystemClock.uptimeMillis() - startedAt
+                // 角标与「已增强」判定都读这里；put 后由 take() 消费。
+                EnhanceTimings.put(pageIndex, enhanceMillis)
             }
         }
 
@@ -123,6 +126,6 @@ object PdfRenderPostProcess {
             }
         }
 
-        return bmp
+        return Result(bmp, enhanceMillis)
     }
 }

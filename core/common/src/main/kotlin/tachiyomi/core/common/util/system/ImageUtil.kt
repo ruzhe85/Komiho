@@ -545,27 +545,24 @@ object ImageUtil {
     /**
      * Komiho (2026-11-04): 页面背景的统一入口。
      *
-     * - 开「自动背景」（阅读主题=自动）：按图片内容挑白/黑，与原行为一致；
-     * - 关自动背景：只要图片格式**可能带透明通道**（PNG/WebP/GIF/AVIF/HEIF…，JPEG 不可能），
-     *   就给一个纯白底 —— 与 PDF 渲染同口径（`PdfRenderFallback` 是 eraseColor(WHITE) 后再画）。
-     *   这样深色主题下「黑字 + 透明底」的素材图（logo、标题卡）也不会整页看不见。
-     *   不透明像素会被图片自己盖住，所以对普通 PNG 页没有可见副作用。
+     * 判据顺序很关键：**先按格式决定，再考虑「自动背景」**。
+     *
+     * 1. 只要图片格式**可能带透明通道**（PNG/WebP/GIF/AVIF/HEIF…，JPEG 不可能），
+     *    一律铺纯白底 —— 与 PDF 渲染同口径（`PdfRenderFallback` 是 eraseColor(WHITE) 后再画）。
+     *    这一步**不看主题、不看「自动背景」**：否则「自动」主题下会走进 chooseBackground，
+     *    而那里按四角采样判背景，透明角读出来是 `(0,0,0,0)`，一不小心又整页发黑
+     *    （透明 PNG 反复「修好又复现」就是这么来的）。
+     *    不透明像素会被图片自己盖住，所以对普通 PNG 页没有可见副作用。
+     * 2. JPEG 不可能带 alpha：维持原行为 —— 开「自动背景」按内容挑白/黑，否则留空（主题底色）。
      */
     fun pageBackground(
         context: Context,
         imageSource: BufferedSource,
         automaticBackground: Boolean,
-    ): Drawable? = if (automaticBackground) {
-        chooseBackground(context, imageSource)
-    } else {
-        transparentPageBackground(imageSource)
-    }
-
-    /** 图片格式是否可能带透明通道；是则返回纯白底，JPEG 返回 null（保持主题底色）。 */
-    private fun transparentPageBackground(imageSource: BufferedSource): Drawable? {
+    ): Drawable? {
         val type = runCatching { findImageType { imageSource.peek().inputStream() } }.getOrNull()
-            ?: return null
-        return if (type == ImageType.JPEG) null else Color.WHITE.toDrawable()
+        if (type != null && type != ImageType.JPEG) return Color.WHITE.toDrawable()
+        return if (automaticBackground) chooseBackground(context, imageSource) else null
     }
 
     /**

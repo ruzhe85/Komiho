@@ -297,7 +297,7 @@ class WebtoonPageHolder(
                             pageIndex = currentPage.index,
                         )
                     }
-                }.getOrDefault(raw)
+                }.getOrNull()?.bitmap ?: raw
                 withUIContext {
                     frame.pageIndex = currentPage.index
                     frame.pageBackground = null

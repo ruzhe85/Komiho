@@ -209,41 +209,49 @@ object PagerPagePreparer {
     ): PagerPreparedPage? {
         // Komiho (2026-11-04): 已渲染好的位图（PDF 渲染兜底页）直接产出结果，跳过
         // 「栅格化 → 编码成 WebP/JPEG → 再解码」的往返（实测省 250–470ms/页）。
-        // 这类页不做双页合并/拆分：PDF 渲染页本来就是单页栅格图，没有跨页语义。
-        page.preRenderedBitmap?.let { provider ->
-            val raw = runCatching { withIOContext { provider() } }.getOrNull()
-            if (raw != null && !raw.isRecycled) {
-                // 增强 / E-Ink 直接在这张位图上做 —— 不再把渲染结果编码成 WebP/JPEG 再交给
-                // Coil 解码（那一步每页 250–470ms，是渲染页最贵的开销）。
-                val viewWidth = viewer.activity.resources.displayMetrics.widthPixels
-                val bitmap = runCatching {
-                    withIOContext {
-                        PdfRenderPostProcess.process(
-                            raw,
-                            viewWidth = viewWidth,
-                            viewHeight = viewHeight,
-                            pageIndex = page.index,
+        //
+        // ⚠️ 双页拆分 / 旋转合并**不走这条旁路**：那两步是在字节流上做的（`process()` 里
+        // `dualPageRotateToFit` / `splitInHalf`，还带 `InsertPage` 的虚拟页插队），位图旁路绕过去
+        // 后就等于「双页功能失效」——所以这两种设置开启时让给下面的字节路径。
+        val dualPageActive = viewer.config.dualPageSplit || viewer.config.dualPageRotateToFit
+        if (!dualPageActive) {
+            page.preRenderedBitmap?.let { provider ->
+                val raw = runCatching { withIOContext { provider() } }.getOrNull()
+                if (raw != null && !raw.isRecycled) {
+                    // 增强 / E-Ink 直接在这张位图上做 —— 不再编码成 WebP/JPEG 再交给 Coil 解码。
+                    val viewWidth = viewer.activity.resources.displayMetrics.widthPixels
+                    val processed = runCatching {
+                        withIOContext {
+                            PdfRenderPostProcess.process(
+                                raw,
+                                viewWidth = viewWidth,
+                                viewHeight = viewHeight,
+                                pageIndex = page.index,
+                            )
+                        }
+                    }.getOrNull()
+                    val bitmap = processed?.bitmap ?: raw
+                    if (bitmap.width.toLong() * bitmap.height > prerenderPixelBudget()) {
+                        // 超大页（如 1440×15050 = 21MP ≈ 86MB ARGB）：缓存放不下几张，回落字节路径。
+                        runCatching { bitmap.recycle() }
+                    } else if (!bitmap.isRecycled) {
+                        val enhanceMs = processed?.enhanceMillis ?: -1L
+                        return PagerPreparedPage(
+                            source = Buffer(),
+                            source2 = null,
+                            isAnimated = false,
+                            background = null,
+                            decodedBitmap = bitmap,
+                            enhancementMode = Injekt.get<ReaderPreferences>().enhancementMode.get(),
+                            cropBorders = viewer.config.imageCropBorders,
+                            // 传真实耗时：之前写死 -1，角标把「已经跑过 AI 的页」显示成跳过。
+                            enhanceElapsedMillis = enhanceMs,
+                            layoutApplied = true,
+                            // enhanced=true：源字节为空，不能让「停顿补算」拿空 buffer 去重建。
+                            enhanced = true,
+                            retryable = false,
                         )
                     }
-                }.getOrDefault(raw)
-                if (bitmap.width.toLong() * bitmap.height > prerenderPixelBudget()) {
-                    // 超大页（如 1440×15050 = 21MP ≈ 86MB ARGB）：缓存里放不下几张，回落字节路径。
-                    runCatching { bitmap.recycle() }
-                } else if (!bitmap.isRecycled) {
-                    return PagerPreparedPage(
-                        source = Buffer(),
-                        source2 = null,
-                        isAnimated = false,
-                        background = null,
-                        decodedBitmap = bitmap,
-                        enhancementMode = Injekt.get<ReaderPreferences>().enhancementMode.get(),
-                        cropBorders = viewer.config.imageCropBorders,
-                        enhanceElapsedMillis = -1L,
-                        layoutApplied = true,
-                        // enhanced=true：源字节为空，不能让「停顿补算」拿空 buffer 去重建。
-                        enhanced = true,
-                        retryable = false,
-                    )
                 }
             }
         }

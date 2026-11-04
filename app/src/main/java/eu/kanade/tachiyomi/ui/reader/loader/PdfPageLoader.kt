@@ -170,12 +170,32 @@ internal class PdfPageLoader private constructor(
     }
 
     /**
-     * 渲染页统一走位图直通：PDFium 出位图后**不再编码成字节**。
+     * 页面「是否已经有位图」。
      *
-     * 增强（AI/Lanczos）与 E-Ink 由 [eu.kanade.tachiyomi.util.PdfRenderPostProcess] 直接在这张
-     * 位图上做（见 `PagerPagePreparer` / `WebtoonPageHolder`），所以这里不需要再按增强开关分流。
+     * **能直通的页不提供位图**：这类页交回 `stream()`（内嵌 JPEG 原字节），继续走 Coil ——
+     * 原图画质、AI 增强、双页拆分/旋转全都和以前一样，一点不打折。
+     *
+     * 只有「本来就要渲染」的页（无内嵌 JPEG / 解析器不可用）才给位图，省掉
+     * 「渲染 → 编码成 WebP/JPEG → 再解码」的往返；增强与 E-Ink 由
+     * [eu.kanade.tachiyomi.util.PdfRenderPostProcess] 直接在这张位图上做。
+     *
+     * 注意：这里返回的是**惰性 lambda**，判据在真正准备这一页时才求值，
+     * 不会因为要判断直通而拖慢打开（解析器也只是首次用到时才建）。
      */
-    private fun preRenderedProvider(index: Int): () -> Bitmap? = { renderPage(index) }
+    private fun preRenderedProvider(index: Int): () -> Bitmap? = {
+        if (canPassthrough(index)) null else renderPage(index)
+    }
+
+    /** 这一页能否走内嵌 JPEG 直通（判据与 [openStream] 完全一致，只读流头 3 字节）。 */
+    private fun canPassthrough(index: Int): Boolean {
+        val parser = parserOrNull() ?: return false
+        return runCatching {
+            val img = parser.bestImageForPage(index) ?: return@runCatching false
+            if (img.filter != "DCTDecode") return@runCatching false
+            val head = parser.rawStreamHead(img.objNum, 3) ?: return@runCatching false
+            head.size >= 2 && head[0] == 0xFF.toByte() && head[1] == 0xD8.toByte()
+        }.getOrDefault(false)
+    }
 
     /** 按与阅读器一致的尺寸策略渲染一页（竖长页按宽度、普通页按长边）。 */
     private fun renderPage(index: Int): Bitmap? {
