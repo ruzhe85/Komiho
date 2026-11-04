@@ -84,6 +84,17 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
      * 拿到已初始化的 [decoder] 后，完成采样 / 解码 / 增强 / 硬件位图转换，返回结果。
      * 封面归档特例与普通页共用此逻辑。
      */
+    /** 用平台解码器解 PNG（支持调色板 tRNS 透明），失败返回 null 让调用方回落 JNI。 */
+    private fun decodePlatformPng(sampleSize: Int): Bitmap? = runCatching {
+        val opts = android.graphics.BitmapFactory.Options().apply {
+            inSampleSize = sampleSize.coerceAtLeast(1)
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        resources.peek().inputStream().use {
+            android.graphics.BitmapFactory.decodeStream(it, null, opts)
+        }
+    }.getOrNull()
+
     private fun decodeWith(decoder: ImageDecoder): DecodeResult {
         // Komiho:「从 0 开始解码」的计时起点 —— 角标显示的实际计算耗时从这里算起，
         // 等锁与线程排队会被剔除（见 EnhanceTimings）。
@@ -136,7 +147,21 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             scale = options.scale,
         )
 
-        var bitmap = decoder.decode(sampleSize = sampleSize)
+        // Komiho (2026-11-05): PNG 交给**平台解码器**。
+        //
+        // 我们的 JNI 解码器（image-decoder）不处理调色板 PNG 的 tRNS 透明表：透明索引对应的
+        // 调色板颜色（Komga/EPUB 里常是纯黑）会被原样画成不透明像素 —— 于是「黑字 + 透明底」
+        // 的 logo 整块变黑，后面再怎么压白底也救不回来（alpha 在解码这一步就没了）。
+        // BitmapFactory 对 tRNS/PLTE 处理正确，代价只是一次平台解码。
+        val isPng = runCatching {
+            ImageUtil.findImageType { resources.peek().inputStream() } == ImageUtil.ImageType.PNG
+        }.getOrDefault(false)
+
+        var bitmap = if (isPng) {
+            decodePlatformPng(sampleSize) ?: decoder.decode(sampleSize = sampleSize)
+        } else {
+            decoder.decode(sampleSize = sampleSize)
+        }
         decoder.recycle()
 
         check(bitmap != null) { "Failed to decode image" }

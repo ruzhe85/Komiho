@@ -213,7 +213,8 @@ object PagerPagePreparer {
         // ⚠️ 双页拆分 / 旋转合并**不走这条旁路**：那两步是在字节流上做的（`process()` 里
         // `dualPageRotateToFit` / `splitInHalf`，还带 `InsertPage` 的虚拟页插队），位图旁路绕过去
         // 后就等于「双页功能失效」——所以这两种设置开启时让给下面的字节路径。
-        val dualPageActive = viewer.config.dualPageSplit || viewer.config.dualPageRotateToFit
+        val dualPageActive = viewer.config.dualPageSplit || viewer.config.dualPageRotateToFit ||
+            viewer.config.doublePages || extraPage != null
         if (!dualPageActive) {
             page.preRenderedBitmap?.let { provider ->
                 val raw = runCatching { withIOContext { provider() } }.getOrNull()
