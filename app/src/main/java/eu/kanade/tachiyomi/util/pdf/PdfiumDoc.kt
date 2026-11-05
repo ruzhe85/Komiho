@@ -30,18 +30,26 @@ class PdfiumDoc private constructor(
     private val pfd: ParcelFileDescriptor,
 ) : Closeable {
 
+    /** 关闭标志：关过之后所有调用直接返回 null/0，绝不把已销毁的句柄交给 PDFium。 */
+    private var closed = false
+
     val pageCount: Int
-        get() = runCatching { doc.getPageCount() }.getOrDefault(0)
+        get() = synchronized(PdfiumLock.mutex) {
+            if (closed) 0 else runCatching { doc.getPageCount() }.getOrDefault(0)
+        }
 
     /** 页面尺寸（PostScript 点，1/72 英寸）；取不到返回 null。 */
-    fun sizePoints(index: Int): Pair<Int, Int>? = runCatching {
-        val page = doc.openPage(index) ?: return@runCatching null
-        try {
-            page.getPageWidthPoint() to page.getPageHeightPoint()
-        } finally {
-            runCatching { page.close() }
-        }
-    }.getOrNull()
+    fun sizePoints(index: Int): Pair<Int, Int>? = synchronized(PdfiumLock.mutex) {
+        if (closed) return@synchronized null
+        runCatching {
+            val page = doc.openPage(index) ?: return@runCatching null
+            try {
+                page.getPageWidthPoint() to page.getPageHeightPoint()
+            } finally {
+                runCatching { page.close() }
+            }
+        }.getOrNull()
+    }
 
     /**
      * 渲染一页到 ARGB_8888 位图。
@@ -50,10 +58,10 @@ class PdfiumDoc private constructor(
      * - `canvasColor = 0` 表示不额外填充画布（页面已铺满整张位图）；
      * - 失败（越界/渲染异常）返回 null，调用方回落错误页。
      */
-    fun renderPage(index: Int, width: Int, height: Int): Bitmap? {
-        if (width <= 0 || height <= 0) return null
+    fun renderPage(index: Int, width: Int, height: Int): Bitmap? = synchronized(PdfiumLock.mutex) {
+        if (closed || width <= 0 || height <= 0) return@synchronized null
         val bmp = runCatching { Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888) }
-            .getOrNull() ?: return null
+            .getOrNull() ?: return@synchronized null
         val ok = runCatching {
             val page = doc.openPage(index) ?: return@runCatching false
             try {
@@ -75,14 +83,21 @@ class PdfiumDoc private constructor(
             .getOrDefault(false)
         if (!ok) {
             runCatching { bmp.recycle() }
-            return null
+            return@synchronized null
         }
-        return bmp
+        bmp
     }
 
     override fun close() {
-        runCatching { doc.close() }
-        runCatching { pfd.close() }
+        // 与渲染/尺寸查询互斥：等正在跑的 PDFium 调用结束再销毁句柄，
+        // 否则就是「PdfiumDoc 已 close、后台线程还在 LoadPage」的 use-after-free。
+        synchronized(PdfiumLock.mutex) {
+            if (!closed) {
+                closed = true
+                runCatching { doc.close() }
+                runCatching { pfd.close() }
+            }
+        }
     }
 
     companion object {
@@ -101,7 +116,7 @@ class PdfiumDoc private constructor(
         fun open(path: String, password: String? = null): PdfiumDoc {
             val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
             return try {
-                val doc = core.newDocument(pfd, password)
+                val doc = synchronized(PdfiumLock.mutex) { core.newDocument(pfd, password) }
                 val wrapper = PdfiumDoc(doc, pfd)
                 // 先构造再读页数：pageCount 自带 runCatching，不会因为这一行把 doc 漏掉没关。
                 DiagLog.d(TAG, "open ok path=$path password=${password != null} pages=${wrapper.pageCount}")

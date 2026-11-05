@@ -187,6 +187,9 @@ struct BestImage {
     FPDF_PAGEOBJECT obj = nullptr;
     float bestCover = 0.0f;
     float totalCover = 0.0f;
+    // 诊断用：本页扫到多少个对象、其中多少张图（判否时看日志就知道卡在哪个门）。
+    int objects = 0;
+    int images = 0;
 };
 
 // Form XObject 递归上限：正常文档 0~1 层，给到 3 层只为容错。
@@ -202,13 +205,14 @@ void considerImage(FPDF_PAGEOBJECT obj, FPDF_PAGE page, const FS_MATRIX& outer,
     if (md.width == 0 || md.height == 0) return;
 
     const FS_MATRIX t = composeMatrix(outer, m);
-    const float iw = static_cast<float>(md.width);
-    const float ih = static_cast<float>(md.height);
-    // 外接矩形：像素宽方向 (a,b)、高方向 (c,d)；旋转页（/Rotate 90）落在 b/c 上，同样成立。
-    const float x1 = t.a * iw + t.c * ih + t.e;
-    const float y1 = t.b * iw + t.d * ih + t.f;
-    const float w = std::fabs(x1 - t.e);
-    const float h = std::fabs(y1 - t.f);
+
+    // ⚠️ 图像 XObject 的坐标系是**单位正方形**（0..1），不是像素尺寸：
+    // FPDFPageObj_GetMatrix 已经把「单位图像」映射到页面矩形，因此渲染尺寸 = 基向量长度，
+    // **不能再乘 md.width/height**（乘了会得到 像素×页面 的量级，cover 上百万，
+    // 所有页都被判成「非整页图」—— v20261105 就是这么把直通全关掉的）。
+    // 旋转页（/Rotate 90）的映射落在 b/c 上，用基向量长度同样成立。
+    const float w = std::sqrt(t.a * t.a + t.b * t.b);
+    const float h = std::sqrt(t.c * t.c + t.d * t.d);
     if (!(w > 1.0f) || !(h > 1.0f)) return;
 
     const float cover = (w / pw) * (h / ph);
@@ -217,8 +221,9 @@ void considerImage(FPDF_PAGEOBJECT obj, FPDF_PAGE page, const FS_MATRIX& outer,
 
     // 位置必须大致居中：跨页图被切成两半的 PDF，每半张的尺寸都等于整页，
     // 只靠面积会误判成整页图 → 直通后这一页显示的是隔壁页的内容。
-    const float cx = (t.e + x1) * 0.5f;
-    const float cy = (t.f + y1) * 0.5f;
+    // 单位正方形中心 (0.5, 0.5) 映射到页面坐标：
+    const float cx = 0.5f * (t.a + t.c) + t.e;
+    const float cy = 0.5f * (t.b + t.d) + t.f;
     if (std::fabs(cx - pw * 0.5f) / pw > kMaxCenterOffset) return;
     if (std::fabs(cy - ph * 0.5f) / ph > kMaxCenterOffset) return;
 
@@ -241,6 +246,7 @@ void scanObjects(FPDF_PAGE page, FPDF_PAGEOBJECT form, const FS_MATRIX& outer,
         count = g_api.FormObjCountObjects(form);
     }
     if (count <= 0 || count > 4096) return;
+    out.objects += count;
 
     for (int i = 0; i < count; i++) {
         FPDF_PAGEOBJECT obj = form == nullptr
@@ -249,6 +255,7 @@ void scanObjects(FPDF_PAGE page, FPDF_PAGEOBJECT form, const FS_MATRIX& outer,
         if (obj == nullptr) continue;
         const int type = g_api.PageObjGetType(obj);
         if (type == kPageObjImage) {
+            out.images++;
             considerImage(obj, page, outer, pw, ph, out);
         } else if (type == kPageObjForm) {
             FS_MATRIX fm{};
@@ -259,21 +266,28 @@ void scanObjects(FPDF_PAGE page, FPDF_PAGEOBJECT form, const FS_MATRIX& outer,
 }
 
 // 页面里「铺满整页的那张图」；没有就返回 nullptr（交给渲染）。
-FPDF_PAGEOBJECT findFullPageImage(FPDF_PAGE page) {
-    if (page == nullptr) return nullptr;
-    const float pw = g_api.GetPageWidthF(page);
-    const float ph = g_api.GetPageHeightF(page);
-    if (!(pw > 1.0f) || !(ph > 1.0f)) return nullptr;
-
+// [stats] 非空时带出本页的扫描统计，供诊断日志用。
+FPDF_PAGEOBJECT findFullPageImage(FPDF_PAGE page, BestImage* stats) {
     BestImage best;
-    const FS_MATRIX identity{1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
-    scanObjects(page, nullptr, identity, pw, ph, 0, best);
+    FPDF_PAGEOBJECT result = nullptr;
 
-    if (best.obj == nullptr) return nullptr;
-    if (best.bestCover < kMinCoverRatio) return nullptr;
-    // 还有别的图占着页面（多图拼页/分栏），只抽一张会丢内容 → 渲染。
-    if (best.totalCover - best.bestCover > kMaxOtherCover) return nullptr;
-    return best.obj;
+    if (page != nullptr) {
+        const float pw = g_api.GetPageWidthF(page);
+        const float ph = g_api.GetPageHeightF(page);
+        if (pw > 1.0f && ph > 1.0f) {
+            const FS_MATRIX identity{1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
+            scanObjects(page, nullptr, identity, pw, ph, 0, best);
+            // 主图必须铺满整页，且不能还有别的图占着版面（多图拼页/分栏只抽一张会丢内容）。
+            if (best.obj != nullptr &&
+                best.bestCover >= kMinCoverRatio &&
+                best.totalCover - best.bestCover <= kMaxOtherCover) {
+                result = best.obj;
+            }
+        }
+    }
+
+    if (stats != nullptr) *stats = best;
+    return result;
 }
 
 /**
@@ -371,10 +385,17 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeProbe(
 
     std::lock_guard<std::mutex> guard(g_lock);
     FPDF_PAGE page = g_api.LoadPage(ctx->doc, index);
-    if (page == nullptr) return JNI_FALSE;
-    FPDF_PAGEOBJECT obj = findFullPageImage(page);
+    if (page == nullptr) {
+        LOGW("probe page=%d LoadPage failed", index);
+        return JNI_FALSE;
+    }
+    BestImage stats;
+    FPDF_PAGEOBJECT obj = findFullPageImage(page, &stats);
     const bool ok = isJpegRaw(obj, page);
     g_api.ClosePage(page);
+    // 诊断：判否时看 cover 与 images —— 一眼能分清「多图页」还是「不是 JPEG」。
+    LOGD("probe page=%d objs=%d imgs=%d cover=%.2f total=%.2f jpeg=%d",
+         index, stats.objects, stats.images, stats.bestCover, stats.totalCover, ok ? 1 : 0);
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -388,7 +409,7 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeRawJpeg(
     FPDF_PAGE page = g_api.LoadPage(ctx->doc, index);
     if (page == nullptr) return nullptr;
 
-    FPDF_PAGEOBJECT obj = findFullPageImage(page);
+    FPDF_PAGEOBJECT obj = findFullPageImage(page, nullptr);
     if (!isJpegRaw(obj, page)) {
         g_api.ClosePage(page);
         return nullptr;

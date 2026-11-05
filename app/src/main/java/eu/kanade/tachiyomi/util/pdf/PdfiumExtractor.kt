@@ -31,7 +31,9 @@ internal object PdfiumExtractor {
     fun open(path: String, password: String?): Handle? {
         if (!loaded) return null
         val startedAt = android.os.SystemClock.uptimeMillis()
-        val ptr = runCatching { nativeOpen(path, password) }.getOrDefault(0L)
+        val ptr = synchronized(PdfiumLock.mutex) {
+            runCatching { nativeOpen(path, password) }.getOrDefault(0L)
+        }
         val elapsed = android.os.SystemClock.uptimeMillis() - startedAt
         if (ptr == 0L) {
             DiagLog.d(TAG, "PDFium 抽取句柄不可用（${elapsed}ms），回落解析器/渲染")
@@ -42,13 +44,23 @@ internal object PdfiumExtractor {
     }
 
     fun probe(handle: Long, index: Int): Boolean =
-        handle != 0L && runCatching { nativeProbe(handle, index) }.getOrDefault(false)
+        handle != 0L && synchronized(PdfiumLock.mutex) {
+            runCatching { nativeProbe(handle, index) }.getOrDefault(false)
+        }
 
     fun rawJpeg(handle: Long, index: Int): ByteArray? =
-        if (handle == 0L) null else runCatching { nativeRawJpeg(handle, index) }.getOrNull()
+        if (handle == 0L) {
+            null
+        } else {
+            synchronized(PdfiumLock.mutex) {
+                runCatching { nativeRawJpeg(handle, index) }.getOrNull()
+            }
+        }
 
     fun close(handle: Long) {
-        if (handle != 0L) runCatching { nativeClose(handle) }
+        if (handle != 0L) {
+            synchronized(PdfiumLock.mutex) { runCatching { nativeClose(handle) } }
+        }
     }
 
     /**
