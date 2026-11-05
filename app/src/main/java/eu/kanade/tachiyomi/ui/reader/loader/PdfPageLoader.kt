@@ -50,12 +50,17 @@ internal class PdfPageLoader private constructor(
     private val remoteUrl: String?,
 ) : PageLoader() {
 
+    // 这两个字段在 getPages()（IO 线程）写、在页面准备（Coil 线程）读，中间没有共同锁 ——
+    // 必须 volatile 才有可见性保证，否则理论上会读到 null（表现为随机「这一页无法渲染」）。
+    @Volatile
     private lateinit var path: String
 
     /** PDFium 文档句柄（页数与渲染的唯一来源）。 */
+    @Volatile
     private var doc: PdfiumDoc? = null
 
     /** 本次打开实际使用的密码（空串表示「权限型加密、无用户密码」）。 */
+    @Volatile
     private var currentPassword: String? = null
 
     /**
@@ -103,6 +108,17 @@ internal class PdfPageLoader private constructor(
             extractor = PdfiumExtractor.open(path, currentPassword)
         }
         extractor
+    }
+
+    /**
+     * 渲染页「编码后字节」的 LRU（3 条，按访问顺序淘汰）。
+     *
+     * 只缓存**字节**、不缓存位图：位图会被上位（分页超预算时）`recycle()`，缓存位图必然
+     * 踩到 "trying to use a recycled bitmap"；字节不可变，重新包装成 InputStream 也安全。
+     */
+    private val encodedCache = object : LinkedHashMap<Int, ByteArray>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, ByteArray>): Boolean =
+            size > 3
     }
 
     /** 本地 PDF：传 UniFile。 */
@@ -244,8 +260,13 @@ internal class PdfPageLoader private constructor(
         val (pw, ph) = document.sizePoints(index) ?: (595 to 842)
         val (tw, th) = PdfRenderFallback.displaySize(pw, ph)
         val bitmap = document.renderPage(index, tw, th)
-        // Komiho: 与「page N: ... passthrough」对称 —— 看日志就知道这一页是抽的还是画的。
-        DiagLog.d(TAG, "page ${index + 1}: pdfium render ${tw}x$th ${if (bitmap != null) "ok" else "failed"}")
+        // Komiho: 与「page N: ... passthrough」对称 —— 看日志就知道这一页是抽的还是画的；
+        // `page=……` 是 PDF 的点尺寸，用来核对渲染尺寸是否与页面比例一致（双页左右不等大时看这里）。
+        DiagLog.d(
+            TAG,
+            "page ${index + 1}: pdfium render ${tw}x$th (page=${pw}x$ph) " +
+                (if (bitmap != null) "ok" else "failed"),
+        )
         return bitmap
     }
 
@@ -283,9 +304,24 @@ internal class PdfPageLoader private constructor(
         }
 
         // ③ 渲染兜底：位图直通拿不到（渲染失败/被回收）时才走字节路径，保证不白屏。
+        //
+        // 同一页会被读多次：measurePageAspectRatio 判条漫比例一次、真正显示一次、来回翻页
+        // 再来几次。每次「渲染 + 编码」要 400~600ms（《游戏机实用技术》那类纯 Flate 位图
+        // 的杂志页尤其明显，日志里 page 4 被渲染了 13 次）—— 缓存编码结果只付第一次。
+        synchronized(encodedCache) { encodedCache[index] }?.let { cached ->
+            DiagLog.d(TAG, "page ${index + 1}: encoded cache hit (${cached.size}B)")
+            return ByteArrayInputStream(cached)
+        }
         val bitmap = renderPage(index)
             ?: throw IllegalStateException("PDF 第 ${index + 1} 页无法渲染（可能已损坏）")
+        val encodeStart = android.os.SystemClock.uptimeMillis()
         val bytes = PdfRenderFallback.encodeForDisplay(bitmap)
+        DiagLog.d(
+            TAG,
+            "page ${index + 1}: encode ${bytes.size}B in " +
+                "${android.os.SystemClock.uptimeMillis() - encodeStart}ms",
+        )
+        synchronized(encodedCache) { encodedCache[index] = bytes }
         return ByteArrayInputStream(bytes)
     }
 
@@ -364,6 +400,7 @@ internal class PdfPageLoader private constructor(
             runCatching { extractor?.close() }
             extractor = null
         }
+        synchronized(encodedCache) { encodedCache.clear() }
         runCatching { doc?.close() }
         doc = null
         super.recycle()

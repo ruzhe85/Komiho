@@ -56,8 +56,8 @@ object PdfRenderFallback {
     /** 长条页输出长边上限：PDFium/位图分配对大尺寸有上限，极端窄长页不能无限拉高。 */
     private const val MAX_TALL_LONG_SIDE = 24_000
 
-    /** 超过这个像素量（百万像素）就改用 JPEG 编码：无损编码在超大页上要几秒，翻页会卡死。 */
-    private const val LARGE_PAGE_MP = 10L
+    /** JPEG 质量：PDF 渲染页是栅格化的二次产物，q95 肉眼无可辨差异。 */
+    private const val JPEG_QUALITY = 95
 
     /** 渲染指定页为 Bitmap：
      *  - 先填白底，避免矢量/文本 PDF 无色块区域透出（原先透明 → 底色消失）。
@@ -267,21 +267,18 @@ object PdfRenderFallback {
      *
      * API 30+ 用 **WebP 无损** 而不是 PNG：两者都是无损，但 Skia 的 WebP 编码器比 libpng 快
      * 一大截，而这一层编码正是「渲染兜底页」除 PDFium 之外的第二个大头（3MP 扫描页 PNG
-     * 动辄几百毫秒/页）。低版本没有 WebP 无损常量，继续 PNG。
+     * 动辄几百毫秒/页）。
+     *
+     * Komiho (2026-11-06): 统一改成 **JPEG q95**，不再按像素量分流。
+     *  - 这类页是 PDFium 栅格化的二次产物，q95 肉眼无可辨差异；
+     *  - libjpeg-turbo 有 SIMD 优化：3MP 页约 40~80ms，而无损 WebP 要 250~470ms
+     *    （21MP 长条页实测 4.9s），有损 WebP q95 也要 100~250ms；
+     *  - 下游还要再解码一次（喂 Coil / 双页合并），JPEG 解码同样更快；
+     *  - 渲染页一律白底不透明，不受 JPEG 无 alpha 的限制。
      */
     private fun encodePage(bmp: Bitmap): ByteArray {
         val out = ByteArrayOutputStream(1 shl 20)
-        val megapixels = bmp.width.toLong() * bmp.height / 1_000_000L
-        if (megapixels >= LARGE_PAGE_MP) {
-            // Komiho (2026-11-04): 超大页（1440×15049 这种长条扫图 = 21MP）用无损编码一次要 5 秒
-            // （实测 encode=4921ms / render 只有 209ms），整本翻不动。这类页本来就是 PDFium
-            // 栅格化的结果，改用高质量 JPEG（q95）换速度，肉眼无可辨差异。
-            bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            bmp.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 100, out)
-        } else {
-            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
-        }
+        bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
         return out.toByteArray()
     }
 
