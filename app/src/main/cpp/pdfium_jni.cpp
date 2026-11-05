@@ -2,37 +2,39 @@
 //
 // 为什么自己写这一层：`io.legere:pdfiumandroid` 的 Kotlin API 只有「渲染 / 文本」，
 // 没暴露 fpdf_edit 的对象接口。PDFium 本体（AAR 里的 libpdfium.so）导出了
-// FPDFPage_GetObject / FPDFPageObj_GetMatrix / FPDFImageObj_GetImageDataRaw —— 这里用
-// dlopen + dlsym 直接调它们，拿到 PDF 里**嵌入的原始压缩流**（DCTDecode 时就是原始
-// JPEG 字节），0 次重采样、0 次重编码；系统 PdfRenderer 给不了这种东西。
+// FPDFPage_GetObject / FPDFImageObj_GetImageDataRaw —— 这里用 dlopen + dlsym 直接调，
+// 拿到 PDF 里**嵌入的原始压缩流**（DCTDecode 时就是原始 JPEG 字节），0 次重采样、
+// 0 次重编码；系统 PdfRenderer 给不了这种东西。
 //
-// ⚠️ 2026-11-05 23:29 两次 native 崩溃都落在 openStream → probe 里，且没有打出任何
-// `probe page=` 日志 —— 说明死在 findFullPageImage 内部。可疑项按「非基础 API」收敛：
-//   · 去掉 FPDFImageObj_GetImageMetadata（结构体布局随版本变化，写越界会炸栈），
-//     CMYK 改为直接解析 JPEG 的 SOF 段分量数判断；
-//   · 去掉 FPDFFormObj_CountObjects/GetObject（experimental，签名不稳），不再递归
-//     Form XObject —— 这类页交给「渲染」或自写解析器，不再冒崩溃风险；
-//   · probe 只做几何（LoadPage / CountObjects / GetObject / GetType / GetMatrix），
-//     不碰任何数据流；原始字节只在 nativeRawJpeg 里读一次。
-//   · nativeOpen 后跑一次 selftest（LoadPage(0) + 遍历对象类型），基础 API 有问题会
-//     在打开时就暴露，不用等翻页。
+// ⚠️ 2026-11-05 连续三次 native 崩溃（22:56:48 / 23:29:3x / 23:49:2x）都发生在打开 PDF
+// 后的 probe 阶段。排查结论：只保留**最基础**的对象接口，几何判断也搬进内存里做。
+//   · 不再调 FPDFPageObj_GetMatrix（experimental，且已确认崩溃就发生在这类扩展调用上）；
+//     改为「页面只有一张图」作为直通前提；
+//   · 不再调 FPDFImageObj_GetImageMetadata（结构体布局随版本变化，写越界即炸栈）；
+//     CMYK/旋转/跨页全部由**解析 JPEG 头**判断（宽高比与页面比例比对）；
+//   · 不再递归 FPDFFormObj_*（experimental，签名不稳）。
 //
-// 设计约束（破一条就会影响正常阅读）：
-//  1. 任何一步失败都返回 0/null/false，Kotlin 侧立刻回落「自写解析器 → PDFium 渲染」；
-//  2. 用独立文档句柄（自己的 FPDF_LoadDocument），不去反射 legere 的内部指针；
-//  3. PDFium 全局非线程安全 —— JNI 内一把 mutex，Kotlin 侧还有 PdfiumLock 串行化
-//     渲染与抽取两个入口；
-//  4. 只认「铺满整页的 JPEG」：多图拼页、水印/logo 页、JPX/JBIG2/Flate 一律不抽。
+// 诊断信息的传输：native 日志只进 logcat，而应用内导出的日志读的是 Kotlin 的 DiagLog
+// 缓冲 —— 所以这里不再依赖 __android_log_print，把统计通过 IntArray 回传给 Kotlin，
+// 由 Kotlin 用 DiagLog 记（`probe page=…` / `raw page=…` / `selftest[..]`）。
+//
+// 设计约束：
+//  1. 任何一步失败都返回 0/null/false，Kotlin 侧回落「自写解析器 → PDFium 渲染」；
+//  2. 用独立文档句柄（自己的 FPDF_LoadDocument），不反射 legere 的内部指针；
+//  3. PDFium 全局非线程安全 —— JNI 内一把 mutex，Kotlin 侧 PdfiumLock 再串行化两个入口；
+//  4. 只认「整页单图 + 纯 JPEG + 比例吻合」：多图页、水印页、JPX/JBIG2/Flate 一律渲染。
 #include <jni.h>
 #include <android/log.h>
 #include <dlfcn.h>
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <new>
+#include <string>
 
 #define LOG_TAG "KomihoPdfiumX"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -45,30 +47,14 @@ using FPDF_DOCUMENT = void*;
 using FPDF_PAGE = void*;
 using FPDF_PAGEOBJECT = void*;
 
-struct FS_MATRIX {
-    float a;
-    float b;
-    float c;
-    float d;
-    float e;
-    float f;
-};
-
 // FPDF_PAGEOBJ_IMAGE
 constexpr int kPageObjImage = 3;
 
 // 单张图上限 256MB：超过就按异常处理，回落渲染。
 constexpr uint32_t kMaxRawBytes = 256U * 1024U * 1024U;
 
-// 主图必须覆盖页面的比例（面积）。0.75 ≈ 边长 87%：允许扫描件四周有白边，
-// 又能把「半页图」（0.5）挡在外面。
-constexpr float kMinCoverRatio = 0.75f;
-// 主图面积上限：跨页图（靠 /Clip 只显示一半）尺寸约 2.0，必须挡掉。
-constexpr float kMaxCoverRatio = 1.35f;
-// 除主图之外的图（水印/角标）最多允许占的面积。
-constexpr float kMaxOtherCover = 0.10f;
-// 主图中心与页面中心的最大偏移（按页面尺寸归一化）。
-constexpr float kMaxCenterOffset = 0.30f;
+// JPEG 宽高比与页面宽高比允许的偏差（白边/水印会让两者略有出入）。
+constexpr float kMaxAspectDelta = 0.10f;
 
 struct Api {
     void (*InitLibrary)();
@@ -82,7 +68,6 @@ struct Api {
     int (*PageCountObjects)(FPDF_PAGE page);
     FPDF_PAGEOBJECT (*PageGetObject)(FPDF_PAGE page, int index);
     int (*PageObjGetType)(FPDF_PAGEOBJECT obj);
-    int (*PageObjGetMatrix)(FPDF_PAGEOBJECT obj, FS_MATRIX* matrix);
     // 返回类型与 buflen 都是 PDFium 的 `unsigned long`（arm64 上是 64 位）。
     unsigned long (*ImageObjGetDataRaw)(FPDF_PAGEOBJECT obj, void* buffer, unsigned long buflen);
 };
@@ -132,7 +117,6 @@ void ensureLoaded() {
             bindSymbol(lib, "FPDFPage_CountObjects", g_api.PageCountObjects) &&
             bindSymbol(lib, "FPDFPage_GetObject", g_api.PageGetObject) &&
             bindSymbol(lib, "FPDFPageObj_GetType", g_api.PageObjGetType) &&
-            bindSymbol(lib, "FPDFPageObj_GetMatrix", g_api.PageObjGetMatrix) &&
             bindSymbol(lib, "FPDFImageObj_GetImageDataRaw", g_api.ImageObjGetDataRaw);
         if (!ok) {
             LOGW("pdfium symbols incomplete (passthrough disabled)");
@@ -146,78 +130,30 @@ void ensureLoaded() {
     });
 }
 
-struct BestImage {
-    FPDF_PAGEOBJECT obj = nullptr;
-    float bestCover = 0.0f;
-    float totalCover = 0.0f;
-    // 诊断用：本页扫到多少个对象、其中多少张图。
-    int objects = 0;
-    int images = 0;
-};
+/**
+ * 页面里「唯一的那个 image 对象」。
+ *
+ * 直通前提从「几何覆盖整页」退化为「本页只有一张图」：不再需要 FPDFPageObj_GetMatrix
+ * （已确认崩溃就发生在扩展对象 API 上）。多图页（拼页/水印/分栏）一律返回 nullptr → 渲染。
+ */
+FPDF_PAGEOBJECT singlePageImage(FPDF_PAGE page, int* objects, int* images) {
+    *objects = 0;
+    *images = 0;
+    if (page == nullptr) return nullptr;
+    const int count = g_api.PageCountObjects(page);
+    if (count <= 0 || count > 4096) return nullptr;
+    *objects = count;
 
-// 一张图对页面的覆盖率（面积）。
-//
-// ⚠️ 图像 XObject 的坐标系是**单位正方形**（0..1）：FPDFPageObj_GetMatrix 已经把
-// 「单位图像」映射到页面矩形，因此渲染尺寸 = 基向量长度，**不能乘像素宽高**
-// （乘了会得到 像素×页面 的量级，cover 上百万，所有页都被判成非整页图）。
-void considerImage(FPDF_PAGEOBJECT obj, float pw, float ph, BestImage& out) {
-    FS_MATRIX m{};
-    if (!g_api.PageObjGetMatrix(obj, &m)) return;
-
-    // 旋转页（/Rotate 90）的映射落在 b/c 上，用基向量长度同样成立。
-    const float w = std::sqrt(m.a * m.a + m.b * m.b);
-    const float h = std::sqrt(m.c * m.c + m.d * m.d);
-    if (!(w > 1.0f) || !(h > 1.0f)) return;
-
-    const float cover = (w / pw) * (h / ph);
-    if (!(cover > 0.0f) || cover > kMaxCoverRatio) return;
-
-    // 位置必须大致居中：跨页图被切成两半的 PDF，每半张尺寸都等于整页，
-    // 只靠面积会误判 → 直通后这一页显示的是隔壁页的内容。
-    const float cx = 0.5f * (m.a + m.c) + m.e;
-    const float cy = 0.5f * (m.b + m.d) + m.f;
-    if (std::fabs(cx - pw * 0.5f) / pw > kMaxCenterOffset) return;
-    if (std::fabs(cy - ph * 0.5f) / ph > kMaxCenterOffset) return;
-
-    out.totalCover += cover;
-    if (cover > out.bestCover) {
-        out.bestCover = cover;
-        out.obj = obj;
+    FPDF_PAGEOBJECT only = nullptr;
+    for (int i = 0; i < count; i++) {
+        FPDF_PAGEOBJECT obj = g_api.PageGetObject(page, i);
+        if (obj == nullptr) continue;
+        if (g_api.PageObjGetType(obj) != kPageObjImage) continue;
+        (*images)++;
+        if (*images > 1) return nullptr; // 多图页：只抽一张会丢内容
+        only = obj;
     }
-}
-
-// 页面里「铺满整页的那张图」；没有就返回 nullptr（交给渲染）。
-// [stats] 非空时带出本页扫描统计，供诊断日志用。
-FPDF_PAGEOBJECT findFullPageImage(FPDF_PAGE page, BestImage* stats) {
-    BestImage best;
-    FPDF_PAGEOBJECT result = nullptr;
-
-    if (page != nullptr) {
-        const float pw = g_api.GetPageWidthF(page);
-        const float ph = g_api.GetPageHeightF(page);
-        if (pw > 1.0f && ph > 1.0f) {
-            const int count = g_api.PageCountObjects(page);
-            if (count > 0 && count <= 4096) {
-                best.objects = count;
-                for (int i = 0; i < count; i++) {
-                    FPDF_PAGEOBJECT obj = g_api.PageGetObject(page, i);
-                    if (obj == nullptr) continue;
-                    if (g_api.PageObjGetType(obj) != kPageObjImage) continue;
-                    best.images++;
-                    considerImage(obj, pw, ph, best);
-                }
-            }
-            // 主图必须铺满整页，且不能还有别的图占着版面（多图拼页只抽一张会丢内容）。
-            if (best.obj != nullptr &&
-                best.bestCover >= kMinCoverRatio &&
-                best.totalCover - best.bestCover <= kMaxOtherCover) {
-                result = best.obj;
-            }
-        }
-    }
-
-    if (stats != nullptr) *stats = best;
-    return result;
+    return *images == 1 ? only : nullptr;
 }
 
 /** 长度归一化 —— 规避 `FPDF_DWORD` 的 32/64 位歧义（返回值高位可能是寄存器残留）。 */
@@ -228,8 +164,26 @@ unsigned long normalizeLen(unsigned long raw) {
     return 0;
 }
 
-/** JPEG 的 SOF 段里的分量数（1=灰度，3=YCbCr，4=CMYK）；解析不出返回 0。 */
-int jpegComponentCount(const uint8_t* d, size_t n) {
+struct JpegHeader {
+    int comps = 0;// 1=灰度 3=YCbCr 4=CMYK
+    int width = 0;
+    int height = 0;
+    bool hasEoi = false;
+};
+
+/** 只解析 JPEG 头（SOI/EOI/SOF），不依赖任何 PDFium 结构体。 */
+JpegHeader parseJpeg(const uint8_t* d, size_t n) {
+    JpegHeader h;
+    if (n < 4 || d[0] != 0xFF || d[1] != 0xD8) return h;
+
+    // 尾部允许 0/换行填充，但必须找得到 EOI —— 截断的 JPEG 解码会失败直接显示错误页。
+    size_t end = n;
+    while (end > 2 && (d[end - 1] == 0x00 || d[end - 1] == 0x0A ||
+                       d[end - 1] == 0x0D || d[end - 1] == 0x20)) {
+        end--;
+    }
+    h.hasEoi = end >= 4 && d[end - 2] == 0xFF && d[end - 1] == 0xD9;
+
     size_t i = 2; // 跳过 SOI
     while (i + 4 <= n) {
         if (d[i] != 0xFF) {
@@ -242,68 +196,51 @@ int jpegComponentCount(const uint8_t* d, size_t n) {
             continue;
         }
         const size_t seg = (static_cast<size_t>(d[i + 2]) << 8) | d[i + 3];
-        if (seg < 2 || i + 2 + seg > n) return 0;
+        if (seg < 2 || i + 2 + seg > n) break;
         // SOF0..SOF15（C4=DHT、C8=JPG、CC=DAC 不是 SOF）
         if (marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC) {
-            if (seg < 8) return 0;
-            return d[i + 9];
+            if (seg >= 8) {
+                h.height = (d[i + 5] << 8) | d[i + 6];
+                h.width = (d[i + 7] << 8) | d[i + 8];
+                h.comps = d[i + 9];
+            }
+            break;
         }
         i += 2 + seg;
     }
-    return 0;
+    return h;
 }
 
-/** 原始流是不是能直接交给解码器的 JPEG：SOI + 完整 EOI + 非 CMYK。 */
-bool isPlainJpeg(const uint8_t* d, size_t n) {
-    if (n < 4 || d[0] != 0xFF || d[1] != 0xD8) return false;
-
-    // 尾部允许 0/换行填充，但必须找得到 EOI —— 截断的 JPEG 解码会失败直接显示错误页。
-    size_t end = n;
-    while (end > 2 && (d[end - 1] == 0x00 || d[end - 1] == 0x0A ||
-                       d[end - 1] == 0x0D || d[end - 1] == 0x20)) {
-        end--;
-    }
-    if (end < 4 || d[end - 2] != 0xFF || d[end - 1] != 0xD9) return false;
-
-    const int comps = jpegComponentCount(d, n);
-    // 4 分量（CMYK）会被解码器按 RGB 硬转 → 偏色，交给 PDFium 渲染才正确。
-    return comps == 1 || comps == 3;
+bool aspectMatches(const JpegHeader& h, float pageW, float pageH) {
+    if (h.comps != 1 && h.comps != 3) return false; // 4=CMYK 会偏色；未知分量同样不抽
+    if (h.width <= 0 || h.height <= 0 || pageW <= 1.0f || pageH <= 1.0f) return false;
+    const float pageRatio = pageW / pageH;
+    const float imgRatio = static_cast<float>(h.width) / static_cast<float>(h.height);
+    const float d1 = std::fabs(imgRatio - pageRatio) / pageRatio;
+    const float d2 = std::fabs(1.0f / imgRatio - pageRatio) / pageRatio; // 页面 /Rotate 90
+    return std::fmin(d1, d2) <= kMaxAspectDelta;
 }
 
-/**
- * 打开后的基础 API 自检：LoadPage(0) → CountObjects → GetObject → GetType → GetMatrix。
- *
- * 目的不是"验证功能"，而是**把崩溃点钉在打开阶段**：日志最后一行就是最后成功的调用，
- * 不用等翻页、也不用猜是哪个符号。任何一步失败都只记日志，不影响可用性。
- */
-void selfTest(FPDF_DOCUMENT doc) {
-    if (doc == nullptr || g_api.GetPageCount(doc) <= 0) return;
-    LOGD("selftest begin");
+/** 打开后的基础 API 自检，摘要文本回传给 Kotlin 记日志（native 日志进不了应用内缓冲）。 */
+std::string selfTest(FPDF_DOCUMENT doc) {
+    char buf[160];
+    if (doc == nullptr || g_api.GetPageCount(doc) <= 0) return "pages=0";
     FPDF_PAGE page = g_api.LoadPage(doc, 0);
-    if (page == nullptr) {
-        LOGW("selftest: LoadPage(0) failed");
-        return;
-    }
-    const int count = g_api.PageCountObjects(page);
+    if (page == nullptr) return "LoadPage(0)=null";
+    int objects = 0;
     int images = 0;
-    bool matrixLogged = false;
-    for (int i = 0; i < count && i < 512; i++) {
-        FPDF_PAGEOBJECT obj = g_api.PageGetObject(page, i);
-        if (obj == nullptr) continue;
-        if (g_api.PageObjGetType(obj) != kPageObjImage) continue;
-        images++;
-        if (!matrixLogged) {
-            FS_MATRIX m{};
-            const int got = g_api.PageObjGetMatrix(obj, &m);
-            matrixLogged = true;
-            LOGD("selftest: matrix got=%d a=%.3f b=%.3f c=%.3f d=%.3f e=%.1f f=%.1f",
-                 got, m.a, m.b, m.c, m.d, m.e, m.f);
-        }
-    }
+    singlePageImage(page, &objects, &images);
     const float w = g_api.GetPageWidthF(page);
     const float h = g_api.GetPageHeightF(page);
     g_api.ClosePage(page);
-    LOGD("selftest end objs=%d imgs=%d page=%.1fx%.1f", count, images, w, h);
+    snprintf(buf, sizeof(buf), "objs=%d imgs=%d page=%.0fx%.0f", objects, images, w, h);
+    return buf;
+}
+
+void fillStats(JNIEnv* env, jintArray array, int32_t a, int32_t b, int32_t c) {
+    if (array == nullptr || env->GetArrayLength(array) < 3) return;
+    jint values[3] = {a, b, c};
+    env->SetIntArrayRegion(array, 0, 3, values);
 }
 
 } // namespace
@@ -341,12 +278,15 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeOpen(
         return 0;
     }
     LOGD("open ok pages=%d", pages);
-
-    {
-        std::lock_guard<std::mutex> guard(g_lock);
-        selfTest(doc);
-    }
     return reinterpret_cast<jlong>(ctx);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeSelfTest(JNIEnv* env, jobject, jlong handle) {
+    auto* ctx = reinterpret_cast<Ctx*>(handle);
+    if (!g_ready || ctx == nullptr || ctx->doc == nullptr) return nullptr;
+    std::lock_guard<std::mutex> guard(g_lock);
+    return env->NewStringUTF(selfTest(ctx->doc).c_str());
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -363,67 +303,85 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeClose(JNIEnv*, jobject, 
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeProbe(
-        JNIEnv*, jobject, jlong handle, jint index) {
+        JNIEnv* env, jobject, jlong handle, jint index, jintArray jStats) {
     auto* ctx = reinterpret_cast<Ctx*>(handle);
     if (!g_ready || ctx == nullptr || ctx->doc == nullptr || index < 0) return JNI_FALSE;
 
-    std::lock_guard<std::mutex> guard(g_lock);
-    FPDF_PAGE page = g_api.LoadPage(ctx->doc, index);
-    if (page == nullptr) {
-        LOGW("probe page=%d LoadPage failed", index);
-        return JNI_FALSE;
+    int objects = 0;
+    int images = 0;
+    FPDF_PAGEOBJECT obj = nullptr;
+    {
+        std::lock_guard<std::mutex> guard(g_lock);
+        FPDF_PAGE page = g_api.LoadPage(ctx->doc, index);
+        if (page == nullptr) {
+            fillStats(env, jStats, -1, 0, 0);
+            return JNI_FALSE;
+        }
+        obj = singlePageImage(page, &objects, &images);
+        g_api.ClosePage(page);
     }
-    BestImage stats;
-    FPDF_PAGEOBJECT obj = findFullPageImage(page, &stats);
-    g_api.ClosePage(page);
-    const bool ok = obj != nullptr;
-    // 诊断：判否时看 cover/images 就知道卡在哪道门（几何问题 vs 多图页 vs 无图页）。
-    LOGD("probe page=%d objs=%d imgs=%d cover=%.2f total=%.2f full=%d",
-         index, stats.objects, stats.images, stats.bestCover, stats.totalCover, ok ? 1 : 0);
-    return ok ? JNI_TRUE : JNI_FALSE;
+    fillStats(env, jStats, objects, images, 0);
+    return obj != nullptr ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeRawJpeg(
-        JNIEnv* env, jobject, jlong handle, jint index) {
+        JNIEnv* env, jobject, jlong handle, jint index, jintArray jStats) {
     auto* ctx = reinterpret_cast<Ctx*>(handle);
     if (!g_ready || ctx == nullptr || ctx->doc == nullptr || index < 0) return nullptr;
 
-    std::lock_guard<std::mutex> guard(g_lock);
-    FPDF_PAGE page = g_api.LoadPage(ctx->doc, index);
-    if (page == nullptr) return nullptr;
+    unsigned long len = 0;
+    unsigned long copied = 0;
+    int objects = 0;
+    int images = 0;
+    int comps = 0;
+    float pageW = 0.0f;
+    float pageH = 0.0f;
+    uint8_t* buffer = nullptr;
 
-    FPDF_PAGEOBJECT obj = findFullPageImage(page, nullptr);
-    if (obj == nullptr) {
+    {
+        std::lock_guard<std::mutex> guard(g_lock);
+        FPDF_PAGE page = g_api.LoadPage(ctx->doc, index);
+        if (page == nullptr) {
+            fillStats(env, jStats, -1, 0, 0);
+            return nullptr;
+        }
+        pageW = g_api.GetPageWidthF(page);
+        pageH = g_api.GetPageHeightF(page);
+        FPDF_PAGEOBJECT obj = singlePageImage(page, &objects, &images);
+        if (obj != nullptr) {
+            len = normalizeLen(g_api.ImageObjGetDataRaw(obj, nullptr, 0));
+            if (len != 0) {
+                buffer = static_cast<uint8_t*>(std::malloc(static_cast<size_t>(len)));
+                if (buffer != nullptr) {
+                    copied = normalizeLen(
+                        g_api.ImageObjGetDataRaw(obj, buffer, static_cast<unsigned long>(len)));
+                }
+            }
+        }
         g_api.ClosePage(page);
+    }
+
+    if (buffer == nullptr || copied != len) {
+        if (buffer != nullptr) std::free(buffer);
+        fillStats(env, jStats, objects, images, 0);
         return nullptr;
     }
 
-    const unsigned long len = normalizeLen(g_api.ImageObjGetDataRaw(obj, nullptr, 0));
-    if (len == 0) {
-        g_api.ClosePage(page);
-        return nullptr;
-    }
-    auto* buffer = static_cast<uint8_t*>(std::malloc(static_cast<size_t>(len)));
-    if (buffer == nullptr) {
-        g_api.ClosePage(page);
-        return nullptr;
-    }
-    const unsigned long copied = normalizeLen(g_api.ImageObjGetDataRaw(obj, buffer, len));
-    g_api.ClosePage(page);
+    const JpegHeader header = parseJpeg(buffer, static_cast<size_t>(len));
+    comps = header.comps;
+    const bool ok = header.hasEoi && aspectMatches(header, pageW, pageH);
 
-    const bool ok = copied == len && isPlainJpeg(buffer, static_cast<size_t>(len));
-    LOGD("raw page=%d len=%lu copied=%lu ok=%d", index, len, copied, ok ? 1 : 0);
-    if (!ok) {
-        std::free(buffer);
-        return nullptr;
-    }
-
-    jbyteArray out = env->NewByteArray(static_cast<jsize>(len));
-    if (out != nullptr) {
-        env->SetByteArrayRegion(out, 0, static_cast<jsize>(len),
-                                reinterpret_cast<const jbyte*>(buffer));
+    jbyteArray out = nullptr;
+    if (ok) {
+        out = env->NewByteArray(static_cast<jsize>(len));
+        if (out != nullptr) {
+            env->SetByteArrayRegion(out, 0, static_cast<jsize>(len),
+                                    reinterpret_cast<const jbyte*>(buffer));
+        }
     }
     std::free(buffer);
+    // stats: [0]=objects [1]=images [2]=JPEG 分量数（0=头解析失败，4=CMYK，1/3 才是可直通）
+    fillStats(env, jStats, objects, images, comps);
     return out;
 }

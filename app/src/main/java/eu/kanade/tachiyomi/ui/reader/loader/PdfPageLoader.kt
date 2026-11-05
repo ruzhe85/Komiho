@@ -373,6 +373,6 @@ internal class PdfPageLoader private constructor(
         private const val TAG = "KomihoPdfLoader"
 
         /** 实现标记：出现在 `PDF open` 日志里，用来判断装到的包是否包含本版逻辑。 */
-        private const val IMPL_MARK = "20261105-pdfium+raw"
+        private const val IMPL_MARK = "20261105-pdfium+raw3"
     }
 }
