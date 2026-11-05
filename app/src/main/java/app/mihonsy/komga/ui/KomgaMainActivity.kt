@@ -4275,6 +4275,20 @@ private fun SettingsTab(
                         }
                     },
                 )
+                // Komiho (2026-11-06): 与导出一组 —— 落盘缓冲是 8MB 环形、跨会话累积。
+                // 排查完清一次，下次导出的就只剩本次会话，不用人工从旧 dump 里挑。
+                TextPreferenceWidget(
+                    title = composeStringResource(R.string.settings_clear_diagnostic_logs),
+                    subtitle = composeStringResource(R.string.settings_clear_diagnostic_logs_summary),
+                    onPreferenceClick = {
+                        eu.kanade.tachiyomi.diagnostic.DiagnosticLogBuffer.clear()
+                        Toast.makeText(
+                            context.applicationContext,
+                            context.getString(R.string.settings_clear_diagnostic_logs_done),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                )
                 // SY <--
             }
         }

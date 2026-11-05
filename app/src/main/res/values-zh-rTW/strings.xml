@@ -232,6 +232,9 @@
     <string name="settings_advanced">進階</string>
     <string name="settings_export_diagnostic_logs">匯出診斷記錄</string>
     <string name="settings_export_diagnostic_logs_failed">匯出診斷記錄失敗</string>
+    <string name="settings_clear_diagnostic_logs">清除診斷記錄</string>
+    <string name="settings_clear_diagnostic_logs_summary">落盤緩衝會跨工作階段累積（上限 8MB）；清除後下次匯出只含本次工作階段</string>
+    <string name="settings_clear_diagnostic_logs_done">診斷記錄已清除</string>
     <string name="reader_progress_bubble">進度條縮圖</string>
     <string name="settings_reader">閱讀設定</string>
     <string name="settings_reader_summary">翻頁/方向/縮放/增強/導覽…</string>

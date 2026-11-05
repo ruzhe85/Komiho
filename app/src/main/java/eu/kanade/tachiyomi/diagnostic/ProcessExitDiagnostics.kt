@@ -115,7 +115,9 @@ object ProcessExitDiagnostics {
             }
             if (isAbnormal(info.reason)) logTrace(info)
         }
-        prefs?.edit()?.putLong(KEY_LAST_REPORTED_TS, maxTs)?.apply()
+        // 用 commit：这条记录的意义就是「下次崩溃后别再重播」，若用 apply（异步落盘）
+        // 而进程紧接着又死，下次启动会重复打印一遍，等于白改。
+        prefs?.edit()?.putLong(KEY_LAST_REPORTED_TS, maxTs)?.commit()
 
         // 自解释：免得看导出文件的人（和后来接手的人）要回代码里查这张表。
         DiagLog.d(
@@ -176,6 +178,9 @@ object ProcessExitDiagnostics {
         for (raw in text.lineSequence()) {
             val line = raw.trimEnd()
             if (line.isBlank()) continue
+            // tombstone 里有一大段 `x0 … x29` 寄存器 dump 和二进制块：对判读没用，
+            // 而且按 UTF-8 解码出来是乱码（导出文件里那一串 `x0������`），直接丢。
+            if (!looksTextual(line)) continue
             val trimmed = line.trimStart()
             val header = trimmed.startsWith("pid:") ||
                 trimmed.startsWith("signal ") ||
@@ -195,11 +200,21 @@ object ProcessExitDiagnostics {
             // 一条都匹配不到 —— 退回前 40 行，至少能看到卡在哪个方法。
             return text.lineSequence()
                 .map { it.trimEnd() }
-                .filter { it.isNotBlank() }
+                .filter { it.isNotBlank() && looksTextual(it) }
                 .take(MAX_TRACE_FRAMES)
                 .toList()
         }
         return out
+    }
+
+    /** 非 ASCII / 控制字符占比过高的行视为二进制垃圾（trace 里的寄存器 dump 就是这种）。 */
+    private fun looksTextual(line: String): Boolean {
+        var bad = 0
+        for (ch in line) {
+            if (ch == '\t') continue
+            if (ch.code < 0x20 || ch.code > 0x7E) bad++
+        }
+        return bad * 4 <= line.length
     }
 
     /** 单条 trace 最多读这么多字节：native 栈通常几 KB，ANR trace 会到几十 KB。 */
