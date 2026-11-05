@@ -25,6 +25,11 @@ import java.util.Locale
  * - `ANR` → 卡死被系统杀掉（正好对应「解析慢到超时」）；
  * - `USER_REQUESTED` → 用户自己划掉的，此时日志「断掉」**不代表崩溃**。
  *
+ * Komiho (2026-11-06) 两条收缩（原先每次启动把 8 条历史记录 + 各自最多 1500 行 trace 全打
+ * 一遍，导出文件里 6 万行 / 7MB 有 99% 是重复 dump）：
+ *  1. 只汇报**上次启动之后新增**的退出记录（时间戳记在 SharedPreferences 里）；
+ *  2. trace 只留关键行（异常信息 / 信号 / 带 .so 的帧 + 前 40 帧），单条上限 120 行。
+ *
  * 只读、只打日志；任何失败都吞掉（老系统 / 厂商裁剪 / 无权限）。
  */
 object ProcessExitDiagnostics {
@@ -33,6 +38,13 @@ object ProcessExitDiagnostics {
 
     /** 一次最多列几条（系统上限约 16）。 */
     private const val MAX_ENTRIES = 8
+
+    private const val PREFS = "komiho_diag"
+    private const val KEY_LAST_REPORTED_TS = "last_exit_ts"
+
+    /** 单条 trace 最多写这么多行/帧（防止把导出文件刷成几 MB）。 */
+    private const val MAX_TRACE_LINES = 120
+    private const val MAX_TRACE_FRAMES = 40
 
     private val TIME_FORMAT = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault())
 
@@ -61,8 +73,24 @@ object ProcessExitDiagnostics {
             DiagLog.d(TAG, "无进程退出记录（首次启动，或已被系统清理）")
             return
         }
-        DiagLog.d(TAG, "上次会话之后能查到的进程退出记录 ${list.size} 条（**本次启动之前**发生）:")
-        for (info in list) {
+
+        val prefs = runCatching {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        }.getOrNull()
+        val lastReported = prefs?.getLong(KEY_LAST_REPORTED_TS, 0L) ?: 0L
+
+        // 系统会长期保留最近 8 条，每次都全量打印 → 日志被历史 dump 淹没。
+        // 只报「上次汇报之后新增的」，同时仍把总数说出来，方便判断历史里有没有崩溃。
+        val fresh = list.filter { it.timestamp > lastReported }
+        if (fresh.isEmpty()) {
+            DiagLog.d(TAG, "无新的进程退出记录（系统里共 ${list.size} 条，均已汇报过）")
+            return
+        }
+
+        DiagLog.d(TAG, "新增进程退出记录 ${fresh.size} 条（系统共 ${list.size} 条，均在本次启动之前）:")
+        var maxTs = lastReported
+        for (info in fresh) {
+            if (info.timestamp > maxTs) maxTs = info.timestamp
             val line = buildString {
                 append("reason=").append(reasonName(info.reason))
                 append(", time=").append(TIME_FORMAT.format(Date(info.timestamp)))
@@ -87,6 +115,8 @@ object ProcessExitDiagnostics {
             }
             if (isAbnormal(info.reason)) logTrace(info)
         }
+        prefs?.edit()?.putLong(KEY_LAST_REPORTED_TS, maxTs)?.apply()
+
         // 自解释：免得看导出文件的人（和后来接手的人）要回代码里查这张表。
         DiagLog.d(
             TAG,
@@ -102,7 +132,8 @@ object ProcessExitDiagnostics {
      * 这是唯一能拿到 **native 栈**的地方（`#00 pc 0000xxxx  /data/app/…/libwaifu2x-jni.so`）：
      * [ApplicationExitInfo] 的 reason/status 只能告诉我们「SIGSEGV」或「SIGABRT」，指不到具体
      * 哪个 .so、哪个函数；而 adb 在不少设备上拿不到（鸿蒙、家长控制/企业管控机型）。
-     * 系统没给（老版本、部分厂商裁剪）就静默跳过，不影响其余日志。
+     *
+     * 只保留判读需要的行：异常信息 / 信号 / 前 [MAX_TRACE_FRAMES] 帧 / 任何带 `.so` 的帧。
      */
     @RequiresApi(Build.VERSION_CODES.R)
     private fun logTrace(info: ApplicationExitInfo) {
@@ -120,21 +151,59 @@ object ProcessExitDiagnostics {
         }.getOrNull()
         if (text.isNullOrBlank()) return
 
-        // 逐行写：一行一条便于按 tag/关键字过滤，也避免超长单条把缓冲撑爆。
-        val lines = text.lineSequence()
-            .map { it.trimEnd() }
-            .filter { it.isNotBlank() }
-            .take(MAX_TRACE_LINES)
-            .toList()
-        DiagLog.w(TAG, "退出 trace(${reasonName(info.reason)}, time=${TIME_FORMAT.format(Date(info.timestamp))}) ${lines.size} 行:")
+        val lines = trimTrace(text)
+        if (lines.isEmpty()) return
+        DiagLog.w(
+            TAG,
+            "退出 trace(${reasonName(info.reason)}, time=${TIME_FORMAT.format(Date(info.timestamp))}) " +
+                "保留 ${lines.size} 行:",
+        )
         lines.forEach { DiagLog.w(TAG, it) }
+    }
+
+    /**
+     * 从完整 trace 里挑出关键行。
+     *
+     * 原始 trace 是一份几万行的 tombstone（含所有线程的寄存器 dump），全量落盘既慢又难读；
+     * 判读真正用得到的是「怎么死的 + 崩在哪个 .so」。所以只留：
+     *  - `Abort message` / `signal` / `pid:` 这类头部；
+     *  - 崩溃线程的前 [MAX_TRACE_FRAMES] 个栈帧；
+     *  - 任何带 `.so` 的帧（不限于前 40 帧，app 自己的库往往在中间）。
+     */
+    private fun trimTrace(text: String): List<String> {
+        val out = ArrayList<String>(MAX_TRACE_LINES)
+        var frames = 0
+        for (raw in text.lineSequence()) {
+            val line = raw.trimEnd()
+            if (line.isBlank()) continue
+            val trimmed = line.trimStart()
+            val header = trimmed.startsWith("pid:") ||
+                trimmed.startsWith("signal ") ||
+                trimmed.startsWith("Abort message") ||
+                trimmed.startsWith("backtrace:")
+            val withLib = trimmed.startsWith("#") && line.contains(".so")
+            if (header || withLib) {
+                out += line
+            } else if (trimmed.startsWith("#")) {
+                frames++
+                if (frames <= MAX_TRACE_FRAMES) out += line
+            }
+            if (out.size >= MAX_TRACE_LINES) break
+        }
+        if (out.isEmpty()) {
+            // ANR 的 trace 是 Java 线程 dump（`"main" prio=5 …`，没有 `#` 帧），上面的规则
+            // 一条都匹配不到 —— 退回前 40 行，至少能看到卡在哪个方法。
+            return text.lineSequence()
+                .map { it.trimEnd() }
+                .filter { it.isNotBlank() }
+                .take(MAX_TRACE_FRAMES)
+                .toList()
+        }
+        return out
     }
 
     /** 单条 trace 最多读这么多字节：native 栈通常几 KB，ANR trace 会到几十 KB。 */
     private const val MAX_TRACE_BYTES = 64 * 1024
-
-    /** 最多写这么多行（防止极端 trace 把导出文件刷成几十 MB）。 */
-    private const val MAX_TRACE_LINES = 1500
 
     /** 需要特别标红的退出原因（用 WARN 级别写，便于在导出文件里一眼看到）。 */
     private fun isAbnormal(reason: Int): Boolean = when (reason) {

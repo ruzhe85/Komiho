@@ -5,6 +5,7 @@ import logcat.LogPriority
 import logcat.LogcatLogger
 import java.io.BufferedWriter
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,11 +38,15 @@ import java.util.Locale
 object DiagnosticLogBuffer {
 
     /** 磁盘缓冲上限：超过则保留最近 75%。8MB 约可容纳数万行，足够覆盖一次崩溃前后。 */
-    private const val MAX_FILE_BYTES = 8 * 1024 * 1024
+    private const val MAX_FILE_BYTES = 8L * 1024 * 1024
+
+    /** 每写这么多行才查一次文件大小（原先每行一次 `length()` 系统调用）。 */
+    private const val SIZE_CHECK_EVERY = 256
 
     private val lock = Any()
     private lateinit var logFile: File
     private var writer: BufferedWriter? = null
+    private var linesSinceSizeCheck = 0
 
     fun install(context: Context) {
         logFile = File(context.filesDir, "komiho_diagnostic_log.txt")
@@ -127,6 +132,7 @@ object DiagnosticLogBuffer {
             } catch (_: Throwable) {
             }
             writer = null
+            linesSinceSizeCheck = 0
             if (this::logFile.isInitialized && logFile.exists()) logFile.delete()
             openWriter()
         }
@@ -157,28 +163,61 @@ object DiagnosticLogBuffer {
                     append(message.replace('\n', ' ').replace('\r', ' '))
                 }
                 synchronized(lock) {
+                    // flush 只把 Java 缓冲交给内核（不 fsync）：进程崩掉数据仍在，
+                    // 这正是崩溃日志要的效果，所以保留每行 flush。
                     writer?.append(line)?.append('\n')?.flush()
-                    if (logFile.length() > MAX_FILE_BYTES) trimLocked()
+                    if (++linesSinceSizeCheck >= SIZE_CHECK_EVERY) {
+                        linesSinceSizeCheck = 0
+                        if (logFile.length() > MAX_FILE_BYTES) trimLocked()
+                    }
                 }
             } catch (_: Throwable) {
             }
         }
     }
 
-    /** 环形裁剪：保留最近 75%（须在 [lock] 内调用，且会安全地重开 writer）。 */
+    /**
+     * 环形裁剪：保留最近 75%（须在 [lock] 内调用，且会安全地重开 writer）。
+     *
+     * Komiho (2026-11-06): 改成**按字节**截断。原实现 `readLines()` + `takeLast` + `writeText`
+     * 要把 8MB 整个读进内存（peak 30MB+，还要拼字符串），在阅读器高频写日志时会造成明显卡顿；
+     * 现在只 seek 到目标位置、丢掉半行、流式拷到临时文件再 rename，内存占用固定 64KB。
+     */
     private fun trimLocked() {
         try {
             writer?.close()
         } catch (_: Throwable) {
         }
         writer = null
-        val lines = logFile.readLines()
-        if (lines.size <= 1) {
-            openWriter()
-            return
+        try {
+            val keepBytes = MAX_FILE_BYTES * 3 / 4
+            val length = logFile.length()
+            if (length <= keepBytes) {
+                openWriter()
+                return
+            }
+            val tmp = File(logFile.parentFile, logFile.name + ".tmp")
+            FileInputStream(logFile).use { input ->
+                input.channel.position(length - keepBytes)
+                // 丢掉被截断的半行
+                var b = input.read()
+                while (b != -1 && b != '\n'.code) b = input.read()
+                FileOutputStream(tmp).use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                    }
+                }
+            }
+            if (!tmp.renameTo(logFile)) {
+                tmp.copyTo(logFile, overwrite = true)
+                tmp.delete()
+            }
+        } catch (_: Throwable) {
+            // 裁剪失败绝不能影响后续日志写入
         }
-        val keep = lines.takeLast((lines.size * 3) / 4)
-        logFile.writeText(keep.joinToString("\n") + "\n")
         openWriter()
     }
 
