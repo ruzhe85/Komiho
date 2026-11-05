@@ -59,13 +59,32 @@ internal object PdfiumExtractor {
         return Handle(ptr)
     }
 
-    /** [stats] = [对象数, 图对象数, 0]；返回本页是否「单图页」。 */
+    // stats 槽位（native 侧 fillStats 写入）：
+    // 0=objects 1=images 2=comps 3=jpegW 4=jpegH 5=hasEoi 6=pageW 7=pageH 8=reason
+    private const val STATS_SIZE = 10
+
+    /** 每多少次 native 调用落一次熔断探针（见 Handle.guard）。 */
+    private const val ARM_EVERY = 8
+
+    /** 拒绝原因 → 日志文字（与 native 的 kReason* 常量对应）。 */
+    fun reasonName(code: Int): String = when (code) {
+        0 -> "ok"
+        1 -> "tiny"
+        2 -> "no-data"
+        3 -> "no-eoi"
+        4 -> "color"
+        5 -> "aspect"
+        6 -> "multi-image"
+        else -> "?"
+    }
+
+    /** 返回本页是否「单图页」；[stats] 见 [STATS_SIZE] 注释。 */
     fun probe(handle: Long, index: Int, stats: IntArray): Boolean =
         handle != 0L && synchronized(PdfiumLock.mutex) {
             runCatching { nativeProbe(handle, index, stats) }.getOrDefault(false)
         }
 
-    /** [info] = [对象数, 图对象数, JPEG 分量数]；返回原始 JPEG 字节（不合格为 null）。 */
+    /** 返回原始 JPEG 字节（不合格为 null）；[info] 见 [STATS_SIZE] 注释。 */
     fun rawJpeg(handle: Long, index: Int, info: IntArray): ByteArray? =
         if (handle == 0L) {
             null
@@ -90,23 +109,26 @@ internal object PdfiumExtractor {
     class Handle internal constructor(private var ptr: Long) : Closeable {
 
         /**
-         * 本句柄是否已经成功跑过一次 native 调用。
+         * 熔断探针的节流计数。
          *
-         * 熔断只需要覆盖「第一次真正进 PDFium」：崩溃几乎都发生在首个 probe，而且
-         * 每页都写两次 SharedPreferences（commit + fsync）代价太大。首次正常返回后
-         * 就不再写盘。
+         * 每次 native 调用都写两次 SharedPreferences（commit + fsync）太贵（同一页要 probe + raw
+         * 两次），但只覆盖"第一次调用"又会让「崩在第 50 页」这种情形漏网（每次重开都崩）。
+         * 折中：每 [ARM_EVERY] 次调用落盘一次，最多 4 页内必有一次覆盖。
          */
-        private var armedOnce = false
+        private var callsSinceArm = ARM_EVERY
 
         private inline fun <T> guard(block: () -> T): T {
-            if (armedOnce) return block()
+            if (callsSinceArm < ARM_EVERY) {
+                callsSinceArm++
+                return block()
+            }
             PdfiumGuard.arm()
             return try {
                 block()
             } finally {
                 // 走不到这里 = 进程死在 native 调用里 → 下次启动熔断。
                 PdfiumGuard.disarm()
-                armedOnce = true
+                callsSinceArm = 1
             }
         }
 
@@ -115,12 +137,12 @@ internal object PdfiumExtractor {
         fun canPassthrough(index: Int): Boolean {
             val handle = ptr
             if (handle == 0L) return false
-            val stats = IntArray(3)
+            val stats = IntArray(STATS_SIZE)
             val ok = guard { PdfiumExtractor.probe(handle, index, stats) }
             DiagLog.d(
                 TAG,
                 "probe page=${index + 1} objs=${stats[0]} imgs=${stats[1]} " +
-                    "single=${if (ok) 1 else 0}",
+                    "page=${stats[6]}x${stats[7]} single=${if (ok) 1 else 0}",
             )
             return ok
         }
@@ -130,12 +152,14 @@ internal object PdfiumExtractor {
         fun rawJpeg(index: Int): ByteArray? {
             val handle = ptr
             if (handle == 0L) return null
-            val info = IntArray(3)
+            val info = IntArray(STATS_SIZE)
             val bytes = guard { PdfiumExtractor.rawJpeg(handle, index, info) }
             DiagLog.d(
                 TAG,
-                "raw page=${index + 1} objs=${info[0]} imgs=${info[1]} " +
-                    "comps=${info[2]} len=${bytes?.size ?: 0} ok=${if (bytes != null) 1 else 0}",
+                "raw page=${index + 1} objs=${info[0]} imgs=${info[1]} comps=${info[2]} " +
+                    "page=${info[6]}x${info[7]} img=${info[3]}x${info[4]} eoi=${info[5]} " +
+                    "reason=${reasonName(info[8])} len=${bytes?.size ?: 0} " +
+                    "ok=${if (bytes != null) 1 else 0}",
             )
             return bytes
         }

@@ -211,14 +211,30 @@ JpegHeader parseJpeg(const uint8_t* d, size_t n) {
     return h;
 }
 
-bool aspectMatches(const JpegHeader& h, float pageW, float pageH) {
-    if (h.comps != 1 && h.comps != 3) return false; // 4=CMYK 会偏色；未知分量同样不抽
-    if (h.width <= 0 || h.height <= 0 || pageW <= 1.0f || pageH <= 1.0f) return false;
+// 拒绝原因（回传给 Kotlin 打日志用，0 = 可直通）
+constexpr int kReasonOk = 0;
+constexpr int kReasonTiny = 1;     // 图太小（不是铺满整页的扫描图）
+constexpr int kReasonNoData = 2;   // 取不到原始流 / 页面尺寸异常
+constexpr int kReasonNoEoi = 3;    // 流被截断（没有 FFD9）
+constexpr int kReasonColor = 4;    // CMYK / 未知分量
+constexpr int kReasonAspect = 5;   // 宽高比与页面差太多（跨页图被 /Clip 切一半）
+constexpr int kReasonMulti = 6;    // 本页不止一张图（拼页/水印页）
+
+int checkJpeg(const JpegHeader& h, float pageW, float pageH) {
+    if (h.width <= 0 || h.height <= 0 || pageW <= 1.0f || pageH <= 1.0f) return kReasonNoData;
+    // 「本页只有一张图」还不够：纯文字页上贴一个 logo 也是单图。页面尺寸是点（1/72 英寸），
+    // 扫描图至少 150dpi（像素数 ≥ 2×点数）；像素不到页面一半的绝不可能是整页图。
+    if (static_cast<float>(h.width) * 2.0f < pageW ||
+        static_cast<float>(h.height) * 2.0f < pageH) {
+        return kReasonTiny;
+    }
+    if (!h.hasEoi) return kReasonNoEoi;
+    if (h.comps != 1 && h.comps != 3) return kReasonColor; // 4=CMYK 会偏色；未知分量同样不抽
     const float pageRatio = pageW / pageH;
     const float imgRatio = static_cast<float>(h.width) / static_cast<float>(h.height);
     const float d1 = std::fabs(imgRatio - pageRatio) / pageRatio;
     const float d2 = std::fabs(1.0f / imgRatio - pageRatio) / pageRatio; // 页面 /Rotate 90
-    return std::fmin(d1, d2) <= kMaxAspectDelta;
+    return std::fmin(d1, d2) <= kMaxAspectDelta ? kReasonOk : kReasonAspect;
 }
 
 /** 打开后的基础 API 自检，摘要文本回传给 Kotlin 记日志（native 日志进不了应用内缓冲）。 */
@@ -237,10 +253,26 @@ std::string selfTest(FPDF_DOCUMENT doc) {
     return buf;
 }
 
-void fillStats(JNIEnv* env, jintArray array, int32_t a, int32_t b, int32_t c) {
-    if (array == nullptr || env->GetArrayLength(array) < 3) return;
-    jint values[3] = {a, b, c};
-    env->SetIntArrayRegion(array, 0, 3, values);
+// stats 槽位：0=objects 1=images 2=comps 3=jpegW 4=jpegH 5=hasEoi 6=pageW 7=pageH 8=reason
+constexpr int kStatsSize = 10;
+
+struct Stats {
+    int32_t objects = 0;
+    int32_t images = 0;
+    int32_t comps = 0;
+    int32_t jpegW = 0;
+    int32_t jpegH = 0;
+    int32_t eoi = 0;
+    int32_t pageW = 0;
+    int32_t pageH = 0;
+    int32_t reason = 0;
+};
+
+void fillStats(JNIEnv* env, jintArray array, const Stats& s) {
+    if (array == nullptr || env->GetArrayLength(array) < kStatsSize) return;
+    jint values[kStatsSize] = {s.objects, s.images, s.comps, s.jpegW, s.jpegH,
+                               s.eoi, s.pageW, s.pageH, s.reason, 0};
+    env->SetIntArrayRegion(array, 0, kStatsSize, values);
 }
 
 } // namespace
@@ -309,18 +341,37 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeProbe(
 
     int objects = 0;
     int images = 0;
+    float pageW = 0.0f;
+    float pageH = 0.0f;
     FPDF_PAGEOBJECT obj = nullptr;
     {
         std::lock_guard<std::mutex> guard(g_lock);
         FPDF_PAGE page = g_api.LoadPage(ctx->doc, index);
         if (page == nullptr) {
-            fillStats(env, jStats, -1, 0, 0);
+            Stats s;
+            s.objects = -1;
+            s.reason = kReasonNoData;
+            fillStats(env, jStats, s);
             return JNI_FALSE;
         }
+        pageW = g_api.GetPageWidthF(page);
+        pageH = g_api.GetPageHeightF(page);
         obj = singlePageImage(page, &objects, &images);
         g_api.ClosePage(page);
     }
-    fillStats(env, jStats, objects, images, 0);
+    Stats s;
+    s.objects = objects;
+    s.images = images;
+    s.pageW = static_cast<int32_t>(pageW + 0.5f);
+    s.pageH = static_cast<int32_t>(pageH + 0.5f);
+    if (obj != nullptr) {
+        s.reason = kReasonOk;
+    } else if (images > 1) {
+        s.reason = kReasonMulti;
+    } else {
+        s.reason = kReasonNoData;
+    }
+    fillStats(env, jStats, s);
     return obj != nullptr ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -343,7 +394,10 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeRawJpeg(
         std::lock_guard<std::mutex> guard(g_lock);
         FPDF_PAGE page = g_api.LoadPage(ctx->doc, index);
         if (page == nullptr) {
-            fillStats(env, jStats, -1, 0, 0);
+            Stats s;
+            s.objects = -1;
+            s.reason = kReasonNoData;
+            fillStats(env, jStats, s);
             return nullptr;
         }
         pageW = g_api.GetPageWidthF(page);
@@ -362,18 +416,25 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeRawJpeg(
         g_api.ClosePage(page);
     }
 
+    Stats s;
+    s.objects = objects;
+    s.images = images;
+    s.pageW = static_cast<int32_t>(pageW + 0.5f);
+    s.pageH = static_cast<int32_t>(pageH + 0.5f);
+
     if (buffer == nullptr || copied != len) {
         if (buffer != nullptr) std::free(buffer);
-        fillStats(env, jStats, objects, images, 0);
+        s.reason = kReasonNoData;
+        fillStats(env, jStats, s);
         return nullptr;
     }
 
     const JpegHeader header = parseJpeg(buffer, static_cast<size_t>(len));
     comps = header.comps;
-    const bool ok = header.hasEoi && aspectMatches(header, pageW, pageH);
+    const int reason = checkJpeg(header, pageW, pageH);
 
     jbyteArray out = nullptr;
-    if (ok) {
+    if (reason == kReasonOk) {
         out = env->NewByteArray(static_cast<jsize>(len));
         if (out != nullptr) {
             env->SetByteArrayRegion(out, 0, static_cast<jsize>(len),
@@ -381,7 +442,11 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeRawJpeg(
         }
     }
     std::free(buffer);
-    // stats: [0]=objects [1]=images [2]=JPEG 分量数（0=头解析失败，4=CMYK，1/3 才是可直通）
-    fillStats(env, jStats, objects, images, comps);
+    s.comps = comps;
+    s.jpegW = header.width;
+    s.jpegH = header.height;
+    s.eoi = header.hasEoi ? 1 : 0;
+    s.reason = reason;
+    fillStats(env, jStats, s);
     return out;
 }
