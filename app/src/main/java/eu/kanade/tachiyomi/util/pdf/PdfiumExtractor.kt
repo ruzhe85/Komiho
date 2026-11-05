@@ -75,6 +75,7 @@ internal object PdfiumExtractor {
         4 -> "color"
         5 -> "aspect"
         6 -> "multi-image"
+        7 -> "many-objects"
         else -> "?"
     }
 

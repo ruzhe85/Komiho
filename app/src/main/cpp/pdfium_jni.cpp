@@ -50,6 +50,26 @@ using FPDF_PAGEOBJECT = void*;
 // FPDF_PAGEOBJ_IMAGE
 constexpr int kPageObjImage = 3;
 
+/**
+ * 页面对象数的直通上限。
+ *
+ * 「本页只有一张图」≠「这页只有图」：乐高说明书、杂志排版页里往往有几十个文字/矢量
+ * 对象 + 1 张位图。只判「图有几张」的话，那张图会被当成整页内容抽走，其余全丢
+ * （2026-11-06 日志里 `objs=24 imgs=1` 就是这么一页，只是恰好被宽高比检查挡住）。
+ * 纯扫描页的 `objs` 恒为 1，所以门槛放在 8 不会误伤。
+ */
+constexpr int kMaxPageObjects = 8;
+
+// 拒绝原因（回传给 Kotlin 打日志用，0 = 可直通）
+constexpr int kReasonOk = 0;
+constexpr int kReasonTiny = 1;        // 图太小（不是铺满整页的扫描图）
+constexpr int kReasonNoData = 2;      // 取不到原始流 / 页面尺寸异常
+constexpr int kReasonNoEoi = 3;       // 流被截断（没有 FFD9）
+constexpr int kReasonColor = 4;       // CMYK / 未知分量
+constexpr int kReasonAspect = 5;      // 宽高比与页面差太多（跨页图被 /Clip 切一半）
+constexpr int kReasonMulti = 6;       // 本页不止一张图（拼页/水印页）
+constexpr int kReasonManyObjects = 7; // 页面上还有大量文字/矢量（排版页、说明书）
+
 // 单张图上限 256MB：超过就按异常处理，回落渲染。
 constexpr uint32_t kMaxRawBytes = 256U * 1024U * 1024U;
 
@@ -133,12 +153,16 @@ void ensureLoaded() {
 /**
  * 页面里「唯一的那个 image 对象」。
  *
- * 直通前提从「几何覆盖整页」退化为「本页只有一张图」：不再需要 FPDFPageObj_GetMatrix
- * （已确认崩溃就发生在扩展对象 API 上）。多图页（拼页/水印/分栏）一律返回 nullptr → 渲染。
+ * 直通前提从「几何覆盖整页」退化为「本页只有一张图 + 页面上没有别的排版内容」：
+ * 不再需要 FPDFPageObj_GetMatrix（已确认崩溃就发生在扩展对象 API 上）。
+ * 多图页（拼页/水印/分栏）、对象数超限的排版页一律返回 nullptr → 渲染。
+ *
+ * [rejectReason] 非空时带出「为什么拒」（供日志与 probe 复用）。
  */
-FPDF_PAGEOBJECT singlePageImage(FPDF_PAGE page, int* objects, int* images) {
+FPDF_PAGEOBJECT singlePageImage(FPDF_PAGE page, int* objects, int* images, int* rejectReason) {
     *objects = 0;
     *images = 0;
+    if (rejectReason != nullptr) *rejectReason = 0;
     if (page == nullptr) return nullptr;
     const int count = g_api.PageCountObjects(page);
     if (count <= 0 || count > 4096) return nullptr;
@@ -152,6 +176,14 @@ FPDF_PAGEOBJECT singlePageImage(FPDF_PAGE page, int* objects, int* images) {
         (*images)++;
         if (*images > 1) return nullptr; // 多图页：只抽一张会丢内容
         only = obj;
+    }
+
+    // 对象太多 = 排版页（说明书/杂志）：图只有一张，但文字、矢量、图注还有一堆，
+    // 只抽这张图会把它们全丢掉。仍然把 images 统计出来，日志里能一眼看出原因。
+    // 注意：images == 0 的纯文字/矢量页不归这条（那是「无图」，日志里记 no-data 更准确）。
+    if (count > kMaxPageObjects) {
+        if (*images >= 1 && rejectReason != nullptr) *rejectReason = kReasonManyObjects;
+        return nullptr;
     }
     return *images == 1 ? only : nullptr;
 }
@@ -211,15 +243,6 @@ JpegHeader parseJpeg(const uint8_t* d, size_t n) {
     return h;
 }
 
-// 拒绝原因（回传给 Kotlin 打日志用，0 = 可直通）
-constexpr int kReasonOk = 0;
-constexpr int kReasonTiny = 1;     // 图太小（不是铺满整页的扫描图）
-constexpr int kReasonNoData = 2;   // 取不到原始流 / 页面尺寸异常
-constexpr int kReasonNoEoi = 3;    // 流被截断（没有 FFD9）
-constexpr int kReasonColor = 4;    // CMYK / 未知分量
-constexpr int kReasonAspect = 5;   // 宽高比与页面差太多（跨页图被 /Clip 切一半）
-constexpr int kReasonMulti = 6;    // 本页不止一张图（拼页/水印页）
-
 int checkJpeg(const JpegHeader& h, float pageW, float pageH) {
     if (h.width <= 0 || h.height <= 0 || pageW <= 1.0f || pageH <= 1.0f) return kReasonNoData;
     // 「本页只有一张图」还不够：纯文字页上贴一个 logo 也是单图。页面尺寸是点（1/72 英寸），
@@ -245,7 +268,7 @@ std::string selfTest(FPDF_DOCUMENT doc) {
     if (page == nullptr) return "LoadPage(0)=null";
     int objects = 0;
     int images = 0;
-    singlePageImage(page, &objects, &images);
+    singlePageImage(page, &objects, &images, nullptr);
     const float w = g_api.GetPageWidthF(page);
     const float h = g_api.GetPageHeightF(page);
     g_api.ClosePage(page);
@@ -341,6 +364,7 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeProbe(
 
     int objects = 0;
     int images = 0;
+    int reject = 0;
     float pageW = 0.0f;
     float pageH = 0.0f;
     FPDF_PAGEOBJECT obj = nullptr;
@@ -356,7 +380,7 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeProbe(
         }
         pageW = g_api.GetPageWidthF(page);
         pageH = g_api.GetPageHeightF(page);
-        obj = singlePageImage(page, &objects, &images);
+        obj = singlePageImage(page, &objects, &images, &reject);
         g_api.ClosePage(page);
     }
     Stats s;
@@ -366,6 +390,8 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeProbe(
     s.pageH = static_cast<int32_t>(pageH + 0.5f);
     if (obj != nullptr) {
         s.reason = kReasonOk;
+    } else if (reject != 0) {
+        s.reason = reject;
     } else if (images > 1) {
         s.reason = kReasonMulti;
     } else {
@@ -385,6 +411,7 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeRawJpeg(
     unsigned long copied = 0;
     int objects = 0;
     int images = 0;
+    int reject = 0;
     int comps = 0;
     float pageW = 0.0f;
     float pageH = 0.0f;
@@ -402,7 +429,7 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeRawJpeg(
         }
         pageW = g_api.GetPageWidthF(page);
         pageH = g_api.GetPageHeightF(page);
-        FPDF_PAGEOBJECT obj = singlePageImage(page, &objects, &images);
+        FPDF_PAGEOBJECT obj = singlePageImage(page, &objects, &images, &reject);
         if (obj != nullptr) {
             len = normalizeLen(g_api.ImageObjGetDataRaw(obj, nullptr, 0));
             if (len != 0) {
@@ -424,7 +451,14 @@ Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeRawJpeg(
 
     if (buffer == nullptr || copied != len) {
         if (buffer != nullptr) std::free(buffer);
-        s.reason = kReasonNoData;
+        // obj == nullptr 时优先报「为什么拒」（排版页/多图），否则才是取不到数据。
+        if (reject != 0) {
+            s.reason = reject;
+        } else if (images > 1) {
+            s.reason = kReasonMulti;
+        } else {
+            s.reason = kReasonNoData;
+        }
         fillStats(env, jStats, s);
         return nullptr;
     }
