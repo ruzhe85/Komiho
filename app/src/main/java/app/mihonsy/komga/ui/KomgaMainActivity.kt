@@ -4232,7 +4232,29 @@ private fun SettingsTab(
                                             "lowMemory=${memInfo.lowMemory}, " +
                                             "threshold=${memInfo.threshold / 1048576}MB\n",
                                     )
-                                    append("Log lines: ${logs.lineSequence().count()} (persisted to disk, may span the last app restart)\n\n")
+                                    // Komiho (2026-11-06): 落盘缓冲是 8MB 环形，会跨多次会话累积。
+                                    // 这里直接标出时间跨度与体积 —— 否则要确认「这段日志从哪天开始」
+                                    // 得翻到第一行看时间戳（30 天没写满时，开头可能是几周前的）。
+                                    val lineCount = logs.lineSequence().count()
+                                    val firstTs = logs.lineSequence().firstOrNull()?.take(23)
+                                    val lastTs = logs.lineSequence().lastOrNull()?.take(23)
+                                    val spanMs = runCatching {
+                                        val parser = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+                                        (parser.parse(lastTs!!).time - parser.parse(firstTs!!).time)
+                                    }.getOrDefault(-1L)
+                                    val spanText = when {
+                                        spanMs < 0 -> null
+                                        spanMs < 60_000 -> "${spanMs / 1000}s"
+                                        spanMs < 3_600_000 -> "${spanMs / 60_000}min"
+                                        spanMs < 86_400_000 ->
+                                            "${spanMs / 3_600_000}h${(spanMs % 3_600_000) / 60_000}min"
+                                        else -> "${spanMs / 86_400_000}d${(spanMs % 86_400_000) / 3_600_000}h"
+                                    }
+                                    append(
+                                        "Log span: ${firstTs ?: "?"} ~ ${lastTs ?: "?"}" +
+                                            (if (spanText != null) " ($spanText)" else "") +
+                                            ", ~${logs.length / 1024}KB, $lineCount lines\n\n",
+                                    )
                                 }
                                 file.writeText(header + logs)
                                 file.getUriCompat(context)
