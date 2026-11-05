@@ -53,6 +53,17 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                     ?.getCoverStream()
             }
         }
+        // Komiho (2026-11-05): PNG 必须赶在 JNI 解码器**读流之前**截下来。
+        //
+        // 阅读页的 data 是页字节流，Coil 包成 SourceImageSource —— `source()` 背后只有
+        // **一条** BufferedSource。JNI 解码器 newInstance 会把它读干并 close，之后
+        // `resources.source()` 只能拿到 EOF/已关闭的流：isPng 检测恒为 false（异常被
+        // runCatching 吞掉），平台解码永远走不到，透明底照旧被 image-decoder 的 tRNS
+        // 缺陷画成不透明黑 —— 这就是「加了平台解码还是一片黑」的真正原因。
+        if (coverStream == null) {
+            readPngBytes()?.let { return decodePng(it) }
+        }
+
         val decoder = resources.sourceOrNull()?.use {
             coverStream.use { coverStream ->
                 // Komiho: 深度裁剪边缘 —— 只在裁边开启时把 aggressiveCrop 传给 fork 的
@@ -77,30 +88,68 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                 "流为空/截断或图片数据损坏（阅读页偶发+刷新即好=章节回收竞态，读取层会报明确原因）"
         }
 
-        return decodeWith(decoder!!)
+        val dec = decoder!!
+        return decodeWith(dec.width, dec.height) { sampleSize ->
+            try {
+                dec.decode(sampleSize = sampleSize)
+            } finally {
+                dec.recycle()
+            }
+        }
+    }
+
+    /** 若当前页是 PNG，返回整份字节（peek 判型不消耗流）；其它格式/读取失败返回 null。 */
+    private fun readPngBytes(): ByteArray? {
+        return try {
+            val source = resources.sourceOrNull() ?: return null
+            val type = source.peek().use { ImageUtil.findImageType(it.inputStream()) }
+            if (type == ImageUtil.ImageType.PNG) source.readByteArray() else null
+        } catch (e: Throwable) {
+            null
+        }
     }
 
     /**
-     * 拿到已初始化的 [decoder] 后，完成采样 / 解码 / 增强 / 硬件位图转换，返回结果。
-     * 封面归档特例与普通页共用此逻辑。
+     * PNG 走平台解码：先 inJustDecodeBounds 拿原始尺寸（[decodeWith] 要用它算采样率），
+     * 再由 [decodeWith] 里的 lambda 按采样率真正解码。字节已整份在内存里，两趟都从内存读。
      */
-    /** 用平台解码器解 PNG（支持调色板 tRNS 透明），失败返回 null 让调用方回落 JNI。 */
-    private fun decodePlatformPng(sampleSize: Int): Bitmap? = runCatching {
+    private fun decodePng(bytes: ByteArray): DecodeResult {
+        val bounds = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, this)
+        }
+        check(bounds.outWidth > 0 && bounds.outHeight > 0) {
+            "Failed to decode image: PNG 头解析失败（${bytes.size}B）"
+        }
+        return decodeWith(bounds.outWidth, bounds.outHeight, formatCarriesAlpha = true) { sampleSize ->
+            decodePlatformPng(bytes, sampleSize)
+        }
+    }
+
+    /** 用平台解码器解 PNG（支持调色板 tRNS 透明），失败返回 null（由 decodeWith 报错）。 */
+    private fun decodePlatformPng(bytes: ByteArray, sampleSize: Int): Bitmap? = runCatching {
         val opts = android.graphics.BitmapFactory.Options().apply {
             inSampleSize = sampleSize.coerceAtLeast(1)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        resources.source().peek().inputStream().use {
-            android.graphics.BitmapFactory.decodeStream(it, null, opts)
-        }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
     }.getOrNull()
 
-    private fun decodeWith(decoder: ImageDecoder): DecodeResult {
+    /**
+     * 完成采样 / 解码 / 增强 / 硬件位图转换，返回结果。
+     * 封面归档特例与普通页共用此逻辑。
+     *
+     * [decode] 在算好采样率之后才调用 —— PNG 交平台解码，其余交 JNI。
+     */
+    private fun decodeWith(
+        srcWidth: Int,
+        srcHeight: Int,
+        formatCarriesAlpha: Boolean = false,
+        decode: (sampleSize: Int) -> Bitmap?,
+    ): DecodeResult {
         // Komiho:「从 0 开始解码」的计时起点 —— 角标显示的实际计算耗时从这里算起，
         // 等锁与线程排队会被剔除（见 EnhanceTimings）。
         val decodeStart = android.os.SystemClock.uptimeMillis()
-        val srcWidth = decoder.width
-        val srcHeight = decoder.height
 
         val dstWidth = options.size.widthPx(options.scale) { srcWidth }
         val dstHeight = options.size.heightPx(options.scale) { srcHeight }
@@ -147,29 +196,27 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             scale = options.scale,
         )
 
-        // Komiho (2026-11-05): PNG 交给**平台解码器**。
-        //
-        // 我们的 JNI 解码器（image-decoder）不处理调色板 PNG 的 tRNS 透明表：透明索引对应的
-        // 调色板颜色（Komga/EPUB 里常是纯黑）会被原样画成不透明像素 —— 于是「黑字 + 透明底」
-        // 的 logo 整块变黑，后面再怎么压白底也救不回来（alpha 在解码这一步就没了）。
-        // BitmapFactory 对 tRNS/PLTE 处理正确，代价只是一次平台解码。
-        val isPng = runCatching {
-            ImageUtil.findImageType { resources.source().peek().inputStream() } == ImageUtil.ImageType.PNG
-        }.getOrDefault(false)
-
-        var bitmap = if (isPng) {
-            decodePlatformPng(sampleSize) ?: decoder.decode(sampleSize = sampleSize)
-        } else {
-            decoder.decode(sampleSize = sampleSize)
-        }
-        decoder.recycle()
-
+        var bitmap = decode(sampleSize)
         check(bitmap != null) { "Failed to decode image" }
 
-        // Komiho (2026-11-04): 记录源图是否**真**带透明像素。必须在这里判断 ——
-        // 增强（AI / Lanczos）按 RGB 处理，会把 alpha 写死成 255，透明区随即变成不透明黑，
-        // 之后再也分辨不出来了。
-        val srcTransparent = ImageUtil.hasTransparentPixels(bitmap)
+        // Komiho (2026-11-05): 透明图**必须在增强之前**压白底，这是整条链路上唯一有效的点。
+        //
+        // 增强（AI / Lanczos 的 RGB 内核）会把 alpha 一律写成 255，而透明像素的 RGB 是 0：
+        // 透明区因此变成**不透明黑**。等增强跑完再压白底已经晚了 —— 那时画到白底上的仍是
+        // 黑像素，白底被完全盖住。判断本身也必须在解码后、增强前做，之后 alpha 就没了。
+        // 判据两条并集：像素抽样（任何格式）+「源格式带 alpha 通道」（PNG 独有）。
+        // 抽样是网格，透明区很窄时可能漏检；PNG 这边 `hasAlpha()` 为 true 就说明文件本身
+        // 带 alpha 通道（BitmapFactory 按 PNG 的 alpha 类型置位），这种情况一律压白底，
+        // 代价只是一次位图拷贝，换来的是「不会再黑」。
+        val srcTransparent = ImageUtil.hasTransparentPixels(bitmap) ||
+            (formatCarriesAlpha && bitmap.hasAlpha())
+        if (srcTransparent) {
+            val flattened = ImageUtil.flattenOnWhite(bitmap)
+            if (flattened != null && flattened !== bitmap) {
+                bitmap.recycle()
+                bitmap = flattened
+            }
+        }
 
         // Komiho (2026-09-26 定稿): AI 跳过门 —— 解码后、预缩前算 fit 比例 r。
         // 普通页 r = min(视图宽/图宽, 视图高/图高)：r ≤ 1 = 屏幕只会缩小显示，源图高频细节
@@ -303,19 +350,6 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                 // Fall back to the original on ANY failure (incl. OutOfMemoryError,
                 // which Exception does not catch — an OOM here used to crash the
                 // whole reader on large downloaded pages).
-            }
-        }
-
-        // Komiho (2026-11-04): 透明图统一压成纯白底。
-        //
-        // 和 PDF 渲染兜底同口径（那边 `eraseColor(Color.WHITE)` 后再画）。放在增强之后、
-        // E-Ink / 硬件位图之前：增强已经破坏 alpha（透明变黑），而 E-Ink 灰阶化与
-        // hardware 转换都要求软件位图。
-        if (srcTransparent) {
-            val flattened = ImageUtil.flattenOnWhite(bitmap)
-            if (flattened != null && flattened !== bitmap) {
-                bitmap.recycle()
-                bitmap = flattened
             }
         }
 
