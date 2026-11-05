@@ -298,7 +298,7 @@ class ReaderActivity : BaseActivity() {
                         if (exception is ArchivePasswordException) {
                             viewModel.openArchivePasswordDialog()
                         } else if (exception is PdfPasswordException) {
-                            viewModel.openPdfPasswordDialog(unsupported = exception.unsupported, wrongPassword = exception.wrongPassword)
+                            viewModel.openPdfPasswordDialog(wrongPassword = exception.wrongPassword)
                         } else {
                             setInitialChapterError(exception)
                         }
@@ -606,40 +606,33 @@ class ReaderActivity : BaseActivity() {
                     title = { Text(stringResource(MR.strings.pdf_password_prompt)) },
                     text = {
                         Column {
-                            if (dialogState.unsupported) {
+                            if (dialogState.wrongPassword) {
                                 Text(
-                                    stringResource(MR.strings.pdf_unsupported),
+                                    stringResource(MR.strings.password_incorrect),
                                     color = MaterialTheme.colorScheme.error,
                                 )
-                            } else {
-                                if (dialogState.wrongPassword) {
-                                    Text(
-                                        stringResource(MR.strings.password_incorrect),
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                                OutlinedTextField(
-                                    value = password,
-                                    onValueChange = { password = it },
-                                    label = { Text(stringResource(MR.strings.password_label)) },
-                                    singleLine = true,
-                                    visualTransformation = PasswordVisualTransformation(),
-                                    keyboardOptions = KeyboardOptions(
-                                        autoCorrect = false,
-                                        imeAction = ImeAction.Done,
-                                    ),
-                                    keyboardActions = KeyboardActions(
-                                        onDone = {
-                                            if (password.isNotBlank()) viewModel.submitPdfPassword(password)
-                                        },
-                                    ),
-                                )
                             }
+                            OutlinedTextField(
+                                value = password,
+                                onValueChange = { password = it },
+                                label = { Text(stringResource(MR.strings.password_label)) },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(
+                                    autoCorrect = false,
+                                    imeAction = ImeAction.Done,
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        if (password.isNotBlank()) viewModel.submitPdfPassword(password)
+                                    },
+                                ),
+                            )
                         }
                     },
                     confirmButton = {
                         TextButton(
-                            enabled = password.isNotBlank() && !dialogState.unsupported,
+                            enabled = password.isNotBlank(),
                             onClick = { viewModel.submitPdfPassword(password) },
                         ) {
                             Text(stringResource(MR.strings.action_ok))

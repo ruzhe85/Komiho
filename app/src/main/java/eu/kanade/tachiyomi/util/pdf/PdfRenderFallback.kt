@@ -19,9 +19,11 @@ import kotlin.math.sqrt
  * - [renderPage]：编码成 WebP 无损（API 30+）/ JPEG（≥10MP 大页）/ PNG（低版本）字节流，
  *   供「另存图片」或仍有字节需求的调用方使用。
  *
- * 加密 PDF：Android 15（API 35）起 PdfRenderer 支持 [android.graphics.pdf.LoadParams]
- * 带密码加载；[password] 非 null 且系统版本足够时使用密码构造，否则走无密码构造。
- * 密码错误时系统抛 SecurityException，由调用方（[PdfPageLoader]）转成 [PdfPasswordException]。
+ * 加密 PDF：**阅读器已改走自带 PDFium**（[PdfiumDoc]，minSdk 起都支持密码），本类目前只剩
+ * 「封面缩略图」与「页数探测」两条路径还在用系统 PdfRenderer —— 那条要到 Android 15
+ * （API 35）的 [android.graphics.pdf.LoadParams] 才支持带密码。所以低版本上加密 PDF 是
+ * 「正文可读、封面为空」，与阅读无关。密码错误时系统抛 SecurityException，由调用方转成
+ * [PdfPasswordException]。
  */
 object PdfRenderFallback {
 

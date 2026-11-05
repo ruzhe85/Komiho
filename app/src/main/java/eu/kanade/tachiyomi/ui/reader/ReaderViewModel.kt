@@ -1702,8 +1702,8 @@ class ReaderViewModel @JvmOverloads constructor(
     // SY <--
 
     // SY --> Komiho: 加密 PDF 密码输入
-    fun openPdfPasswordDialog(unsupported: Boolean = false, wrongPassword: Boolean = false) {
-        mutableState.update { it.copy(dialog = Dialog.PdfPassword(unsupported = unsupported, wrongPassword = wrongPassword)) }
+    fun openPdfPasswordDialog(wrongPassword: Boolean = false) {
+        mutableState.update { it.copy(dialog = Dialog.PdfPassword(wrongPassword = wrongPassword)) }
     }
 
     fun submitPdfPassword(password: String) {
@@ -1716,7 +1716,7 @@ class ReaderViewModel @JvmOverloads constructor(
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
                 if (e is PdfPasswordException) {
-                    mutableState.update { it.copy(dialog = Dialog.PdfPassword(unsupported = e.unsupported, wrongPassword = e.wrongPassword)) }
+                    mutableState.update { it.copy(dialog = Dialog.PdfPassword(wrongPassword = e.wrongPassword)) }
                     return@launchIO
                 }
                 logcat(LogPriority.ERROR, e)
@@ -2096,7 +2096,6 @@ class ReaderViewModel @JvmOverloads constructor(
         // SY --> Komiho: 加密 PDF 密码输入对话框
         data class PdfPassword(
             val wrongPassword: Boolean = false,
-            val unsupported: Boolean = false,
         ) : Dialog
         // SY <--
 

@@ -871,7 +871,7 @@ class PagerPageHolder(
         if (error is ArchivePasswordException) {
             viewer.activity.viewModel.openArchivePasswordDialog()
         } else if (error is PdfPasswordException) {
-            viewer.activity.viewModel.openPdfPasswordDialog(unsupported = error.unsupported, wrongPassword = error.wrongPassword)
+            viewer.activity.viewModel.openPdfPasswordDialog(wrongPassword = error.wrongPassword)
         }
         if (errorLayout == null) {
             errorLayout = ReaderErrorBinding.inflate(LayoutInflater.from(context), this, true)
@@ -880,7 +880,7 @@ class PagerPageHolder(
                 if (error is ArchivePasswordException) {
                     viewer.activity.viewModel.openArchivePasswordDialog()
                 } else if (error is PdfPasswordException) {
-                    viewer.activity.viewModel.openPdfPasswordDialog(unsupported = error.unsupported, wrongPassword = error.wrongPassword)
+                    viewer.activity.viewModel.openPdfPasswordDialog(wrongPassword = error.wrongPassword)
                 } else {
                     page.chapter.pageLoader?.retryPage(page)
                 }
