@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.util.pdf.PdfPasswordHolder
 import eu.kanade.tachiyomi.util.pdf.PdfParser
 import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
 import eu.kanade.tachiyomi.util.pdf.PdfiumDoc
+import eu.kanade.tachiyomi.util.pdf.PdfiumExtractor
 import eu.kanade.tachiyomi.util.pdf.remotePdfSource
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -28,8 +29,9 @@ import tachiyomi.core.common.util.lang.withIOContext
  * 之前用系统的 `android.graphics.pdf.PdfRenderer`，它对畸形 PDF 一律抛 `SecurityException`，
  * 我们只能当成「需要密码」反复弹框，页数也会对不上。现在：
  *  - **页数 / 能否打开**：只信 PDFium。打得开就一定有正确页数；打不开才分「要密码 / 文件损坏」。
- *  - **直通**：仍由自写的 [PdfParser] 负责（取 `/DCTDecode` 原始字节）。它只是**可选加速**：
- *    解析成功且页数和 PDFium 一致才逐页尝试，任何一页不成即就地渲染，绝不影响打开。
+ *  - **直通**：优先 [PdfiumExtractor]（PDFium 对象 API，`FPDFImageObj_GetImageDataRaw`）——
+ *    它不碰自写解析器的 xref/页树，页树残缺的文件也能逐页抽内嵌 JPEG；[PdfParser] 退为
+ *    第二层兜底（它判为 `/DCTDecode` 的页）。两者都是**可选加速**，任何一页抽不到即就地渲染。
  *  - **渲染**：PDFium 直接写 ARGB_8888 位图；图像增强开着时走字节路径（AI 正常），
  *    关着时直接给位图（省掉「编码成 WebP/JPEG → 再解码」的往返）。
  *
@@ -72,6 +74,35 @@ internal class PdfPageLoader private constructor(
             passthrough = openPassthroughParser()
         }
         return passthrough
+    }
+
+    /**
+     * Komiho (2026-11-05): PDFium 直通抽取器 —— **惰性、可选、与 [passthrough] 并行**。
+     *
+     * 它用 PDFium 自己的页对象树取内嵌图，完全不碰 [PdfParser] 的 xref/页树解析，
+     * 所以「页树残缺 → 整本渲染」的文件（典型：205MB 那本 xref 只读出 869 个对象）
+     * 现在也能逐页抽内嵌 JPEG。原生实现见 `app/src/main/cpp/pdfium_jni.cpp`。
+     *
+     * 句柄是**独立打开的**（不反射 legere 的内部指针），代价是每本书多一次
+     * 20~30ms 的打开；只在首页准备时才发生，不影响 getPages 的耗时。
+     */
+    private var extractor: PdfiumExtractor.Handle? = null
+    private var extractorResolved = false
+
+    /**
+     * 取 PDFium 抽取句柄（首次调用时才打开；失败返回 null，之后不再重试，全部回落）。
+     *
+     * 页面准备是在 Coil 的后台线程上并发发生的，这里必须串行化：否则相邻两页会各打开
+     * 一个文档句柄（泄漏一份），甚至读到半初始化的字段。
+     */
+    private val extractorLock = Any()
+
+    private fun extractorOrNull(): PdfiumExtractor.Handle? = synchronized(extractorLock) {
+        if (!extractorResolved) {
+            extractorResolved = true
+            extractor = PdfiumExtractor.open(path, currentPassword)
+        }
+        extractor
     }
 
     /** 本地 PDF：传 UniFile。 */
@@ -186,8 +217,18 @@ internal class PdfPageLoader private constructor(
         if (canPassthrough(index)) null else renderPage(index)
     }
 
-    /** 这一页能否走内嵌 JPEG 直通（判据与 [openStream] 完全一致，只读流头 3 字节）。 */
+    /**
+     * 这一页能否走内嵌 JPEG 直通（判据与 [openStream] 完全一致）。
+     *
+     * PDFium 抽取句柄可用 → 判据**由它独家给出**：它看到的是 PDFium 自己的页对象树，
+     * 判否的页基本都是「本来就该渲染」的（无图/多图拼页/非 JPEG/跨页裁剪）。判否时不
+     * 回退自写解析器，理由见 [openStream]。
+     * 句柄不可用（库缺失/打不开）→ 才回落自写解析器。
+     */
     private fun canPassthrough(index: Int): Boolean {
+        // PDFium 抽取句柄可用时，判据**由它独家负责**：结论来自 PDFium 自己的页对象树，
+        // 比自写解析器可靠；也避免为了兜底在首屏触发一次 1~2s 的整本解析。
+        extractorOrNull()?.let { return it.canPassthrough(index) }
         val parser = parserOrNull() ?: return false
         return runCatching {
             val img = parser.bestImageForPage(index) ?: return@runCatching false
@@ -202,28 +243,46 @@ internal class PdfPageLoader private constructor(
         val document = doc ?: return null
         val (pw, ph) = document.sizePoints(index) ?: (595 to 842)
         val (tw, th) = PdfRenderFallback.displaySize(pw, ph)
-        return document.renderPage(index, tw, th)
+        val bitmap = document.renderPage(index, tw, th)
+        // Komiho: 与「page N: ... passthrough」对称 —— 看日志就知道这一页是抽的还是画的。
+        DiagLog.d(TAG, "page ${index + 1}: pdfium render ${tw}x$th ${if (bitmap != null) "ok" else "failed"}")
+        return bitmap
     }
 
     private fun openStream(index: Int): InputStream {
         check(!isRecycled) { "PDF 页面读取时加载器已被回收——重载即恢复" }
 
-        // ① 直通：内嵌 JPEG 原字节（解一次码，和读 zip 等价）。
-        val parser = parserOrNull()
-        if (parser != null) {
-            val raw = runCatching {
-                val img = parser.bestImageForPage(index)
-                if (img != null && img.filter == "DCTDecode") parser.rawStreamBytes(img.objNum) else null
-            }.getOrNull()
-            if (raw != null && raw.size > 2 &&
-                raw[0] == 0xFF.toByte() && raw[1] == 0xD8.toByte()
+        // ① 直通 A：PDFium 对象 API —— 不依赖自写解析器，页树残缺的文件也能抽。
+        val extractorHandle = extractorOrNull()
+        if (extractorHandle != null) {
+            val rawJpeg = runCatching { extractorHandle.rawJpeg(index) }.getOrNull()
+            if (rawJpeg != null && rawJpeg.size > 2 &&
+                rawJpeg[0] == 0xFF.toByte() && rawJpeg[1] == 0xD8.toByte()
             ) {
-                DiagLog.d(TAG, "page ${index + 1}: DCT passthrough (${raw.size}B)")
-                return ByteArrayInputStream(raw)
+                DiagLog.d(TAG, "page ${index + 1}: pdfium raw passthrough (${rawJpeg.size}B)")
+                return ByteArrayInputStream(rawJpeg)
+            }
+            // 判为「非整页 JPEG」（多图拼页/水印页）或抽取失败：直接渲染。
+            // 这里**不再**让自写解析器试 —— 多图页只抽一张会丢内容，而创建它还要白扫
+            // 整本（205MB 那本的 1.8s 就是这么来的）。
+        } else {
+            // ② 直通 B：自写解析器内嵌 JPEG 原字节（PDFium 抽取不可用时的兜底）。
+            val parser = parserOrNull()
+            if (parser != null) {
+                val raw = runCatching {
+                    val img = parser.bestImageForPage(index)
+                    if (img != null && img.filter == "DCTDecode") parser.rawStreamBytes(img.objNum) else null
+                }.getOrNull()
+                if (raw != null && raw.size > 2 &&
+                    raw[0] == 0xFF.toByte() && raw[1] == 0xD8.toByte()
+                ) {
+                    DiagLog.d(TAG, "page ${index + 1}: DCT passthrough (${raw.size}B)")
+                    return ByteArrayInputStream(raw)
+                }
             }
         }
 
-        // ② 渲染兜底：位图直通拿不到（渲染失败/被回收）时才走字节路径，保证不白屏。
+        // ③ 渲染兜底：位图直通拿不到（渲染失败/被回收）时才走字节路径，保证不白屏。
         val bitmap = renderPage(index)
             ?: throw IllegalStateException("PDF 第 ${index + 1} 页无法渲染（可能已损坏）")
         val bytes = PdfRenderFallback.encodeForDisplay(bitmap)
@@ -297,9 +356,14 @@ internal class PdfPageLoader private constructor(
     }
 
     override fun recycle() {
-        // 注意：这里不能碰 parserOrNull() —— 那会在回收时触发一次整本解析。只关已存在的。
+        // 注意：这里不能碰 parserOrNull() / extractorOrNull() —— 那会在回收时触发一次
+        // 整本解析或一次文档打开。只关已经存在的。
         runCatching { passthrough?.close() }
         passthrough = null
+        synchronized(extractorLock) {
+            runCatching { extractor?.close() }
+            extractor = null
+        }
         runCatching { doc?.close() }
         doc = null
         super.recycle()
@@ -309,6 +373,6 @@ internal class PdfPageLoader private constructor(
         private const val TAG = "KomihoPdfLoader"
 
         /** 实现标记：出现在 `PDF open` 日志里，用来判断装到的包是否包含本版逻辑。 */
-        private const val IMPL_MARK = "20261105-pdfium"
+        private const val IMPL_MARK = "20261105-pdfium+raw"
     }
 }

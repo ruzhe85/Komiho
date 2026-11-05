@@ -6,7 +6,11 @@ import java.io.RandomAccessFile
 import java.util.zip.Inflater
 
 /**
- * 轻量 PDF 解析器（方案 A：自写提取 + 系统 PdfRenderer 兜底）。
+ * 轻量 PDF 解析器（**兜底**：主路径已换成 [PdfiumExtractor] 的 PDFium 对象 API）。
+ *
+ * Komiho (2026-11-05): 只有当 [PdfiumExtractor] 不可用（libpdfium 拿不到符号 / 文档打不开）
+ * 时才会被创建。它自己解析 xref + 页树，遇到残缺结构会白扫整本文件（205MB 那本要 1.8~2.1s
+ * 且最后仍判不可用），所以不再作为主路径 —— 但它不依赖 PDFium，留着当最后一道保险。
  *
  * 设计目标：从本地 PDF 中抽取「内嵌图原始字节流」——彩色扫描漫画主流是 DCTDecode(JPEG)，
  * 直通原始字节即可被现有解码+增强管线（Lanczos3 / AI / NPU）无损处理，网点细节不被重采样抹掉。

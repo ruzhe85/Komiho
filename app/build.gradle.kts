@@ -451,8 +451,11 @@ dependencies {
     // Komiho (2026-11-04): 打包 PDFium（io.legere/pdfiumandroid，Apache-2.0）。
     // 系统自带的 android.graphics.pdf.PdfRenderer 封装太薄：xref 损坏的 PDF 一律抛
     // SecurityException（被我们当成「需要密码」），页树解析失败就只能整本渲染。
-    // 换成自带 PDFium 后，解析/容错交给它，我们自己的 PdfParser 只作为「内嵌 JPEG 直通」的
-    // 可选加速路径（失败即回落，不影响打开）。
+    //
+    // Komiho (2026-11-05): 直通也由 PDFium 做了 —— AAR 里的 libpdfium.so 动态导出了
+    // fpdf_edit 的对象接口，我们在 cpp/pdfium_jni.cpp 里 dlopen + dlsym 调
+    // FPDFImageObj_GetImageDataRaw 取内嵌 JPEG 原始字节（系统 PdfRenderer 没有这种能力）。
+    // 自写 PdfParser 退为「PDFium 抽取不可用」时的兜底。
     implementation(libs.pdfium.android)
 }
 

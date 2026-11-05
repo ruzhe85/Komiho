@@ -21,8 +21,9 @@ import java.io.IOException
  * PDFium 本体对畸形 PDF 的容忍度高得多（Chrome 用的同一套），打开成功与否就是唯一判据：
  * 能打开 = 页数可信；打不开 = 要么真加密（IOException 里带 password 字样），要么文件损坏。
  *
- * 注意：这里**不做**直通（提取内嵌 JPEG）—— 那是 [PdfParser] 的活，且只是可选加速：
- * 解析成功、页数一致才逐页尝试直通，否则一律走本类的渲染。
+ * 注意：这里**不做**直通（提取内嵌 JPEG）—— 那是 [PdfiumExtractor] 的活（同一份
+ * libpdfium.so 的对象 API，见 cpp/pdfium_jni.cpp），[PdfParser] 只作它的兜底。
+ * 直通判否的页一律走本类的渲染。
  */
 class PdfiumDoc private constructor(
     private val doc: PdfDocument,

@@ -64,6 +64,24 @@ target_link_libraries(mobi-jni
 )
 
 # =====================================================================================
+# 1.8) PDFium 内嵌图直通 —— 薄 JNI 包装（Kotlin: eu.kanade.tachiyomi.util.pdf.PdfiumExtractor）。
+#
+# **不链接 libpdfium.so**：它由 io.legere:pdfiumandroid-core 的 AAR 提供，运行期用
+# dlopen 惰性打开（该 .so 动态导出了 FPDFPage_GetObject /
+# FPDFPageObj_GetMatrix / FPDFImageObj_GetImageDataRaw 等对象级符号）。
+# 库缺失或符号不全时所有调用返回 null，Kotlin 侧回落「自写解析器 → 渲染」。
+# =====================================================================================
+add_library(komiho-pdfium-jni SHARED
+    pdfium_jni.cpp
+)
+target_include_directories(komiho-pdfium-jni PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(komiho-pdfium-jni
+    android
+    log
+    dl
+)
+
+# =====================================================================================
 # 2) GPU upscaler — ncnn + Vulkan, optional.
 #
 # Kept as a SEPARATE shared library on purpose: ncnn's CMake package exports

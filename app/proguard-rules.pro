@@ -318,3 +318,8 @@
 # 类或方法被 R8 重命名就会 UnsatisfiedLinkError；自检 Activity 也按类名由 adb 启动。
 -keep class eu.kanade.tachiyomi.util.waifu2x.LiteRtNative { *; }
 -keep class eu.kanade.tachiyomi.util.waifu2x.LiteRtSelfTestActivity { *; }
+
+# Komiho (2026-11-05): PDF 内嵌图直通（PDFium 对象 API，见 cpp/pdfium_jni.cpp）。
+# 同上：JNI 符号名 = Java_eu_kanade_tachiyomi_util_pdf_PdfiumExtractor_nativeXxx，
+# 类被重命名即 UnsatisfiedLinkError（阅读 PDF 会退回渲染，功能不坏但白装）。
+-keep class eu.kanade.tachiyomi.util.pdf.PdfiumExtractor { *; }
