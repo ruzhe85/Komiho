@@ -301,6 +301,7 @@
     <string name="added_to_collection">已加入收藏</string>
     <string name="marked_series_read">已标记系列为已读</string>
     <string name="marked_series_unread">已标记为未读</string>
+    <string name="selection_stale_hint">所选条目已不在当前列表</string>
 
 
     <!-- SY: Komiho 来源管理流程（AddSourceFlow） -->

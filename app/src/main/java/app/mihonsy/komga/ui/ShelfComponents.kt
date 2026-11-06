@@ -386,6 +386,16 @@ fun BookShelf(
 
     fun performBatchUpdate(completed: Boolean) {
         val snapshot = selectedBooks
+        if (snapshot.isEmpty()) {
+            // 列表换过之后旧的选中 id 可能已无对应行：空集合不发请求，也不弹「成功」。
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.selection_stale_hint),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+            exitSelection()
+            return
+        }
         scope.launch {
             runCatching {
                 snapshot.forEach { b ->
@@ -436,7 +446,8 @@ fun BookShelf(
                         Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.cancel))
                     }
                     Text(
-                        composeStringResource(R.string.selected_count, selectedIds.size),
+                        // 数字要等于批量操作真正会碰到的条目数（books ∩ selectedIds）。
+                        composeStringResource(R.string.selected_count, selectedBooks.size),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )

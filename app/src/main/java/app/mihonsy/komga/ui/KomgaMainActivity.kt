@@ -28,6 +28,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -62,6 +63,7 @@ import eu.kanade.tachiyomi.data.coil.LocalCoverData
 import eu.kanade.tachiyomi.data.coil.SmbCoverData
 // SY <--
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -88,6 +90,7 @@ import tachiyomi.presentation.core.i18n.stringResource
 // SY <--
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -107,6 +110,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
 import androidx.compose.material.icons.filled.ArrowBack
@@ -185,6 +189,7 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
@@ -207,6 +212,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import app.mihonsy.komga.data.DashboardPreferences
@@ -1421,6 +1427,7 @@ private fun KomgaMainScreen(
                             refreshTick = refreshTick,
                             sort = librarySortMode,
                             onSortModeChange = { librarySortMode = it },
+                            onDataChanged = { refreshSignal.update { it + 1 } },
                             readFilter = libraryReadFilter,
                             onReadFilterChange = { libraryReadFilter = it },
                             filterType = libraryFilterType,
@@ -2597,6 +2604,9 @@ private fun LibraryTab(
     refreshTick: Int,
     sort: LibrarySort,
     onSortModeChange: (LibrarySort) -> Unit,
+    // 批量操作（标记已读/未读）改的是服务端状态，书架行又显示已读数量，
+    // 所以操作成功后必须让宿主重载一次，否则数字不动、看起来像没生效。
+    onDataChanged: () -> Unit = {},
     readFilter: ReadFilter,
     onReadFilterChange: (ReadFilter) -> Unit,
     filterType: String? = null,
@@ -2634,8 +2644,27 @@ private fun LibraryTab(
     // 选择状态下拦截系统返回手势：退出选择而不是退出程序
     BackHandler(inSelection) { exitSeriesSelection() }
 
+    // 切库 / 换 tag-author-genre 筛选 / 换已读筛选后，整批 series 被换掉，旧的选中 id
+    // 已经没有对应行。留着不清空会出现「顶栏已选 5 项、实际 0 项可操作」，
+    // 点标记已读还会空转后弹成功提示（假成功），所以这里直接退出多选。
+    LaunchedEffect(selectedLibraryId, readFilter, filterType, filterValue) {
+        if (selectionMode) exitSeriesSelection()
+    }
+
     fun markSeriesBatch(completed: Boolean) {
+        // 用与界面一致的交集（series ∩ selectedIds），不用裸 selectedIds：
+        // 万一还有残留的旧 id，也不能把列表里看不见的系列改掉。
         val snapshot = selectedSeries.map { it.id }
+        if (snapshot.isEmpty()) {
+            // 空快照不发任何请求，否则 forEach 空转却弹「已标记已读」= 假成功。
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.selection_stale_hint),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+            exitSeriesSelection()
+            return
+        }
         scope.launch {
             runCatching {
                 snapshot.forEach { sid ->
@@ -2648,6 +2677,7 @@ private fun LibraryTab(
                     android.widget.Toast.LENGTH_SHORT,
                 ).show()
                 exitSeriesSelection()
+                onDataChanged()
             }.onFailure {
                 android.widget.Toast.makeText(context, context.getString(R.string.operation_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
             }
@@ -2759,7 +2789,9 @@ private fun LibraryTab(
                         Icon(Icons.Filled.Close, contentDescription = composeStringResource(R.string.cancel))
                     }
                     Text(
-                        composeStringResource(R.string.selected_count, selectedIds.size),
+                        // 用交集大小而不是 selectedIds.size：显示的数字必须等于批量操作
+                        // 实际会碰到的条目数，否则会出现「已选 5 项却改不动任何一项」。
+                        composeStringResource(R.string.selected_count, selectedSeries.size),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
@@ -6027,6 +6059,20 @@ private fun storageRootLabel(rootPath: String): String {
 }
 
 /**
+ * Komiho (2026-11-06): 由 SAF 文档 URI 推出其**父目录**的 document URI。
+ *
+ * `DocumentsContract.moveDocument` 需要源文件的父文档 URI。浏览页通常只认 `current`
+ * （当前目录），但递归搜索的命中项来自任意子目录 —— 一律传 `current.uri` 会让移动
+ * 失败或挪错位置。document id 是路径式的（`primary:dirA/dirB`），去掉最后一段即父级。
+ */
+private fun safParentDocumentUri(uri: Uri): Uri? {
+    val docId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull() ?: return null
+    val parentDocId = docId.substringBeforeLast('/', "")
+    if (parentDocId.isEmpty()) return null
+    return runCatching { DocumentsContract.buildDocumentUriUsingTree(uri, parentDocId) }.getOrNull()
+}
+
+/**
  * Komiho: 本地浏览页每个目录各自的滚动位置（key = 卷 URI + 相对路径栈）。
  *
  * 进程内静态缓存而不是 remember：进子目录再按返回、从阅读器回来、甚至 Activity 被重建，
@@ -6174,9 +6220,16 @@ private fun LocalFileBrowser(
     val progressReadLabel = composeStringResource(R.string.book_status_read)
     var loading by remember { mutableStateOf(true) }
 
-    // Komiho (2026-11-06): 长按多选（照 Komga 书架那套）。标识用条目名 —— 同目录内唯一。
+    // Komiho (2026-11-06): 长按多选（照 Komga 书架那套）。
+    // 标识用 URI 而不是条目名：递归搜索的命中项来自子目录，靠名字回查
+    // current.findFile(name) 可能命中当前目录的**同名**文件，从而删错/移错。这里直接
+    // 记住 LocalEntry（含真实 UniFile），后续操作作用于被选中的那个文件本身。
     var selectionMode by remember { mutableStateOf(false) }
-    var selectedNames by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedEntries by remember { mutableStateOf<Map<String, LocalEntry>>(emptyMap()) }
+    // 打开删除/重命名/移动对话框时冻结一份操作对象：确认框里列的名字必须就是真正
+    // 会被操作的那些文件，不能等用户点「确定」时再回头读 selectedEntries（若期间选中
+    // 集合被清空，就会出现「删除 0 项」这类空操作）。
+    var operationTargets by remember { mutableStateOf<List<LocalEntry>>(emptyList()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameTargetName by remember { mutableStateOf("") }
@@ -6184,6 +6237,19 @@ private fun LocalFileBrowser(
     var showMoveDialog by remember { mutableStateOf(false) }
     var movePickStack by remember { mutableStateOf<List<String>>(emptyList()) }
     var movePickDirs by remember { mutableStateOf<List<UniFile>>(emptyList()) }
+
+    // 选中集合的唯一入口。取消掉最后一项时自动退出多选 —— 否则顶栏停在「已选 0 项」、
+    // 底栏三格全灰，必须手动点 × 才能出来。
+    fun toggleSelected(entry: LocalEntry) {
+        val key = entry.uni.uri.toString()
+        val next = if (selectedEntries.containsKey(key)) selectedEntries - key else selectedEntries + (key to entry)
+        selectedEntries = next
+        if (next.isEmpty()) selectionMode = false
+    }
+    fun exitFileSelection() {
+        selectionMode = false
+        selectedEntries = emptyMap()
+    }
     // 列目录：仿 Material Files，用 DocumentsContract 子文档游标一次性把整目录元数据取全
     // （1 次 IPC），之后排序/图标/归档判断全走内存，杜绝每比较都触发 SAF 跨进程查询的卡顿。
     // 失败（URI 形态异常等）自动回退到 UniFile.listFiles()，不崩溃。
@@ -6241,39 +6307,37 @@ private fun LocalFileBrowser(
     }
     // Komiho (2026-11-06): 批量删除确认 —— 列出前 3 个名字，避免误删。
     if (showDeleteConfirm) {
+        val deleteTargets = operationTargets
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除 ${selectedNames.size} 项") },
+            title = { Text("删除 ${deleteTargets.size} 项") },
             text = {
                 Text(
-                    selectedNames.take(3).joinToString("\n") +
-                        if (selectedNames.size > 3) "\n…" else "",
+                    deleteTargets.take(3).joinToString("\n") { it.name } +
+                        if (deleteTargets.size > 3) "\n…" else "",
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val names = selectedNames
                         showDeleteConfirm = false
                         fileOpScope.launch {
                             val failed = withContext(Dispatchers.IO) {
-                                names.filterNot { name ->
+                                deleteTargets.filterNot { entry ->
                                     runCatching {
-                                        val target = current.findFile(name) ?: return@runCatching false
                                         if (hasAllFilesAccess) {
-                                            fs.realPathOf(target)?.let { File(it).deleteRecursively() } ?: false
+                                            fs.realPathOf(entry.uni)?.let { File(it).deleteRecursively() } ?: false
                                         } else {
-                                            target.delete()
+                                            entry.uni.delete()
                                         }
                                     }.getOrDefault(false)
                                 }
                             }
-                            selectionMode = false
-                            selectedNames = emptySet()
+                            exitFileSelection()
                             Toast.makeText(
                                 context,
                                 if (failed.isEmpty()) {
-                                    "已删除 ${names.size} 项"
+                                    "已删除 ${deleteTargets.size} 项"
                                 } else {
                                     "删除完成，失败 ${failed.size} 项（只读或无写入权限）"
                                 },
@@ -6306,36 +6370,38 @@ private fun LocalFileBrowser(
                 TextButton(
                     enabled = renameNewName.isNotBlank() && renameNewName.trim() != renameTargetName,
                     onClick = {
-                        val targetName = renameTargetName
+                        // 直接用打开对话框时冻结的 UniFile，不再按名字回当前目录找
+                        //（递归搜索结果可能来自子目录，同名会改错文件）。
+                        val target = operationTargets.firstOrNull()
                         val newName = renameNewName.trim()
                         showRenameDialog = false
-                        fileOpScope.launch {
-                            val ok = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    val target = current.findFile(targetName) ?: return@runCatching false
-                                    if (hasAllFilesAccess) {
-                                        val src = fs.realPathOf(target) ?: return@runCatching false
-                                        val dest = File(File(src).parentFile, newName)
-                                        if (dest.exists()) return@runCatching false
-                                        File(src).renameTo(dest)
-                                    } else {
-                                        android.provider.DocumentsContract.renameDocument(
-                                            context.contentResolver,
-                                            target.uri,
-                                            newName,
-                                        ) != null
-                                    }
-                                }.getOrDefault(false)
-                            }
-                            Toast.makeText(
-                                context,
-                                if (ok) "已重命名为「$newName」" else "重命名失败：同名已存在或无写入权限",
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                            if (ok) {
-                                selectionMode = false
-                                selectedNames = emptySet()
-                                refreshTick++
+                        if (target != null) {
+                            fileOpScope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        if (hasAllFilesAccess) {
+                                            val src = fs.realPathOf(target.uni) ?: return@runCatching false
+                                            val dest = File(File(src).parentFile, newName)
+                                            if (dest.exists()) return@runCatching false
+                                            File(src).renameTo(dest)
+                                        } else {
+                                            android.provider.DocumentsContract.renameDocument(
+                                                context.contentResolver,
+                                                target.uni.uri,
+                                                newName,
+                                            ) != null
+                                        }
+                                    }.getOrDefault(false)
+                                }
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "已重命名为「$newName」" else "重命名失败：同名已存在或无写入权限",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                                if (ok) {
+                                    exitFileSelection()
+                                    refreshTick++
+                                }
                             }
                         }
                     },
@@ -6363,9 +6429,8 @@ private fun LocalFileBrowser(
                 }.getOrDefault(emptyList())
             }
         }
-        val invalidTarget = selectedNames.any { name ->
-            val src = current.findFile(name) ?: return@any false
-            val s = fs.realPathOf(src) ?: src.uri.toString()
+        val invalidTarget = operationTargets.any { entry ->
+            val s = fs.realPathOf(entry.uni) ?: entry.uni.uri.toString()
             val d = fs.realPathOf(pickDir) ?: pickDir.uri.toString()
             d == s || d.startsWith("$s/")
         }
@@ -6406,18 +6471,17 @@ private fun LocalFileBrowser(
                 TextButton(
                     enabled = !invalidTarget,
                     onClick = {
-                        val names = selectedNames
+                        val sources = operationTargets
                         val dest = pickDir
                         showMoveDialog = false
                         fileOpScope.launch {
                             val failed = withContext(Dispatchers.IO) {
-                                names.filterNot { name ->
+                                sources.filterNot { entry ->
                                     runCatching {
-                                        val src = current.findFile(name) ?: return@runCatching false
                                         if (hasAllFilesAccess) {
-                                            val srcPath = fs.realPathOf(src) ?: return@runCatching false
+                                            val srcPath = fs.realPathOf(entry.uni) ?: return@runCatching false
                                             val destPath = fs.realPathOf(dest) ?: return@runCatching false
-                                            val out = File(destPath, name)
+                                            val out = File(destPath, entry.name)
                                             // 目标就是源所在目录（用户选了当前目录）：视为无需移动，
                                             // 否则下面 exists 会把「源自己」判成同名冲突。
                                             if (out.absolutePath == File(srcPath).absolutePath) {
@@ -6428,16 +6492,19 @@ private fun LocalFileBrowser(
                                                 true
                                             } else {
                                                 // 跨卷：先复制成功再删源，失败时源不受影响。
-                                                src.openInputStream().use { input ->
+                                                entry.uni.openInputStream().use { input ->
                                                     out.outputStream().use { input.copyTo(it) }
                                                 }
                                                 File(srcPath).deleteRecursively()
                                             }
                                         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                            // 源可能不在当前目录（递归搜索命中项），父文档 URI 必须按
+                                            // 它自己的 URI 推，不能一律传 current.uri。
+                                            val parentUri = safParentDocumentUri(entry.uni.uri) ?: current.uri
                                             android.provider.DocumentsContract.moveDocument(
                                                 context.contentResolver,
-                                                src.uri,
-                                                current.uri,
+                                                entry.uni.uri,
+                                                parentUri,
                                                 dest.uri,
                                             ) != null
                                         } else {
@@ -6446,12 +6513,11 @@ private fun LocalFileBrowser(
                                     }.getOrDefault(false)
                                 }
                             }
-                            selectionMode = false
-                            selectedNames = emptySet()
+                            exitFileSelection()
                             Toast.makeText(
                                 context,
                                 if (failed.isEmpty()) {
-                                    "已移动 ${names.size} 项"
+                                    "已移动 ${sources.size} 项"
                                 } else {
                                     "移动完成，失败 ${failed.size} 项（同名/无权限/复制失败）"
                                 },
@@ -6500,7 +6566,9 @@ private fun LocalFileBrowser(
     // SY --> Komiho: 「搜索下级目录」开启时，按关键词 BFS 递归遍历当前目录整棵子树，命中项流式回传。
     // 防抖 300ms（连续输入不立即重扫）；命中项边扫边显（近层优先）；上限 RECURSIVE_MAX_RESULTS。
     // 输入变化即重启（旧 job 被取消），退出搜索或关掉递归则清空结果。
-    LaunchedEffect(searchActive, searchRecursive, searchQuery) {
+    // refreshTick 也进 key：在递归结果里删/改名/移动成功后必须重扫，否则已删条目
+    // 还留在搜索列表上（点它才失败）。
+    LaunchedEffect(searchActive, searchRecursive, searchQuery, refreshTick) {
         if (searchActive && searchRecursive && searchQuery.isNotBlank()) {
             delay(300)
             if (!(searchActive && searchRecursive && searchQuery.isNotBlank())) return@LaunchedEffect
@@ -6537,15 +6605,9 @@ private fun LocalFileBrowser(
     }
     // Komiho (2026-11-06): 多选态优先吃返回键（先退出多选，再谈返回上级）。
     // 注册在上一行之后 —— OnBackPressedDispatcher 后注册的先回调。
-    BackHandler(enabled = selectionMode) {
-        selectionMode = false
-        selectedNames = emptySet()
-    }
+    BackHandler(enabled = selectionMode) { exitFileSelection() }
     // Komiho (2026-11-06): 切换目录（面包屑/上级/跳转）一律退出多选，避免选中状态带到新目录。
-    LaunchedEffect(current) {
-        selectionMode = false
-        selectedNames = emptySet()
-    }
+    LaunchedEffect(current) { exitFileSelection() }
 
     // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转：navRequest 为文件的相对路径，
     // 定位到其所在目录（父目录栈）；目录不存在时 fold 兜底回落根目录。消费后置空。
@@ -6619,9 +6681,39 @@ private fun LocalFileBrowser(
         }
     // SY <--
 
-    Column(Modifier.fillMaxSize()) {
-        // SY --> Komiho: 顶部搜索激活时显示搜索框（范围=当前目录），否则显示面包屑 + 搜索/Tune 按钮。
-        if (searchActive) {
+    // 多选底栏叠在内容之上：内容仍是一个 Column（多选时给它让出底栏实测高度，
+    // 否则最后一行会被底栏永久盖住），底栏不参与 Column 排布。
+    // 高度实测而不是写死 64dp：系统字体放大后「图标 + 文案」会超过 64dp，
+    // 固定留白就会让底栏压住列表（或把文案裁掉）。
+    var selectionBarHeight by remember { mutableStateOf(FileSelectionBarHeight) }
+    val density = LocalDensity.current
+    Box(Modifier.fillMaxSize()) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .then(if (selectionMode) Modifier.padding(bottom = selectionBarHeight) else Modifier),
+    ) {
+        // SY --> Komiho: 多选优先于搜索框 —— 长按递归结果进入多选时，顶栏必须显示
+        // 「已选 N 项」，不能还挂着搜索框让人误以为没进入多选。
+        if (selectionMode) {
+            // 多选态顶栏：只留「退出 + 已选 N 项」。动作全下放到底栏 —— 挤在面包屑右边
+            // 既看不清也点不准（原来三个 TextButton 像附属小字）。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { exitFileSelection() }) {
+                    Icon(Icons.Filled.Close, contentDescription = "退出多选")
+                }
+                Text(
+                    text = "已选 ${selectedEntries.size} 项",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                )
+            }
+        } else if (searchActive) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -6770,38 +6862,6 @@ private fun LocalFileBrowser(
                     contentDescription = "新建文件夹",
                 )
             }
-            // Komiho: 多选态：重命名（仅单选）+ 删除 + 退出。
-            if (selectionMode) {
-                if (selectedNames.size == 1) {
-                    TextButton(
-                        onClick = {
-                            renameTargetName = selectedNames.first()
-                            renameNewName = renameTargetName
-                            showRenameDialog = true
-                        },
-                    ) {
-                        Text("重命名")
-                    }
-                }
-                TextButton(
-                    enabled = selectedNames.isNotEmpty(),
-                    onClick = {
-                        movePickStack = emptyList()
-                        showMoveDialog = true
-                    },
-                ) {
-                    Text("移动")
-                }
-                TextButton(
-                    enabled = selectedNames.isNotEmpty(),
-                    onClick = { showDeleteConfirm = true },
-                ) {
-                    Text("删除${if (selectedNames.isEmpty()) "" else "(${selectedNames.size})"}")
-                }
-                IconButton(onClick = { selectionMode = false; selectedNames = emptySet() }) {
-                    Icon(Icons.Filled.Close, contentDescription = "退出多选")
-                }
-            }
             IconButton(onClick = { searchActive = true }) {
                 Icon(
                     imageVector = Icons.Filled.Search,
@@ -6857,21 +6917,13 @@ private fun LocalFileBrowser(
                             showCover = showCover,
                             clickable = selectionMode || isItemClickable(file),
                             progressText = listProgressLabel(fileProgress[file.name], progressReadLabel),
-                            selected = file.name in selectedNames,
+                            selected = selectedEntries.containsKey(file.uni.uri.toString()),
                             onLongClick = {
                                 selectionMode = true
-                                selectedNames = selectedNames + file.name
+                                toggleSelected(file)
                             },
                             onOpen = {
-                                if (selectionMode) {
-                                    selectedNames = if (file.name in selectedNames) {
-                                        selectedNames - file.name
-                                    } else {
-                                        selectedNames + file.name
-                                    }
-                                } else {
-                                    onOpenItem(file)
-                                }
+                                if (selectionMode) toggleSelected(file) else onOpenItem(file)
                             },
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -6897,26 +6949,45 @@ private fun LocalFileBrowser(
                             showCover = showCover,
                             clickable = selectionMode || isItemClickable(file),
                             progressText = gridProgressLabel(fileProgress[file.name], progressReadLabel),
-                            selected = file.name in selectedNames,
+                            selected = selectedEntries.containsKey(file.uni.uri.toString()),
                             onLongClick = {
                                 selectionMode = true
-                                selectedNames = selectedNames + file.name
+                                toggleSelected(file)
                             },
                             onClick = {
-                                if (selectionMode) {
-                                    selectedNames = if (file.name in selectedNames) {
-                                        selectedNames - file.name
-                                    } else {
-                                        selectedNames + file.name
-                                    }
-                                } else {
-                                    onOpenItem(file)
-                                }
+                                if (selectionMode) toggleSelected(file) else onOpenItem(file)
                             },
                         )
                     }
                 }
             }
+        }
+    }
+
+        // 底部操作栏：重命名（仅单选可用）/ 移动 / 删除。
+        if (selectionMode) {
+            FileSelectionBar(
+                selectedCount = selectedEntries.size,
+                onRename = {
+                    val targets = selectedEntries.values.toList()
+                    operationTargets = targets
+                    renameTargetName = targets.firstOrNull()?.name.orEmpty()
+                    renameNewName = renameTargetName
+                    showRenameDialog = true
+                },
+                onMove = {
+                    operationTargets = selectedEntries.values.toList()
+                    movePickStack = emptyList()
+                    showMoveDialog = true
+                },
+                onDelete = {
+                    operationTargets = selectedEntries.values.toList()
+                    showDeleteConfirm = true
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .onSizeChanged { selectionBarHeight = with(density) { it.height.toDp() } },
+            )
         }
     }
 
@@ -6932,6 +7003,85 @@ private fun LocalFileBrowser(
         sort = sort,
         onSortModeChange = { sort = it; prefs.localBrowseSort.set(it.toPref()) },
     )
+}
+
+/**
+ * Komiho (2026-11-06): 文件浏览器多选底栏的**最小**高度。
+ *
+ * 系统字体放大时「图标 + 文案」会把它撑高，所以调用方不能按这个常量写死留白，
+ * 而是用 `onSizeChanged` 实测底栏高度给列表让位，否则最后一行会被压住。
+ */
+private val FileSelectionBarHeight = 64.dp
+
+/**
+ * Komiho (2026-11-06): 文件浏览器多选底栏 —— 视觉照抄 Komga 书架多选底栏
+ * （surfaceContainerHigh + 均分三格「图标 + 文案」），但组件独立复制一份，
+ * 避免后续给文件浏览器加动作时连带改到书架那套 [SelectionActionItem]。
+ */
+@Composable
+private fun FileSelectionBar(
+    selectedCount: Int,
+    onRename: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 3.dp,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = FileSelectionBarHeight)
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FileSelectionAction(
+                icon = Icons.Filled.DriveFileRenameOutline,
+                label = "重命名",
+                enabled = selectedCount == 1,
+                onClick = onRename,
+            )
+            FileSelectionAction(
+                icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                label = "移动",
+                enabled = selectedCount > 0,
+                onClick = onMove,
+            )
+            FileSelectionAction(
+                icon = Icons.Filled.Delete,
+                label = "删除",
+                enabled = selectedCount > 0,
+                onClick = onDelete,
+            )
+        }
+    }
+}
+
+/** 底栏单格：图标 + 文案；禁用态只降透明度（灰掉但不改尺寸，三格宽度不跳动）。 */
+@Composable
+private fun RowScope.FileSelectionAction(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .weight(1f)
+            .combinedClickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 4.dp)
+            .alpha(if (enabled) 1f else 0.38f),
+    ) {
+        Icon(icon, contentDescription = label)
+        Spacer(Modifier.height(2.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+    }
 }
 
 /** 文件/目录一行（列表模式）。可点性由调用方按「目录/归档/图片」决定。
@@ -6966,7 +7116,8 @@ private fun FileRow(
 /** 列表条目行骨架：本地浏览与 WebDAV 浏览共用同一「列表模式」视觉——
  *  左侧图标/封面槽 + 单行名称（省略号）+ 右侧进度（「62/166 37%」/「已读」）；
  *  底部分隔线由调用方在行后追加。
- *  [selected] 进入多选时的选中底色（照抄 Komga 书架行的 primaryContainer 0.35 透明度）。 */
+ *  [selected] 进入多选时的选中底色（照抄 Komga 书架行的 primaryContainer 0.35 透明度）
+ *  + 2dp 主色描边：只有底色时在深色主题/电子墨水屏上几乎看不出来选中了哪几行。 */
 @Composable
 private fun FileListRow(
     name: String,
@@ -6984,6 +7135,7 @@ private fun FileListRow(
         } else {
             Color.Transparent
         },
+        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = Modifier
             .fillMaxWidth()
             .then(
@@ -7148,10 +7300,13 @@ private fun FileGridCell(
         modifier = Modifier
             .then(
                 if (selected) {
-                    Modifier.background(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                        RoundedCornerShape(8.dp),
-                    )
+                    // 底色 + 2dp 主色描边：网格里格子小、封面杂色多，只靠底色分不清选中与否。
+                    Modifier
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            RoundedCornerShape(8.dp),
+                        )
+                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
                 } else {
                     Modifier
                 },
@@ -7227,10 +7382,13 @@ private fun LocalFileGridItem(
         modifier = Modifier
             .then(
                 if (selected) {
-                    Modifier.background(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                        RoundedCornerShape(8.dp),
-                    )
+                    // 底色 + 2dp 主色描边：网格里格子小、封面杂色多，只靠底色分不清选中与否。
+                    Modifier
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            RoundedCornerShape(8.dp),
+                        )
+                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
                 } else {
                     Modifier
                 },

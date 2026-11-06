@@ -290,6 +290,7 @@
     <string name="added_to_collection">Added to collection</string>
     <string name="marked_series_read">Series marked as read</string>
     <string name="marked_series_unread">Series marked as unread</string>
+    <string name="selection_stale_hint">Selected items are no longer in the list</string>
 
 
     <!-- SY: Komiho add source flow -->

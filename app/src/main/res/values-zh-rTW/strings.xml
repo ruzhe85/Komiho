@@ -285,6 +285,7 @@
     <string name="added_to_collection">已加入收藏</string>
     <string name="marked_series_read">已標記系列為已讀</string>
     <string name="marked_series_unread">已標記為未讀</string>
+    <string name="selection_stale_hint">所選項目已不在目前清單</string>
 
 
     <!-- SY: Komiho 新增來源流程 -->
