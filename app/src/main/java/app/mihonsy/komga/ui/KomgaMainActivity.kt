@@ -55,7 +55,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import coil3.compose.AsyncImagePainter
 import coil3.compose.SubcomposeAsyncImage
@@ -193,7 +192,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
@@ -7325,26 +7323,17 @@ private fun GridProgressBadge(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * Komiho (2026-11-06): 文件夹形状 —— 底部圆角矩形 + 左上标签。
+ * Komiho (2026-11-07): 目录封面的外圈形状 —— **单层圆角矩形**。
  *
- * 用来把目录缩略图裁成「文件夹」轮廓，对应传统文件管理器「文件夹夹着缩略图」的观感；
- * 不再用「封面 + 角标」那种叠一层图标的做法（取不到封面时会出现图标套角标，很丑）。
+ * 早先用「主体 + 左上标签」两条子路径拼文件夹形，`border` 描边会把两条子路径的边界
+ * 都画出来（外面一圈框、左上角再套一个小框），很怪，所以只保留单圈外框。
+ * 文件夹与文件的区别只靠这一圈主色，尺寸完全一致。
  */
-private val FolderCoverShape = GenericShape { size, _ ->
-    val w = size.width
-    val h = size.height
-    val radius = minOf(w, h) * 0.09f
-    val tabW = w * 0.40f
-    val tabH = h * 0.16f
-    // 主体 + 左上标签：两次 addRoundRect 同向填充，外轮廓自然合并成文件夹形。
-    addRoundRect(RoundRect(0f, 0f, w, h, radius, radius))
-    addRoundRect(RoundRect(0f, 0f, tabW, tabH + radius, radius, radius))
-}
+private val FolderCoverShape = RoundedCornerShape(6.dp)
 
 /**
- * Komiho (2026-11-06): 目录封面 —— 缩略图装进文件夹轮廓里，外面一圈文件夹底色当边框。
- * 取不到封面时由调用方回落到普通文件夹图标（不带任何角标）。
- * 保持横向比例（1.12:1），在列表 40×56 与网格竖槽里都居中显示，不会被拉变形。
+ * Komiho (2026-11-06): 目录封面 —— 缩略图铺满，外圈描一圈主色当标识。
+ * 取不到封面时由调用方回落到普通文件夹图标（不带任何装饰）。
  */
 @Composable
 private fun FolderCoverFrame(content: @Composable () -> Unit) {
@@ -7352,8 +7341,7 @@ private fun FolderCoverFrame(content: @Composable () -> Unit) {
     // 「这是文件夹」，而不是靠缩小 / 换成横向图标（那样在竖槽里会和文件明显不一样大）。
     Box(modifier = Modifier.fillMaxSize().clip(FolderCoverShape)) {
         content()
-        // 描边单独画在上层，避免被内容盖住；形状仍是文件夹轮廓（左上标签），
-        // 一眼能看出是文件夹而不是普通图片。
+        // 描边单独画在上层，避免被内容盖住。形状是单圈圆角矩形 —— 只描一条外框。
         Box(
             modifier = Modifier
                 .fillMaxSize()
