@@ -55,8 +55,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import coil3.compose.AsyncImagePainter
 import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.rememberAsyncImagePainter
 import coil3.request.ImageRequest
 // SY --> Komiho: 本地封面（走 Coil，自带 filesDir/komiho_local_covers 缓存，与 Komga 缓存隔离）
 import eu.kanade.tachiyomi.data.coil.LocalCoverData
@@ -190,6 +193,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
@@ -6957,22 +6961,26 @@ private fun LocalFileBrowser(
                 }
             }
             else -> {
-                // 网格模式复用 Komga 书架的 Adaptive 列密度 + 间距逻辑（仅列表/紧凑网格两种）。
-                val isCompact = displayMode != LibraryDisplayMode.List
-                val adaptiveMin = if (isCompact) 96.dp else 168.dp
+                // 与 Komga 书架同口径：紧凑网格 96dp / 4 / 6 且标题叠在封面内，
+                // 宽松网格 128dp / 8 / 12 且标题在封面下方。
+                val isCompact = displayMode == LibraryDisplayMode.CompactGrid
+                val adaptiveMin = if (isCompact) 96.dp else 128.dp
+                val hSpace = if (isCompact) 4.dp else 8.dp
+                val vSpace = if (isCompact) 6.dp else 12.dp
                 val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = adaptiveMin)
                 LazyVerticalGrid(
                     state = browseGridState,
                     columns = cells,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(hSpace),
+                    verticalArrangement = Arrangement.spacedBy(vSpace),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(displayList, key = { it.uni.uri.toString() }) { file ->
                         LocalFileGridItem(
                             entry = file,
                             showCover = showCover,
+                            titleInside = isCompact,
                             clickable = selectionMode || isItemClickable(file),
                             progressText = gridProgressLabel(fileProgress[file.name], progressReadLabel),
                             selected = selectedEntries.containsKey(file.uni.uri.toString()),
@@ -7317,24 +7325,68 @@ private fun GridProgressBadge(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * Komiho (2026-11-06): 目录封面右上角的类型角标。
+ * Komiho (2026-11-06): 文件夹形状 —— 底部圆角矩形 + 左上标签。
  *
- * 目录封面取「目录内首张图 / 首个归档首图」，归档封面取「归档首图」——两者都是漫画页，
- * 开了「显示封面」后完全分不出文件夹和文件。关封面时有 Folder/Book 图标可用，
- * 开封面就靠这个角标补上类型信息。放右上角避开左上角的进度胶囊。
+ * 用来把目录缩略图裁成「文件夹」轮廓，对应传统文件管理器「文件夹夹着缩略图」的观感；
+ * 不再用「封面 + 角标」那种叠一层图标的做法（取不到封面时会出现图标套角标，很丑）。
+ */
+private val FolderCoverShape = GenericShape { size, _ ->
+    val w = size.width
+    val h = size.height
+    val radius = minOf(w, h) * 0.09f
+    val tabW = w * 0.40f
+    val tabH = h * 0.16f
+    // 主体 + 左上标签：两次 addRoundRect 同向填充，外轮廓自然合并成文件夹形。
+    addRoundRect(RoundRect(0f, 0f, w, h, radius, radius))
+    addRoundRect(RoundRect(0f, 0f, tabW, tabH + radius, radius, radius))
+}
+
+/**
+ * Komiho (2026-11-06): 目录封面 —— 缩略图装进文件夹轮廓里，外面一圈文件夹底色当边框。
+ * 取不到封面时由调用方回落到普通文件夹图标（不带任何角标）。
+ * 保持横向比例（1.12:1），在列表 40×56 与网格竖槽里都居中显示，不会被拉变形。
  */
 @Composable
-private fun DirectoryCoverBadge(modifier: Modifier = Modifier) {
-    Surface(
-        color = Color.Black.copy(alpha = 0.6f),
-        shape = RoundedCornerShape(4.dp),
-        modifier = modifier,
+private fun FolderCoverFrame(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth(0.92f)
+            .aspectRatio(1.12f)
+            .clip(FolderCoverShape)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
     ) {
-        Icon(
-            imageVector = Icons.Filled.Folder,
-            contentDescription = "文件夹",
-            tint = Color.White,
-            modifier = Modifier.size(16.dp).padding(2.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(2.5.dp)
+                .clip(FolderCoverShape),
+        ) {
+            content()
+        }
+    }
+}
+
+/**
+ * Komiho (2026-11-06): 紧凑网格的标题叠层 —— 照 Komga LibrarySeriesCard 的 titleInside：
+ * 封面底部一条「透明 → 黑 0.7」渐变，白字最多两行。本地 / WebDAV / SMB 网格共用，
+ * 调用处传 `Modifier.align(Alignment.BottomCenter).fillMaxWidth()`。
+ */
+@Composable
+private fun GridTitleInside(name: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .zIndex(1f)
+            .background(
+                Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))),
+            )
+            .padding(horizontal = 6.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text = name,
+            color = Color.White,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -7350,19 +7402,27 @@ private fun LocalCoverThumb(
 ) {
     if (showCover) {
         val context = LocalContext.current
-        Box(modifier = modifier) {
-            SubcomposeAsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(LocalCoverData(entry.uni, entry.lastModified))
-                    .build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-                loading = { LocalCoverFallback(entry, iconSize) },
-                error = { LocalCoverFallback(entry, iconSize) },
-            )
-            if (entry.isDirectory) {
-                DirectoryCoverBadge(Modifier.align(Alignment.TopEnd).padding(2.dp).zIndex(1f))
+        val painter = rememberAsyncImagePainter(
+            ImageRequest.Builder(context)
+                .data(LocalCoverData(entry.uni, entry.lastModified))
+                .build(),
+        )
+        val state by painter.state.collectAsState()
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            if (state is AsyncImagePainter.State.Success) {
+                val image: @Composable () -> Unit = {
+                    Image(
+                        painter = painter,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                // 目录：缩略图装进文件夹轮廓（传统文件管理器观感）；文件：铺满整个槽。
+                if (entry.isDirectory) FolderCoverFrame { image() } else image()
+            } else {
+                // 加载中 / 取不到封面：只显示普通图标，不套任何装饰。
+                LocalCoverFallback(entry, iconSize)
             }
         }
     } else {
@@ -7475,14 +7535,16 @@ private fun LocalFileGridItem(
     clickable: Boolean,
     progressText: String? = null,
     selected: Boolean = false,
+    /** 紧凑网格：标题叠在封面底部（照 Komga LibrarySeriesCard），宽松网格仍显示在封面下方。 */
+    titleInside: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
-    val isDir = entry.isDirectory
-    val isArchive = entry.isArchive
-
-    val iconSize = if (isDir || isArchive) 56.dp else 40.dp
+    // Komiho (2026-11-06): 网格图标统一 56dp（本地/WebDAV/SMB 同档位）。
+    // 此前图片类单图用 40dp，三源不一致；且「显示封面 / 不显示封面」两条分支共用这个值，
+    // 保证切换开关时回落图标不跳尺寸。
+    val iconSize = 56.dp
 
     // 未开封面：整体交给共用骨架 [FileGridCell]（自带点击/内边距，clickable=false 避免双重点击）。
     if (!showCover) {
@@ -7535,45 +7597,50 @@ private fun LocalFileGridItem(
                 // zIndex：保证胶囊画在封面之上（Box 内后者优先，封面在胶囊之后组合时会被盖住）。
                 GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
             }
-            SubcomposeAsyncImage(
-                model = ImageRequest.Builder(context)
+            val painter = rememberAsyncImagePainter(
+                ImageRequest.Builder(context)
                     .data(LocalCoverData(entry.uni, entry.lastModified))
                     .build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-                loading = {
-                    Icon(
-                        fileIcon(entry),
-                        contentDescription = null,
-                        tint = fileTint(entry),
-                        modifier = Modifier.size(iconSize),
-                    )
-                },
-                error = {
-                    Icon(
-                        fileIcon(entry),
-                        contentDescription = null,
-                        tint = fileTint(entry),
-                        modifier = Modifier.size(iconSize),
-                    )
-                },
             )
-            if (entry.isDirectory) {
-                DirectoryCoverBadge(Modifier.align(Alignment.TopEnd).padding(4.dp).zIndex(1f))
+            val coverState by painter.state.collectAsState()
+            if (coverState is AsyncImagePainter.State.Success) {
+                val image: @Composable () -> Unit = {
+                    Image(
+                        painter = painter,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                // 目录：缩略图装进文件夹轮廓（传统文件管理器观感）；文件：铺满整个槽。
+                if (entry.isDirectory) FolderCoverFrame { image() } else image()
+            } else {
+                // 加载中 / 取不到封面：只显示普通图标，不套任何装饰。
+                Icon(
+                    fileIcon(entry),
+                    contentDescription = null,
+                    tint = fileTint(entry),
+                    modifier = Modifier.size(iconSize),
+                )
             }
             // 进度胶囊带 zIndex(1f)，仍会画在这层遮罩之上。
             if (selected) FileSelectionCheckOverlay()
+            if (titleInside) {
+                // 紧凑网格：标题叠在封面底部（渐变蒙层 + 白字，与 Komga 一致）。
+                GridTitleInside(entry.name, Modifier.align(Alignment.BottomCenter).fillMaxWidth())
+            }
         }
         // SY <--
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = entry.name,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
+        if (!titleInside) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = entry.name,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -7627,13 +7694,19 @@ private fun LocalBrowseOptionsMenu(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
                     )
-                    Row(
+                    // FlowRow 而不是 Row：三档 chip 在英文 locale 下一行放不下（Comfortable grid
+                    // 很长），Row 会把最后一个挤出屏幕。
+                    FlowRow(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 24.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        listOf(LibraryDisplayMode.List, LibraryDisplayMode.CompactGrid).forEach { m ->
+                        // 与 Komga 书架同三档：列表 / 紧凑网格 / 宽松网格。
+                        // 此前只留了「列表 + 紧凑网格」两项，而且网格样式一律按宽松画
+                        //（标题在封面下方），等于紧凑网格这个模式根本没实现。
+                        LibraryDisplayMode.entries.forEach { m ->
                             FilterChip(
                                 selected = displayMode == m,
                                 onClick = { onDisplayModeChange(m) },
@@ -8350,14 +8423,18 @@ private fun WebDavBrowsePane(
                 }
             }
             else -> {
-                // 网格模式：与本地浏览同一套列密度逻辑（紧凑网格 96dp Adaptive）。
-                val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = 96.dp)
+                // 与本地/ Komga 书架同口径：紧凑 96dp / 4 / 6（标题叠封面内），宽松 128dp / 8 / 12。
+                val isCompact = displayMode == LibraryDisplayMode.CompactGrid
+                val adaptiveMin = if (isCompact) 96.dp else 128.dp
+                val hSpace = if (isCompact) 4.dp else 8.dp
+                val vSpace = if (isCompact) 6.dp else 12.dp
+                val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = adaptiveMin)
                 LazyVerticalGrid(
                     state = browseGridState,
                     columns = cells,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(hSpace),
+                    verticalArrangement = Arrangement.spacedBy(vSpace),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(displayList, key = { it.url }) { e ->
@@ -8365,6 +8442,7 @@ private fun WebDavBrowsePane(
                         conn = conn,
                         entry = e,
                         showCover = showCover,
+                        titleInside = isCompact,
                         progressText = gridProgressLabel(fileProgress[e.name], progressReadLabel),
                         onClick = { onOpenItem(e) },
                     )
@@ -8416,6 +8494,8 @@ private fun WebDavGridItem(
     entry: WebDavEntry,
     showCover: Boolean,
     progressText: String? = null,
+    /** 紧凑网格：标题叠在封面底部（照 Komga LibrarySeriesCard）。 */
+    titleInside: Boolean = false,
     onClick: () -> Unit,
 ) {
     if (!showCover) {
@@ -8430,7 +8510,6 @@ private fun WebDavGridItem(
         )
         return
     }
-    val context = LocalContext.current
     val iconSize = 56.dp
     Column(
         modifier = Modifier.clickable(onClick = onClick).padding(6.dp),
@@ -8451,15 +8530,20 @@ private fun WebDavGridItem(
                 // zIndex：保证胶囊画在封面之上（Box 内后者优先，封面在胶囊之后组合时会被盖住）。
                 GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
             }
+            if (titleInside) {
+                GridTitleInside(entry.name, Modifier.align(Alignment.BottomCenter).fillMaxWidth())
+            }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = entry.name,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
+        if (!titleInside) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = entry.name,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -8504,17 +8588,23 @@ private fun WebDavCoverThumb(
         icon()
         return
     }
-    Box(modifier = modifier) {
-        SubcomposeAsyncImage(
-            model = ImageRequest.Builder(context).data(cover).build(),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-            loading = { icon() },
-            error = { icon() },
-        )
-        if (entry.isDir) {
-            DirectoryCoverBadge(Modifier.align(Alignment.TopEnd).padding(2.dp).zIndex(1f))
+    val painter = rememberAsyncImagePainter(ImageRequest.Builder(context).data(cover).build())
+    val state by painter.state.collectAsState()
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (state is AsyncImagePainter.State.Success) {
+            val image: @Composable () -> Unit = {
+                Image(
+                    painter = painter,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            // 目录：缩略图装进文件夹轮廓；文件：铺满整个槽。
+            if (entry.isDir) FolderCoverFrame { image() } else image()
+        } else {
+            // 加载中 / 取不到封面：只显示普通图标，不套任何装饰。
+            icon()
         }
     }
 }
@@ -9215,13 +9305,18 @@ private fun SmbBrowsePane(
                 }
             }
             else -> {
-                val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = 96.dp)
+                // 与本地/ Komga 书架同口径：紧凑 96dp / 4 / 6（标题叠封面内），宽松 128dp / 8 / 12。
+                val isCompact = displayMode == LibraryDisplayMode.CompactGrid
+                val adaptiveMin = if (isCompact) 96.dp else 128.dp
+                val hSpace = if (isCompact) 4.dp else 8.dp
+                val vSpace = if (isCompact) 6.dp else 12.dp
+                val cells = if (columnCount > 0) GridCells.Fixed(columnCount) else GridCells.Adaptive(minSize = adaptiveMin)
                 LazyVerticalGrid(
                     state = browseGridState,
                     columns = cells,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(hSpace),
+                    verticalArrangement = Arrangement.spacedBy(vSpace),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(displayList, key = { it.path }) { e ->
@@ -9229,6 +9324,7 @@ private fun SmbBrowsePane(
                         conn = conn,
                         entry = e,
                         showCover = showCover,
+                        titleInside = isCompact,
                         progressText = gridProgressLabel(fileProgress[e.name], progressReadLabel),
                         onClick = { onOpenItem(e) },
                     )
@@ -9291,6 +9387,8 @@ private fun SmbGridItem(
     entry: SmbEntry,
     showCover: Boolean,
     progressText: String? = null,
+    /** 紧凑网格：标题叠在封面底部（照 Komga LibrarySeriesCard）。 */
+    titleInside: Boolean = false,
     onClick: () -> Unit,
 ) {
     // 未开封面：整体交给共用骨架 [FileGridCell]（自带点击/内边距，clickable=false 避免双重点击）。
@@ -9300,7 +9398,8 @@ private fun SmbGridItem(
             name = entry.name,
             icon = fileKindIcon(entry.isDir, entry.isArchive, entry.isImage),
             iconTint = fileKindTint(entry.isDir, entry.isArchive),
-            iconSize = if (entry.isDir || entry.isArchive) 56.dp else 40.dp,
+            // 与本地/WebDAV 网格同档位：所有类型 56dp。
+            iconSize = 56.dp,
             clickable = true,
             progressText = progressText,
             onClick = onClick,
@@ -9323,14 +9422,21 @@ private fun SmbGridItem(
                 // zIndex：保证胶囊画在封面之上（Box 内后者优先，封面在胶囊之后组合时会被盖住）。
                 GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
             }
+            if (titleInside) {
+                GridTitleInside(entry.name, Modifier.align(Alignment.BottomCenter).fillMaxWidth())
+            }
         }
-        Text(
-            text = entry.name,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
+        if (!titleInside) {
+            // 与本地/WebDAV 网格一致：4dp 间距 + labelSmall。
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = entry.name,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -9349,29 +9455,37 @@ private fun SmbCoverThumb(
         val context = LocalContext.current
         // SY: 2026-09 对齐本地——目录也显示封面（散图目录 = 目录内第一张图，cover 优先）；
         // 取不到封面/加载中回落 fileKindIcon（目录仍是文件夹图标）。
-        Box(modifier = modifier) {
-            SubcomposeAsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(
-                        SmbCoverData(
-                            conn,
-                            entry.path,
-                            entry.lastModified,
-                            entry.isImage,
-                            entry.isDir,
-                            entry.isPdf,
-                            entry.isMobi,
-                        ),
+        val painter = rememberAsyncImagePainter(
+            ImageRequest.Builder(context)
+                .data(
+                    SmbCoverData(
+                        conn,
+                        entry.path,
+                        entry.lastModified,
+                        entry.isImage,
+                        entry.isDir,
+                        entry.isPdf,
+                        entry.isMobi,
+                    ),
+                )
+                .build(),
+        )
+        val state by painter.state.collectAsState()
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            if (state is AsyncImagePainter.State.Success) {
+                val image: @Composable () -> Unit = {
+                    Image(
+                        painter = painter,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
                     )
-                    .build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-                loading = { SmbCoverFallback(entry, iconSize) },
-                error = { SmbCoverFallback(entry, iconSize) },
-            )
-            if (entry.isDir) {
-                DirectoryCoverBadge(Modifier.align(Alignment.TopEnd).padding(2.dp).zIndex(1f))
+                }
+                // 目录：缩略图装进文件夹轮廓；文件：铺满整个槽。
+                if (entry.isDir) FolderCoverFrame { image() } else image()
+            } else {
+                // 加载中 / 取不到封面：只显示普通图标，不套任何装饰。
+                SmbCoverFallback(entry, iconSize)
             }
         }
     } else {
