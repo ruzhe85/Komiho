@@ -7348,21 +7348,17 @@ private val FolderCoverShape = GenericShape { size, _ ->
  */
 @Composable
 private fun FolderCoverFrame(content: @Composable () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth(0.92f)
-            .aspectRatio(1.12f)
-            .clip(FolderCoverShape)
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
-    ) {
+    // 尺寸与文件封面**完全一致**（铺满整个槽），只在外圈描一圈主色：靠颜色区分
+    // 「这是文件夹」，而不是靠缩小 / 换成横向图标（那样在竖槽里会和文件明显不一样大）。
+    Box(modifier = Modifier.fillMaxSize().clip(FolderCoverShape)) {
+        content()
+        // 描边单独画在上层，避免被内容盖住；形状仍是文件夹轮廓（左上标签），
+        // 一眼能看出是文件夹而不是普通图片。
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(2.5.dp)
-                .clip(FolderCoverShape),
-        ) {
-            content()
-        }
+                .border(2.dp, MaterialTheme.colorScheme.primary, FolderCoverShape),
+        )
     }
 }
 
@@ -7426,7 +7422,11 @@ private fun LocalCoverThumb(
             }
         }
     } else {
-        LocalCoverFallback(entry, iconSize)
+        // 关掉封面时也占同样大的槽：否则列表的 leading 会从 40×56 缩成图标本身，
+        // 行高跟着变，「有封面 / 没封面」两种状态看起来是两套列表。
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            LocalCoverFallback(entry, iconSize)
+        }
     }
 }
 
@@ -7506,12 +7506,26 @@ private fun FileGridCell(
             modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(iconSize))
-            if (selected) FileSelectionCheckOverlay()
-            if (progressText != null) {
-                // zIndex：保证胶囊画在封面之上（Box 内后者优先，封面在胶囊之后组合时会被盖住）。
-                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
+            if (progressText == null) {
+                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(iconSize))
+            } else {
+                // 无封面时进度紧贴图标下方，作为「图标的一条附注」整体居中；
+                // 原来钉在格子左上角，和居中的图标之间隔着一大块空白，看起来像飘出去了。
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(iconSize))
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = progressText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
             }
+            if (selected) FileSelectionCheckOverlay()
         }
         Spacer(Modifier.height(4.dp))
         Text(
@@ -8568,8 +8582,13 @@ private fun WebDavCoverThumb(
             modifier = Modifier.size(iconSize),
         )
     }
+    // 所有回落路径都包进同一个尺寸的槽：列表的 leading 必须与「有封面」时一样宽，
+    // 否则关封面/取不到封面时行高会跳，看起来像两套列表。
+    val fallbackBox: @Composable () -> Unit = {
+        Box(modifier = modifier, contentAlignment = Alignment.Center) { icon() }
+    }
     if (!showCover || !(entry.isArchive || entry.isDir)) {
-        icon()
+        fallbackBox()
         return
     }
     val context = LocalContext.current
@@ -8585,7 +8604,7 @@ private fun WebDavCoverThumb(
         WebDavCoverCache.coverForDisplay(context, chapterUrl, showCover)
     }
     if (cover == null) {
-        icon()
+        fallbackBox()
         return
     }
     val painter = rememberAsyncImagePainter(ImageRequest.Builder(context).data(cover).build())
@@ -9489,7 +9508,10 @@ private fun SmbCoverThumb(
             }
         }
     } else {
-        SmbCoverFallback(entry, iconSize)
+        // 关掉封面时也占同样大的槽，保证列表行高与「有封面」时一致。
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            SmbCoverFallback(entry, iconSize)
+        }
     }
 }
 
