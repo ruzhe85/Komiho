@@ -203,6 +203,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import sh.calvin.reorderable.ReorderableItem
@@ -6660,20 +6661,24 @@ private suspend fun loadFileProgress(
 /** 列表模式标签：「62/166 37%」；已读给「已读」；未读/页数未知返回 null（不占位）。 */
 private fun listProgressLabel(p: tachiyomi.domain.chapter.model.ChapterProgress?, readLabel: String): String? {
     if (p == null || p.totalPages <= 0) return null
-    if (p.read) return readLabel
-    if (p.lastPageRead <= 0L) return null
-    val page = (p.lastPageRead + 1).coerceAtMost(p.totalPages.toLong())
-    val percent = (page * 100 / p.totalPages).coerceIn(1L, 99L)
+    val total = p.totalPages.toLong()
+    val page = (p.lastPageRead + 1).coerceIn(1L, total)
+    // 「已读」只在真的停在末页时显示：读完的文件重新翻回中间，应该看到新页码而不是继续显示「已读」。
+    if (p.read && page >= total) return readLabel
+    if (page <= 1L) return null
+    val percent = (page * 100 / total).coerceIn(1L, 99L)
     return "$page/${p.totalPages} $percent%"
 }
 
 /** 网格模式标签：「37%」/「已读」；未读/页数未知返回 null（不画胶囊）。 */
 private fun gridProgressLabel(p: tachiyomi.domain.chapter.model.ChapterProgress?, readLabel: String): String? {
     if (p == null || p.totalPages <= 0) return null
-    if (p.read) return readLabel
-    if (p.lastPageRead <= 0L) return null
-    val page = (p.lastPageRead + 1).coerceAtMost(p.totalPages.toLong())
-    return "${(page * 100 / p.totalPages).coerceIn(1L, 99L)}%"
+    val total = p.totalPages.toLong()
+    val page = (p.lastPageRead + 1).coerceIn(1L, total)
+    // 同列表：只在末页才算「已读」，重读到中间就显示新的百分比。
+    if (p.read && page >= total) return readLabel
+    if (page <= 1L) return null
+    return "${(page * 100 / total).coerceIn(1L, 99L)}%"
 }
 
 /** Komiho (2026-11-06): 网格封面左上角的进度胶囊（与 Komga 书籍卡片同观感）。 */
@@ -6752,7 +6757,8 @@ private fun FileGridCell(
         ) {
             Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(iconSize))
             if (progressText != null) {
-                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart))
+                // zIndex：保证胶囊画在封面之上（Box 内后者优先，封面在胶囊之后组合时会被盖住）。
+                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -6811,7 +6817,8 @@ private fun LocalFileGridItem(
             contentAlignment = Alignment.Center,
         ) {
             if (progressText != null) {
-                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart))
+                // zIndex：保证胶囊画在封面之上（Box 内后者优先，封面在胶囊之后组合时会被盖住）。
+                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
             }
             SubcomposeAsyncImage(
                 model = ImageRequest.Builder(context)
@@ -7721,7 +7728,8 @@ private fun WebDavGridItem(
                 iconSize = iconSize,
             )
             if (progressText != null) {
-                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart))
+                // zIndex：保证胶囊画在封面之上（Box 内后者优先，封面在胶囊之后组合时会被盖住）。
+                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -8579,7 +8587,8 @@ private fun SmbGridItem(
         ) {
             SmbCoverThumb(conn = conn, entry = entry, showCover = true, modifier = Modifier.fillMaxSize(), iconSize = 56.dp)
             if (progressText != null) {
-                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart))
+                // zIndex：保证胶囊画在封面之上（Box 内后者优先，封面在胶囊之后组合时会被盖住）。
+                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
             }
         }
         Text(

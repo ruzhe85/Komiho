@@ -541,15 +541,24 @@ class ReaderViewModel @JvmOverloads constructor(
         // 不写是为了避免无谓地刷新 last_modified_at（那会牵动同步判定）。
         val knownPages = chapter.pages?.size ?: 0
         val chapterId = chapter.chapter.id
-        if (knownPages > 0 && chapterId != null) {
-            // ReaderChapter.chapter 是 db 模型，没有 content_key / total_pages；
-            // toDomainChapter() 也是逐字段 copy，同样带不出新字段 —— 必须回库读一次。
+        // 只处理「文件型章节」（PDF/CBZ/EPUB 的 url 是路径或 webdav:// smb://）；漫画章节是 http，
+        // 跳过可避免每次开章节都多一次主键查询，也不去碰它们的 last_modified_at。
+        val isFileChapter = !chapter.chapter.url.startsWith("http")
+        var storedChapter: tachiyomi.domain.chapter.model.Chapter? = null
+        if (isFileChapter && chapterId != null) {
             val chapterRepo = Injekt.get<tachiyomi.domain.chapter.repository.ChapterRepository>()
-            val stored = runCatching { chapterRepo.getChapterById(chapterId) }.getOrNull()
-            if (stored != null && stored.contentKey != null && stored.totalPages != knownPages) {
+            storedChapter = runCatching { chapterRepo.getChapterById(chapterId) }.getOrNull()
+            if (knownPages > 0 && storedChapter != null &&
+                storedChapter.contentKey != null && storedChapter.totalPages != knownPages
+            ) {
                 runCatching { chapterRepo.updateChapterTotalPages(chapterId, knownPages) }
             }
         }
+        eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+            "FileProgress",
+            "pages file=$isFileChapter id=$chapterId n=$knownPages " +
+                "key=${storedChapter?.contentKey} total=${storedChapter?.totalPages}",
+        )
 
         val chapterPos = chapterList.indexOf(chapter)
         val newChapters = ViewerChapters(
