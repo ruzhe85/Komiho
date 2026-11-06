@@ -7316,6 +7316,29 @@ private fun GridProgressBadge(text: String, modifier: Modifier = Modifier) {
     )
 }
 
+/**
+ * Komiho (2026-11-06): 目录封面右上角的类型角标。
+ *
+ * 目录封面取「目录内首张图 / 首个归档首图」，归档封面取「归档首图」——两者都是漫画页，
+ * 开了「显示封面」后完全分不出文件夹和文件。关封面时有 Folder/Book 图标可用，
+ * 开封面就靠这个角标补上类型信息。放右上角避开左上角的进度胶囊。
+ */
+@Composable
+private fun DirectoryCoverBadge(modifier: Modifier = Modifier) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.6f),
+        shape = RoundedCornerShape(4.dp),
+        modifier = modifier,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Folder,
+            contentDescription = "文件夹",
+            tint = Color.White,
+            modifier = Modifier.size(16.dp).padding(2.dp),
+        )
+    }
+}
+
 /** 本地条目封面/图标统一渲染：showCover 开时显示封面缩略图（Coil + 全局 DiskCache），
  *  加载中或取不到封面时回落到文件图标。列表与网格共用，保证两种模式封面行为一致。 */
 @Composable
@@ -7327,16 +7350,21 @@ private fun LocalCoverThumb(
 ) {
     if (showCover) {
         val context = LocalContext.current
-        SubcomposeAsyncImage(
-            model = ImageRequest.Builder(context)
-                .data(LocalCoverData(entry.uni, entry.lastModified))
-                .build(),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = modifier,
-            loading = { LocalCoverFallback(entry, iconSize) },
-            error = { LocalCoverFallback(entry, iconSize) },
-        )
+        Box(modifier = modifier) {
+            SubcomposeAsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(LocalCoverData(entry.uni, entry.lastModified))
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                loading = { LocalCoverFallback(entry, iconSize) },
+                error = { LocalCoverFallback(entry, iconSize) },
+            )
+            if (entry.isDirectory) {
+                DirectoryCoverBadge(Modifier.align(Alignment.TopEnd).padding(2.dp).zIndex(1f))
+            }
+        }
     } else {
         LocalCoverFallback(entry, iconSize)
     }
@@ -7531,6 +7559,9 @@ private fun LocalFileGridItem(
                     )
                 },
             )
+            if (entry.isDirectory) {
+                DirectoryCoverBadge(Modifier.align(Alignment.TopEnd).padding(4.dp).zIndex(1f))
+            }
             // 进度胶囊带 zIndex(1f)，仍会画在这层遮罩之上。
             if (selected) FileSelectionCheckOverlay()
         }
@@ -8473,14 +8504,19 @@ private fun WebDavCoverThumb(
         icon()
         return
     }
-    SubcomposeAsyncImage(
-        model = ImageRequest.Builder(context).data(cover).build(),
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
-        modifier = modifier,
-        loading = { icon() },
-        error = { icon() },
-    )
+    Box(modifier = modifier) {
+        SubcomposeAsyncImage(
+            model = ImageRequest.Builder(context).data(cover).build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+            loading = { icon() },
+            error = { icon() },
+        )
+        if (entry.isDir) {
+            DirectoryCoverBadge(Modifier.align(Alignment.TopEnd).padding(2.dp).zIndex(1f))
+        }
+    }
 }
 
 /** WebDAV 条目排序：目录恒置顶，再按所选字段/方向（与本地浏览同一套 [LocalFileSort]/[LocalFileSortBy]）。 */
@@ -9237,7 +9273,15 @@ private fun SmbFileRow(
     onOpen: () -> Unit,
 ) {
     FileListRow(name = entry.name, clickable = true, progressText = progressText, onOpen = onOpen) {
-        SmbCoverThumb(conn = conn, entry = entry, showCover = showCover, iconSize = 40.dp)
+        SmbCoverThumb(
+            conn = conn,
+            entry = entry,
+            showCover = showCover,
+            // 与本地/WebDAV 列表同一缩略图尺寸；此前未传尺寸，封面角标需要确定的槽位。
+            // 回落图标也统一 24dp（网格仍用 56dp），三源列表观感一致。
+            modifier = Modifier.size(width = 40.dp, height = 56.dp),
+            iconSize = 24.dp,
+        )
     }
 }
 
@@ -9305,26 +9349,31 @@ private fun SmbCoverThumb(
         val context = LocalContext.current
         // SY: 2026-09 对齐本地——目录也显示封面（散图目录 = 目录内第一张图，cover 优先）；
         // 取不到封面/加载中回落 fileKindIcon（目录仍是文件夹图标）。
-        SubcomposeAsyncImage(
-            model = ImageRequest.Builder(context)
-                .data(
-                    SmbCoverData(
-                        conn,
-                        entry.path,
-                        entry.lastModified,
-                        entry.isImage,
-                        entry.isDir,
-                        entry.isPdf,
-                        entry.isMobi,
-                    ),
-                )
-                .build(),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = modifier,
-            loading = { SmbCoverFallback(entry, iconSize) },
-            error = { SmbCoverFallback(entry, iconSize) },
-        )
+        Box(modifier = modifier) {
+            SubcomposeAsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(
+                        SmbCoverData(
+                            conn,
+                            entry.path,
+                            entry.lastModified,
+                            entry.isImage,
+                            entry.isDir,
+                            entry.isPdf,
+                            entry.isMobi,
+                        ),
+                    )
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                loading = { SmbCoverFallback(entry, iconSize) },
+                error = { SmbCoverFallback(entry, iconSize) },
+            )
+            if (entry.isDir) {
+                DirectoryCoverBadge(Modifier.align(Alignment.TopEnd).padding(2.dp).zIndex(1f))
+            }
+        }
     } else {
         SmbCoverFallback(entry, iconSize)
     }
@@ -9698,10 +9747,6 @@ private suspend fun countChapterPages(context: Context, url: String, file: UniFi
 // SY --> Komiho: 「打开文件位置」已改为应用内跳转（openLocationInApp → 浏览 tab
 // 定位所在目录），不再调起系统文件管理器，原 openFileLocation(ACTION_VIEW 目录) 移除。
 // SY <--
-
-/** 章节号格式化：整数不带小数（1.0 → 1），否则保留两位小数。 */
-private fun formatChapterNumber(n: Double): String =
-    if (n % 1.0 == 0.0) n.toLong().toString() else "%.2f".format(n)
 
 /** 本地历史/书签共用条目行：左侧封面、标题（与「⋯」按钮并排）、副标题、大小/日期、进度条。
  *  moreMenu 为右侧「⋯」展开的菜单内容（历史=汇聚+删除；书签=取消书签）。 */
@@ -10787,18 +10832,19 @@ private fun BookmarksTabLocal(
                             ?: SmbCoverCache.existingCoverFile(context, first.chapterUrl)
                     }
                     // SY <--
-                    val chapterText = if (first.chapterNumber >= 0) {
-                        composeStringResource(R.string.chapter_ordinal, formatChapterNumber(first.chapterNumber))
-                    } else {
-                        first.chapterName
+                    // 标题取文件名（章节名 / chapterUrl 末段），副标题展示系列名 + 书签数，
+                    // 与历史 tab 同口径。本地文件来源的 chapterNumber 是 ChapterNumbering
+                    // 按文件名猜出来的，显示「第 X 话」对用户没有意义。
+                    val volumeTitle = first.chapterName.ifBlank {
+                        first.chapterUrl.trimEnd('/').substringAfterLast('/')
                     }
                     val isExpanded = expanded.contains(chapterId)
                     val firstPage = bms.minOf { it.page }
 
                     LocalFileRow(
                         context = context,
-                        title = first.mangaTitle,
-                        subtitle = composeStringResource(R.string.bookmarks_count_subtitle, chapterText, bms.size) +
+                        title = volumeTitle,
+                        subtitle = composeStringResource(R.string.bookmarks_count_subtitle, first.mangaTitle, bms.size) +
                             (if (missing) " · 文件已删除" else ""),
                         sourceBadge = chapterSourceLabel(first.chapterUrl, webDavConns, smbConns),
                         enabled = !missing,
