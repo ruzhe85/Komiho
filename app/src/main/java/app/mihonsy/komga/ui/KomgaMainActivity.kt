@@ -7128,7 +7128,7 @@ private suspend fun openLocalFile(
             if (contentKey != null && chapter.contentKey != contentKey) {
                 chapterRepo.updateChapterContentKey(chapter.id!!, contentKey)
             }
-            Triple(manga.id!!, chapter.id!!.toLong(), startPage ?: chapter.last_page_read.toInt())
+            Triple(manga.id!!, chapter.id!!.toLong(), startPage ?: chapter.lastPageRead.toInt())
         }
         eu.kanade.tachiyomi.diagnostic.DiagLog.i(
             "LocalOpen",
@@ -7999,7 +7999,7 @@ private suspend fun openWebDavTestFile(
             if (contentKey != null && chapter.contentKey != contentKey) {
                 chapterRepo.updateChapterContentKey(chapter.id!!, contentKey)
             }
-            Triple(manga.id!!, chapter.id!!.toLong(), startPage ?: chapter.last_page_read.toInt())
+            Triple(manga.id!!, chapter.id!!.toLong(), startPage ?: chapter.lastPageRead.toInt())
         }
         eu.kanade.tachiyomi.diagnostic.DiagLog.i(
             "WebDavOpen",
@@ -8793,7 +8793,7 @@ private suspend fun openSmbFile(
             if (contentKey != null && chapter.contentKey != contentKey) {
                 chapterRepo.updateChapterContentKey(chapter.id!!, contentKey)
             }
-            Triple(manga.id!!, chapter.id!!.toLong(), startPage ?: chapter.last_page_read.toInt())
+            Triple(manga.id!!, chapter.id!!.toLong(), startPage ?: chapter.lastPageRead.toInt())
         }
         eu.kanade.tachiyomi.diagnostic.DiagLog.i(
             "SmbOpen",

@@ -541,8 +541,11 @@ class ReaderViewModel @JvmOverloads constructor(
         // 不写是为了避免无谓地刷新 last_modified_at（那会牵动同步判定）。
         val knownPages = chapter.pages?.size ?: 0
         val chapterId = chapter.chapter.id
-        if (knownPages > 0 && chapterId != null &&
-            chapter.chapter.contentKey != null && chapter.chapter.totalPages != knownPages
+        // ReaderChapter.chapter 是 db 模型（没有 content_key / total_pages），
+        // 要读新字段得先转成 domain 模型（内存映射，不查库）。
+        val domainChapter = runCatching { chapter.chapter.toDomainChapter() }.getOrNull()
+        if (knownPages > 0 && chapterId != null && domainChapter != null &&
+            domainChapter.contentKey != null && domainChapter.totalPages != knownPages
         ) {
             runCatching {
                 Injekt.get<tachiyomi.domain.chapter.repository.ChapterRepository>()

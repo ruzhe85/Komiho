@@ -64,6 +64,9 @@ val backupChapterMapper = {
         version: Long,
         _: Long,
         memo: JsonObject,
+        // 新增两列（content_key / total_pages）：备份不需要，占位以匹配列顺序。
+        _: String?,
+        _: Long,
     ->
     BackupChapter(
         url = url,

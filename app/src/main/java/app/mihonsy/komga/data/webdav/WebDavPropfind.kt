@@ -112,7 +112,7 @@ object WebDavPropfind {
                 .also { items ->
                     // 顺手填充缓存，供「打开文件」取 size/mtime（见 cachedEntry）。
                     synchronized(recentEntries) { items.forEach { recentEntries[it.url] = it } }
-                    logcat(LogPriority.DEBUG) { "[WebDav] PROPFIND %s -> %d 项".format(dir, it.size) }
+                    logcat(LogPriority.DEBUG) { "[WebDav] PROPFIND %s -> %d 项".format(dir, items.size) }
                 }
         }
 
