@@ -94,6 +94,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.History
@@ -6173,10 +6174,299 @@ private fun LocalFileBrowser(
     val progressReadLabel = composeStringResource(R.string.book_status_read)
     var loading by remember { mutableStateOf(true) }
 
+    // Komiho (2026-11-06): 长按多选（照 Komga 书架那套）。标识用条目名 —— 同目录内唯一。
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedNames by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameTargetName by remember { mutableStateOf("") }
+    var renameNewName by remember { mutableStateOf("") }
+    var showMoveDialog by remember { mutableStateOf(false) }
+    var movePickStack by remember { mutableStateOf<List<String>>(emptyList()) }
+    var movePickDirs by remember { mutableStateOf<List<UniFile>>(emptyList()) }
     // 列目录：仿 Material Files，用 DocumentsContract 子文档游标一次性把整目录元数据取全
     // （1 次 IPC），之后排序/图标/归档判断全走内存，杜绝每比较都触发 SAF 跨进程查询的卡顿。
     // 失败（URI 形态异常等）自动回退到 UniFile.listFiles()，不崩溃。
-    LaunchedEffect(current, sort) {
+    // Komiho (2026-11-06): 文件操作第一步 —— 新建文件夹（顶部 +）。refreshTick 用于操作成功后强制重列。
+    var refreshTick by remember { mutableIntStateOf(0) }
+    var showNewFolderDialog by remember { mutableStateOf(false) }
+    var newFolderName by remember { mutableStateOf("") }
+    val fileOpScope = rememberCoroutineScope()
+    if (showNewFolderDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewFolderDialog = false },
+            title = { Text("新建文件夹") },
+            text = {
+                OutlinedTextField(
+                    value = newFolderName,
+                    onValueChange = { newFolderName = it },
+                    label = { Text("文件夹名称") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newFolderName.isNotBlank(),
+                    onClick = {
+                        val name = newFolderName.trim()
+                        showNewFolderDialog = false
+                        if (name.isNotEmpty()) {
+                            fileOpScope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        // 全盘权限走真实路径（mkdirs）；纯 SAF 走 UniFile.createDirectory。
+                                        if (hasAllFilesAccess) {
+                                            val dir = fs.realPathOf(current)
+                                            dir != null && File(dir, name).mkdirs()
+                                        } else {
+                                            current.createDirectory(name) != null
+                                        }
+                                    }.getOrDefault(false)
+                                }
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "已创建文件夹「$name」" else "创建失败：无写入权限或同名已存在",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                                if (ok) refreshTick++
+                            }
+                        }
+                    },
+                ) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewFolderDialog = false }) { Text("取消") }
+            },
+        )
+    }
+    // Komiho (2026-11-06): 批量删除确认 —— 列出前 3 个名字，避免误删。
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除 ${selectedNames.size} 项") },
+            text = {
+                Text(
+                    selectedNames.take(3).joinToString("\n") +
+                        if (selectedNames.size > 3) "\n…" else "",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val names = selectedNames
+                        showDeleteConfirm = false
+                        fileOpScope.launch {
+                            val failed = withContext(Dispatchers.IO) {
+                                names.filterNot { name ->
+                                    runCatching {
+                                        val target = current.findFile(name) ?: return@runCatching false
+                                        if (hasAllFilesAccess) {
+                                            fs.realPathOf(target)?.let { File(it).deleteRecursively() } ?: false
+                                        } else {
+                                            target.delete()
+                                        }
+                                    }.getOrDefault(false)
+                                }
+                            }
+                            selectionMode = false
+                            selectedNames = emptySet()
+                            Toast.makeText(
+                                context,
+                                if (failed.isEmpty()) {
+                                    "已删除 ${names.size} 项"
+                                } else {
+                                    "删除完成，失败 ${failed.size} 项（只读或无写入权限）"
+                                },
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            refreshTick++
+                        }
+                    },
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+            },
+        )
+    }
+    // Komiho (2026-11-06): 重命名（仅单选）。全盘模式 File.renameTo；SAF 用 DocumentsContract。
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("重命名") },
+            text = {
+                OutlinedTextField(
+                    value = renameNewName,
+                    onValueChange = { renameNewName = it },
+                    label = { Text("新名称（含扩展名）") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = renameNewName.isNotBlank() && renameNewName.trim() != renameTargetName,
+                    onClick = {
+                        val targetName = renameTargetName
+                        val newName = renameNewName.trim()
+                        showRenameDialog = false
+                        fileOpScope.launch {
+                            val ok = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    val target = current.findFile(targetName) ?: return@runCatching false
+                                    if (hasAllFilesAccess) {
+                                        val src = fs.realPathOf(target) ?: return@runCatching false
+                                        val dest = File(File(src).parentFile, newName)
+                                        if (dest.exists()) return@runCatching false
+                                        File(src).renameTo(dest)
+                                    } else {
+                                        android.provider.DocumentsContract.renameDocument(
+                                            context.contentResolver,
+                                            target.uri,
+                                            newName,
+                                        ) != null
+                                    }
+                                }.getOrDefault(false)
+                            }
+                            Toast.makeText(
+                                context,
+                                if (ok) "已重命名为「$newName」" else "重命名失败：同名已存在或无写入权限",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            if (ok) {
+                                selectionMode = false
+                                selectedNames = emptySet()
+                                refreshTick++
+                            }
+                        }
+                    },
+                ) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) { Text("取消") }
+            },
+        )
+    }
+    // Komiho (2026-11-06): 移动 —— 目录选择器（只列目录，从当前来源根开始）。
+    // 目标不能是源自身或子目录；同名不覆盖。全盘模式 renameTo（跨卷回退复制+删源），
+    // SAF 模式走 DocumentsContract.moveDocument（API 24+）。
+    if (showMoveDialog) {
+        val pickDir = remember(movePickStack) {
+            movePickStack.fold(base) { d, seg -> d.findFile(seg) ?: d }
+        }
+        LaunchedEffect(pickDir) {
+            movePickDirs = withContext(Dispatchers.IO) {
+                runCatching {
+                    pickDir.listFiles()
+                        ?.filter { it.isDirectory }
+                        ?.sortedBy { it.name ?: "" }
+                        .orEmpty()
+                }.getOrDefault(emptyList())
+            }
+        }
+        val invalidTarget = selectedNames.any { name ->
+            val src = current.findFile(name) ?: return@any false
+            val s = fs.realPathOf(src) ?: src.uri.toString()
+            val d = fs.realPathOf(pickDir) ?: pickDir.uri.toString()
+            d == s || d.startsWith("$s/")
+        }
+        AlertDialog(
+            onDismissRequest = { showMoveDialog = false },
+            title = { Text("移动到…") },
+            text = {
+                Column {
+                    Text(
+                        "/" + (listOf(base.name ?: "") + movePickStack)
+                            .filter { it.isNotBlank() }
+                            .joinToString("/"),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                    )
+                    if (movePickStack.isNotEmpty()) {
+                        TextButton(onClick = { movePickStack = movePickStack.dropLast(1) }) {
+                            Text(".. 上级")
+                        }
+                    }
+                    if (invalidTarget) {
+                        Text(
+                            "不能移动到自身或子目录",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    LazyColumn(modifier = Modifier.heightIn(max = 260.dp)) {
+                        items(movePickDirs, key = { it.uri.toString() }) { d ->
+                            TextButton(onClick = { d.name?.let { movePickStack = movePickStack + it } }) {
+                                Text(d.name ?: "", maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !invalidTarget,
+                    onClick = {
+                        val names = selectedNames
+                        val dest = pickDir
+                        showMoveDialog = false
+                        fileOpScope.launch {
+                            val failed = withContext(Dispatchers.IO) {
+                                names.filterNot { name ->
+                                    runCatching {
+                                        val src = current.findFile(name) ?: return@runCatching false
+                                        if (hasAllFilesAccess) {
+                                            val srcPath = fs.realPathOf(src) ?: return@runCatching false
+                                            val destPath = fs.realPathOf(dest) ?: return@runCatching false
+                                            val out = File(destPath, name)
+                                            // 目标就是源所在目录（用户选了当前目录）：视为无需移动，
+                                            // 否则下面 exists 会把「源自己」判成同名冲突。
+                                            if (out.absolutePath == File(srcPath).absolutePath) {
+                                                return@runCatching true
+                                            }
+                                            if (out.exists()) return@runCatching false
+                                            if (File(srcPath).renameTo(out)) {
+                                                true
+                                            } else {
+                                                // 跨卷：先复制成功再删源，失败时源不受影响。
+                                                src.openInputStream().use { input ->
+                                                    out.outputStream().use { input.copyTo(it) }
+                                                }
+                                                File(srcPath).deleteRecursively()
+                                            }
+                                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                            android.provider.DocumentsContract.moveDocument(
+                                                context.contentResolver,
+                                                src.uri,
+                                                current.uri,
+                                                dest.uri,
+                                            ) != null
+                                        } else {
+                                            false
+                                        }
+                                    }.getOrDefault(false)
+                                }
+                            }
+                            selectionMode = false
+                            selectedNames = emptySet()
+                            Toast.makeText(
+                                context,
+                                if (failed.isEmpty()) {
+                                    "已移动 ${names.size} 项"
+                                } else {
+                                    "移动完成，失败 ${failed.size} 项（同名/无权限/复制失败）"
+                                },
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            refreshTick++
+                        }
+                    },
+                ) { Text("移到这里") }
+            },
+            dismissButton = { TextButton(onClick = { showMoveDialog = false }) { Text("取消") } },
+        )
+    }
+
+    LaunchedEffect(current, sort, refreshTick) {
         loading = true
         val list = withContext(Dispatchers.IO) {
             // 真实路径模式：base.uri 是 file:// 而非 SAF tree URI，走 DocumentsContract
@@ -6244,6 +6534,17 @@ private fun LocalFileBrowser(
     // 返回键回上一层；已在根目录时不拦截，交还外层（回 Home）。
     BackHandler(enabled = stack.isNotEmpty()) {
         navigateTo(stack.dropLast(1))
+    }
+    // Komiho (2026-11-06): 多选态优先吃返回键（先退出多选，再谈返回上级）。
+    // 注册在上一行之后 —— OnBackPressedDispatcher 后注册的先回调。
+    BackHandler(enabled = selectionMode) {
+        selectionMode = false
+        selectedNames = emptySet()
+    }
+    // Komiho (2026-11-06): 切换目录（面包屑/上级/跳转）一律退出多选，避免选中状态带到新目录。
+    LaunchedEffect(current) {
+        selectionMode = false
+        selectedNames = emptySet()
     }
 
     // SY --> Komiho: 历史/书签「打开文件位置」应用内跳转：navRequest 为文件的相对路径，
@@ -6462,6 +6763,45 @@ private fun LocalFileBrowser(
                     }
                 }
             }
+            // Komiho (2026-11-06): 新建文件夹 —— 放在搜索左侧，不依赖选中项，空目录也能用。
+            IconButton(onClick = { newFolderName = ""; showNewFolderDialog = true }) {
+                Icon(
+                    imageVector = Icons.Filled.CreateNewFolder,
+                    contentDescription = "新建文件夹",
+                )
+            }
+            // Komiho: 多选态：重命名（仅单选）+ 删除 + 退出。
+            if (selectionMode) {
+                if (selectedNames.size == 1) {
+                    TextButton(
+                        onClick = {
+                            renameTargetName = selectedNames.first()
+                            renameNewName = renameTargetName
+                            showRenameDialog = true
+                        },
+                    ) {
+                        Text("重命名")
+                    }
+                }
+                TextButton(
+                    enabled = selectedNames.isNotEmpty(),
+                    onClick = {
+                        movePickStack = emptyList()
+                        showMoveDialog = true
+                    },
+                ) {
+                    Text("移动")
+                }
+                TextButton(
+                    enabled = selectedNames.isNotEmpty(),
+                    onClick = { showDeleteConfirm = true },
+                ) {
+                    Text("删除${if (selectedNames.isEmpty()) "" else "(${selectedNames.size})"}")
+                }
+                IconButton(onClick = { selectionMode = false; selectedNames = emptySet() }) {
+                    Icon(Icons.Filled.Close, contentDescription = "退出多选")
+                }
+            }
             IconButton(onClick = { searchActive = true }) {
                 Icon(
                     imageVector = Icons.Filled.Search,
@@ -6515,9 +6855,24 @@ private fun LocalFileBrowser(
                         FileRow(
                             entry = file,
                             showCover = showCover,
-                            clickable = isItemClickable(file),
+                            clickable = selectionMode || isItemClickable(file),
                             progressText = listProgressLabel(fileProgress[file.name], progressReadLabel),
-                            onOpen = { onOpenItem(file) },
+                            selected = file.name in selectedNames,
+                            onLongClick = {
+                                selectionMode = true
+                                selectedNames = selectedNames + file.name
+                            },
+                            onOpen = {
+                                if (selectionMode) {
+                                    selectedNames = if (file.name in selectedNames) {
+                                        selectedNames - file.name
+                                    } else {
+                                        selectedNames + file.name
+                                    }
+                                } else {
+                                    onOpenItem(file)
+                                }
+                            },
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
@@ -6540,9 +6895,24 @@ private fun LocalFileBrowser(
                         LocalFileGridItem(
                             entry = file,
                             showCover = showCover,
-                            clickable = isItemClickable(file),
+                            clickable = selectionMode || isItemClickable(file),
                             progressText = gridProgressLabel(fileProgress[file.name], progressReadLabel),
-                            onClick = { onOpenItem(file) },
+                            selected = file.name in selectedNames,
+                            onLongClick = {
+                                selectionMode = true
+                                selectedNames = selectedNames + file.name
+                            },
+                            onClick = {
+                                if (selectionMode) {
+                                    selectedNames = if (file.name in selectedNames) {
+                                        selectedNames - file.name
+                                    } else {
+                                        selectedNames + file.name
+                                    }
+                                } else {
+                                    onOpenItem(file)
+                                }
+                            },
                         )
                     }
                 }
@@ -6572,9 +6942,18 @@ private fun FileRow(
     showCover: Boolean,
     clickable: Boolean,
     progressText: String? = null,
+    selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     onOpen: () -> Unit,
 ) {
-    FileListRow(name = entry.name, clickable = clickable, progressText = progressText, onOpen = onOpen) {
+    FileListRow(
+        name = entry.name,
+        clickable = clickable,
+        progressText = progressText,
+        selected = selected,
+        onLongClick = onLongClick,
+        onOpen = onOpen,
+    ) {
         LocalCoverThumb(
             entry = entry,
             showCover = showCover,
@@ -6586,39 +6965,57 @@ private fun FileRow(
 
 /** 列表条目行骨架：本地浏览与 WebDAV 浏览共用同一「列表模式」视觉——
  *  左侧图标/封面槽 + 单行名称（省略号）+ 右侧进度（「62/166 37%」/「已读」）；
- *  底部分隔线由调用方在行后追加。 */
+ *  底部分隔线由调用方在行后追加。
+ *  [selected] 进入多选时的选中底色（照抄 Komga 书架行的 primaryContainer 0.35 透明度）。 */
 @Composable
 private fun FileListRow(
     name: String,
     clickable: Boolean,
     progressText: String? = null,
+    selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     onOpen: () -> Unit,
     leading: @Composable () -> Unit,
 ) {
-    Row(
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        } else {
+            Color.Transparent
+        },
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (clickable) Modifier.clickable(onClick = onOpen) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .then(
+                if (clickable) {
+                    Modifier.combinedClickable(onClick = onOpen, onLongClick = onLongClick)
+                } else {
+                    Modifier
+                },
+            ),
     ) {
-        leading()
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = name,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        if (progressText != null) {
-            Spacer(Modifier.width(8.dp))
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            leading()
+            Spacer(Modifier.width(12.dp))
             Text(
-                text = progressText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = name,
+                style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            if (progressText != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = progressText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -6743,11 +7140,29 @@ private fun FileGridCell(
     iconSize: Dp,
     clickable: Boolean,
     progressText: String? = null,
+    selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
-            .then(if (clickable) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(
+                if (selected) {
+                    Modifier.background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                        RoundedCornerShape(8.dp),
+                    )
+                } else {
+                    Modifier
+                },
+            )
+            .then(
+                if (clickable) {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                } else {
+                    Modifier
+                },
+            )
             .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -6782,6 +7197,8 @@ private fun LocalFileGridItem(
     showCover: Boolean,
     clickable: Boolean,
     progressText: String? = null,
+    selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -6799,6 +7216,8 @@ private fun LocalFileGridItem(
             iconSize = iconSize,
             clickable = clickable,
             progressText = progressText,
+            selected = selected,
+            onLongClick = onLongClick,
             onClick = onClick,
         )
         return
@@ -6806,7 +7225,23 @@ private fun LocalFileGridItem(
 
     Column(
         modifier = Modifier
-            .then(if (clickable) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(
+                if (selected) {
+                    Modifier.background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                        RoundedCornerShape(8.dp),
+                    )
+                } else {
+                    Modifier
+                },
+            )
+            .then(
+                if (clickable) {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                } else {
+                    Modifier
+                },
+            )
             .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
