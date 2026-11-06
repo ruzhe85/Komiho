@@ -6322,22 +6322,33 @@ private fun LocalFileBrowser(
                     onClick = {
                         showDeleteConfirm = false
                         fileOpScope.launch {
-                            val failed = withContext(Dispatchers.IO) {
-                                deleteTargets.filterNot { entry ->
-                                    runCatching {
+                            val (failed, clearedHistory) = withContext(Dispatchers.IO) {
+                                val deletedPaths = mutableListOf<String>()
+                                val failed = deleteTargets.filterNot { entry ->
+                                    // 路径要在删除**前**取：文件删掉后部分 UniFile 实现已无法反推。
+                                    val path = fs.realPathOf(entry.uni)
+                                    val ok = runCatching {
                                         if (hasAllFilesAccess) {
-                                            fs.realPathOf(entry.uni)?.let { File(it).deleteRecursively() } ?: false
+                                            path?.let { File(it).deleteRecursively() } ?: false
                                         } else {
                                             entry.uni.delete()
                                         }
                                     }.getOrDefault(false)
+                                    if (ok && path != null) deletedPaths.add(path)
+                                    ok
                                 }
+                                // 书签/历史 tab 会缓存 chapterUrl → UniFile；删完必须失效，
+                                // 否则「文件已删除」判定可能命中删除前的旧对象。
+                                if (deletedPaths.isNotEmpty()) fileResolveCache.clear()
+                                // 只清真正删掉的文件：失败项还在磁盘上，历史必须保留。
+                                failed to clearLocalHistoryForPaths(deletedPaths)
                             }
                             exitFileSelection()
                             Toast.makeText(
                                 context,
                                 if (failed.isEmpty()) {
-                                    "已删除 ${deleteTargets.size} 项"
+                                    "已删除 ${deleteTargets.size} 项" +
+                                        (if (clearedHistory > 0) "，清理历史 $clearedHistory 条" else "")
                                 } else {
                                     "删除完成，失败 ${failed.size} 项（只读或无写入权限）"
                                 },
@@ -6696,8 +6707,9 @@ private fun LocalFileBrowser(
         // SY --> Komiho: 多选优先于搜索框 —— 长按递归结果进入多选时，顶栏必须显示
         // 「已选 N 项」，不能还挂着搜索框让人误以为没进入多选。
         if (selectionMode) {
-            // 多选态顶栏：只留「退出 + 已选 N 项」。动作全下放到底栏 —— 挤在面包屑右边
-            // 既看不清也点不准（原来三个 TextButton 像附属小字）。
+            // 多选态顶栏：退出 + 已选 N 项 + 全选/反选（照 Komga 书架那套）。
+            // 动作全下放到底栏 —— 挤在面包屑右边既看不清也点不准（原来三个 TextButton
+            // 像附属小字）；全选/反选属于「选择范围」操作，留在顶栏。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -6711,7 +6723,21 @@ private fun LocalFileBrowser(
                     text = "已选 ${selectedEntries.size} 项",
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
+                    modifier = Modifier.weight(1f),
                 )
+                IconButton(onClick = { selectedEntries = displayList.associateBy { it.uni.uri.toString() } }) {
+                    Icon(Icons.Filled.SelectAll, contentDescription = composeStringResource(R.string.select_all))
+                }
+                IconButton(onClick = {
+                    // 反选 = 当前可见全集 - 已选。直接赋值而不走 toggleSelected：全选后
+                    // 反选会得到空集，此时不能自动退出多选，否则用户没法继续重新选。
+                    val current = selectedEntries
+                    selectedEntries = displayList
+                        .filterNot { current.containsKey(it.uni.uri.toString()) }
+                        .associateBy { it.uni.uri.toString() }
+                }) {
+                    Icon(Icons.Outlined.FlipToBack, contentDescription = composeStringResource(R.string.select_inverse))
+                }
             }
         } else if (searchActive) {
             Row(
@@ -7006,6 +7032,41 @@ private fun LocalFileBrowser(
 }
 
 /**
+ * Komiho (2026-11-06): 删除本地文件/目录后，同步清掉指向它们的历史记录。
+ *
+ * 历史 tab 取的是 history×chapters×mangas 视图中 `last_read > 0` 的行，文件路径在
+ * `chapters.url`。沿用项目「删除单条历史」的口径 [HistoryRepository.resetHistory]（软删），
+ * 不动 chapter/manga —— 阅读进度列与 content_key 复用逻辑都不受牵连。
+ * 新格式 chapter.url 是真实绝对路径，旧版是相对浏览根的路径，两种都要能命中。
+ */
+private suspend fun clearLocalHistoryForPaths(paths: List<String>): Int {
+    if (paths.isEmpty()) return 0
+    val fs = Injekt.get<LocalSourceFileSystem>()
+    val historyRepo = Injekt.get<HistoryRepository>()
+    // 不用 runCatching：它会连协程取消一起吞掉，取消后还会继续往 DB 里写。
+    val items = try {
+        historyRepo.getHistoryBySourceDetailed(LocalSource.ID).first()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        emptyList()
+    }
+    // 相对浏览根的路径，用于兼容旧版相对 chapter.url；纯字符串换算，不查文件系统。
+    val relPaths = paths.mapNotNull { fs.relativeFromBase(it) }
+    val staleIds = items.filter { item ->
+        val url = item.chapterUrl
+        // WebDAV / SMB 共用 LocalSource.ID，且 URL 可能是 webdav:xxx/path 这种不带 // 的
+        // 形态，统一用 isRemoteChapterUrl 判，不能只靠 contains("://")。
+        if (isRemoteChapterUrl(url)) return@filter false
+        // 删目录时要连带清掉其下所有章节（chapter.url 可能是目录本身，也可能是子文件）。
+        paths.any { p -> url == p || url.startsWith("$p/") } ||
+            (!url.startsWith('/') && relPaths.any { rel -> url == rel || url.startsWith("$rel/") })
+    }.map { it.id }
+    staleIds.forEach { historyRepo.resetHistory(it) }
+    return staleIds.size
+}
+
+/**
  * Komiho (2026-11-06): 文件浏览器多选底栏的**最小**高度。
  *
  * 系统字体放大时「图标 + 文案」会把它撑高，所以调用方不能按这个常量写死留白，
@@ -7117,7 +7178,8 @@ private fun FileRow(
  *  左侧图标/封面槽 + 单行名称（省略号）+ 右侧进度（「62/166 37%」/「已读」）；
  *  底部分隔线由调用方在行后追加。
  *  [selected] 进入多选时的选中底色（照抄 Komga 书架行的 primaryContainer 0.35 透明度）
- *  + 2dp 主色描边：只有底色时在深色主题/电子墨水屏上几乎看不出来选中了哪几行。 */
+ *  + 2dp 主色描边 + 行尾实心勾：只有底色/描边时在深色主题、电子墨水屏上
+ *  仍然不够直观，补一个明确的「打勾」标记。 */
 @Composable
 private fun FileListRow(
     name: String,
@@ -7166,6 +7228,15 @@ private fun FileListRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                )
+            }
+            if (selected) {
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp),
                 )
             }
         }
@@ -7282,6 +7353,28 @@ private fun LocalCoverFallback(entry: LocalEntry, iconSize: Dp) {
     )
 }
 
+/**
+ * Komiho (2026-11-06): 网格选中态的打勾遮罩 —— 照 Komga 书架卡片那套
+ * （primary 0.55 半透明盖住封面 + 中央 onPrimary 实心勾）。两种网格格子共用，
+ * 保证「有封面 / 无封面」两种形态的选中反馈完全一致。
+ */
+@Composable
+private fun FileSelectionCheckOverlay() {
+    Surface(
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.Filled.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(32.dp),
+            )
+        }
+    }
+}
+
 /** 无封面网格格子骨架：图标居中的 0.7 比例槽 + 两行居中名称。
  *  本地网格未开封面时与 WebDAV 网格共用（封面形态仅本地有，见 [LocalFileGridItem]）。 */
 @Composable
@@ -7326,6 +7419,7 @@ private fun FileGridCell(
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(iconSize))
+            if (selected) FileSelectionCheckOverlay()
             if (progressText != null) {
                 // zIndex：保证胶囊画在封面之上（Box 内后者优先，封面在胶囊之后组合时会被盖住）。
                 GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
@@ -7437,6 +7531,8 @@ private fun LocalFileGridItem(
                     )
                 },
             )
+            // 进度胶囊带 zIndex(1f)，仍会画在这层遮罩之上。
+            if (selected) FileSelectionCheckOverlay()
         }
         // SY <--
         Spacer(Modifier.height(4.dp))
@@ -9512,6 +9608,23 @@ private fun resolveLocalFile(chapterUrl: String): UniFile? {
     return result.also { fileResolveCache[chapterUrl] = it }
 }
 
+/**
+ * Komiho (2026-11-06): 远程章节的 URL 不落在本地文件系统上，不能按「本地文件是否存在」
+ * 判定可用性，否则 WebDAV/SMB 书签会被误判成失效。
+ */
+private fun isRemoteChapterUrl(chapterUrl: String): Boolean =
+    chapterUrl.startsWith("webdav:") || chapterUrl.startsWith("smb:") || chapterUrl.contains("://")
+
+/**
+ * Komiho (2026-11-06): 判断一个章节对应的文件是否还在。必须在 IO 线程调用。
+ * [resolveLocalFile] 有进程内缓存，删掉文件后可能仍返回删除前的 UniFile 对象，
+ * 所以一定要再查一次 `exists()`，不能只看解析结果是否为 null。
+ */
+private fun localChapterFileAvailable(chapterUrl: String): Boolean {
+    if (isRemoteChapterUrl(chapterUrl)) return true
+    return resolveLocalFile(chapterUrl)?.exists() == true
+}
+
 /** 文件元信息（大小/修改时间），带缓存，避免重复 SAF IPC。file 未解析时不缓存（避免陈旧 0）。 */
 private fun getFileStat(chapterUrl: String, file: UniFile?): FileStat {
     if (file == null) return FileStat(0, 0)
@@ -9605,6 +9718,8 @@ private fun LocalFileRow(
     coverModel: Any?,
     /** 来源标识（本地/WebDAV/SMB）：历史/书签共用存储，行内以徽章区分。null = 不显示。 */
     sourceBadge: String? = null,
+    /** 文件已删除时置灰、行点击失效；「⋯」菜单仍可用（要留删除书签的入口）。 */
+    enabled: Boolean = true,
     onClick: () -> Unit,
     moreMenu: @Composable (dismiss: () -> Unit) -> Unit,
 ) {
@@ -9619,7 +9734,8 @@ private fun LocalFileRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.38f)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -10643,6 +10759,17 @@ private fun BookmarksTabLocal(
                     val file by produceState<UniFile?>(initialValue = null, key1 = first.chapterUrl) {
                         value = withContext(Dispatchers.IO) { resolveLocalFile(first.chapterUrl) }
                     }
+                    // 三态：null=判定中（先按可用来画，避免进 tab 时整列表闪一下灰），
+                    // false=文件已删。resumeTick/refreshTick 进 key，删完文件再回来要复查。
+                    val fileAvailable by produceState<Boolean?>(
+                        initialValue = null,
+                        key1 = first.chapterUrl,
+                        key2 = resumeTick,
+                        key3 = refreshTick,
+                    ) {
+                        value = withContext(Dispatchers.IO) { localChapterFileAvailable(first.chapterUrl) }
+                    }
+                    val missing = fileAvailable == false
                     val totalPages by produceState(initialValue = 0, key1 = file, key2 = first.chapterUrl, key3 = resumeTick) {
                         // 本地文件走磁盘计数；WebDAV 等远程章节无文件，取阅读器回填的内存备忘
                         value = file?.let { countChapterPages(context, first.chapterUrl, it) }
@@ -10671,8 +10798,10 @@ private fun BookmarksTabLocal(
                     LocalFileRow(
                         context = context,
                         title = first.mangaTitle,
-                        subtitle = composeStringResource(R.string.bookmarks_count_subtitle, chapterText, bms.size),
+                        subtitle = composeStringResource(R.string.bookmarks_count_subtitle, chapterText, bms.size) +
+                            (if (missing) " · 文件已删除" else ""),
                         sourceBadge = chapterSourceLabel(first.chapterUrl, webDavConns, smbConns),
+                        enabled = !missing,
                         fileSize = stat.size,
                         // 文件修改时间对远程章节无意义，行内改显最后阅读时间
                         dateTime = first.lastRead?.time ?: 0L,
@@ -10722,6 +10851,7 @@ private fun BookmarksTabLocal(
                                     context = context,
                                     page = bm.page,
                                     totalPages = totalPages,
+                                    enabled = !missing,
                                     onClick = {
                                         context.startActivity(ReaderActivity.newIntent(context, bm.mangaId, chapterId, bm.page))
                                     },
@@ -10750,13 +10880,15 @@ private fun BookmarkPageRow(
     context: Context,
     page: Int,
     totalPages: Int,
+    enabled: Boolean = true,
     onClick: () -> Unit,
     onRemove: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.38f)
             .padding(start = 28.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
