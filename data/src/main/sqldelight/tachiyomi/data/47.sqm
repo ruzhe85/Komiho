@@ -1,0 +1,3 @@
+ALTER TABLE chapters ADD COLUMN content_key TEXT;
+ALTER TABLE chapters ADD COLUMN total_pages INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX idx_chapters_content_key ON chapters(content_key);

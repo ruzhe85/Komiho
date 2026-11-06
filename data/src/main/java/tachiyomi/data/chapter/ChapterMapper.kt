@@ -23,6 +23,9 @@ object ChapterMapper {
         @Suppress("UNUSED_PARAMETER")
         isSyncing: Long,
         memo: JsonObject,
+        // 参数顺序必须与 chapters 表列顺序一致（SQLDelight 生成的 mapper 按列顺序调用）。
+        contentKey: String?,
+        totalPages: Long,
     ): Chapter = Chapter(
         id = id,
         mangaId = mangaId,
@@ -40,5 +43,7 @@ object ChapterMapper {
         lastModifiedAt = lastModifiedAt,
         version = version,
         memo = memo,
+        contentKey = contentKey,
+        totalPages = totalPages.toInt(),
     )
 }

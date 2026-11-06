@@ -2,6 +2,7 @@ package tachiyomi.domain.chapter.repository
 
 import kotlinx.coroutines.flow.Flow
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.model.ChapterProgress
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.model.LocalBookmarkItem
 
@@ -36,4 +37,15 @@ interface ChapterRepository {
     // SY -->
     suspend fun getChapterByUrl(url: String): List<Chapter>
     // SY <--
+
+    // Komiho (2026-11-06): 文件身份（v1:size:mtime）。文件移动/改名后 url 失效，
+    // 但 content_key 不变 —— 文件浏览器与历史都靠它把同一条章节找回来。
+    suspend fun getChapterByContentKey(contentKey: String): Chapter?
+
+    /** 文件浏览器列表：按一批 content_key 批量取进度（不含大字段）。 */
+    suspend fun getChapterProgressByContentKeys(contentKeys: List<String>): List<ChapterProgress>
+
+    suspend fun updateChapterContentKey(chapterId: Long, contentKey: String)
+
+    suspend fun updateChapterTotalPages(chapterId: Long, totalPages: Int)
 }

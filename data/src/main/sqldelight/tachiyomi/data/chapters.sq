@@ -19,6 +19,11 @@ CREATE TABLE chapters(
     version INTEGER NOT NULL DEFAULT 0,
     is_syncing INTEGER NOT NULL DEFAULT 0,
     memo BLOB AS JsonObject NOT NULL DEFAULT '{}',
+    -- Komiho (2026-11-06): 文件身份（v1:size:mtime，见 FileIdentity）。文件移动/改名后
+    -- url 会变，但 content_key 不变 —— 文件浏览器靠它把进度/history 找回来。
+    content_key TEXT,
+    -- 总页数：文件浏览器显示「62/166」的分母；打开一次写一次（0 = 未知）。
+    total_pages INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(manga_id) REFERENCES mangas (_id)
     ON DELETE CASCADE
 );
@@ -26,6 +31,7 @@ CREATE TABLE chapters(
 CREATE INDEX chapters_manga_id_index ON chapters(manga_id);
 CREATE INDEX chapters_unread_by_manga_index ON chapters(manga_id, read) WHERE read = 0;
 CREATE INDEX idx_chapters_url ON chapters(url);
+CREATE INDEX idx_chapters_content_key ON chapters(content_key);
 
 CREATE TRIGGER update_last_modified_at_chapters
 AFTER UPDATE ON chapters
@@ -112,6 +118,33 @@ SELECT *
 FROM chapters
 WHERE url = :chapterUrl
 AND manga_id = :mangaId;
+
+-- Komiho (2026-11-06): 按文件身份查章节 —— 文件移动/改名后仍能找回同一条记录。
+-- 打开文件时优先用它（命中就把 url 更新成新路径，进度与历史一并跟过来）。
+getChapterByContentKey:
+SELECT *
+FROM chapters
+WHERE content_key = :contentKey
+-- 同一 key 可能有多条（复制出来的副本都写了同一个身份），取最近更新的那条，
+-- 避免每次查询拿到的记录不确定。
+ORDER BY last_modified_at DESC
+LIMIT 1;
+
+-- 文件浏览器列表：只取展示需要的字段，按一批 key 一次查完。
+chapterProgressByContentKeys:
+SELECT content_key, last_page_read, total_pages, read
+FROM chapters
+WHERE content_key IN :contentKeys;
+
+updateChapterContentKey:
+UPDATE chapters
+SET content_key = :contentKey
+WHERE _id = :chapterId;
+
+updateChapterTotalPages:
+UPDATE chapters
+SET total_pages = :totalPages
+WHERE _id = :chapterId;
 
 removeChaptersWithIds:
 DELETE FROM chapters

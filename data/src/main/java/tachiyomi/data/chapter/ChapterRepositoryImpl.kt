@@ -12,6 +12,7 @@ import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.chapter.ChapterMapper.mapChapter
 import tachiyomi.data.subscribeToList
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.model.ChapterProgress
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.model.LocalBookmarkItem
 import tachiyomi.domain.chapter.repository.ChapterRepository
@@ -162,4 +163,33 @@ class ChapterRepositoryImpl(
             .awaitAsList()
     }
     // SY <--
+
+    // Komiho (2026-11-06): 文件身份相关查询。
+    override suspend fun getChapterByContentKey(contentKey: String): Chapter? {
+        return database.chaptersQueries
+            .getChapterByContentKey(contentKey, ::mapChapter)
+            .awaitAsOneOrNull()
+    }
+
+    override suspend fun getChapterProgressByContentKeys(contentKeys: List<String>): List<ChapterProgress> {
+        if (contentKeys.isEmpty()) return emptyList()
+        return database.chaptersQueries
+            .chapterProgressByContentKeys(contentKeys) { key, lastPageRead, totalPages, read ->
+                ChapterProgress(
+                    contentKey = key,
+                    lastPageRead = lastPageRead,
+                    totalPages = totalPages.toInt(),
+                    read = read,
+                )
+            }
+            .awaitAsList()
+    }
+
+    override suspend fun updateChapterContentKey(chapterId: Long, contentKey: String) {
+        database.chaptersQueries.updateChapterContentKey(contentKey = contentKey, chapterId = chapterId)
+    }
+
+    override suspend fun updateChapterTotalPages(chapterId: Long, totalPages: Int) {
+        database.chaptersQueries.updateChapterTotalPages(totalPages = totalPages.toLong(), chapterId = chapterId)
+    }
 }
