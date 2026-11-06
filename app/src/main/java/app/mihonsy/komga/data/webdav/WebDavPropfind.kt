@@ -60,6 +60,19 @@ internal val WEBDAV_IMAGE_EXTS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp
 object WebDavPropfind {
 
     /**
+     * Komiho (2026-11-06): 最近列过的条目（按完整 URL）。
+     *
+     * 用途：`openWebDavTestFile` 要给章节算文件身份（size + mtime），列表刚列过就有现成的，
+     * 命中缓存就不用再发一次 PROPFIND —— 从文件列表点开等于零额外请求。
+     * 换进程/直接跳转（历史、书签）时缓存为空，调用方回退列一次。
+     */
+    private val recentEntries = object : LinkedHashMap<String, WebDavEntry>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, WebDavEntry>) = size > 512
+    }
+
+    fun cachedEntry(url: String): WebDavEntry? = synchronized(recentEntries) { recentEntries[url] }
+
+    /**
      * 列出 [dirUrl] 的直接子项（Depth-1）。返回子目录 + 归档（zip/cbz/rar/7z），不含自身。
      * 目录在前、归档在后，各自按名称自然排序（Chapter2 < Chapter10）。
      * 失败抛异常（401/405/网络错误等），由调用方决定提示或兜底。
@@ -96,7 +109,11 @@ object WebDavPropfind {
                     resp.body?.string() ?: throw Exception("PROPFIND 空响应")
                 }
             parse(xml, selfPath, dir)
-                .also { logcat(LogPriority.DEBUG) { "[WebDav] PROPFIND %s -> %d 项".format(dir, it.size) } }
+                .also { items ->
+                    // 顺手填充缓存，供「打开文件」取 size/mtime（见 cachedEntry）。
+                    synchronized(recentEntries) { items.forEach { recentEntries[it.url] = it } }
+                    logcat(LogPriority.DEBUG) { "[WebDav] PROPFIND %s -> %d 项".format(dir, it.size) }
+                }
         }
 
     // ------------------------------------------------------------ XML 解析

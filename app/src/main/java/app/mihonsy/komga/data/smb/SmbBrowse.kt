@@ -60,6 +60,23 @@ internal val SMB_IMAGE_EXTS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", 
 object SmbBrowse {
 
     /** 浏览起始路径 = 连接上配置的共享内起始目录（空 = 共享根）。 */
+    /**
+     * Komiho (2026-11-06): 最近列过的条目（按共享内相对路径）。
+     *
+     * 用途：`openSmbFile` 给章节算文件身份（size + mtime）时复用列表结果 ——
+     * 从文件列表点开等于零额外请求；历史/书签进入时缓存为空，调用方回退列一次。
+     */
+    private val recentEntries = object : LinkedHashMap<String, SmbEntry>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SmbEntry>) = size > 512
+    }
+
+    /** 列目录后顺手记住，供 [cachedEntry] 查。 */
+    private fun rememberEntries(list: List<SmbEntry>) {
+        synchronized(recentEntries) { list.forEach { recentEntries[it.path] = it } }
+    }
+
+    fun cachedEntry(path: String): SmbEntry? = synchronized(recentEntries) { recentEntries[path] }
+
     fun rootPath(conn: SmbConnection): String = conn.path
 
     /**
@@ -74,6 +91,7 @@ object SmbBrowse {
             val listStart = System.currentTimeMillis()
             try {
                 val out = listOnce(conn, password, relPath)
+                rememberEntries(out)
                 val cost = System.currentTimeMillis() - listStart
                 // 慢 → WARN：release 版日志级别（WARN）会吞掉 INFO，而「慢」正是要取证的现场。
                 if (cost >= SmbSessionManager.SLOW_LOG_MS) {
@@ -88,6 +106,7 @@ object SmbBrowse {
                 SmbSessionManager.invalidate(conn)
                 val retryStart = System.currentTimeMillis()
                 val out = listOnce(conn, password, relPath)
+                rememberEntries(out)
                 logcat(LogPriority.WARN) { "[Smb] 列目录 $relPath 重试成功，${out.size} 项，耗时 ${System.currentTimeMillis() - retryStart}ms" }
                 out
             }

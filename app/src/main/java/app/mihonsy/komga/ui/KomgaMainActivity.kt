@@ -273,6 +273,7 @@ import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.diagnostic.DiagnosticLogBuffer
 import eu.kanade.tachiyomi.util.system.createFileInCacheDir
 import eu.kanade.tachiyomi.util.pdf.PdfRenderFallback
+import eu.kanade.tachiyomi.util.storage.FileIdentity
 import eu.kanade.tachiyomi.util.storage.getUriCompat
 import eu.kanade.tachiyomi.util.system.toShareIntent
 // SY <--
@@ -6145,6 +6146,18 @@ private fun LocalFileBrowser(
     // SY <--
 
     var entries by remember { mutableStateOf<List<LocalEntry>>(emptyList()) }
+    // Komiho (2026-11-06): 归档/PDF 的阅读进度（62/166）。散图目录、图片、目录不显示。
+    // 纯计算：size/mtime 已在列目录时拿到，不额外读文件；DB 一次批量查。
+    val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
+        initialValue = emptyMap(),
+        key1 = entries,
+    ) {
+        value = loadFileProgress(
+            entries.filter { !it.isDirectory && it.isArchive }
+                .map { Triple(it.name, it.size, it.lastModified) },
+        )
+    }
+    val progressReadLabel = composeStringResource(R.string.book_status_read)
     var loading by remember { mutableStateOf(true) }
 
     // 列目录：仿 Material Files，用 DocumentsContract 子文档游标一次性把整目录元数据取全
@@ -6490,6 +6503,7 @@ private fun LocalFileBrowser(
                             entry = file,
                             showCover = showCover,
                             clickable = isItemClickable(file),
+                            progressText = listProgressLabel(fileProgress[file.name], progressReadLabel),
                             onOpen = { onOpenItem(file) },
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -6514,6 +6528,7 @@ private fun LocalFileBrowser(
                             entry = file,
                             showCover = showCover,
                             clickable = isItemClickable(file),
+                            progressText = gridProgressLabel(fileProgress[file.name], progressReadLabel),
                             onClick = { onOpenItem(file) },
                         )
                     }
@@ -6539,8 +6554,14 @@ private fun LocalFileBrowser(
 /** 文件/目录一行（列表模式）。可点性由调用方按「目录/归档/图片」决定。
  *  开启「显示封面」时，左侧 icon 改为封面缩略图（走 Coil 全局缓存，取不到回落 icon）。 */
 @Composable
-private fun FileRow(entry: LocalEntry, showCover: Boolean, clickable: Boolean, onOpen: () -> Unit) {
-    FileListRow(name = entry.name, clickable = clickable, onOpen = onOpen) {
+private fun FileRow(
+    entry: LocalEntry,
+    showCover: Boolean,
+    clickable: Boolean,
+    progressText: String? = null,
+    onOpen: () -> Unit,
+) {
+    FileListRow(name = entry.name, clickable = clickable, progressText = progressText, onOpen = onOpen) {
         LocalCoverThumb(
             entry = entry,
             showCover = showCover,
@@ -6551,11 +6572,13 @@ private fun FileRow(entry: LocalEntry, showCover: Boolean, clickable: Boolean, o
 }
 
 /** 列表条目行骨架：本地浏览与 WebDAV 浏览共用同一「列表模式」视觉——
- *  左侧图标/封面槽 + 单行名称（省略号）；底部分隔线由调用方在行后追加。 */
+ *  左侧图标/封面槽 + 单行名称（省略号）+ 右侧进度（「62/166 37%」/「已读」）；
+ *  底部分隔线由调用方在行后追加。 */
 @Composable
 private fun FileListRow(
     name: String,
     clickable: Boolean,
+    progressText: String? = null,
     onOpen: () -> Unit,
     leading: @Composable () -> Unit,
 ) {
@@ -6573,8 +6596,81 @@ private fun FileListRow(
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        if (progressText != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = progressText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
     }
+}
+
+/**
+ * Komiho (2026-11-06): 文件浏览器进度 —— 把「条目标识 + size + mtime」批量换算成进度记录。
+ *
+ * 只对**文件型章节**（归档/PDF/文档）调用；散图目录、图片文件、目录一律不传，所以这里
+ * 拿不到条目就是空 map。零额外 IO：size/mtime 都来自列表加载时已有的字段，算 key 是纯计算。
+ */
+private suspend fun loadFileProgress(
+    items: List<Triple<String, Long, Long>>,
+): Map<String, tachiyomi.domain.chapter.model.ChapterProgress> {
+    if (items.isEmpty()) return emptyMap()
+    val keyToId = HashMap<String, String>(items.size)
+    for ((id, size, mtime) in items) {
+        val key = FileIdentity.of(size, mtime) ?: continue
+        // 不用 putIfAbsent：那是 Java 8 / API 24 才有的默认方法，minSdk 更低会 NoSuchMethodError。
+        if (!keyToId.containsKey(key)) keyToId[key] = id
+    }
+    if (keyToId.isEmpty()) return emptyMap()
+    val rows = runCatching {
+        Injekt.get<ChapterRepository>().getChapterProgressByContentKeys(keyToId.keys.toList())
+    }.getOrDefault(emptyList())
+    if (rows.isEmpty()) return emptyMap()
+    val out = HashMap<String, tachiyomi.domain.chapter.model.ChapterProgress>(rows.size)
+    for (row in rows) {
+        val id = row.contentKey?.let { keyToId[it] } ?: continue
+        out[id] = row
+    }
+    return out
+}
+
+/** 列表模式标签：「62/166 37%」；已读给「已读」；未读/页数未知返回 null（不占位）。 */
+private fun listProgressLabel(p: tachiyomi.domain.chapter.model.ChapterProgress?, readLabel: String): String? {
+    if (p == null || p.totalPages <= 0) return null
+    if (p.read) return readLabel
+    if (p.lastPageRead <= 0L) return null
+    val page = (p.lastPageRead + 1).coerceAtMost(p.totalPages.toLong())
+    val percent = (page * 100 / p.totalPages).coerceIn(1L, 99L)
+    return "$page/${p.totalPages} $percent%"
+}
+
+/** 网格模式标签：「37%」/「已读」；未读/页数未知返回 null（不画胶囊）。 */
+private fun gridProgressLabel(p: tachiyomi.domain.chapter.model.ChapterProgress?, readLabel: String): String? {
+    if (p == null || p.totalPages <= 0) return null
+    if (p.read) return readLabel
+    if (p.lastPageRead <= 0L) return null
+    val page = (p.lastPageRead + 1).coerceAtMost(p.totalPages.toLong())
+    return "${(page * 100 / p.totalPages).coerceIn(1L, 99L)}%"
+}
+
+/** Komiho (2026-11-06): 网格封面左上角的进度胶囊（与 Komga 书籍卡片同观感）。 */
+@Composable
+private fun GridProgressBadge(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = Color.White,
+        maxLines = 1,
+        modifier = modifier
+            .padding(6.dp)
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 /** 本地条目封面/图标统一渲染：showCover 开时显示封面缩略图（Coil + 全局 DiskCache），
@@ -6623,6 +6719,7 @@ private fun FileGridCell(
     iconTint: Color,
     iconSize: Dp,
     clickable: Boolean,
+    progressText: String? = null,
     onClick: () -> Unit,
 ) {
     Column(
@@ -6636,6 +6733,9 @@ private fun FileGridCell(
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(iconSize))
+            if (progressText != null) {
+                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart))
+            }
         }
         Spacer(Modifier.height(4.dp))
         Text(
@@ -6657,6 +6757,7 @@ private fun LocalFileGridItem(
     entry: LocalEntry,
     showCover: Boolean,
     clickable: Boolean,
+    progressText: String? = null,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -6673,6 +6774,7 @@ private fun LocalFileGridItem(
             iconTint = fileTint(entry),
             iconSize = iconSize,
             clickable = clickable,
+            progressText = progressText,
             onClick = onClick,
         )
         return
@@ -6690,6 +6792,9 @@ private fun LocalFileGridItem(
             modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
             contentAlignment = Alignment.Center,
         ) {
+            if (progressText != null) {
+                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart))
+            }
             SubcomposeAsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(LocalCoverData(entry.uni, entry.lastModified))
@@ -6904,6 +7009,34 @@ private suspend fun openLocalFile(
             if (manga.ogTitle != title) {
                 mangaRepo.update(MangaUpdate(id = manga.id!!, title = title))
             }
+            // Komiho (2026-11-06): 文件身份（归档/PDF 才有；散图目录不支持进度显示）。
+            // 先按 content_key 找「同一个文件」的旧记录：改名/移动后 url 变、key 不变，
+            // 复用旧 chapter 才能把进度与历史带过来 —— 否则会新建一条进度为 0 的，
+            // 列表读旧记录、阅读写新记录，同 key 两条数据各说各话。
+            val contentKey = if (file.isLocalBook()) {
+                FileIdentity.of(file.length(), file.lastModified())
+            } else {
+                null
+            }
+            if (contentKey != null) {
+                val existing = runCatching { chapterRepo.getChapterByContentKey(contentKey) }.getOrNull()
+                if (existing != null && (existing.url != canonicalFile || existing.mangaId != manga.id!!)) {
+                    // 新路径下若已经有一条**别的**记录（复制出来的副本、或此前扫过同一路径），
+                    // 就不要把旧记录改指过来 —— 否则历史/书签里的老条目会跳到这个副本上。
+                    val taken = runCatching {
+                        chapterRepo.getChapterByUrlAndMangaId(canonicalFile, manga.id!!)
+                    }.getOrNull()
+                    if (taken == null || taken.id == existing.id) {
+                        chapterRepo.update(
+                            ChapterUpdate(id = existing.id, mangaId = manga.id, url = canonicalFile),
+                        )
+                        eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+                            "LocalOpen",
+                            "按文件身份复用章节 id=${existing.id} from=${existing.url} key=$contentKey",
+                        )
+                    }
+                }
+            }
             val chapter = if (file.isLocalBook()) {
                 // 归档/epub：把同目录所有归档/epub 都建成章节（去重），使阅读器能自动加载下一章。
                 // 章节 url 用真实绝对路径（与 manga.url 同源），翻完当前卷自动续到下一卷。
@@ -6987,7 +7120,15 @@ private suspend fun openLocalFile(
                         ),
                     ).first()
             }
-            Triple(manga.id!!, chapter.id!!.toLong(), startPage)
+            // Komiho (2026-11-06): 归档/PDF 的 startPage 恒为 null，这里兜底成章节自身进度 ——
+            // 否则 ChapterLoader 会因「已读章节」跳过 last_page_read（要求
+            // !read || preserveReadingPosition || page != null），从文件入口进来就从第 1 页开始，
+            // 而历史入口因为显式传了 lastPageRead 才正常。`page != null` 同时让该守卫放行。
+            // 新建的章节也要补上身份，否则下次打开还是查不到（老库渐进补齐）。
+            if (contentKey != null && chapter.contentKey != contentKey) {
+                chapterRepo.updateChapterContentKey(chapter.id!!, contentKey)
+            }
+            Triple(manga.id!!, chapter.id!!.toLong(), startPage ?: chapter.last_page_read.toInt())
         }
         eu.kanade.tachiyomi.diagnostic.DiagLog.i(
             "LocalOpen",
@@ -7129,6 +7270,18 @@ private fun WebDavBrowsePane(
     // SY <--
 
     var entries by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
+    // Komiho (2026-11-06): 归档/PDF 的阅读进度（62/166）。散图目录、图片、目录不显示。
+    // WebDAV 的 size/mtime 来自 PROPFIND，零额外请求。
+    val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
+        initialValue = emptyMap(),
+        key1 = entries,
+    ) {
+        value = loadFileProgress(
+            entries.filter { !it.isDir && it.isArchive }
+                .map { Triple(it.name, it.size, it.lastModified) },
+        )
+    }
+    val progressReadLabel = composeStringResource(R.string.book_status_read)
     var loading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var retryTick by remember { mutableIntStateOf(0) }
@@ -7425,7 +7578,13 @@ private fun WebDavBrowsePane(
             displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(state = browseListState, modifier = Modifier.fillMaxSize()) {
                     items(displayList, key = { it.url }) { e ->
-                        WebDavFileRow(conn = conn, entry = e, showCover = showCover, onOpen = { onOpenItem(e) })
+                        WebDavFileRow(
+                        conn = conn,
+                        entry = e,
+                        showCover = showCover,
+                        progressText = listProgressLabel(fileProgress[e.name], progressReadLabel),
+                        onOpen = { onOpenItem(e) },
+                    )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -7442,7 +7601,13 @@ private fun WebDavBrowsePane(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(displayList, key = { it.url }) { e ->
-                        WebDavGridItem(conn = conn, entry = e, showCover = showCover, onClick = { onOpenItem(e) })
+                        WebDavGridItem(
+                        conn = conn,
+                        entry = e,
+                        showCover = showCover,
+                        progressText = gridProgressLabel(fileProgress[e.name], progressReadLabel),
+                        onClick = { onOpenItem(e) },
+                    )
                     }
                 }
             }
@@ -7466,8 +7631,14 @@ private fun WebDavBrowsePane(
 
 /** WebDAV 列表模式一行：与本地 [FileRow] 共用 [FileListRow] 骨架与图标语义；showCover 开时显示封面。 */
 @Composable
-private fun WebDavFileRow(conn: WebDavConnection, entry: WebDavEntry, showCover: Boolean, onOpen: () -> Unit) {
-    FileListRow(name = entry.name, clickable = true, onOpen = onOpen) {
+private fun WebDavFileRow(
+    conn: WebDavConnection,
+    entry: WebDavEntry,
+    showCover: Boolean,
+    progressText: String? = null,
+    onOpen: () -> Unit,
+) {
+    FileListRow(name = entry.name, clickable = true, progressText = progressText, onOpen = onOpen) {
         WebDavCoverThumb(
             conn = conn,
             entry = entry,
@@ -7480,7 +7651,13 @@ private fun WebDavFileRow(conn: WebDavConnection, entry: WebDavEntry, showCover:
 
 /** WebDAV 网格模式一格：未开封面与本地网格未开形态一致（图标居中 + 两行名称）；开封面形态同本地网格。 */
 @Composable
-private fun WebDavGridItem(conn: WebDavConnection, entry: WebDavEntry, showCover: Boolean, onClick: () -> Unit) {
+private fun WebDavGridItem(
+    conn: WebDavConnection,
+    entry: WebDavEntry,
+    showCover: Boolean,
+    progressText: String? = null,
+    onClick: () -> Unit,
+) {
     if (!showCover) {
         FileGridCell(
             name = entry.name,
@@ -7488,6 +7665,7 @@ private fun WebDavGridItem(conn: WebDavConnection, entry: WebDavEntry, showCover
             iconTint = fileKindTint(entry.isDir, entry.isArchive),
             iconSize = 56.dp,
             clickable = true,
+            progressText = progressText,
             onClick = onClick,
         )
         return
@@ -7509,6 +7687,9 @@ private fun WebDavGridItem(conn: WebDavConnection, entry: WebDavEntry, showCover
                 modifier = Modifier.fillMaxSize(),
                 iconSize = iconSize,
             )
+            if (progressText != null) {
+                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart))
+            }
         }
         Spacer(Modifier.height(4.dp))
         Text(
@@ -7671,6 +7852,39 @@ private suspend fun openWebDavTestFile(
             }
             // 散图：被点开那张图在「目录内自然序图片列表」中的下标 → 阅读器初始页。
             // 判据与排序必须和 WebDavDirectoryPageLoader 一致（isImage + 自然序），否则会错页。
+            // Komiho (2026-11-06): 文件身份（归档才有；散图目录不支持进度显示）。
+            // WebDAV 没有单文件 stat，列一次父目录拿 size/mtime —— 只在打开时一次，
+            // 列表侧靠 PROPFIND 已有字段，零额外请求。
+            val contentKey = if (isImageFile) {
+                null
+            } else {
+                // 从文件列表点开时，列表刚 PROPFIND 过 → 缓存命中，零额外请求；
+                // 历史/书签/手输 URL 进来缓存里没有，才回退列一次父目录。
+                val meta = WebDavPropfind.cachedEntry(httpUrl)
+                    ?: runCatching {
+                        WebDavPropfind.list(conn, dirUrl)
+                            .firstOrNull { it.url == httpUrl || it.name == decodedName }
+                    }.getOrNull()
+                meta?.let { FileIdentity.of(it.size, it.lastModified) }
+            }
+            if (contentKey != null) {
+                val existing = runCatching { chapterRepo.getChapterByContentKey(contentKey) }.getOrNull()
+                if (existing != null && (existing.url != chapterUrl || existing.mangaId != manga.id!!)) {
+                    // 同 Local：新路径已有别的记录时不抢，避免历史条目指错文件。
+                    val taken = runCatching {
+                        chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                    }.getOrNull()
+                    if (taken == null || taken.id == existing.id) {
+                        chapterRepo.update(
+                            ChapterUpdate(id = existing.id, mangaId = manga.id, url = chapterUrl),
+                        )
+                        eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+                            "WebDavOpen",
+                            "按文件身份复用章节 id=${existing.id} from=${existing.url} key=$contentKey",
+                        )
+                    }
+                }
+            }
             // 注意：logcat 是 Any 的扩展函数，只在有隐式接收者的作用域（如本 withContext）里可解析，
             // 不能提到函数体顶层，否则 CI 报 Unresolved reference 'logcat'。
             val startPage = if (isImageFile) {
@@ -7777,7 +7991,15 @@ private suspend fun openWebDavTestFile(
             }
             val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
                 ?: error(context.getString(R.string.webdav_chapter_write_failed))
-            Triple(manga.id!!, chapter.id!!.toLong(), startPage)
+            // Komiho (2026-11-06): 归档/PDF 的 startPage 恒为 null，这里兜底成章节自身进度 ——
+            // 否则 ChapterLoader 会因「已读章节」跳过 last_page_read（要求
+            // !read || preserveReadingPosition || page != null），从文件入口进来就从第 1 页开始，
+            // 而历史入口因为显式传了 lastPageRead 才正常。`page != null` 同时让该守卫放行。
+            // 新建的章节也要补上身份，否则下次打开还是查不到（老库渐进补齐）。
+            if (contentKey != null && chapter.contentKey != contentKey) {
+                chapterRepo.updateChapterContentKey(chapter.id!!, contentKey)
+            }
+            Triple(manga.id!!, chapter.id!!.toLong(), startPage ?: chapter.last_page_read.toInt())
         }
         eu.kanade.tachiyomi.diagnostic.DiagLog.i(
             "WebDavOpen",
@@ -7927,6 +8149,18 @@ private fun SmbBrowsePane(
     }
 
     var entries by remember { mutableStateOf<List<SmbEntry>>(emptyList()) }
+    // Komiho (2026-11-06): 归档/PDF 的阅读进度（62/166）。散图目录、图片、目录不显示。
+    // SMB 的 size/mtime 来自列目录结果，零额外请求。
+    val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
+        initialValue = emptyMap(),
+        key1 = entries,
+    ) {
+        value = loadFileProgress(
+            entries.filter { !it.isDir && it.isArchive }
+                .map { Triple(it.name, it.size, it.lastModified) },
+        )
+    }
+    val progressReadLabel = composeStringResource(R.string.book_status_read)
     var loading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var retryTick by remember { mutableIntStateOf(0) }
@@ -8192,7 +8426,13 @@ private fun SmbBrowsePane(
             displayMode == LibraryDisplayMode.List -> {
                 LazyColumn(state = browseListState, modifier = Modifier.fillMaxSize()) {
                     items(displayList, key = { it.path }) { e ->
-                        SmbFileRow(conn = conn, entry = e, showCover = showCover, onOpen = { onOpenItem(e) })
+                        SmbFileRow(
+                        conn = conn,
+                        entry = e,
+                        showCover = showCover,
+                        progressText = listProgressLabel(fileProgress[e.name], progressReadLabel),
+                        onOpen = { onOpenItem(e) },
+                    )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -8208,7 +8448,13 @@ private fun SmbBrowsePane(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(displayList, key = { it.path }) { e ->
-                        SmbGridItem(conn = conn, entry = e, showCover = showCover, onClick = { onOpenItem(e) })
+                        SmbGridItem(
+                        conn = conn,
+                        entry = e,
+                        showCover = showCover,
+                        progressText = gridProgressLabel(fileProgress[e.name], progressReadLabel),
+                        onClick = { onOpenItem(e) },
+                    )
                     }
                 }
             }
@@ -8246,9 +8492,10 @@ private fun SmbFileRow(
     conn: SmbConnection,
     entry: SmbEntry,
     showCover: Boolean,
+    progressText: String? = null,
     onOpen: () -> Unit,
 ) {
-    FileListRow(name = entry.name, clickable = true, onOpen = onOpen) {
+    FileListRow(name = entry.name, clickable = true, progressText = progressText, onOpen = onOpen) {
         SmbCoverThumb(conn = conn, entry = entry, showCover = showCover, iconSize = 40.dp)
     }
 }
@@ -8258,6 +8505,7 @@ private fun SmbGridItem(
     conn: SmbConnection,
     entry: SmbEntry,
     showCover: Boolean,
+    progressText: String? = null,
     onClick: () -> Unit,
 ) {
     // 未开封面：整体交给共用骨架 [FileGridCell]（自带点击/内边距，clickable=false 避免双重点击）。
@@ -8269,6 +8517,7 @@ private fun SmbGridItem(
             iconTint = fileKindTint(entry.isDir, entry.isArchive),
             iconSize = if (entry.isDir || entry.isArchive) 56.dp else 40.dp,
             clickable = true,
+            progressText = progressText,
             onClick = onClick,
         )
         return
@@ -8285,6 +8534,9 @@ private fun SmbGridItem(
             contentAlignment = Alignment.Center,
         ) {
             SmbCoverThumb(conn = conn, entry = entry, showCover = true, modifier = Modifier.fillMaxSize(), iconSize = 56.dp)
+            if (progressText != null) {
+                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart))
+            }
         }
         Text(
             text = entry.name,
@@ -8400,6 +8652,37 @@ private suspend fun openSmbFile(
             if (manga.ogTitle != seriesTitle) {
                 mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
             }
+            // Komiho (2026-11-06): 文件身份（归档才有；散图目录不支持进度显示）。
+            // SMB 没有单文件 stat，列一次当前目录拿 size/mtime —— 只在打开时一次。
+            val contentKey = if (isImageFile) {
+                null
+            } else {
+                // 从文件列表点开时刚列过该目录 → 缓存命中，零额外请求；
+                // 历史/书签进入时缓存为空，回退列一次。
+                val meta = SmbBrowse.cachedEntry(SmbBrowse.join(dirRel, fileName))
+                    ?: runCatching {
+                        SmbBrowse.list(conn, password, dirRel).firstOrNull { it.name == fileName }
+                    }.getOrNull()
+                meta?.let { FileIdentity.of(it.size, it.lastModified) }
+            }
+            if (contentKey != null) {
+                val existing = runCatching { chapterRepo.getChapterByContentKey(contentKey) }.getOrNull()
+                if (existing != null && (existing.url != chapterUrl || existing.mangaId != manga.id!!)) {
+                    // 同 Local：新路径已有别的记录时不抢，避免历史条目指错文件。
+                    val taken = runCatching {
+                        chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                    }.getOrNull()
+                    if (taken == null || taken.id == existing.id) {
+                        chapterRepo.update(
+                            ChapterUpdate(id = existing.id, mangaId = manga.id, url = chapterUrl),
+                        )
+                        eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+                            "SmbOpen",
+                            "按文件身份复用章节 id=${existing.id} from=${existing.url} key=$contentKey",
+                        )
+                    }
+                }
+            }
             // 散图：被点开那张图在「目录内自然序图片列表」中的下标 → 阅读器初始页。
             // 判据与排序必须和 SmbDirectoryPageLoader 一致（isImage + 自然序），否则会错页。
             // 注意：logcat 是 Any 的扩展函数，只能在有隐式接收者的作用域里用（见本 withContext）。
@@ -8502,7 +8785,15 @@ private suspend fun openSmbFile(
             }
             val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
                 ?: error(context.getString(R.string.webdav_chapter_write_failed))
-            Triple(manga.id!!, chapter.id!!.toLong(), startPage)
+            // Komiho (2026-11-06): 归档/PDF 的 startPage 恒为 null，这里兜底成章节自身进度 ——
+            // 否则 ChapterLoader 会因「已读章节」跳过 last_page_read（要求
+            // !read || preserveReadingPosition || page != null），从文件入口进来就从第 1 页开始，
+            // 而历史入口因为显式传了 lastPageRead 才正常。`page != null` 同时让该守卫放行。
+            // 新建的章节也要补上身份，否则下次打开还是查不到（老库渐进补齐）。
+            if (contentKey != null && chapter.contentKey != contentKey) {
+                chapterRepo.updateChapterContentKey(chapter.id!!, contentKey)
+            }
+            Triple(manga.id!!, chapter.id!!.toLong(), startPage ?: chapter.last_page_read.toInt())
         }
         eu.kanade.tachiyomi.diagnostic.DiagLog.i(
             "SmbOpen",

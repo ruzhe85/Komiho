@@ -536,6 +536,19 @@ class ReaderViewModel @JvmOverloads constructor(
         // SY --> Komiho: 整本下载已在 loader.loadChapter 内完成，其后只剩页面解码，不再属于「缓存中」。
         _chapterCaching.value = false
         // SY <--
+        // Komiho (2026-11-06): 记录总页数 —— 文件浏览器要显示「62/166」的分母。
+        // 只在「已经打过文件身份（PDF/归档）」且值变化时写：普通漫画章节 contentKey 为空，
+        // 不写是为了避免无谓地刷新 last_modified_at（那会牵动同步判定）。
+        val knownPages = chapter.pages?.size ?: 0
+        val chapterId = chapter.chapter.id
+        if (knownPages > 0 && chapterId != null &&
+            chapter.chapter.contentKey != null && chapter.chapter.totalPages != knownPages
+        ) {
+            runCatching {
+                Injekt.get<tachiyomi.domain.chapter.repository.ChapterRepository>()
+                    .updateChapterTotalPages(chapterId, knownPages)
+            }
+        }
 
         val chapterPos = chapterList.indexOf(chapter)
         val newChapters = ViewerChapters(
