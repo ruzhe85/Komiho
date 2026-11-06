@@ -130,9 +130,10 @@ WHERE content_key = :contentKey
 ORDER BY last_modified_at DESC
 LIMIT 1;
 
--- 文件浏览器列表：只取展示需要的字段，按一批 key 一次查完。
-chapterProgressByContentKeys:
-SELECT content_key, last_page_read, total_pages, read
+-- 文件浏览器列表：按一批 key 一次查完。
+-- 用 SELECT *（走已验证的 ChapterMapper），避免自定义列顺序再出一次错。
+getChaptersByContentKeys:
+SELECT *
 FROM chapters
 WHERE content_key IN :contentKeys;
 

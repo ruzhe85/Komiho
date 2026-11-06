@@ -6146,11 +6146,23 @@ private fun LocalFileBrowser(
     // SY <--
 
     var entries by remember { mutableStateOf<List<LocalEntry>>(emptyList()) }
+    // Komiho (2026-11-06): 从阅读器回到列表时重查一次进度 —— 打开文件会写 content_key/页数，
+    // 但 entries 没变，只用 entries 当 key 的话列表仍是旧状态（看起来「没有进度」）。
+    var progressTick by remember { mutableIntStateOf(0) }
+    val progressLifecycle = LocalLifecycleOwner.current
+    DisposableEffect(progressLifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) progressTick++
+        }
+        progressLifecycle.lifecycle.addObserver(observer)
+        onDispose { progressLifecycle.lifecycle.removeObserver(observer) }
+    }
     // Komiho (2026-11-06): 归档/PDF 的阅读进度（62/166）。散图目录、图片、目录不显示。
     // 纯计算：size/mtime 已在列目录时拿到，不额外读文件；DB 一次批量查。
     val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
         initialValue = emptyMap(),
         key1 = entries,
+        key2 = progressTick,
     ) {
         value = loadFileProgress(
             entries.filter { !it.isDirectory && it.isArchive }
@@ -6629,7 +6641,13 @@ private suspend fun loadFileProgress(
     if (keyToId.isEmpty()) return emptyMap()
     val rows = runCatching {
         Injekt.get<ChapterRepository>().getChapterProgressByContentKeys(keyToId.keys.toList())
+    }.onFailure {
+        eu.kanade.tachiyomi.diagnostic.DiagLog.w("FileProgress", "查询进度失败: ${it.message}")
     }.getOrDefault(emptyList())
+    eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+        "FileProgress",
+        "items=${items.size} keys=${keyToId.size} rows=${rows.size}",
+    )
     if (rows.isEmpty()) return emptyMap()
     val out = HashMap<String, tachiyomi.domain.chapter.model.ChapterProgress>(rows.size)
     for (row in rows) {
@@ -7018,6 +7036,10 @@ private suspend fun openLocalFile(
             } else {
                 null
             }
+            eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+                "LocalOpen",
+                "身份 size=${file.length()} mtime=${file.lastModified()} key=$contentKey",
+            )
             if (contentKey != null) {
                 val existing = runCatching { chapterRepo.getChapterByContentKey(contentKey) }.getOrNull()
                 if (existing != null && (existing.url != canonicalFile || existing.mangaId != manga.id!!)) {
@@ -7270,11 +7292,22 @@ private fun WebDavBrowsePane(
     // SY <--
 
     var entries by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
+    // Komiho (2026-11-06): 从阅读器回到列表时重查一次进度（见 LocalFileBrowser 同名注释）。
+    var progressTick by remember { mutableIntStateOf(0) }
+    val progressLifecycle = LocalLifecycleOwner.current
+    DisposableEffect(progressLifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) progressTick++
+        }
+        progressLifecycle.lifecycle.addObserver(observer)
+        onDispose { progressLifecycle.lifecycle.removeObserver(observer) }
+    }
     // Komiho (2026-11-06): 归档/PDF 的阅读进度（62/166）。散图目录、图片、目录不显示。
     // WebDAV 的 size/mtime 来自 PROPFIND，零额外请求。
     val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
         initialValue = emptyMap(),
         key1 = entries,
+        key2 = progressTick,
     ) {
         value = loadFileProgress(
             entries.filter { !it.isDir && it.isArchive }
@@ -8149,11 +8182,22 @@ private fun SmbBrowsePane(
     }
 
     var entries by remember { mutableStateOf<List<SmbEntry>>(emptyList()) }
+    // Komiho (2026-11-06): 从阅读器回到列表时重查一次进度（见 LocalFileBrowser 同名注释）。
+    var progressTick by remember { mutableIntStateOf(0) }
+    val progressLifecycle = LocalLifecycleOwner.current
+    DisposableEffect(progressLifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) progressTick++
+        }
+        progressLifecycle.lifecycle.addObserver(observer)
+        onDispose { progressLifecycle.lifecycle.removeObserver(observer) }
+    }
     // Komiho (2026-11-06): 归档/PDF 的阅读进度（62/166）。散图目录、图片、目录不显示。
     // SMB 的 size/mtime 来自列目录结果，零额外请求。
     val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
         initialValue = emptyMap(),
         key1 = entries,
+        key2 = progressTick,
     ) {
         value = loadFileProgress(
             entries.filter { !it.isDir && it.isArchive }

@@ -26,10 +26,13 @@ object FileIdentity {
      * 否则所有异常项会串成一团。
      */
     fun of(size: Long, lastModified: Long): String? {
-        if (size <= 0L) return null
         // 归一到秒：File.lastModified 是毫秒，但 SAF/WebDAV 有些 provider 只给到秒，
         // 不归一的话同一个文件在两种访问方式下会算出两个 key。
         val mtimeSec = if (lastModified > 0L) lastModified / 1000L else 0L
-        return "$PREFIX:$size:$mtimeSec"
+        // size 缺失（SAF 某些 provider 对文档返回 0）时用 mtime 兜底 —— 列表和打开入口读的是
+        // 同一个 UniFile，两边会同时是 0，所以仍然能对上。两边都为 0 时才放弃（否则所有条目
+        // 会共用一个 key，进度互相串）。
+        if (size <= 0L && mtimeSec == 0L) return null
+        return "$PREFIX:${size.coerceAtLeast(0L)}:$mtimeSec"
     }
 }
