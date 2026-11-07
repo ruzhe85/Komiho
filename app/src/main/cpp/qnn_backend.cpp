@@ -858,6 +858,7 @@ private:
     LOGD("QNN HTP power mode applied: %s", mode_name);
   }
 
+ public:
   /** Komiho (2026-11-07): 运行时切换功耗档。未初始化时只记住，下次 load 时生效。 */
   void set_power_mode(int mode) {
     if (mode < 0) mode = 0;
@@ -872,6 +873,7 @@ private:
     configure_performance();
   }
 
+ private:
   void release_performance() {
     if (power_config_id_ != 0 &&
         performance_infrastructure_.destroyPowerConfigId) {
