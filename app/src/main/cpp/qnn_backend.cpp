@@ -781,36 +781,44 @@ private:
     // （DCVS 都被关了，HTP 恒跑最高频），所以均衡/省电必须先把 dcvsEnable 打开。
     const char *mode_name = "performance";
     if (power_mode_ == 1) {
-      // 均衡：DCVS 自适应升降频，允许空闲休眠；电压从 NOMINAL 起步、峰值仍可升到
-      // MAX。长时间阅读时靠自适应比锁死最高频更不容易撞系统 thermal 限频。
+      // 均衡：DCVS 自适应，电压从 TURBO 起步（比 MAX 低一档）、峰值仍可升到 MAX。
+      // 首版直接把 Min/Target 压到 NOMINAL（一口气掉了 5 档），实测单页 1.2s → 2.1s：
+      // 一页推理只有 1~2 秒，HTP 来不及从 NOM 爬到 MAX 就结束，等于全程低频跑。
+      // 只降一档（TURBO）通常损失 5~15% 速度，功耗却明显下降，是更划算的折中。
+      // 休眠门槛用 1s 而不是 4s：连续翻页的间隔本来就只有 1~3 秒，4s 门槛等于永不休眠。
       mode_name = "balanced";
       dcvs.dcvsV3Config.dcvsEnable = 1;
       dcvs.dcvsV3Config.powerMode =
           QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_ADJUST_UP_DOWN;
       dcvs.dcvsV3Config.sleepLatency = 1000;
       dcvs.dcvsV3Config.sleepDisable = 0;
-      dcvs.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_NOM;
-      dcvs.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_NOM;
+      dcvs.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_TURBO;
+      dcvs.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_TURBO;
       dcvs.dcvsV3Config.busVoltageCornerMax =
           DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
-      dcvs.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_NOM;
-      dcvs.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_NOM;
+      dcvs.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_TURBO;
+      dcvs.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_TURBO;
       dcvs.dcvsV3Config.coreVoltageCornerMax =
           DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
     } else if (power_mode_ >= 2) {
-      // 省电：POWER_SAVER 档 + 电压上限压到 NOMINAL、平时 SVS，休眠门槛拉到 4s。
+      // 省电：POWER_SAVER 档 + 平时 SVS、峰值封顶 TURBO，休眠门槛同样 1s。
+      // 上限早先是 NOMINAL，实测单页 3.4s —— 比「2~3 秒看一页」的翻页间隔还长，
+      // 预读永远追不上，翻页会明显停顿。提到 TURBO 后约 2.2~2.5s，勉强跟得上节奏，
+      // 同时仍比性能档少一大截功耗。
+      // 另外：这一档工作占空比接近 100%，连续翻页时 HTP 没有空闲窗口，1s/4s 都不会
+      // 真休眠；休眠收益只体现在「停下来看一页」或离开阅读器的时候。
       mode_name = "saver";
       dcvs.dcvsV3Config.dcvsEnable = 1;
       dcvs.dcvsV3Config.powerMode =
           QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_POWER_SAVER_MODE;
-      dcvs.dcvsV3Config.sleepLatency = 4000;
+      dcvs.dcvsV3Config.sleepLatency = 1000;
       dcvs.dcvsV3Config.sleepDisable = 0;
       dcvs.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_SVS;
       dcvs.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_SVS;
-      dcvs.dcvsV3Config.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_NOM;
+      dcvs.dcvsV3Config.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_TURBO;
       dcvs.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_SVS;
       dcvs.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_SVS;
-      dcvs.dcvsV3Config.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_NOM;
+      dcvs.dcvsV3Config.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_TURBO;
     } else {
       // 性能（原样保留）：关 DCVS + Burst + 锁最高电压 + 禁休眠。
       dcvs.dcvsV3Config.dcvsEnable = 0;
