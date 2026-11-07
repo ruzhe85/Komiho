@@ -627,7 +627,7 @@ object Waifu2x {
     }
 
     /**
-     * Komiho (2026-11-07): 应用 QNN/HTP 功耗档（0 = 性能 / 1 = 均衡 / 2 = 省电）。
+     * Komiho (2026-11-07): 应用 QNN/HTP 功耗档（0 = 性能 / 1 = 省电）。
      *
      * 未初始化时原生只记住档位，下次 [initQnnEngine] 生效；已初始化则立刻重设 perf 配置
      * （不重建 QNN context，切换是即时的）。QNN 引擎重建时由 [ensureEngine] 重新应用，
@@ -1288,7 +1288,7 @@ object Waifu2x {
     private external fun nativeInitQnn(contextPath: String, nativeLibraryDir: String, padding: Int): Boolean
 
     /**
-     * Komiho (2026-11-07): HTP 功耗档（0 = 性能 / 1 = 均衡 / 2 = 省电）。
+     * Komiho (2026-11-07): HTP 功耗档（0 = 性能 / 1 = 省电）。
      * 与 [nativeUpdatePerformanceConfig] 不同，这个真正作用于 QNN（见 qnn_backend.cpp
      * 的 `configure_performance`）。未初始化时只记录，初始化后生效。
      */

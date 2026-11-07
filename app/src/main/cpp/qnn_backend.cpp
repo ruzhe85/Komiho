@@ -776,48 +776,38 @@ private:
     dcvs.dcvsV3Config.setBusParams = 1;
     dcvs.dcvsV3Config.setCoreParams = 1;
 
-    // Komiho (2026-11-07): 三档由 power_mode_ 决定。
+    // Komiho (2026-11-07): 两档由 power_mode_ 决定（0 = 性能、1 = 省电）。
     // 关键点：原来那套「关 DCVS + 锁最高电压 + 禁休眠」下，powerMode 名存实亡
-    // （DCVS 都被关了，HTP 恒跑最高频），所以均衡/省电必须先把 dcvsEnable 打开。
+    // （DCVS 都被关了，HTP 恒跑最高频），所以省电档必须先把 dcvsEnable 打开。
+    //
+    // 曾有过第三档「均衡」（TURBO 起步 + 可升到 MAX + 1s 休眠），实测下来：
+    // 连续阅读时 DCVS 几十毫秒就爬到 MAX、空闲窗口 0~0.8s 又够不着休眠门槛，
+    // 速度与机身温度和性能档几乎一致，等于没有价值 —— 已删除。
     const char *mode_name = "performance";
-    if (power_mode_ == 1) {
-      // 均衡：DCVS 自适应，电压从 TURBO 起步（比 MAX 低一档）、峰值仍可升到 MAX。
-      // 首版直接把 Min/Target 压到 NOMINAL（一口气掉了 5 档），实测单页 1.2s → 2.1s：
-      // 一页推理只有 1~2 秒，HTP 来不及从 NOM 爬到 MAX 就结束，等于全程低频跑。
-      // 只降一档（TURBO）通常损失 5~15% 速度，功耗却明显下降，是更划算的折中。
-      // 休眠门槛用 1s 而不是 4s：连续翻页的间隔本来就只有 1~3 秒，4s 门槛等于永不休眠。
-      mode_name = "balanced";
+    if (power_mode_ >= 1) {
+      // 省电：把三个 corner **全部锁在 TURBO**（比性能档的 MAX 低两档），不做升降。
+      //
+      // 漫画是短任务场景（单页 1~2 秒），HTP 的 DCVS 从低档爬到高档要几十毫秒以上，
+      // 而且爬升期间算力是浪费掉的 —— 起点就等于实际执行频率，压低起点（NOM/SVS）
+      // 只会让每页都白慢，省不下多少电。所以这里不用「低起点 + 高上限」那套，
+      // 直接锁定一个中等档：速度损失有限，峰值功耗明显下降。
+      //
+      // 注意 dcvsEnable 必须为 1 才让 corner 约束生效；关掉 DCVS 时 HTP 会无视
+      // corner 直接跑最高频（那正是性能档的做法）。
+      //
+      // 休眠门槛 1s：连续翻页时空闲窗口 0~0.8s，基本够不着；它的作用只在
+      // 「停在一页久看」时，退出阅读器则由 shutdown() 直接释放 context。
+      mode_name = "saver";
       dcvs.dcvsV3Config.dcvsEnable = 1;
       dcvs.dcvsV3Config.powerMode =
-          QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_ADJUST_UP_DOWN;
+          QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_PERFORMANCE_MODE;
       dcvs.dcvsV3Config.sleepLatency = 1000;
       dcvs.dcvsV3Config.sleepDisable = 0;
       dcvs.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_TURBO;
       dcvs.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_TURBO;
-      dcvs.dcvsV3Config.busVoltageCornerMax =
-          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+      dcvs.dcvsV3Config.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_TURBO;
       dcvs.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_TURBO;
       dcvs.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_TURBO;
-      dcvs.dcvsV3Config.coreVoltageCornerMax =
-          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
-    } else if (power_mode_ >= 2) {
-      // 省电：POWER_SAVER 档 + 平时 SVS、峰值封顶 TURBO，休眠门槛同样 1s。
-      // 上限早先是 NOMINAL，实测单页 3.4s —— 比「2~3 秒看一页」的翻页间隔还长，
-      // 预读永远追不上，翻页会明显停顿。提到 TURBO 后约 2.2~2.5s，勉强跟得上节奏，
-      // 同时仍比性能档少一大截功耗。
-      // 另外：这一档工作占空比接近 100%，连续翻页时 HTP 没有空闲窗口，1s/4s 都不会
-      // 真休眠；休眠收益只体现在「停下来看一页」或离开阅读器的时候。
-      mode_name = "saver";
-      dcvs.dcvsV3Config.dcvsEnable = 1;
-      dcvs.dcvsV3Config.powerMode =
-          QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_POWER_SAVER_MODE;
-      dcvs.dcvsV3Config.sleepLatency = 1000;
-      dcvs.dcvsV3Config.sleepDisable = 0;
-      dcvs.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_SVS;
-      dcvs.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_SVS;
-      dcvs.dcvsV3Config.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_TURBO;
-      dcvs.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_SVS;
-      dcvs.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_SVS;
       dcvs.dcvsV3Config.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_TURBO;
     } else {
       // 性能（原样保留）：关 DCVS + Burst + 锁最高电压 + 禁休眠。
@@ -851,7 +841,7 @@ private:
         QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_RPC_POLLING_TIME;
     rpc_polling.rpcPollingTimeConfig =
         QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIG_MAX_RPC_POLLING_TIME;
-    // 性能档沿用原来最激进的高频轮询；均衡/省电不强制，交给驱动默认值。
+    // 性能档沿用原来最激进的高频轮询；省电档不强制，交给驱动默认值。
     const QnnHtpPerfInfrastructure_PowerConfig_t *configs_perf[] = {
         &dcvs, &rpc_latency, &rpc_polling, nullptr};
     const QnnHtpPerfInfrastructure_PowerConfig_t *configs_eco[] = {
@@ -867,10 +857,10 @@ private:
   }
 
  public:
-  /** Komiho (2026-11-07): 运行时切换功耗档。未初始化时只记住，下次 load 时生效。 */
+  /** Komiho (2026-11-07): 运行时切换功耗档（0 = 性能、1 = 省电）。未初始化时只记住。 */
   void set_power_mode(int mode) {
     if (mode < 0) mode = 0;
-    if (mode > 2) mode = 2;
+    if (mode > 1) mode = 1;
     power_mode_ = mode;
     if (!initialized_) {
       return;
@@ -1146,7 +1136,7 @@ private:
       QNN_HTP_DEVICE_PERF_INFRASTRUCTURE_INIT;
   uint32_t power_config_id_ = 0;
   bool initialized_ = false;
-  // Komiho (2026-11-07): 0 = 性能（原 Burst 配置）、1 = 均衡、2 = 省电。
+  // Komiho (2026-11-07): 0 = 性能（原 Burst 配置）、1 = 省电。
   // 由 Kotlin 侧偏好决定，加载模型时应用；运行时切换走 set_power_mode()。
   int power_mode_ = 0;
 };
@@ -1224,7 +1214,7 @@ void shutdown() {
 #endif
 }
 
-// Komiho (2026-11-07): 0 = 性能 / 1 = 均衡 / 2 = 省电。见 Runtime::set_power_mode。
+// Komiho (2026-11-07): 0 = 性能 / 1 = 省电。见 Runtime::set_power_mode。
 void set_power_mode(int mode) {
 #if MIHON_ENABLE_QNN
   runtime.set_power_mode(mode);

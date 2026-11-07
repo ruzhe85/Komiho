@@ -21,7 +21,7 @@ int process_rgba(const uint8_t *input, int width, int height, int input_stride,
                  const std::atomic<bool> *should_abort);
 void shutdown();
 
-// Komiho (2026-11-07): 运行时切换 HTP 功耗档（0 = 性能 / 1 = 均衡 / 2 = 省电）。
+// Komiho (2026-11-07): 运行时切换 HTP 功耗档（0 = 性能 / 1 = 省电）。
 // 未初始化时只记录，等下一次 initialize() 生效；已初始化则立刻重设 perf 配置。
 void set_power_mode(int mode);
 

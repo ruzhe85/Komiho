@@ -417,7 +417,6 @@
     <string name="enhancement_detail_advanced">AI 选项</string>
     <string name="enhancement_qnn_power_mode">NPU 功耗模式</string>
     <string name="enhancement_qnn_power_performance">性能</string>
-    <string name="enhancement_qnn_power_balanced">均衡</string>
     <string name="enhancement_qnn_power_saver">省电</string>
     <!-- Komiho: NPU 详情里「没有系列、或系列只有它一个」的模型统一归到这个组。 -->
     <string name="enhancement_series_standalone">Standalone</string>
