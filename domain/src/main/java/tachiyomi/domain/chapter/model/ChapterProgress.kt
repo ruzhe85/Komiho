@@ -8,6 +8,11 @@ package tachiyomi.domain.chapter.model
  */
 data class ChapterProgress(
     val contentKey: String?,
+    /**
+     * 章节 URL（本地绝对路径 / WebDAV 章节 URL / SMB 章节 URL）。
+     * 只有「按 URL 兜底查询」这条通道会填；按 content_key 查询时为 null。
+     */
+    val url: String? = null,
     /** 0-based 页码（展示时 +1）。 */
     val lastPageRead: Long,
     /** 总页数，0 = 未知（不显示进度）。 */

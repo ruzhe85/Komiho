@@ -45,6 +45,13 @@ interface ChapterRepository {
     /** 文件浏览器列表：按一批 content_key 批量取进度（不含大字段）。 */
     suspend fun getChapterProgressByContentKeys(contentKeys: List<String>): List<ChapterProgress>
 
+    /**
+     * 文件浏览器列表的**兜底通道**：按一批章节 URL 批量取进度。
+     * 从历史 / 书签进入阅读不会经过打开入口，这类章节的 content_key 可能为空，
+     * 只按 key 查会显示不出进度。返回项的 [ChapterProgress.url] 为对应章节 URL。
+     */
+    suspend fun getChapterProgressByUrls(urls: List<String>): List<ChapterProgress>
+
     suspend fun updateChapterContentKey(chapterId: Long, contentKey: String)
 
     suspend fun updateChapterTotalPages(chapterId: Long, totalPages: Int)

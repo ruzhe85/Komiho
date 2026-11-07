@@ -186,6 +186,22 @@ class ChapterRepositoryImpl(
             }
     }
 
+    override suspend fun getChapterProgressByUrls(urls: List<String>): List<ChapterProgress> {
+        if (urls.isEmpty()) return emptyList()
+        return database.chaptersQueries
+            .getChaptersByUrls(urls, ::mapChapter)
+            .awaitAsList()
+            .map {
+                ChapterProgress(
+                    contentKey = it.contentKey,
+                    url = it.url,
+                    lastPageRead = it.lastPageRead,
+                    totalPages = it.totalPages,
+                    read = it.read,
+                )
+            }
+    }
+
     override suspend fun updateChapterContentKey(chapterId: Long, contentKey: String) {
         database.chaptersQueries.updateChapterContentKey(contentKey = contentKey, chapterId = chapterId)
     }

@@ -6214,10 +6214,15 @@ private fun LocalFileBrowser(
         key1 = entries,
         key2 = progressTick,
     ) {
-        value = loadFileProgress(
-            entries.filter { !it.isDirectory && it.isArchive }
-                .map { Triple(it.name, it.size, it.lastModified) },
-        )
+        value = withContext(Dispatchers.IO) {
+            loadFileProgress(
+                entries.filter { !it.isDirectory && it.isArchive }.map {
+                    // 章节 url 用真实绝对路径，与 openLocalFile 写入的一致（兜底通道靠它匹配）。
+                    // realPathOf 内部是 File.canonicalPath（会碰文件系统），几百个文件必须放 IO 线程。
+                    FileProgressQuery(it.name, it.size, it.lastModified, fs.realPathOf(it.uni) ?: "")
+                },
+            )
+        }
     }
     val progressReadLabel = composeStringResource(R.string.book_status_read)
     var loading by remember { mutableStateOf(true) }
@@ -7250,37 +7255,78 @@ private fun FileListRow(
 }
 
 /**
- * Komiho (2026-11-06): 文件浏览器进度 —— 把「条目标识 + size + mtime」批量换算成进度记录。
+ * Komiho (2026-11-07): 文件浏览器进度查询的一项 —— 显示名 + 文件身份（size/mtime）+ 章节 URL。
+ * size/mtime 用于 content_key 通道（文件移动/改名后仍有效）；chapterUrl 用于兜底通道。
+ */
+private data class FileProgressQuery(
+    val name: String,
+    val size: Long,
+    val mtime: Long,
+    val chapterUrl: String,
+)
+
+/**
+ * Komiho (2026-11-06): 文件浏览器进度 —— 把条目批量换算成进度记录。
  *
  * 只对**文件型章节**（归档/PDF/文档）调用；散图目录、图片文件、目录一律不传，所以这里
- * 拿不到条目就是空 map。零额外 IO：size/mtime 都来自列表加载时已有的字段，算 key 是纯计算。
+ * 拿不到条目就是空 map。零额外 IO：size/mtime/url 都来自列表加载时已有的字段。
+ *
+ * 两条通道：
+ * 1. content_key（size+mtime）—— 文件移动/改名后仍然有效，优先；
+ * 2. 章节 URL —— 兜底。从历史 / 书签进入阅读不会经过「打开文件」入口，这些章节的
+ *    content_key 可能一直是空的（旧版本只给「当前打开的那一卷」写 key），只查 key
+ *    会让列表显示不出进度。
  */
 private suspend fun loadFileProgress(
-    items: List<Triple<String, Long, Long>>,
+    items: List<FileProgressQuery>,
 ): Map<String, tachiyomi.domain.chapter.model.ChapterProgress> {
     if (items.isEmpty()) return emptyMap()
-    val keyToId = HashMap<String, String>(items.size)
-    for ((id, size, mtime) in items) {
-        val key = FileIdentity.of(size, mtime) ?: continue
+    val repo = Injekt.get<ChapterRepository>()
+    val out = HashMap<String, tachiyomi.domain.chapter.model.ChapterProgress>(items.size)
+
+    val keyToName = HashMap<String, String>(items.size)
+    for (item in items) {
+        val key = FileIdentity.of(item.size, item.mtime) ?: continue
         // 不用 putIfAbsent：那是 Java 8 / API 24 才有的默认方法，minSdk 更低会 NoSuchMethodError。
-        if (!keyToId.containsKey(key)) keyToId[key] = id
+        if (!keyToName.containsKey(key)) keyToName[key] = item.name
     }
-    if (keyToId.isEmpty()) return emptyMap()
-    val rows = runCatching {
-        Injekt.get<ChapterRepository>().getChapterProgressByContentKeys(keyToId.keys.toList())
-    }.onFailure {
-        eu.kanade.tachiyomi.diagnostic.DiagLog.w("FileProgress", "查询进度失败: ${it.message}")
-    }.getOrDefault(emptyList())
+    if (keyToName.isNotEmpty()) {
+        val rows = runCatching {
+            repo.getChapterProgressByContentKeys(keyToName.keys.toList())
+        }.onFailure {
+            eu.kanade.tachiyomi.diagnostic.DiagLog.w("FileProgress", "按文件身份查询进度失败: ${it.message}")
+        }.getOrDefault(emptyList())
+        for (row in rows) {
+            val name = row.contentKey?.let { keyToName[it] } ?: continue
+            out[name] = row
+        }
+    }
+
+    // 兜底：key 没覆盖到的条目按章节 URL 再查一次。
+    val missing = items.filter { it.name !in out }
+    if (missing.isNotEmpty()) {
+        val urlToName = HashMap<String, String>(missing.size)
+        for (item in missing) {
+            if (item.chapterUrl.isNotBlank()) urlToName[item.chapterUrl] = item.name
+        }
+        if (urlToName.isNotEmpty()) {
+            val rows = runCatching {
+                repo.getChapterProgressByUrls(urlToName.keys.toList())
+            }.onFailure {
+                eu.kanade.tachiyomi.diagnostic.DiagLog.w("FileProgress", "按章节 URL 查询进度失败: ${it.message}")
+            }.getOrDefault(emptyList())
+            for (row in rows) {
+                val name = row.url?.let { urlToName[it] } ?: continue
+                // SQL 已按 last_modified_at DESC 排序：同一 URL 多条时先到先得。
+                if (name !in out) out[name] = row
+            }
+        }
+    }
+
     eu.kanade.tachiyomi.diagnostic.DiagLog.d(
         "FileProgress",
-        "items=${items.size} keys=${keyToId.size} rows=${rows.size}",
+        "items=${items.size} keys=${keyToName.size} hit=${out.size}",
     )
-    if (rows.isEmpty()) return emptyMap()
-    val out = HashMap<String, tachiyomi.domain.chapter.model.ChapterProgress>(rows.size)
-    for (row in rows) {
-        val id = row.contentKey?.let { keyToId[it] } ?: continue
-        out[id] = row
-    }
     return out
 }
 
@@ -7877,7 +7923,13 @@ private suspend fun openLocalFile(
                 )
                 archiveSiblings.forEachIndexed { idx, sib ->
                     val url = fs.realPathOf(sib) ?: "$seriesDir/${sib.name}"
-                    if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
+                    // Komiho (2026-11-07): 建章节时就写文件身份（content_key）。
+                    // 续卷是阅读器内部切章，不会再回到这里；而文件浏览器的进度是**按
+                    // content_key 批量查**的 —— 以前只给「当前打开的那一卷」补 key，
+                    // 于是从第 1 卷顺序看到第 5 卷后，列表里只有第 1 卷显示进度。
+                    val sibKey = FileIdentity.of(sib.length(), sib.lastModified())
+                    val existing = chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!)
+                    if (existing == null) {
                         chapterRepo.addAll(
                             listOf(
                                 Chapter.create().copy(
@@ -7886,6 +7938,7 @@ private suspend fun openLocalFile(
                                     name = sib.nameWithoutExtension ?: sib.name.orEmpty(),
                                     chapterNumber = archiveNumbers[idx],
                                     dateUpload = sib.lastModified(),
+                                    contentKey = sibKey,
                                 ),
                             ),
                         )
@@ -7894,6 +7947,10 @@ private suspend fun openLocalFile(
                         syncChapterNumber(chapterRepo, url, manga.id!!, archiveNumbers[idx])
                         // 已存在：旧版曾把 pdf 当散图目录、章节名错置成父文件夹名，纠正回文件名
                         syncChapterName(chapterRepo, url, manga.id!!, sib.nameWithoutExtension ?: sib.name.orEmpty())
+                        // 老数据补 key：升级前建的章节 content_key 为空，顺序续读同样看不到进度。
+                        if (sibKey != null && existing.contentKey != sibKey) {
+                            existing.id?.let { chapterRepo.updateChapterContentKey(it, sibKey) }
+                        }
                     }
                 }
                 chapterRepo.getChapterByUrlAndMangaId(canonicalFile, manga.id!!)
@@ -8112,8 +8169,15 @@ private fun WebDavBrowsePane(
         key2 = progressTick,
     ) {
         value = loadFileProgress(
-            entries.filter { !it.isDir && it.isArchive }
-                .map { Triple(it.name, it.size, it.lastModified) },
+            entries.filter { !it.isDir && it.isArchive }.map {
+                FileProgressQuery(
+                    name = it.name,
+                    size = it.size,
+                    mtime = it.lastModified,
+                    // 与 openWebDavTestFile 写入的章节 url 同源（webdav://connId/<完整 URL>）。
+                    chapterUrl = WebDavConnectionStore.toChapterUrl(conn.id, it.url),
+                )
+            },
         )
     }
     val progressReadLabel = composeStringResource(R.string.book_status_read)
@@ -8818,24 +8882,32 @@ private suspend fun openWebDavTestFile(
                 } else {
             // 同目录归档全部建成章节（去重），顺序 = 文件名自然序（PROPFIND 本身不保证顺序，
             // 这里显式排一次），翻完自动续卷。
+            // 保留 WebDavEntry（而不是只留 url）：建章节时要写 content_key，它由
+            // size+lastModified 算出；没有这两个字段，顺序续读后除第一卷外都查不到进度。
             val siblings = runCatching {
-                WebDavPropfind.list(conn, mangaUrl).filter { it.isArchive }.map { it.url }
+                WebDavPropfind.list(conn, mangaUrl).filter { it.isArchive }
             }.onFailure {
                 logcat(LogPriority.WARN) { "[WebDav] 章节扫描失败，仅打开当前文件: ${it.message}" }
             }.getOrDefault(emptyList())
-            val orderedSiblings = (siblings + httpUrl).distinct()
+            // 当前文件可能不在扫描结果里（扫描失败 / 刚上传），补一条带元信息的占位，保证它也在循环内。
+            val currentSibling = siblings.firstOrNull { it.url == httpUrl }
+                ?: WebDavPropfind.cachedEntry(httpUrl)
+                ?: WebDavEntry(name = decodedName, isDir = false, url = httpUrl, size = 0L, lastModified = 0L)
+            val orderedSiblings = (siblings.filterNot { it.url == httpUrl } + currentSibling)
                 .sortedWith { a, b ->
-                    siblingName(a).compareToNaturalPinyin(siblingName(b))
+                    a.name.compareToNaturalPinyin(b.name)
                 }
             // Komiho: 章节号按自然序兜底（见 ChapterNumbering）。
-            val siblingNumbers = ChapterNumbering.assign(orderedSiblings.map { siblingName(it) }, seriesTitle)
-            orderedSiblings.forEachIndexed { idx, fileHttpUrl ->
-                val url = WebDavConnectionStore.toChapterUrl(conn.id, fileHttpUrl)
-                if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
-                    val fn = fileHttpUrl.substringAfterLast('/')
-                    val decoded =
-                        runCatching { java.net.URLDecoder.decode(fn, "UTF-8") }.getOrDefault(fn)
-                    val name = decoded.substringBeforeLast('.').ifBlank { decoded }
+            val siblingNumbers = ChapterNumbering.assign(orderedSiblings.map { siblingName(it.url) }, seriesTitle)
+            orderedSiblings.forEachIndexed { idx, sib ->
+                val url = WebDavConnectionStore.toChapterUrl(conn.id, sib.url)
+                // Komiho (2026-11-07): 建章节时就写文件身份 —— 续卷是阅读器内部切章，
+                // 不会再经过本函数；以前只给「当前打开的那一卷」补 key，导致顺序看到
+                // 第 N 卷后退回文件浏览器，只有第一卷显示进度。
+                val sibKey = FileIdentity.of(sib.size, sib.lastModified)
+                val existing = chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!)
+                if (existing == null) {
+                    val name = sib.name.substringBeforeLast('.').ifBlank { sib.name }
                     chapterRepo.addAll(
                         listOf(
                             Chapter.create().copy(
@@ -8843,12 +8915,17 @@ private suspend fun openWebDavTestFile(
                                 url = url,
                                 name = name,
                                 chapterNumber = siblingNumbers[idx],
+                                contentKey = sibKey,
                             ),
                         ),
                     )
                 } else {
                     // 已存在：把旧编号纠正过来，否则老库里的错序会一直保留
                     syncChapterNumber(chapterRepo, url, manga.id!!, siblingNumbers[idx])
+                    // 老数据补 key：升级前建的章节 content_key 为空，顺序续读同样看不到进度。
+                    if (sibKey != null && existing.contentKey != sibKey) {
+                        existing.id?.let { chapterRepo.updateChapterContentKey(it, sibKey) }
+                    }
                 }
             }
             }
@@ -9030,8 +9107,15 @@ private fun SmbBrowsePane(
         key2 = progressTick,
     ) {
         value = loadFileProgress(
-            entries.filter { !it.isDir && it.isArchive }
-                .map { Triple(it.name, it.size, it.lastModified) },
+            entries.filter { !it.isDir && it.isArchive }.map {
+                FileProgressQuery(
+                    name = it.name,
+                    size = it.size,
+                    mtime = it.lastModified,
+                    // 与 openSmbFile 写入的章节 url 同源（smb://connId/<共享内相对路径>）。
+                    chapterUrl = SmbConnectionStore.toChapterUrl(conn.id, it.path),
+                )
+            },
         )
     }
     val progressReadLabel = composeStringResource(R.string.book_status_read)
@@ -9664,24 +9748,32 @@ private suspend fun openSmbFile(
                 }
                 // SY <--
                 } else {
+                // 保留 SmbEntry（而不是只留 path）：建章节时要写 content_key，它由
+                // size+lastModified 算出；没有这两个字段，顺序续读后除第一卷外都查不到进度。
                 val siblings = runCatching {
-                    SmbBrowse.list(conn, password, dirRel).filter { it.isArchive }.map { it.path }
+                    SmbBrowse.list(conn, password, dirRel).filter { it.isArchive }
                 }.onFailure {
                     logcat(LogPriority.WARN) { "[Smb] 章节扫描失败，仅打开当前文件: ${it.message}" }
                 }.getOrDefault(emptyList())
+                // 当前文件可能不在扫描结果里（扫描失败 / 刚上传），补一条带元信息的占位。
+                val currentSibling = siblings.firstOrNull { it.path == relPath }
+                    ?: SmbBrowse.cachedEntry(relPath)
+                    ?: SmbEntry(name = fileName, isDir = false, path = relPath, size = 0L, lastModified = 0L)
                 // Komiho: 显式按文件名自然序排 —— 原先直接用 SMB 返回的顺序建章节，
                 // 服务器顺序变了章节顺序就会变（且自然序下标兜底也没了意义）。
-                val orderedSiblings = (siblings + relPath).distinct()
+                val orderedSiblings = (siblings.filterNot { it.path == relPath } + currentSibling)
                     .sortedWith { a, b ->
-                        siblingName(a).compareToNaturalPinyin(siblingName(b))
+                        a.name.compareToNaturalPinyin(b.name)
                     }
                 // Komiho: 章节号按自然序兜底（见 ChapterNumbering）。
-                val siblingNumbers = ChapterNumbering.assign(orderedSiblings.map { siblingName(it) }, seriesTitle)
-                orderedSiblings.forEachIndexed { idx, siblingRel ->
-                    val url = SmbConnectionStore.toChapterUrl(conn.id, siblingRel)
-                    if (chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!) == null) {
-                        val fn = siblingRel.substringAfterLast('/')
-                        val name = fn.substringBeforeLast('.').ifBlank { fn }
+                val siblingNumbers = ChapterNumbering.assign(orderedSiblings.map { it.name }, seriesTitle)
+                orderedSiblings.forEachIndexed { idx, sib ->
+                    val url = SmbConnectionStore.toChapterUrl(conn.id, sib.path)
+                    // Komiho (2026-11-07): 建章节时就写文件身份（见 WebDAV / 本地同款注释）。
+                    val sibKey = FileIdentity.of(sib.size, sib.lastModified)
+                    val existing = chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!)
+                    if (existing == null) {
+                        val name = sib.name.substringBeforeLast('.').ifBlank { sib.name }
                         chapterRepo.addAll(
                             listOf(
                                 Chapter.create().copy(
@@ -9689,12 +9781,17 @@ private suspend fun openSmbFile(
                                     url = url,
                                     name = name,
                                     chapterNumber = siblingNumbers[idx],
+                                    contentKey = sibKey,
                                 ),
                             ),
                         )
                     } else {
                         // 已存在：把旧编号纠正过来，否则老库里的错序会一直保留
                         syncChapterNumber(chapterRepo, url, manga.id!!, siblingNumbers[idx])
+                        // 老数据补 key：升级前建的章节 content_key 为空，顺序续读同样看不到进度。
+                        if (sibKey != null && existing.contentKey != sibKey) {
+                            existing.id?.let { chapterRepo.updateChapterContentKey(it, sibKey) }
+                        }
                     }
                 }
             }

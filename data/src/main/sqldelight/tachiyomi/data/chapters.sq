@@ -137,6 +137,16 @@ SELECT *
 FROM chapters
 WHERE content_key IN :contentKeys;
 
+-- 文件浏览器列表（兜底通道）：按一批章节 URL 一次查完。
+-- 从历史 / 书签进入阅读不会经过「打开文件」入口，这些章节的 content_key 可能一直为空，
+-- 只按 key 查会让列表显示不出进度；这里按 url 再补一次。
+-- 同一 url 理论上可能有多条（历史遗留），取最近更新的那条。
+getChaptersByUrls:
+SELECT *
+FROM chapters
+WHERE url IN :urls
+ORDER BY last_modified_at DESC;
+
 updateChapterContentKey:
 UPDATE chapters
 SET content_key = :contentKey
