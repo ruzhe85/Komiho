@@ -3,7 +3,9 @@ package tachiyomi.data.chapter
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.async.coroutines.awaitAsOne
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import logcat.LogPriority
 import tachiyomi.core.common.util.lang.toLong
 import tachiyomi.core.common.util.system.logcat
@@ -171,34 +173,32 @@ class ChapterRepositoryImpl(
             .awaitAsOneOrNull()
     }
 
-    override suspend fun getChapterProgressByContentKeys(contentKeys: List<String>): List<ChapterProgress> {
-        if (contentKeys.isEmpty()) return emptyList()
+    // Komiho (2026-11-07): 订阅式进度查询（见接口注释）。空集合用 "" 占位，
+    // 因为 `IN ()` 是非法 SQL，而空串不可能等于任何真实 content_key / url。
+    override fun getChapterProgressFlow(
+        contentKeys: List<String>,
+        urls: List<String>,
+    ): Flow<List<ChapterProgress>> {
         return database.chaptersQueries
-            .getChaptersByContentKeys(contentKeys, ::mapChapter)
-            .awaitAsList()
-            .map {
-                ChapterProgress(
-                    contentKey = it.contentKey,
-                    lastPageRead = it.lastPageRead,
-                    totalPages = it.totalPages,
-                    read = it.read,
-                )
-            }
-    }
-
-    override suspend fun getChapterProgressByUrls(urls: List<String>): List<ChapterProgress> {
-        if (urls.isEmpty()) return emptyList()
-        return database.chaptersQueries
-            .getChaptersByUrls(urls, ::mapChapter)
-            .awaitAsList()
-            .map {
-                ChapterProgress(
-                    contentKey = it.contentKey,
-                    url = it.url,
-                    lastPageRead = it.lastPageRead,
-                    totalPages = it.totalPages,
-                    read = it.read,
-                )
+            .getChaptersByKeysOrUrls(
+                contentKeys.ifEmpty { listOf("") },
+                urls.ifEmpty { listOf("") },
+                ::mapChapter,
+            )
+            // subscribeToList 默认 EmptyCoroutineContext，查询会跑在 collect 所在的线程。
+            // 这里 collect 发生在 Compose 的 produceState（主线程），必须显式切到 IO，
+            // 否则每次 chapters 表变化都会在主线程同步扫表。
+            .subscribeToList(Dispatchers.IO)
+            .map { rows ->
+                rows.map {
+                    ChapterProgress(
+                        contentKey = it.contentKey,
+                        url = it.url,
+                        lastPageRead = it.lastPageRead,
+                        totalPages = it.totalPages,
+                        read = it.read,
+                    )
+                }
             }
     }
 

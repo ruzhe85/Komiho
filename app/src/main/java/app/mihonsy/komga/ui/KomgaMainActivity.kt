@@ -245,6 +245,7 @@ import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.backup.KomihoBackup
 import app.mihonsy.komga.data.backup.KomihoSync
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import android.util.Log
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -6197,35 +6198,38 @@ private fun LocalFileBrowser(
     // SY <--
 
     var entries by remember { mutableStateOf<List<LocalEntry>>(emptyList()) }
-    // Komiho (2026-11-06): 从阅读器回到列表时重查一次进度 —— 打开文件会写 content_key/页数，
-    // 但 entries 没变，只用 entries 当 key 的话列表仍是旧状态（看起来「没有进度」）。
-    var progressTick by remember { mutableIntStateOf(0) }
-    val progressLifecycle = LocalLifecycleOwner.current
-    DisposableEffect(progressLifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) progressTick++
-        }
-        progressLifecycle.lifecycle.addObserver(observer)
-        onDispose { progressLifecycle.lifecycle.removeObserver(observer) }
-    }
+    // Komiho (2026-11-07): 进度改成**订阅** chapters 表 —— 阅读器写进度的瞬间列表就刷新。
+    // 早先是「ON_RESUME 里立即重查」，而写入是异步的，退出那一瞬读到的还是旧值
+    //（表现为「第一次退出只有进入章有进度，再退一次才全有」）；delay(600) 只是在猜时间。
+    val progressLifecycle = LocalLifecycleOwner.current.lifecycle
     // Komiho (2026-11-06): 归档/PDF 的阅读进度（62/166）。散图目录、图片、目录不显示。
-    // 纯计算：size/mtime 已在列目录时拿到，不额外读文件；DB 一次批量查。
     val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
         initialValue = emptyMap(),
         key1 = entries,
-        key2 = progressTick,
     ) {
-        // 章节进度是阅读器侧异步落库的：从阅读器返回瞬间查到的还是旧值，
-        // 表现为「刚顺序看完的几卷没有进度，退出再进一次才全有」。和历史 tab 同口径等一拍。
-        if (progressTick > 0) delay(600)
-        value = withContext(Dispatchers.IO) {
-            loadFileProgress(
-                entries.filter { !it.isDirectory && it.isArchive }.map {
-                    // 章节 url 用真实绝对路径，与 openLocalFile 写入的一致（兜底通道靠它匹配）。
-                    // realPathOf 内部是 File.canonicalPath（会碰文件系统），几百个文件必须放 IO 线程。
-                    FileProgressQuery(it.name, it.size, it.lastModified, fs.realPathOf(it.uni) ?: "")
-                },
-            )
+        // size/mtime 来自列目录结果；url 要 realPathOf（File.canonicalPath，碰文件系统），一起放 IO。
+        val queries = withContext(Dispatchers.IO) {
+            entries.filter { !it.isDirectory && it.isArchive }.map {
+                FileProgressQuery(it.name, it.size, it.lastModified, fs.realPathOf(it.uni) ?: "")
+            }
+        }
+        if (queries.isEmpty()) {
+            value = emptyMap()
+            return@produceState
+        }
+        val keyToName = HashMap<String, String>(queries.size)
+        val urlToName = HashMap<String, String>(queries.size)
+        for (q in queries) {
+            FileIdentity.of(q.size, q.mtime)?.let { key ->
+                if (!keyToName.containsKey(key)) keyToName[key] = q.name
+            }
+            if (q.chapterUrl.isNotBlank()) urlToName[q.chapterUrl] = q.name
+        }
+        // 只在 STARTED 期间订阅：后台时阅读器每翻一页都会写进度，列表没必要跟着查库。
+        progressLifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            Injekt.get<ChapterRepository>()
+                .getChapterProgressFlow(keyToName.keys.toList(), urlToName.keys.toList())
+                .collect { rows -> value = mapProgressRows(rows, keyToName, urlToName) }
         }
     }
     val progressReadLabel = composeStringResource(R.string.book_status_read)
@@ -7270,69 +7274,37 @@ private data class FileProgressQuery(
 )
 
 /**
- * Komiho (2026-11-06): 文件浏览器进度 —— 把条目批量换算成进度记录。
+ * Komiho (2026-11-07): 把订阅到的进度记录映射回「条目名 → 进度」。
  *
- * 只对**文件型章节**（归档/PDF/文档）调用；散图目录、图片文件、目录一律不传，所以这里
- * 拿不到条目就是空 map。零额外 IO：size/mtime/url 都来自列表加载时已有的字段。
- *
- * 两条通道：
+ * 两条通道混在同一批 rows 里（SQL 用 `content_key IN … OR url IN …` 一次查出）：
  * 1. content_key（size+mtime）—— 文件移动/改名后仍然有效，优先；
  * 2. 章节 URL —— 兜底。从历史 / 书签进入阅读不会经过「打开文件」入口，这些章节的
- *    content_key 可能一直是空的（旧版本只给「当前打开的那一卷」写 key），只查 key
- *    会让列表显示不出进度。
+ *    content_key 可能一直是空的，只认 key 会让列表显示不出进度。
  */
-private suspend fun loadFileProgress(
-    items: List<FileProgressQuery>,
+private fun mapProgressRows(
+    rows: List<tachiyomi.domain.chapter.model.ChapterProgress>,
+    keyToName: Map<String, String>,
+    urlToName: Map<String, String>,
 ): Map<String, tachiyomi.domain.chapter.model.ChapterProgress> {
-    if (items.isEmpty()) return emptyMap()
-    val repo = Injekt.get<ChapterRepository>()
-    val out = HashMap<String, tachiyomi.domain.chapter.model.ChapterProgress>(items.size)
-
-    val keyToName = HashMap<String, String>(items.size)
-    for (item in items) {
-        val key = FileIdentity.of(item.size, item.mtime) ?: continue
-        // 不用 putIfAbsent：那是 Java 8 / API 24 才有的默认方法，minSdk 更低会 NoSuchMethodError。
-        if (!keyToName.containsKey(key)) keyToName[key] = item.name
-    }
-    if (keyToName.isNotEmpty()) {
-        val rows = runCatching {
-            repo.getChapterProgressByContentKeys(keyToName.keys.toList())
-        }.onFailure {
-            eu.kanade.tachiyomi.diagnostic.DiagLog.w("FileProgress", "按文件身份查询进度失败: ${it.message}")
-        }.getOrDefault(emptyList())
-        for (row in rows) {
-            val name = row.contentKey?.let { keyToName[it] } ?: continue
+    val out = HashMap<String, tachiyomi.domain.chapter.model.ChapterProgress>(rows.size)
+    var keyHitCount = 0
+    for (row in rows) {
+        val name = row.contentKey?.let { keyToName[it] } ?: continue
+        if (name !in out) {
             out[name] = row
+            keyHitCount++
         }
     }
-
-    // 兜底：key 没覆盖到的条目按章节 URL 再查一次。
-    val keyHitCount = out.size
-    val missing = items.filter { it.name !in out }
-    if (missing.isNotEmpty()) {
-        val urlToName = HashMap<String, String>(missing.size)
-        for (item in missing) {
-            if (item.chapterUrl.isNotBlank()) urlToName[item.chapterUrl] = item.name
-        }
-        if (urlToName.isNotEmpty()) {
-            val rows = runCatching {
-                repo.getChapterProgressByUrls(urlToName.keys.toList())
-            }.onFailure {
-                eu.kanade.tachiyomi.diagnostic.DiagLog.w("FileProgress", "按章节 URL 查询进度失败: ${it.message}")
-            }.getOrDefault(emptyList())
-            for (row in rows) {
-                val name = row.url?.let { urlToName[it] } ?: continue
-                // SQL 已按 last_modified_at DESC 排序：同一 URL 多条时先到先得。
-                if (name !in out) out[name] = row
-            }
-        }
+    for (row in rows) {
+        val name = row.url?.let { urlToName[it] } ?: continue
+        // SQL 已按 last_modified_at DESC 排序：同一 URL 多条时先到先得。
+        if (name !in out) out[name] = row
     }
-
-    // 分开记 key / url 两路的命中数：用户反馈「某些卷没进度」时，一眼能看出是
-    // 兜底通道没查到（urlHit=0）还是根本查不到记录。
+    // 分开记两路命中数：反馈「某些卷没进度」时，一眼能看出是 url 通道没对上
+    // （urlHit=0，可能是旧版相对路径的章节）还是 DB 里根本没有记录。
     eu.kanade.tachiyomi.diagnostic.DiagLog.d(
         "FileProgress",
-        "items=${items.size} keys=${keyToName.size} keyHit=$keyHitCount urlHit=${out.size - keyHitCount}",
+        "rows=${rows.size} hit=${out.size} keyHit=$keyHitCount urlHit=${out.size - keyHitCount}",
     )
     return out
 }
@@ -8158,36 +8130,40 @@ private fun WebDavBrowsePane(
     // SY <--
 
     var entries by remember { mutableStateOf<List<WebDavEntry>>(emptyList()) }
-    // Komiho (2026-11-06): 从阅读器回到列表时重查一次进度（见 LocalFileBrowser 同名注释）。
-    var progressTick by remember { mutableIntStateOf(0) }
-    val progressLifecycle = LocalLifecycleOwner.current
-    DisposableEffect(progressLifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) progressTick++
-        }
-        progressLifecycle.lifecycle.addObserver(observer)
-        onDispose { progressLifecycle.lifecycle.removeObserver(observer) }
-    }
+    // Komiho (2026-11-07): 订阅 chapters 表刷新进度（见 LocalFileBrowser 同名注释）。
+    val progressLifecycle = LocalLifecycleOwner.current.lifecycle
     // Komiho (2026-11-06): 归档/PDF 的阅读进度（62/166）。散图目录、图片、目录不显示。
     // WebDAV 的 size/mtime 来自 PROPFIND，零额外请求。
     val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
         initialValue = emptyMap(),
         key1 = entries,
-        key2 = progressTick,
     ) {
-        // 进度由阅读器异步落库，退出瞬间查会读到旧值（见本地同名注释）。
-        if (progressTick > 0) delay(600)
-        value = loadFileProgress(
-            entries.filter { !it.isDir && it.isArchive }.map {
-                FileProgressQuery(
-                    name = it.name,
-                    size = it.size,
-                    mtime = it.lastModified,
-                    // 与 openWebDavTestFile 写入的章节 url 同源（webdav://connId/<完整 URL>）。
-                    chapterUrl = WebDavConnectionStore.toChapterUrl(conn.id, it.url),
-                )
-            },
-        )
+        val queries = entries.filter { !it.isDir && it.isArchive }.map {
+            FileProgressQuery(
+                name = it.name,
+                size = it.size,
+                mtime = it.lastModified,
+                // 与 openWebDavTestFile 写入的章节 url 同源（webdav://connId/<完整 URL>）。
+                chapterUrl = WebDavConnectionStore.toChapterUrl(conn.id, it.url),
+            )
+        }
+        if (queries.isEmpty()) {
+            value = emptyMap()
+            return@produceState
+        }
+        val keyToName = HashMap<String, String>(queries.size)
+        val urlToName = HashMap<String, String>(queries.size)
+        for (q in queries) {
+            FileIdentity.of(q.size, q.mtime)?.let { key ->
+                if (!keyToName.containsKey(key)) keyToName[key] = q.name
+            }
+            if (q.chapterUrl.isNotBlank()) urlToName[q.chapterUrl] = q.name
+        }
+        progressLifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            Injekt.get<ChapterRepository>()
+                .getChapterProgressFlow(keyToName.keys.toList(), urlToName.keys.toList())
+                .collect { rows -> value = mapProgressRows(rows, keyToName, urlToName) }
+        }
     }
     val progressReadLabel = composeStringResource(R.string.book_status_read)
     var loading by remember { mutableStateOf(false) }
@@ -9098,36 +9074,40 @@ private fun SmbBrowsePane(
     }
 
     var entries by remember { mutableStateOf<List<SmbEntry>>(emptyList()) }
-    // Komiho (2026-11-06): 从阅读器回到列表时重查一次进度（见 LocalFileBrowser 同名注释）。
-    var progressTick by remember { mutableIntStateOf(0) }
-    val progressLifecycle = LocalLifecycleOwner.current
-    DisposableEffect(progressLifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) progressTick++
-        }
-        progressLifecycle.lifecycle.addObserver(observer)
-        onDispose { progressLifecycle.lifecycle.removeObserver(observer) }
-    }
+    // Komiho (2026-11-07): 订阅 chapters 表刷新进度（见 LocalFileBrowser 同名注释）。
+    val progressLifecycle = LocalLifecycleOwner.current.lifecycle
     // Komiho (2026-11-06): 归档/PDF 的阅读进度（62/166）。散图目录、图片、目录不显示。
     // SMB 的 size/mtime 来自列目录结果，零额外请求。
     val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
         initialValue = emptyMap(),
         key1 = entries,
-        key2 = progressTick,
     ) {
-        // 进度由阅读器异步落库，退出瞬间查会读到旧值（见本地同名注释）。
-        if (progressTick > 0) delay(600)
-        value = loadFileProgress(
-            entries.filter { !it.isDir && it.isArchive }.map {
-                FileProgressQuery(
-                    name = it.name,
-                    size = it.size,
-                    mtime = it.lastModified,
-                    // 与 openSmbFile 写入的章节 url 同源（smb://connId/<共享内相对路径>）。
-                    chapterUrl = SmbConnectionStore.toChapterUrl(conn.id, it.path),
-                )
-            },
-        )
+        val queries = entries.filter { !it.isDir && it.isArchive }.map {
+            FileProgressQuery(
+                name = it.name,
+                size = it.size,
+                mtime = it.lastModified,
+                // 与 openSmbFile 写入的章节 url 同源（smb://connId/<共享内相对路径>）。
+                chapterUrl = SmbConnectionStore.toChapterUrl(conn.id, it.path),
+            )
+        }
+        if (queries.isEmpty()) {
+            value = emptyMap()
+            return@produceState
+        }
+        val keyToName = HashMap<String, String>(queries.size)
+        val urlToName = HashMap<String, String>(queries.size)
+        for (q in queries) {
+            FileIdentity.of(q.size, q.mtime)?.let { key ->
+                if (!keyToName.containsKey(key)) keyToName[key] = q.name
+            }
+            if (q.chapterUrl.isNotBlank()) urlToName[q.chapterUrl] = q.name
+        }
+        progressLifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            Injekt.get<ChapterRepository>()
+                .getChapterProgressFlow(keyToName.keys.toList(), urlToName.keys.toList())
+                .collect { rows -> value = mapProgressRows(rows, keyToName, urlToName) }
+        }
     }
     val progressReadLabel = composeStringResource(R.string.book_status_read)
     var loading by remember { mutableStateOf(false) }
@@ -9778,6 +9758,14 @@ private suspend fun openSmbFile(
                     }
                 // Komiho: 章节号按自然序兜底（见 ChapterNumbering）。
                 val siblingNumbers = ChapterNumbering.assign(orderedSiblings.map { it.name }, seriesTitle)
+                // Komiho (2026-11-07): 诊断「为什么整目录只有第一卷有 content_key」——
+                // 若 meta 远小于 total，说明服务器在列目录时没给 size/mtime，
+                // 那种情况下只能靠文件浏览器的 URL 通道兜底（进度仍能显示）。
+                eu.kanade.tachiyomi.diagnostic.DiagLog.d(
+                    "SmbOpen",
+                    "siblings=${orderedSiblings.size} " +
+                        "meta=${orderedSiblings.count { FileIdentity.of(it.size, it.lastModified) != null }}",
+                )
                 orderedSiblings.forEachIndexed { idx, sib ->
                     val url = SmbConnectionStore.toChapterUrl(conn.id, sib.path)
                     // Komiho (2026-11-07): 建章节时就写文件身份（见 WebDAV / 本地同款注释）。

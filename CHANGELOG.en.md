@@ -1,5 +1,16 @@
 # Komiho Changelog
 
+## v1.7.0 (2026-11-07)
+
+- New Local file browser now supports long-press file management
+- New File browser (local / SMB / WebDAV) now shows reading progress
+- New File browser (local / SMB / WebDAV) adds a compact grid display mode
+- New Image enhancement — NPU power mode: Performance is faster but runs hotter, Balanced runs cooler at moderate speed — pick whichever suits you
+- New Settings → Komga: choose whether to show the file name or the title
+- New Settings → Storage: cache size limit
+- **Improved The PDF reading module was rewritten, fixing slow opening, stuttery reading and blurry output**
+- Fixed Opening EPUB files could crash back to the file browser on certain Android versions
+
 ## v1.6.0 (2026-10-28)
 
 - New Paged-mode page animation: choose between Slide / Cover / Page-curl

@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.7.0" changeDate="November 7,2026">
+        <changelogtext>[b]Komiho 1.7.0[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 文件浏览器（本地）现在支持长按文件管理</changelogtext>
+        <changelogtext>[b]新增[/b] 文件浏览器（本地/SMB/Webdav）现在支持显示阅读进度</changelogtext>
+        <changelogtext>[b]新增[/b] 文件浏览器（本地/SMB/Webdav）新增显示模式紧凑网格</changelogtext>
+        <changelogtext>[b]新增[/b] 图像增强-NPU-功耗模式，性能发热高速度快，平衡发热低速度中等，按需选择</changelogtext>
+        <changelogtext>[b]新增[/b] 设置-Komga 现在可以选择显示文件名还是标题</changelogtext>
+        <changelogtext>[b]新增[/b] 设置-存储 新增缓存上限设置</changelogtext>
+        <changelogtext>[b]优化[/b] 重做PDF阅读模块，解决PDF打开缓慢、阅读卡顿、输出不清等问题</changelogtext>
+        <changelogtext>[b]修复[/b] 特定安卓版本打开Epub会闪退回文件浏览器的问题</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.6.0" changeDate="October 28,2026">
         <changelogtext>[b]Komiho 1.6.0[/b]</changelogtext>
         <changelogtext>[b]新增[/b] 页漫模式翻页动画，现在可选「平移 / 覆盖 / 翻书」</changelogtext>

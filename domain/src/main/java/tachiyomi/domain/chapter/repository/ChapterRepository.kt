@@ -42,15 +42,21 @@ interface ChapterRepository {
     // 但 content_key 不变 —— 文件浏览器与历史都靠它把同一条章节找回来。
     suspend fun getChapterByContentKey(contentKey: String): Chapter?
 
-    /** 文件浏览器列表：按一批 content_key 批量取进度（不含大字段）。 */
-    suspend fun getChapterProgressByContentKeys(contentKeys: List<String>): List<ChapterProgress>
-
     /**
-     * 文件浏览器列表的**兜底通道**：按一批章节 URL 批量取进度。
-     * 从历史 / 书签进入阅读不会经过打开入口，这类章节的 content_key 可能为空，
-     * 只按 key 查会显示不出进度。返回项的 [ChapterProgress.url] 为对应章节 URL。
+     * Komiho (2026-11-07): 文件浏览器的进度查询 —— **订阅式**，key 与 url 两条通道一次查完，
+     * chapters 表一变就重新发射。
+     *
+     * 通道 1：content_key（size+mtime）—— 文件移动/改名后仍然有效，优先；
+     * 通道 2：章节 URL —— 兜底。从历史 / 书签进入阅读不经过「打开文件」入口，
+     * 这类章节的 content_key 可能为空，只认 key 会让列表显示不出进度。
+     *
+     * 用它替代「退出阅读器后 delay 一下再查」：阅读器写 last_page_read 是异步的，
+     * 猜时间必然偶发读到旧值（表现为「第一次退出只有进入章有进度」）。订阅表变化后
+     * 不存在时序假设，也覆盖「切后台再回来」等不经过退出的路径。
+     *
+     * 调用方对空集合传 `listOf("")` 占位（`IN ()` 是非法 SQL，而空串匹配不到真实 key/url）。
      */
-    suspend fun getChapterProgressByUrls(urls: List<String>): List<ChapterProgress>
+    fun getChapterProgressFlow(contentKeys: List<String>, urls: List<String>): Flow<List<ChapterProgress>>
 
     suspend fun updateChapterContentKey(chapterId: Long, contentKey: String)
 

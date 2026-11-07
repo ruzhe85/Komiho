@@ -579,7 +579,7 @@
     <string name="enhancement_detail_model">Model</string>
     <string name="enhancement_detail_advanced">AI options</string>
     <!-- Komiho (2026-11-07): QNN/HTP power mode (Qualcomm NPU only). -->
-    <string name="enhancement_qnn_power_mode">NPU power mode</string>
+    <string name="enhancement_qnn_power_mode">Power mode</string>
     <string name="enhancement_qnn_power_performance">Performance</string>
     <string name="enhancement_qnn_power_balanced">Balanced</string>
     <!-- Komiho: NPU 详情里「没有系列、或系列只有它一个」的模型统一归到这个组。 -->

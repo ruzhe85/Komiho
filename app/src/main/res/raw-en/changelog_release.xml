@@ -6,6 +6,30 @@
   Keep both files in sync when adding a release.
 -->
 <changelog bulletedList="true">
+    <changelogversion versionName="1.7.0" changeDate="November 7, 2026">
+        <changelogtext>[b]Komiho 1.7.0[/b]</changelogtext>
+        <changelogtext>[b]New[/b] Local file browser now supports long-press file management</changelogtext>
+        <changelogtext>[b]New[/b] File browser (local / SMB / WebDAV) now shows reading progress</changelogtext>
+        <changelogtext>[b]New[/b] File browser (local / SMB / WebDAV) adds a compact grid display mode</changelogtext>
+        <changelogtext>[b]New[/b] Image enhancement — NPU power mode: Performance is faster but runs hotter, Balanced runs cooler at moderate speed — pick whichever suits you</changelogtext>
+        <changelogtext>[b]New[/b] Settings → Komga: choose whether to show the file name or the title</changelogtext>
+        <changelogtext>[b]New[/b] Settings → Storage: cache size limit</changelogtext>
+        <changelogtext>[b]Improved[/b] The PDF reading module was rewritten, fixing slow opening, stuttery reading and blurry output</changelogtext>
+        <changelogtext>[b]Fixed[/b] Opening EPUB files could crash back to the file browser on certain Android versions</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="1.6.0" changeDate="October 28, 2026">
+        <changelogtext>[b]Komiho 1.6.0[/b]</changelogtext>
+        <changelogtext>[b]New[/b] Paged-mode page animation: choose between Slide / Cover / Page-curl</changelogtext>
+        <changelogtext>[b]New[/b] Paged-mode double-tap zoom toggle; turning it off removes the double-tap delay so taps respond immediately, zoom with a two-finger pinch instead</changelogtext>
+        <changelogtext>[b]New[/b] (experimental) Image enhancement — MediaTek NPU upscaling (MTK model package)</changelogtext>
+        <changelogtext>[b]Improved[/b] E-Ink skin is now a solid-color design</changelogtext>
+        <changelogtext>[b]Improved[/b] Double-page split logic</changelogtext>
+        <changelogtext>[b]Fixed[/b] Komga reading progress occasionally resetting when a book was opened from the chapter list</changelogtext>
+        <changelogtext>[b]Fixed[/b] AVIF covers not showing on some OEM ROMs missing the underlying codec</changelogtext>
+        <changelogtext>[b]Fixed[/b] Image enhancement being dropped when turning pages quickly in paged mode</changelogtext>
+        <changelogtext>[b]Fixed[/b] SMB browsing starting directory being duplicated when opened from history</changelogtext>
+        <changelogtext>[b]MediaTek NPU upscaling — notes[/b] The developer has no MediaTek device; this feature is experimental. The model is compiled on first use; after that it is reused and there is no further wait. The official support list is too vague: in theory any SoC from MT6878 onward works, but whether compilation actually succeeds depends on the NeuroPilot and NPU driver shipped in the vendor firmware</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.5.0" changeDate="October 14, 2026">
         <changelogtext>[b]Komiho 1.5.0[/b]</changelogtext>
         <changelogtext>[b]New[/b] E-Ink mode (Settings → Appearance): the reader switches to a dedicated E-Ink grayscale mode. Tested on a limited set of devices — feedback and suggestions are welcome</changelogtext>

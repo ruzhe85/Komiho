@@ -5,6 +5,30 @@
   新增版本時三份都要同步。
 -->
 <changelog bulletedList="true">
+    <changelogversion versionName="1.7.0" changeDate="November 7, 2026">
+        <changelogtext>[b]Komiho 1.7.0[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 檔案瀏覽器（本機）現在支援長按檔案管理</changelogtext>
+        <changelogtext>[b]新增[/b] 檔案瀏覽器（本機/SMB/Webdav）現在支援顯示閱讀進度</changelogtext>
+        <changelogtext>[b]新增[/b] 檔案瀏覽器（本機/SMB/Webdav）新增顯示模式緊湊網格</changelogtext>
+        <changelogtext>[b]新增[/b] 圖像增強-NPU-功耗模式，效能發熱高速度快，平衡發熱低速度中等，按需選擇</changelogtext>
+        <changelogtext>[b]新增[/b] 設定-Komga 現在可以選擇顯示檔名還是標題</changelogtext>
+        <changelogtext>[b]新增[/b] 設定-儲存 新增快取上限設定</changelogtext>
+        <changelogtext>[b]優化[/b] 重做PDF閱讀模組，解決PDF開啟緩慢、閱讀卡頓、輸出不清等問題</changelogtext>
+        <changelogtext>[b]修復[/b] 特定安卓版本開啟Epub會閃退回檔案瀏覽器的問題</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="1.6.0" changeDate="October 28, 2026">
+        <changelogtext>[b]Komiho 1.6.0[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 頁漫模式翻頁動畫，現在可選「平移 / 覆蓋 / 翻書」</changelogtext>
+        <changelogtext>[b]新增[/b] 頁漫模式雙擊縮放開關，關閉後提升點擊跟手度，縮放使用雙指捏合</changelogtext>
+        <changelogtext>[b]新增[/b] （實驗性）圖像增強-聯發科NPU超分（需安裝MTK模型包）</changelogtext>
+        <changelogtext>[b]優化[/b] E-Ink皮膚，現在改成純色設計</changelogtext>
+        <changelogtext>[b]優化[/b] 雙頁拆分邏輯</changelogtext>
+        <changelogtext>[b]修復[/b] Komga從章節列表開始閱讀偶發進度重置</changelogtext>
+        <changelogtext>[b]修復[/b] 部分OEM系統底層缺失無法顯示avif封面圖的問題</changelogtext>
+        <changelogtext>[b]修復[/b] 頁漫模式快速翻頁導致圖像增強失效的問題</changelogtext>
+        <changelogtext>[b]修復[/b] SMB 瀏覽從歷史跳轉時起始目錄被重複拼接</changelogtext>
+        <changelogtext>[b]MTK NPU超分特別說明[/b] 開發者沒有MTK設備，該功能僅實驗性；首次使用需要編譯，完成後直接使用無須再次等待；因官方支援列表太籠統，理論上MT6878之後機型均支援，但實際能否編譯成功，取決於廠商韌體裡打包的NeuroPilot和NPU驅動；失敗後會回落到Vulkan模式，角標顯示GPU</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.5.0" changeDate="October 14, 2026">
         <changelogtext>[b]Komiho 1.5.0[/b]</changelogtext>
         <changelogtext>[b]新增[/b] E-Ink 模式，入口：設定-外觀；啟動後閱讀器切換 EINK 專用灰階模式，測試裝置有限，歡迎回饋建議</changelogtext>

@@ -537,20 +537,25 @@ class ReaderViewModel @JvmOverloads constructor(
         _chapterCaching.value = false
         // SY <--
         // Komiho (2026-11-06): 记录总页数 —— 文件浏览器要显示「62/166」的分母。
-        // 只在「已经打过文件身份（PDF/归档）」且值变化时写：普通漫画章节 contentKey 为空，
-        // 不写是为了避免无谓地刷新 last_modified_at（那会牵动同步判定）。
+        //
+        // Komiho (2026-11-07): 不再要求 `contentKey != null`。SMB 的目录列表拿不到
+        // size/mtime 时整个目录的章节 key 都是 null（实测 22 卷只有被点开那卷有 key），
+        // 那样除第一卷外都写不进总页数，文件浏览器就永远只有第一卷有进度。
+        // 总页数只按「是不是文件型章节」判断，而 updateChapterTotalPages 只改
+        // total_pages、不动 last_modified_at，所以原来担心的「无谓刷新同步判定」并不存在。
         val knownPages = chapter.pages?.size ?: 0
         val chapterId = chapter.chapter.id
-        // 只处理「文件型章节」（PDF/CBZ/EPUB 的 url 是路径或 webdav:// smb://）；漫画章节是 http，
-        // 跳过可避免每次开章节都多一次主键查询，也不去碰它们的 last_modified_at。
-        val isFileChapter = !chapter.chapter.url.startsWith("http")
+        // 文件型章节 = 本地路径 / webdav: / smb://；网络漫画章节是 http。
+        // Komga 章节用的是内部 scheme `komga://book/{id}`（不是 http），光判 http 会把它
+        // 也算成文件章节，给网络章节写 total_pages —— 去掉 contentKey 门槛后才会暴露。
+        val chapterUrl = chapter.chapter.url
+        val isFileChapter = !chapterUrl.startsWith("http") &&
+            !chapterUrl.startsWith("komga://")
         var storedChapter: tachiyomi.domain.chapter.model.Chapter? = null
         if (isFileChapter && chapterId != null) {
             val chapterRepo = Injekt.get<tachiyomi.domain.chapter.repository.ChapterRepository>()
             storedChapter = runCatching { chapterRepo.getChapterById(chapterId) }.getOrNull()
-            if (knownPages > 0 && storedChapter != null &&
-                storedChapter.contentKey != null && storedChapter.totalPages != knownPages
-            ) {
+            if (knownPages > 0 && storedChapter != null && storedChapter.totalPages != knownPages) {
                 runCatching { chapterRepo.updateChapterTotalPages(chapterId, knownPages) }
             }
         }
