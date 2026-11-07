@@ -564,16 +564,16 @@ private fun NpuDetail(
         }
     }
 
-    // Komiho (2026-11-07): 仅骁龙 QNN 生效的功耗档。默认「性能」= 改造前的固定 Burst 行为。
-    // 只留两档：「均衡」实测连续阅读时速度与温度和性能档几乎一致（DCVS 立刻爬到 MAX、
-    // 空闲窗口够不着休眠门槛），留着只会让人多一次无意义的选择。
+    // Komiho (2026-11-07): 仅骁龙 QNN 生效的功耗档，对齐高通公布的档位划分：
+    // 性能 = BURST（MAX/MAX，关 DCVS），平衡 = BALANCED（NOM_PLUS/NOM_PLUS）。
+    // 实测 TURBO 与 MAX 几乎同频（差 10%），真正落差从 NOM_PLUS 开始，所以中间不再留档。
     if (activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP) {
         EnhancementParamLabel(MR.strings.enhancement_qnn_power_mode)
         val powerMode by preferences.qnnPowerMode.collectAsState()
         SettingsChipRow {
             listOf(
                 0 to MR.strings.enhancement_qnn_power_performance,
-                1 to MR.strings.enhancement_qnn_power_saver,
+                1 to MR.strings.enhancement_qnn_power_balanced,
             ).forEach { (mode, labelRes) ->
                 FilterChip(
                     selected = powerMode == mode,

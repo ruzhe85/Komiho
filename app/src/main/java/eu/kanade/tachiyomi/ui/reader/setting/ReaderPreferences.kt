@@ -421,10 +421,12 @@ class ReaderPreferences(
 
     /**
      * Komiho (2026-11-07): QNN/HTP 功耗档 —— 0 = 性能（Burst，即改造前的固定行为）、
-     * 1 = 省电。只对骁龙 QNN 路径生效（MTK LiteRT 没有对应接口）。
+     * 1 = 平衡（对应高通 BALANCED 档：NOM_PLUS/NOM_PLUS）。只对骁龙 QNN 路径生效
+     * （MTK LiteRT 没有对应接口）。
      *
-     * 曾有过第三档「均衡」，实测连续阅读时速度与温度和性能档几乎一致（DCVS 会立刻
-     * 爬到 MAX、空闲窗口又够不着休眠门槛），已删除。
+     * 档位对齐高通的划分：BURST=MAX、SUSTAINED_HIGH/HIGH=TURBO、BALANCED=NOM_PLUS、
+     * LOW_BALANCED=NOM、POWER_SAVER=SVS。实测 TURBO 与 MAX 几乎同频（只差 10%），
+     * 真正的落差从 NOM_PLUS 开始，所以中间不再单独留档。
      *
      * 不进 [enhancementCacheKey]：它只影响推理速度与发热，不改变任何像素，
      * 加进去会让切档白白丢掉已缓存的增强图。

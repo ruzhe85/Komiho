@@ -581,7 +581,7 @@
     <!-- Komiho (2026-11-07): QNN/HTP power mode (Qualcomm NPU only). -->
     <string name="enhancement_qnn_power_mode">NPU power mode</string>
     <string name="enhancement_qnn_power_performance">Performance</string>
-    <string name="enhancement_qnn_power_saver">Power saver</string>
+    <string name="enhancement_qnn_power_balanced">Balanced</string>
     <!-- Komiho: NPU 详情里「没有系列、或系列只有它一个」的模型统一归到这个组。 -->
     <string name="enhancement_series_standalone">Standalone</string>
     <string name="enhancement_scale">Scale</string>
