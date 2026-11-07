@@ -564,6 +564,30 @@ private fun NpuDetail(
         }
     }
 
+    // Komiho (2026-11-07): 仅骁龙 QNN 生效的功耗档。默认「性能」= 改造前的固定 Burst 行为，
+    // 升级后不选也不会变手感；连续阅读发热明显时切「均衡 / 省电」。
+    if (activeModel.backend == UpscaleModelSpec.Backend.QNN_HTP) {
+        EnhancementParamLabel(MR.strings.enhancement_qnn_power_mode)
+        val powerMode by preferences.qnnPowerMode.collectAsState()
+        SettingsChipRow {
+            listOf(
+                0 to MR.strings.enhancement_qnn_power_performance,
+                1 to MR.strings.enhancement_qnn_power_balanced,
+                2 to MR.strings.enhancement_qnn_power_saver,
+            ).forEach { (mode, labelRes) ->
+                FilterChip(
+                    selected = powerMode == mode,
+                    onClick = {
+                        preferences.qnnPowerMode.set(mode)
+                        // 立即生效：已初始化的 QNN 引擎只重设 perf 配置，不重建 context。
+                        Waifu2x.applyQnnPowerMode(mode)
+                    },
+                    label = { Text(stringResource(labelRes)) },
+                )
+            }
+        }
+    }
+
     EnhancementParamLabel(MR.strings.enhancement_detail_advanced)
     AiAdvancedOptions(preferences)
 }

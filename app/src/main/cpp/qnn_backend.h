@@ -21,6 +21,10 @@ int process_rgba(const uint8_t *input, int width, int height, int input_stride,
                  const std::atomic<bool> *should_abort);
 void shutdown();
 
+// Komiho (2026-11-07): 运行时切换 HTP 功耗档（0 = 性能 / 1 = 均衡 / 2 = 省电）。
+// 未初始化时只记录，等下一次 initialize() 生效；已初始化则立刻重设 perf 配置。
+void set_power_mode(int mode);
+
 // Komiho (2026-09-18): 把 ADSP_LIBRARY_PATH 指向 nativeLibraryDir。
 // **必须在任何一次 dlopen("libQnnHtp.so") 之前调用**（见 qnn_backend.cpp 里的长注释）。
 // preferred_dir 为 null/空时用 dladdr 自定位本 .so 所在目录。

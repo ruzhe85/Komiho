@@ -866,6 +866,18 @@ Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeUpdatePerformanceConfig(
   }
 }
 
+// Komiho (2026-11-07): QNN/HTP 功耗档（0 = 性能 / 1 = 均衡 / 2 = 省电）。
+// 与上面的 nativeUpdatePerformanceConfig 不同，这个对 QNN 真正生效
+//（那边只写 ncnn 的 tile_sleep_ms / tilesize）。切档不需要重建 QNN context。
+extern "C" JNIEXPORT void JNICALL
+Java_eu_kanade_tachiyomi_util_waifu2x_Waifu2x_nativeSetQnnPowerMode(
+    JNIEnv *env, jobject thiz, jint mode) {
+  std::lock_guard<std::mutex> lock(g_lock);
+  qnn_backend::set_power_mode(static_cast<int>(mode));
+  LOGD("QNN power mode set to %d (0=perf 1=balanced 2=saver)",
+       static_cast<int>(mode));
+}
+
 // Komiho (2026-10-01): [id] 那次推理是否被 abortProcessing 打断 —— 供 Kotlin 决定要不要跑
 // CPU Lanczos 兜底。见 g_last_aborted_id 与 MihonSyEnhancer.enhanceWithGpu。
 extern "C" JNIEXPORT jboolean JNICALL

@@ -1397,6 +1397,7 @@ private fun KomgaMainScreen(
                             }
                             context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, page))
                         },
+                        onOpenLocation = { openLocationInApp(it) },
                     )
                     // SY <--
                     MainTab.Home -> HomeTab(
@@ -6214,6 +6215,9 @@ private fun LocalFileBrowser(
         key1 = entries,
         key2 = progressTick,
     ) {
+        // 章节进度是阅读器侧异步落库的：从阅读器返回瞬间查到的还是旧值，
+        // 表现为「刚顺序看完的几卷没有进度，退出再进一次才全有」。和历史 tab 同口径等一拍。
+        if (progressTick > 0) delay(600)
         value = withContext(Dispatchers.IO) {
             loadFileProgress(
                 entries.filter { !it.isDirectory && it.isArchive }.map {
@@ -7303,6 +7307,7 @@ private suspend fun loadFileProgress(
     }
 
     // 兜底：key 没覆盖到的条目按章节 URL 再查一次。
+    val keyHitCount = out.size
     val missing = items.filter { it.name !in out }
     if (missing.isNotEmpty()) {
         val urlToName = HashMap<String, String>(missing.size)
@@ -7323,9 +7328,11 @@ private suspend fun loadFileProgress(
         }
     }
 
+    // 分开记 key / url 两路的命中数：用户反馈「某些卷没进度」时，一眼能看出是
+    // 兜底通道没查到（urlHit=0）还是根本查不到记录。
     eu.kanade.tachiyomi.diagnostic.DiagLog.d(
         "FileProgress",
-        "items=${items.size} keys=${keyToName.size} hit=${out.size}",
+        "items=${items.size} keys=${keyToName.size} keyHit=$keyHitCount urlHit=${out.size - keyHitCount}",
     )
     return out
 }
@@ -8168,6 +8175,8 @@ private fun WebDavBrowsePane(
         key1 = entries,
         key2 = progressTick,
     ) {
+        // 进度由阅读器异步落库，退出瞬间查会读到旧值（见本地同名注释）。
+        if (progressTick > 0) delay(600)
         value = loadFileProgress(
             entries.filter { !it.isDir && it.isArchive }.map {
                 FileProgressQuery(
@@ -9106,6 +9115,8 @@ private fun SmbBrowsePane(
         key1 = entries,
         key2 = progressTick,
     ) {
+        // 进度由阅读器异步落库，退出瞬间查会读到旧值（见本地同名注释）。
+        if (progressTick > 0) delay(600)
         value = loadFileProgress(
             entries.filter { !it.isDir && it.isArchive }.map {
                 FileProgressQuery(
@@ -10206,6 +10217,8 @@ private fun SourceDashboardPane(
     onOpenSource: (SourceEntry) -> Unit,
     /** 续读：先把来源/浏览位置切过去（退出阅读器后落在书籍目录），再带页码进阅读器。 */
     onResumeReading: (entry: SourceEntry, mangaId: Long, chapterId: Long, page: Int, chapterUrl: String) -> Unit,
+    /** 「打开文件位置」：切到对应来源的浏览页并定位到该文件所在目录（仅文件型来源可用）。 */
+    onOpenLocation: (String) -> Unit,
 ) {
     val context = LocalContext.current
     // SY: 每个来源显示几条最近阅读 —— 已改为按来源独立配置（来源管理眼睛弹窗，0=隐藏），
@@ -10573,6 +10586,13 @@ private fun SourceDashboardPane(
                                     deleteTick++
                                 }
                             },
+                            // historyId > 0 即文件型来源（本地/WebDAV/SMB）；Komga 条目没有本地历史，
+                            // 也没有可定位的本地目录，不给这一项。
+                            onOpenLocation = if (item.historyId > 0L) {
+                                ({ onOpenLocation(item.chapterUrl) })
+                            } else {
+                                null
+                            },
                         )
                     }
                 }
@@ -10584,7 +10604,8 @@ private fun SourceDashboardPane(
 
 /**
  * 聚合页卡片里的「最近阅读」行：封面 + 名称 + 进度条（页码/总页数 · 百分比）+ 最后阅读时间。
- * 点行 = 续读；右侧 ⋯ = 从头阅读 / 删除记录（服务器条目无本地历史，只给「从头阅读」）。
+ * 点行 = 续读；右侧 ⋯ = 从头阅读 / 删除记录 / 打开文件位置
+ *（服务器条目无本地历史、也没有本地目录，只给「从头阅读」）。
  */
 @Composable
 private fun DashboardRecentRow(
@@ -10593,6 +10614,8 @@ private fun DashboardRecentRow(
     onClick: () -> Unit,
     onReadFromStart: () -> Unit,
     onDelete: () -> Unit,
+    /** 文件型来源（本地/WebDAV/SMB）才有；null 时不显示「打开文件位置」。 */
+    onOpenLocation: (() -> Unit)? = null,
 ) {
     val total = item.totalPages
     val page = (item.page + 1).coerceAtLeast(1)
@@ -10688,6 +10711,17 @@ private fun DashboardRecentRow(
                                 onClick = {
                                     menuExpanded = false
                                     onDelete()
+                                },
+                            )
+                        }
+                        // 打开文件位置：与历史 tab 同口径（应用内切到浏览页并定位所在目录）。
+                        val openLocation = onOpenLocation
+                        if (openLocation != null) {
+                            DropdownMenuItem(
+                                text = { Text(composeStringResource(R.string.local_open_file_location)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    openLocation()
                                 },
                             )
                         }

@@ -420,6 +420,15 @@ class ReaderPreferences(
     val showEnhancementStatus: Preference<Boolean> = preferenceStore.getBoolean("pref_show_enhancement_status", false)
 
     /**
+     * Komiho (2026-11-07): QNN/HTP 功耗档 —— 0 = 性能（Burst，即改造前的固定行为）、
+     * 1 = 均衡、2 = 省电。只对骁龙 QNN 路径生效（MTK LiteRT 没有对应接口）。
+     *
+     * 不进 [enhancementCacheKey]：它只影响推理速度与发热，不改变任何像素，
+     * 加进去会让切档白白丢掉已缓存的增强图。
+     */
+    val qnnPowerMode: Preference<Int> = preferenceStore.getInt("pref_qnn_power_mode", 0)
+
+    /**
      * Komiho (2026-09-19): fingerprint of every preference that changes the **rendered result**
      * of enhancement.
      *

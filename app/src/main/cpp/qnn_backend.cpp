@@ -771,27 +771,66 @@ private:
     dcvs.option = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DCVS_V3;
     dcvs.dcvsV3Config.contextId = power_config_id_;
     dcvs.dcvsV3Config.setDcvsEnable = 1;
-    dcvs.dcvsV3Config.dcvsEnable = 0;
-    dcvs.dcvsV3Config.powerMode =
-        QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_PERFORMANCE_MODE;
     dcvs.dcvsV3Config.setSleepLatency = 1;
-    dcvs.dcvsV3Config.sleepLatency = 40;
     dcvs.dcvsV3Config.setSleepDisable = 1;
-    dcvs.dcvsV3Config.sleepDisable = 1;
     dcvs.dcvsV3Config.setBusParams = 1;
-    dcvs.dcvsV3Config.busVoltageCornerMin =
-        DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
-    dcvs.dcvsV3Config.busVoltageCornerTarget =
-        DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
-    dcvs.dcvsV3Config.busVoltageCornerMax =
-        DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
     dcvs.dcvsV3Config.setCoreParams = 1;
-    dcvs.dcvsV3Config.coreVoltageCornerMin =
-        DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
-    dcvs.dcvsV3Config.coreVoltageCornerTarget =
-        DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
-    dcvs.dcvsV3Config.coreVoltageCornerMax =
-        DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+
+    // Komiho (2026-11-07): 三档由 power_mode_ 决定。
+    // 关键点：原来那套「关 DCVS + 锁最高电压 + 禁休眠」下，powerMode 名存实亡
+    // （DCVS 都被关了，HTP 恒跑最高频），所以均衡/省电必须先把 dcvsEnable 打开。
+    const char *mode_name = "performance";
+    if (power_mode_ == 1) {
+      // 均衡：DCVS 自适应升降频，允许空闲休眠；电压从 NOMINAL 起步、峰值仍可升到
+      // MAX。长时间阅读时靠自适应比锁死最高频更不容易撞系统 thermal 限频。
+      mode_name = "balanced";
+      dcvs.dcvsV3Config.dcvsEnable = 1;
+      dcvs.dcvsV3Config.powerMode =
+          QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_ADJUST_UP_DOWN;
+      dcvs.dcvsV3Config.sleepLatency = 1000;
+      dcvs.dcvsV3Config.sleepDisable = 0;
+      dcvs.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_NOM;
+      dcvs.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_NOM;
+      dcvs.dcvsV3Config.busVoltageCornerMax =
+          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+      dcvs.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_NOM;
+      dcvs.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_NOM;
+      dcvs.dcvsV3Config.coreVoltageCornerMax =
+          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+    } else if (power_mode_ >= 2) {
+      // 省电：POWER_SAVER 档 + 电压上限压到 NOMINAL、平时 SVS，休眠门槛拉到 4s。
+      mode_name = "saver";
+      dcvs.dcvsV3Config.dcvsEnable = 1;
+      dcvs.dcvsV3Config.powerMode =
+          QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_POWER_SAVER_MODE;
+      dcvs.dcvsV3Config.sleepLatency = 4000;
+      dcvs.dcvsV3Config.sleepDisable = 0;
+      dcvs.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_SVS;
+      dcvs.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_SVS;
+      dcvs.dcvsV3Config.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_NOM;
+      dcvs.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_SVS;
+      dcvs.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_SVS;
+      dcvs.dcvsV3Config.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_NOM;
+    } else {
+      // 性能（原样保留）：关 DCVS + Burst + 锁最高电压 + 禁休眠。
+      dcvs.dcvsV3Config.dcvsEnable = 0;
+      dcvs.dcvsV3Config.powerMode =
+          QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_PERFORMANCE_MODE;
+      dcvs.dcvsV3Config.sleepLatency = 40;
+      dcvs.dcvsV3Config.sleepDisable = 1;
+      dcvs.dcvsV3Config.busVoltageCornerMin =
+          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+      dcvs.dcvsV3Config.busVoltageCornerTarget =
+          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+      dcvs.dcvsV3Config.busVoltageCornerMax =
+          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+      dcvs.dcvsV3Config.coreVoltageCornerMin =
+          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+      dcvs.dcvsV3Config.coreVoltageCornerTarget =
+          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+      dcvs.dcvsV3Config.coreVoltageCornerMax =
+          DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+    }
 
     QnnHtpPerfInfrastructure_PowerConfig_t rpc_latency =
         QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIG_INIT;
@@ -804,16 +843,33 @@ private:
         QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_RPC_POLLING_TIME;
     rpc_polling.rpcPollingTimeConfig =
         QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIG_MAX_RPC_POLLING_TIME;
-    const QnnHtpPerfInfrastructure_PowerConfig_t *configs[] = {
+    // 性能档沿用原来最激进的高频轮询；均衡/省电不强制，交给驱动默认值。
+    const QnnHtpPerfInfrastructure_PowerConfig_t *configs_perf[] = {
         &dcvs, &rpc_latency, &rpc_polling, nullptr};
-    status = performance_infrastructure_.setPowerConfig(power_config_id_,
-                                                         configs);
+    const QnnHtpPerfInfrastructure_PowerConfig_t *configs_eco[] = {
+        &dcvs, &rpc_latency, nullptr};
+    status = performance_infrastructure_.setPowerConfig(
+        power_config_id_, power_mode_ == 0 ? configs_perf : configs_eco);
     if (status != QNN_SUCCESS) {
       LOGE("QNN setPowerConfig failed: %u", static_cast<unsigned>(status));
       release_performance();
       return;
     }
-    LOGD("QNN HTP burst performance configuration enabled");
+    LOGD("QNN HTP power mode applied: %s", mode_name);
+  }
+
+  /** Komiho (2026-11-07): 运行时切换功耗档。未初始化时只记住，下次 load 时生效。 */
+  void set_power_mode(int mode) {
+    if (mode < 0) mode = 0;
+    if (mode > 2) mode = 2;
+    power_mode_ = mode;
+    if (!initialized_) {
+      return;
+    }
+    // 已初始化：销毁旧 powerConfigId 再按新档重设（同一个 context 可反复 setPowerConfig，
+    // 不需要重建 QNN context，所以切换是即时生效的）。
+    release_performance();
+    configure_performance();
   }
 
   void release_performance() {
@@ -1080,6 +1136,9 @@ private:
       QNN_HTP_DEVICE_PERF_INFRASTRUCTURE_INIT;
   uint32_t power_config_id_ = 0;
   bool initialized_ = false;
+  // Komiho (2026-11-07): 0 = 性能（原 Burst 配置）、1 = 均衡、2 = 省电。
+  // 由 Kotlin 侧偏好决定，加载模型时应用；运行时切换走 set_power_mode()。
+  int power_mode_ = 0;
 };
 
 Runtime runtime;
@@ -1152,6 +1211,15 @@ int process_rgba(const uint8_t *input, int width, int height, int input_stride,
 void shutdown() {
 #if MIHON_ENABLE_QNN
   runtime.deactivate();
+#endif
+}
+
+// Komiho (2026-11-07): 0 = 性能 / 1 = 均衡 / 2 = 省电。见 Runtime::set_power_mode。
+void set_power_mode(int mode) {
+#if MIHON_ENABLE_QNN
+  runtime.set_power_mode(mode);
+#else
+  (void)mode;
 #endif
 }
 
