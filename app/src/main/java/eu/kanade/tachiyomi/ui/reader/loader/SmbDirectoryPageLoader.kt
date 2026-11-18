@@ -3,9 +3,11 @@ package eu.kanade.tachiyomi.ui.reader.loader
 import app.mihonsy.komga.data.smb.SmbBrowse
 import app.mihonsy.komga.data.smb.SmbConnection
 import app.mihonsy.komga.data.smb.SmbSessionManager
+import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import eu.kanade.tachiyomi.util.lang.readAllBytesCompact
 import java.io.IOException
 
 // SY --> Komiho Phase7: SMB 散图目录章节 —— 目录内没有归档、直接是图片时，
@@ -46,11 +48,36 @@ internal class SmbDirectoryPageLoader(
     private fun readPageBytes(path: String): ByteArray {
         check(!isRecycled) { "页面读取时章节已被回收（翻页/换章竞态）——重载即恢复" }
         // smbj 的 File 是句柄不是 InputStream：getInputStream() 取实时流再读全量。
-        val bytes = SmbSessionManager.openFile(conn, password, path).use { f ->
-            f.getInputStream().buffered().use { it.readBytes() }
+        // issue #16：readBytes() 的 ByteArrayOutputStream 反复 copyOf 扩容峰值可达 3～4 倍，
+        // 多页预取叠加撑爆 512MB heap。这里按已知文件大小一次精确分配（峰值 1 倍）。
+        return SmbSessionManager.openFile(conn, password, path).use { f ->
+            // 大小只用于预分配。查询失败绝不能连累页面读取（部分 NAS 对
+            // FILE_READ_ATTRIBUTES 行为异常），退化为 -1 走分块读取。
+            val size = try {
+                f.getFileInformation().standardInformation.endOfFile
+            } catch (e: Exception) {
+                DiagLog.w("SmbPageRead", "size query failed, fallback to chunked: ${e.message} path=$path")
+                -1L
+            }
+            if (size > Int.MAX_VALUE) throw IOException("图片大小异常（$size 字节）：$path")
+            val bytes = f.getInputStream().buffered(64 * 1024).use { it.readAllBytesCompact(size) }
+            check(bytes.isNotEmpty()) { "图片读取为空（章节流已被回收关闭）：$path——重载即恢复" }
+            // 只在下限上防御「流提前结束」；文件在查询大小后被换成更大的文件时
+            // （读取工具会读全），bytes.size > size 属正常，不能当成不完整。
+            if (size > 0) {
+                check(bytes.size >= size.toInt()) {
+                    "图片读取不完整（${bytes.size}/$size 字节）：$path——重载即恢复"
+                }
+            }
+            if (bytes.size >= LARGE_PAGE_THRESHOLD) {
+                DiagLog.d("SmbPageRead", "page=${bytes.size}B prealloc=$size path=$path")
+            }
+            bytes
         }
-        check(bytes.isNotEmpty()) { "图片读取为空（章节流已被回收关闭）：$path——重载即恢复" }
-        return bytes
+    }
+
+    private companion object {
+        const val LARGE_PAGE_THRESHOLD = 8 * 1024 * 1024
     }
 }
 // SY <--

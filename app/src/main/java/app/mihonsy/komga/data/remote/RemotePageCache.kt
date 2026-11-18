@@ -1,5 +1,6 @@
 package app.mihonsy.komga.data.remote
 
+import eu.kanade.tachiyomi.util.lang.readAllBytesCompact
 import logcat.LogPriority
 import logcat.logcat
 import mihon.core.common.archive.ArchiveHandle
@@ -67,7 +68,10 @@ class RemotePageCache(private val root: File, private val maxBytes: Long) {
         val file = pageFile(dir, entryName) ?: return null
         if (!file.isFile) return null
         file.setLastModified(System.currentTimeMillis())
-        return runCatching { file.readBytes() }
+        return runCatching {
+            // issue #16：readBytes() 扩容峰值 3～4 倍；本地缓存文件长度已知，精确分配。
+            file.inputStream().buffered(64 * 1024).use { it.readAllBytesCompact(file.length()) }
+        }
             .onFailure { logcat(LogPriority.WARN) { "[RemotePageCache] 缓存读取失败，按未命中处理: ${it.message}" } }
             .getOrNull()
             ?.takeIf { it.isNotEmpty() }
@@ -159,7 +163,7 @@ class CachingArchiveHandle(
         val lock = inFlight.computeIfAbsent(entryName) { Any() }
         synchronized(lock) {
             cache.get(dir, entryName)?.let { return it.inputStream() }
-            val bytes = delegate.getInputStream(entryName)?.use { it.readBytes() } ?: return null
+            val bytes = delegate.getInputStream(entryName)?.use { it.readAllBytesCompact() } ?: return null
             if (bytes.isNotEmpty()) cache.put(dir, entryName, bytes)
             return bytes.inputStream()
         }

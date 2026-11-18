@@ -12,6 +12,7 @@ import coil3.request.Options
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.loader.PageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.util.lang.readAllBytesCompact
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -75,7 +76,9 @@ class ReaderPageThumbnailFetcher(
         val input = readerPage.stream?.invoke()
             ?: throw IOException("page ${readerPage.index} stream unavailable for thumbnail")
         // 先把整段读入内存（避免 SMB/WebDAV 双次拉网），再子采样解码。
-        val raw = input.use { it.readBytes() }
+        // issue #16：readBytes() 的 ByteArrayOutputStream 扩容峰值可达 3～4 倍；
+        // 这里改用分块精确组装，避免缩略图请求在大页上再叠一份峰值内存。
+        val raw = input.use { it.readAllBytesCompact() }
         val bitmap = decodeSampled({ ByteArrayInputStream(raw) }, THUMB_PX)
             ?: throw IOException("page ${readerPage.index} decode failed for thumbnail")
         val bytes = runCatching {

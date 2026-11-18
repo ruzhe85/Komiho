@@ -4,9 +4,11 @@ import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavCredentialCrypto
 import app.mihonsy.komga.data.webdav.WebDavPropfind
 import mihon.core.common.archive.WebDavRandomAccessSource
+import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import eu.kanade.tachiyomi.util.lang.readAllBytesCompact
 import java.io.IOException
 
 // SY --> Komiho Phase7: WebDAV 散图目录章节 —— 对齐本地模式与 SMB 的散图做法：
@@ -57,10 +59,20 @@ internal class WebDavDirectoryPageLoader(
         val bytes = client.newCall(builder.build())
             .execute().use { resp ->
                 if (!resp.isSuccessful) throw IOException("图片下载失败 HTTP ${resp.code}: $url")
-                resp.body?.bytes() ?: ByteArray(0)
+                val body = resp.body ?: throw IOException("图片响应为空：$url")
+                // issue #16：ResponseBody.bytes() 走 ByteArrayOutputStream 扩容；
+                // 有 Content-Length 时按长度精确分配，峰值从 3～4 倍降到 1 倍。
+                body.byteStream().use { it.readAllBytesCompact(body.contentLength()) }
             }
         check(bytes.isNotEmpty()) { "图片下载为空：$url" }
+        if (bytes.size >= LARGE_PAGE_THRESHOLD) {
+            DiagLog.d("WebDavPageRead", "page=${bytes.size}B compact-read url=$url")
+        }
         return bytes
+    }
+
+    private companion object {
+        const val LARGE_PAGE_THRESHOLD = 8 * 1024 * 1024
     }
 }
 // SY <--

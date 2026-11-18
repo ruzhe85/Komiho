@@ -2,10 +2,12 @@ package eu.kanade.tachiyomi.ui.reader.loader
 
 import android.app.Application
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
+import eu.kanade.tachiyomi.util.lang.readAllBytesCompact
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -100,7 +102,10 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
                     // 读取统一走 [readEntryBytes]：LOAD_INTO_MEMORY 用后台预读好的字节
                     //（deferred 内部同样走防御），其余模式实时读；回收/空流/截断在读取层
                     // 快速失败，不再把空字节交给解码器伪装成 "Failed to initialize decoder"。
-                    stream = { (imageBytes ?: readEntryBytes(entry)).copyOf().inputStream() }
+                    // issue #16：原先这里 copyOf() 再全量复制一份，与底层 ByteArray
+                    // 同时驻留。ByteArrayInputStream 只读且各自持有独立 position，
+                    // 多个消费者共享同一份不可变字节是安全的，无需复制。
+                    stream = { (imageBytes ?: readEntryBytes(entry)).inputStream() }
                     // SY <--
                     status = Page.State.Ready
                 }
@@ -127,8 +132,13 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
         check(!isRecycled) { "页面读取时章节已被回收（翻页/换章竞态）——重载即恢复" }
         val input = reader.getInputStream(entry.name)
             ?: throw IllegalStateException("归档内取不到条目流：${entry.name}")
-        val bytes = input.buffered().use { it.readBytes() }
+        // issue #16：readBytes() 内部 ByteArrayOutputStream 反复 copyOf 扩容，
+        // 峰值可达 3～4 倍文件大小；改用分块收集 + 一次精确组装，峰值 2 倍。
+        val bytes = input.buffered(64 * 1024).use { it.readAllBytesCompact() }
         check(bytes.isNotEmpty()) { "条目读取为空（章节流已被回收关闭）：${entry.name}——重载即恢复" }
+        if (bytes.size >= LARGE_PAGE_THRESHOLD) {
+            DiagLog.d("ArchivePageRead", "page=${bytes.size}B compact-read entry=${entry.name}")
+        }
         return bytes
     }
 
@@ -138,5 +148,9 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
         // SY -->
         tmpDir.deleteRecursively()
         // SY <--
+    }
+
+    private companion object {
+        const val LARGE_PAGE_THRESHOLD = 8 * 1024 * 1024
     }
 }
