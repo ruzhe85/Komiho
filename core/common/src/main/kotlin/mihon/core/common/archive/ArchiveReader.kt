@@ -9,12 +9,14 @@ import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import logcat.LogPriority
 import me.zhanghai.android.libarchive.ArchiveException
+import tachiyomi.core.common.storage.extension
 import tachiyomi.core.common.storage.openFileDescriptor
 import tachiyomi.core.common.util.system.logcat
 import java.io.Closeable
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.concurrent.Volatile
 
 // SY --> Phase3: 实现 ArchiveHandle 窄接口，与 RemoteZipReader（远程 ZIP 直读路径）共用 ArchivePageLoader
 class ArchiveReader : ArchiveHandle {
@@ -53,8 +55,22 @@ class ArchiveReader : ArchiveHandle {
         if (address != null) ArchiveInputStream(address, size, encrypted)
         else ArchiveInputStream(source!!, encrypted)
 
-    override fun <T> useEntries(block: (Sequence<ArchiveEntry>) -> T): T =
-        newStream(encrypted).use { block(generateSequence { it.getNextEntry() }) }
+    // SY -->
+    /**
+     * 构造期扫描（[checkEncryptionStatus]）顺带收集的条目列表。
+     *
+     * 未加密归档会把全部条目扫完 → 完整缓存，[useEntries] 直接复用，省掉 `getPages()`
+     * 的第二次全量扫描（rar/7z 这类 libarchive-only 格式打开停顿的主要来源之一）；
+     * 加密归档在首个加密条目处提前 break（只为尽快弹密码框），此时列表不完整、不缓存。
+     */
+    @Volatile
+    private var cachedEntries: List<ArchiveEntry>? = null
+    // SY <--
+
+    override fun <T> useEntries(block: (Sequence<ArchiveEntry>) -> T): T {
+        cachedEntries?.let { return block(it.asSequence()) }
+        return newStream(encrypted).use { block(generateSequence { it.getNextEntry() }) }
+    }
 
     override fun getInputStream(entryName: String): InputStream? {
         val startedAt = SystemClock.elapsedRealtime()
@@ -87,11 +103,17 @@ class ArchiveReader : ArchiveHandle {
     private fun checkEncryptionStatus() {
         val startedAt = SystemClock.elapsedRealtime()
         var scanned = 0L
+        // SY --> 顺带收集条目列表，供 useEntries 复用（省掉第二次全量扫描）
+        val collected = ArrayList<ArchiveEntry>()
+        // SY <--
         val archive = newStream(false)
         try {
             while (true) {
                 val entry = archive.getNextEntry() ?: break
                 scanned++
+                // SY -->
+                collected.add(entry)
+                // SY <--
                 if (entry.isEncrypted) {
                     encrypted = true
                     // SY: 仅在已设置全局密码时才校验对错，否则交由上层弹密码框（避免无密码时空抛）
@@ -112,6 +134,9 @@ class ArchiveReader : ArchiveHandle {
             }
         }
         archive.close()
+        // SY --> 未加密 = 已扫完全部条目，列表完整可复用；加密时上面提前 break，不缓存。
+        if (!encrypted) cachedEntries = collected
+        // SY <--
     }
 
     private fun isPasswordIncorrect(entryName: String) {
@@ -190,6 +215,61 @@ fun UniFile.archiveReader(context: Context): ArchiveReader {
     }
     return openFileDescriptor(context, "r").use { ArchiveReader(it) }
 }
+
+// SY --> issue #15：本地 ZIP 中央目录索引路径
+/** [RemoteZipReader] 只支持 ZIP 家族扩展名；rar/7z/tar 直接走 libarchive。 */
+private val ZIP_FAMILY_EXTENSIONS = setOf("zip", "cbz")
+
+/**
+ * 本地归档句柄（issue #15）：zip/cbz 优先进中央目录索引（[RemoteZipReader]）。
+ *
+ * 打开时只读尾部 EOCD + 中央目录建索引，之后每页直接定位读取（O(1)）；
+ * 不再像 libarchive 路径那样「每次找条目从头扫一遍、打开时还要扫两次全包」。
+ *
+ * 其余格式（rar/cbr/7z/cb7/tar/cbt）、索引不支持或解析失败，一律回落 libarchive，行为不变。
+ * SAF / content-uri 没有真实路径，但可通过 [PfdRandomAccessSource] 同样走索引。
+ */
+fun UniFile.indexedArchiveHandle(context: Context): ArchiveHandle {
+    // 非 zip 家族保持原行为：真实文件走定位读、SAF 走 mmap。
+    if (extension?.lowercase() !in ZIP_FAMILY_EXTENSIONS) return archiveReader(context)
+
+    val path = filePath
+    val isRealFile = uri?.scheme == "file" && !path.isNullOrEmpty()
+    val source: RandomAccessSource = if (isRealFile) {
+        LocalRandomAccessSource(File(path))
+    } else {
+        // SAF / content-uri：用 PFD 做定位读；所有权转交 source，close() 时一并关闭。
+        PfdRandomAccessSource(openFileDescriptor(context, "r"))
+    }
+    val label = path ?: uri?.toString().orEmpty()
+
+    try {
+        val indexed = RemoteZipReader(source)
+        val count = indexed.useEntries { it.count() }
+        // 条目名一律按 UTF-8 解码：传统编码（GBK / Shift-JIS 等且未置 UTF-8 标志）会解成
+        // U+FFFD，不同条目可能撞成同一个 key → 丢页。这种情况坚决回落 libarchive。
+        val badNames = count > 0 &&
+            indexed.useEntries { seq -> seq.any { it.name.contains('\uFFFD') } }
+        if (count > 0 && !badNames) {
+            logcat(LogPriority.INFO) { "[Archive] 索引化打开 zip=$label 条目=$count" }
+            return indexed
+        }
+        // 非 ZIP 的尾部偶然命中 EOCD 时会解析出空索引 → 回落 libarchive。
+        logcat(LogPriority.WARN) {
+            "[Archive] 索引不可用（空索引或文件名非 UTF-8），回落 libarchive: $label"
+        }
+    } catch (e: Exception) {
+        logcat(LogPriority.WARN, e) {
+            "[Archive] RemoteZipReader 解析失败，回落 libarchive: ${e.message} path=$label"
+        }
+    }
+
+    // 真实文件复用同一 source（定位读无游标）；SAF 关掉索引用的 PFD 后走原来的 mmap 路径。
+    if (isRealFile) return ArchiveReader(source)
+    runCatching { source.close() }
+    return openFileDescriptor(context, "r").use { ArchiveReader(it) }
+}
+// SY <--
 
 // SY -->
 /**

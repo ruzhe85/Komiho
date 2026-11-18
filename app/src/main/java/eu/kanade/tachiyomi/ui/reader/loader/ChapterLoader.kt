@@ -28,6 +28,7 @@ import mihon.core.common.archive.RemoteScheme
 import mihon.core.common.archive.RemoteZipReader
 import mihon.core.common.archive.WebDavRandomAccessSource
 import mihon.core.common.archive.archiveReader
+import mihon.core.common.archive.indexedArchiveHandle
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
@@ -151,7 +152,9 @@ class ChapterLoader(
             source is LocalSource -> source.getFormat(chapter.chapter).let { format ->
                 when (format) {
                     is Format.Directory -> DirectoryPageLoader(format.file)
-                    is Format.Archive -> ArchivePageLoader(format.file.archiveReader(context))
+                    // SY --> issue #15: 本地 zip/cbz 走中央目录索引（O(1) 取页），其余格式回落 libarchive。
+                    is Format.Archive -> ArchivePageLoader(format.file.indexedArchiveHandle(context))
+                    // SY <--
                     is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
                     // SY --> Komiho: 本地 PDF（彩色扫描漫画常见）—— 自写提取内嵌图 + 系统渲染兜底。
                     is Format.Pdf -> PdfPageLoader(format.file, context)
@@ -202,7 +205,9 @@ class ChapterLoader(
                 val bookId = dbChapter.url.removePrefix(KomgaSource.BOOK_URL_PREFIX)
                 val cbzPath = KomgaDownloadStore(context).getPath(bookId)
                 if (cbzPath != null && File(cbzPath).exists()) {
-                    ArchivePageLoader(UniFile.fromFile(File(cbzPath))!!.archiveReader(context.applicationContext))
+                    ArchivePageLoader(
+                        UniFile.fromFile(File(cbzPath))!!.indexedArchiveHandle(context.applicationContext),
+                    )
                 } else {
                     HttpPageLoader(chapter, source)
                 }

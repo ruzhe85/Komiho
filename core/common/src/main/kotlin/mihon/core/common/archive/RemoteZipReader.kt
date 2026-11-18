@@ -337,6 +337,55 @@ class RemoteZipReader(private val source: RandomAccessSource) : ArchiveHandle {
         }
     }
 
+    /**
+     * 只读条目开头的一小段用于格式嗅探（issue #15）。
+     *
+     * 不能沿用接口默认实现——[getInputStream] 会把整条压缩数据先读进内存，
+     * 对「按条目嗅探」的场景等于把整本图读一遍。这里只取压缩流的开头一段：
+     * 图片魔数都在解压结果的最前面，几十 KB 压缩输入足够。
+     */
+    override fun peek(entryName: String, maxBytes: Int): ByteArray? {
+        if (maxBytes <= 0) return null
+        val e = entries[entryName] ?: return null
+        // 加密条目要做完整解密头处理，直接走通用实现（极少数场景，可接受）。
+        // 判定口径与 getInputStream 对齐：AES 看 aesStrength，ZipCrypto 看 encrypted。
+        if (e.encrypted || e.aesStrength != 0) return super<ArchiveHandle>.peek(entryName, maxBytes)
+        val dataStart = locateData(e)
+        val prefixLen = minOf(e.compSize, PEEK_COMPRESSED_BYTES.toLong()).toInt()
+        if (prefixLen <= 0) return ByteArray(0)
+        val raw = readFully(dataStart, prefixLen)
+        return when (e.method) {
+            METHOD_STORED -> raw.copyOf(minOf(raw.size, maxBytes))
+            METHOD_DEFLATED -> inflatePrefix(raw, maxBytes)
+            else -> null
+        }
+    }
+
+    /** 用截断的压缩输入尽量解出前 [maxBytes] 字节；输入不足就返回已解出的部分。 */
+    private fun inflatePrefix(raw: ByteArray, maxBytes: Int): ByteArray {
+        val out = ByteArray(maxBytes)
+        var offset = 0
+        // 显式 end()：外部传入的 Inflater 不会被 InflaterInputStream.close() 释放，
+        // 而嗅探可能对上百个条目各建一个，native 资源不能等 GC。
+        val inflater = Inflater(true)
+        try {
+            InflaterInputStream(ByteArrayInputStream(raw), inflater, 1024).use { stream ->
+                while (offset < maxBytes) {
+                    val n = stream.read(out, offset, maxBytes - offset)
+                    if (n <= 0) break
+                    offset += n
+                }
+            }
+        } catch (e: Exception) {
+            // 截断的 deflate 流可能提前报错，取已经解出的部分即可。
+        } finally {
+            inflater.end()
+        }
+        return out.copyOf(offset)
+    }
+
+    override fun entrySize(entryName: String): Long = entries[entryName]?.uncompSize ?: -1L
+
     override fun close() {
         source.close()
     }
@@ -532,6 +581,9 @@ class RemoteZipReader(private val source: RandomAccessSource) : ArchiveHandle {
 
     private companion object {
         const val TAIL_SIZE = 64 * 1024
+
+        /** 嗅探时最多读这么多压缩数据：图片魔数在解压结果最前，几十 KB 输入绰绰有余。 */
+        const val PEEK_COMPRESSED_BYTES = 64 * 1024
         // 构造期 ZipCrypto 整条验证的未压缩大小上限（超过则退回 12B 校验字节，1/256 漏网可接受）
         const val UNCOMP_VALIDATE_LIMIT = 32L * 1024 * 1024
         const val METHOD_STORED = 0

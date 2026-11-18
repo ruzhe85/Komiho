@@ -10,7 +10,7 @@ import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
-import mihon.core.common.archive.archiveReader
+import mihon.core.common.archive.indexedArchiveHandle
 import tachiyomi.domain.manga.model.Manga
 import uy.kohesive.injekt.injectLazy
 
@@ -53,7 +53,8 @@ internal class DownloadPageLoader(
     }
 
     private suspend fun getPagesFromArchive(file: UniFile): List<ReaderPage> {
-        val loader = ArchivePageLoader(file.archiveReader(context)).also { archivePageLoader = it }
+        // issue #15：已下载的 CBZ 也走中央目录索引，打开/跳页 O(1)。
+        val loader = ArchivePageLoader(file.indexedArchiveHandle(context)).also { archivePageLoader = it }
         return loader.getPages()
     }
 
