@@ -31,6 +31,7 @@ import okio.BufferedSource
 import tachiyomi.decoder.Format
 import tachiyomi.decoder.ImageDecoder
 import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
 import java.security.SecureRandom
@@ -98,6 +99,34 @@ object ImageUtil {
             else -> decodeWithBitmapFactory(open, maxPx) ?: decodeWithImageDecoder(open, maxPx)
         }
     }
+
+    /**
+     * Komiho (issue #17): 已经整段读进内存的图 —— 直接用字节解码，**不再复制一份**。
+     *
+     * 走上面那个 `() -> InputStream` 版本时，`decodeWithBitmapFactory` 会调 [readAllBytes] 把整段
+     * 再收进一个 `ByteArrayOutputStream`（扩容峰值 2～4 倍）：调用方手里本来就有一份 15MB 的页字节，
+     * 解码瞬间就变成 30～60MB。缩略图这类「已经读过一遍」的场景用这个重载，峰值 = 原字节 + 位图。
+     */
+    fun decodeSampled(bytes: ByteArray, maxPx: Int): Bitmap? {
+        // 与流版本同口径的兜底上限：异常大的输入宁可不解，也不为了解一张图把内存吃穿。
+        if (bytes.isEmpty() || bytes.size > MAX_DECODE_BYTES) return null
+        val type = runCatching { findImageType(ByteArrayInputStream(bytes)) }.getOrNull()
+        return when (type) {
+            ImageType.AVIF, ImageType.JXL -> decodeWithImageDecoder({ ByteArrayInputStream(bytes) }, maxPx)
+            else -> decodeBytesWithBitmapFactory(bytes, maxPx)
+                ?: decodeWithImageDecoder({ ByteArrayInputStream(bytes) }, maxPx)
+        }
+    }
+
+    /** 系统解码（字节路径，零复制）：先探尺寸，再按 inSampleSize 采样解码。 */
+    private fun decodeBytesWithBitmapFactory(bytes: ByteArray, maxPx: Int): Bitmap? = runCatching {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) return@runCatching null
+        val sample = max(1, max(opts.outWidth, opts.outHeight) / maxPx)
+        val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts2)
+    }.getOrNull()
 
     // SY --> Komiho: 只读宽高（不解像素）。系统 bounds 在部分机型上对 AVIF 恒给 0×0
     // （骁龙 8 Elite 实测），此时改用 fork 的 ImageDecoder 取容器元数据 —— 仍然不解像素，

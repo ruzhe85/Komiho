@@ -13,6 +13,18 @@ open class ReaderPage(
     /** Value to check if a page is can be doubled up, but can't because the next page is too wide */
     var isolatedPage: Boolean = false,
     // SY <--
+    // SY --> Komiho (issue #17): 直接取整页字节（不经流）。
+    // SMB / WebDAV / 归档这些来源本来就要先攒出一个 ByteArray，再包成 stream 给我们；
+    // 缩略图若从 stream 读，等于在内存里**再复制一份等长的副本**（读取峰值 1 倍 → 2 倍）。
+    // 给了它就直通那份字节，省掉整页大小的复制。
+    // 注意：必须留在 [stream] 之前——`DownloadPageLoader` 用尾随 lambda 构造 stream。
+    var rawBytes: (() -> ByteArray)? = null,
+    // SY <--
+    // SY --> Komiho (issue #17): 该页原始字节大小（-1 = 未知）。
+    // 供缩略图在**分配内存前**做准入判断（堆余量够不够），也让读取按精确长度一次分配、
+    // 避免分块收集的 2 倍峰值。来源：SMB/WebDAV 目录列举里已有的大小。
+    var sourceSize: Long = -1L,
+    // SY <--
     var stream: (() -> InputStream)? = null,
 
 ) : Page(index, url, imageUrl, null), ReaderItem {

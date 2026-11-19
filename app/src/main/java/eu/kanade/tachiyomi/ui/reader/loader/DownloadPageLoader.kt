@@ -10,6 +10,7 @@ import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.util.system.getUriSize
 import mihon.core.common.archive.indexedArchiveHandle
 import tachiyomi.domain.manga.model.Manga
 import uy.kohesive.injekt.injectLazy
@@ -64,6 +65,10 @@ internal class DownloadPageLoader(
             ReaderPage(page.index, page.url, page.imageUrl) {
                 context.contentResolver.openInputStream(page.uri ?: Uri.EMPTY)!!
             }.apply {
+                // issue #17：下载章节也是本地文件，补上大小供缩略图一次精确分配 + 准入判断。
+                // `getUriSize` 对 file:// 就是一次 stat；对 content:// 才走一次查询，
+                // 相比 buildPageList 里已有的「逐页打开流做图片嗅探」可忽略。
+                sourceSize = page.uri?.let { context.getUriSize(it) } ?: -1L
                 status = Page.State.Ready
             }
         }

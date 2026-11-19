@@ -372,7 +372,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 // Komiho Phase7: SMB 浏览列表封面（归档首图/单图，filesDir 缓存隔离）
                 add(SmbCoverFetcher.Factory(context.applicationContext))
                 // Komiho: 进度条缩略图（本地 / SMB / WebDAV / 远程 复用 PageLoader 加载页原图）
-                add(ReaderPageThumbnailFetcher.Factory())
+                // issue #17：带上 cacheDir 以启用磁盘二级缓存（同一页只拉一次原图）
+                add(ReaderPageThumbnailFetcher.Factory(context.applicationContext))
                 // SY <--
                 // Keyer
                 add(MangaCoverKeyer())
@@ -382,6 +383,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 add(LocalCoverKeyer())
                 // Komiho Phase7: SMB 浏览封面 Keyer
                 add(eu.kanade.tachiyomi.data.coil.SmbCoverKeyer())
+                // Komiho: 进度条缩略图 Keyer（章节+页码，稳定去重，避免同页重复拉原图）
+                add(eu.kanade.tachiyomi.data.coil.ReaderPageThumbnailKeyer())
                 // SY <--
             }
 

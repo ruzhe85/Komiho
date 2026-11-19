@@ -112,6 +112,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
+import coil3.imageLoader
 import eu.kanade.tachiyomi.diagnostic.DiagLog
 import eu.kanade.tachiyomi.util.system.EinkMotion
 import eu.kanade.tachiyomi.util.system.isNightMode
@@ -311,6 +312,9 @@ class ReaderActivity : BaseActivity() {
         config = ReaderConfig()
         setMenuVisibility(viewModel.state.value.menuVisible)
         enableExhAutoScroll()
+        // SY --> Komiho (issue #17): 内存吃紧时让出书库封面占用的内存（见函数注释）。
+        trimCoverCacheIfTight()
+        // SY <--
 
         // Finish when incognito mode is disabled
         preferences.incognitoMode.changes()
@@ -408,6 +412,34 @@ class ReaderActivity : BaseActivity() {
             }
             .launchIn(lifecycleScope)
     }
+
+    // SY --> Komiho (issue #17): 阅读器是内存大头，进阅读器时按需让出书库封面占用的缓存。
+    //
+    // 书库 / 来源列表解码好的封面位图躺在 Coil 的 App 级内存缓存里（位图本身在 native 堆），
+    // 进阅读器后既不显示、也不会自己释放，白白占着进程内存预算。这里不「每次必清」——
+    // 那样每次退出阅读器回书库都要重新解码一屏封面；改成「首屏页图解码完成后看一眼余量，
+    // 真的紧张才清一次」，内存宽裕时完全不动。
+    //
+    // 清的是解码后的位图层，磁盘缓存（komga_covers 等）不受影响：重新解码只需本地字节，
+    // 不走网络、不重新取图。
+    private fun trimCoverCacheIfTight() {
+        // 走 IO 线程：`MemoryCache.clear()` 要逐个释放位图，条目多时在主线程上会有可见卡顿。
+        lifecycleScope.launchIO {
+            delay(READER_TRIM_DELAY_MS)
+            val runtime = Runtime.getRuntime()
+            val max = runtime.maxMemory()
+            val free = max - (runtime.totalMemory() - runtime.freeMemory())
+            // 余量还有 1/4 以上就不动：清缓存本身会让书库下次重新解码，不能白付这个代价。
+            if (free >= max / 4) return@launchIO
+            val cache = applicationContext.imageLoader.memoryCache ?: return@launchIO
+            cache.clear()
+            DiagLog.i(
+                "ReaderMem",
+                "堆余量 ${free / 1024 / 1024}MB/${max / 1024 / 1024}MB，已清理 Coil 内存缓存",
+            )
+        }
+    }
+    // SY <--
 
     private fun ReaderActivityBinding.setComposeOverlay(): Unit = composeOverlay.setComposeContent {
         val state by viewModel.state.collectAsState()
@@ -1978,3 +2010,11 @@ class ReaderActivity : BaseActivity() {
  */
 private val PAGE_NUMBER_EDGE_INSET = 28.dp
 private val PAGE_NUMBER_EDGE_LIFT = 10.dp
+
+/**
+ * Komiho (issue #17): 进阅读器后等多久再检查堆余量。
+ *
+ * 必须晚于首屏页图解码——太早检查看到的是「还没开始吃内存」的假宽裕，
+ * 而首屏那几张大图恰恰是最需要余量的时刻。
+ */
+private const val READER_TRIM_DELAY_MS = 2_000L

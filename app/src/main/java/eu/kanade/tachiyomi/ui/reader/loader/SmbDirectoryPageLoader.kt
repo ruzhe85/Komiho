@@ -30,12 +30,15 @@ internal class SmbDirectoryPageLoader(
         val images = SmbBrowse.list(conn, password, dirRel)
             .filter { it.isImage }
             .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
-            .map { it.path }
         if (images.isEmpty()) throw IOException("目录内没有图片：$dirRel")
-        return images.mapIndexed { i, path ->
+        return images.mapIndexed { i, entry ->
             ReaderPage(i).apply {
+                // issue #17：列举里已有大小，留给缩略图做分配前的准入判断。
+                sourceSize = entry.size
+                // 缩略图直通字节，避免从 stream 再复制一份整页（峰值 1 倍而非 2 倍）。
+                rawBytes = { readPageBytes(entry.path) }
                 // stream 契约：() -> InputStream（ByteArray 需包一层）。
-                stream = { readPageBytes(path).inputStream() }
+                stream = { readPageBytes(entry.path).inputStream() }
                 status = Page.State.Ready
             }
         }

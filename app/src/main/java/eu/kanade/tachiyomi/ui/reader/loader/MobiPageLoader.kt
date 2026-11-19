@@ -73,6 +73,8 @@ internal class MobiPageLoader private constructor(
 
         book.imageFiles.mapIndexed { index, file ->
             ReaderPage(index).apply {
+                // issue #17：抽到本地缓存目录的图片，大小已知，缩略图可精确分配。
+                sourceSize = file.length()
                 stream = { FileInputStream(file) }
                 status = Page.State.Ready
             }

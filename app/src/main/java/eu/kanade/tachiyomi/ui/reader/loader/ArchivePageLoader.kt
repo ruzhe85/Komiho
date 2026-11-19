@@ -107,6 +107,14 @@ internal class ArchivePageLoader(private val reader: ArchiveHandle) : PageLoader
                     // 同时驻留。ByteArrayInputStream 只读且各自持有独立 position，
                     // 多个消费者共享同一份不可变字节是安全的，无需复制。
                     stream = { (imageBytes ?: readEntryBytes(entry)).inputStream() }
+                    // issue #17：缩略图直通同一份字节（ByteArrayInputStream 各自持有 position，
+                    // 只读共享安全），省掉「stream → 再读一份」的等长复制。
+                    rawBytes = { imageBytes ?: readEntryBytes(entry) }
+                    // issue #17：条目解压后大小（索引实现是 map 查表，O(1)；libarchive 兜底
+                    // 返回 -1 = 未知，不会为它多做扫描）。缩略图只用它做**准入判断**与
+                    // 「超过 64MB 不读直接放弃」；实际读取走 rawBytes，由 readEntryBytes
+                    // 自己按 entrySize 精确分配，与本字段无关。
+                    sourceSize = runCatching { reader.entrySize(entry.name) }.getOrDefault(-1L)
                     // SY <--
                     status = Page.State.Ready
                 }

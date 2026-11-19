@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import eu.kanade.tachiyomi.diagnostic.DiagLog
 import tachiyomi.core.common.util.system.ImageUtil
 import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
 import java.io.InputStream
 
 /**
@@ -46,6 +47,34 @@ internal fun decodeCoverBitmap(
         DiagLog.w(
             "CoverDecode",
             "解码失败 $label type=${type?.name ?: "unknown"} strategy=$strategy bytes=$bytes",
+        )
+    }
+    return null
+}
+
+/**
+ * Komiho (issue #17): [decodeCoverBitmap] 的「字节已就位」版本。
+ *
+ * 调用方（进度条缩略图）本来就把整页字节读进内存了，走流版本会让解码器再整段复制一份，
+ * 峰值直接翻倍。这里直接吃字节数组，失败仍写同口径的诊断日志。
+ */
+internal fun decodeCoverBitmapBytes(
+    label: String,
+    maxPx: Int,
+    bytes: ByteArray,
+): Bitmap? {
+    val bitmap = ImageUtil.decodeSampled(bytes, maxPx)
+    if (bitmap != null) return bitmap
+
+    runCatching {
+        val type = ImageUtil.findImageType(BufferedInputStream(ByteArrayInputStream(bytes)))
+        val strategy = when (type) {
+            ImageUtil.ImageType.AVIF, ImageUtil.ImageType.JXL -> "JNI"
+            else -> "system->JNI"
+        }
+        DiagLog.w(
+            "CoverDecode",
+            "解码失败 $label type=${type?.name ?: "unknown"} strategy=$strategy bytes=${bytes.size}",
         )
     }
     return null

@@ -30,11 +30,14 @@ internal class WebDavDirectoryPageLoader(
         val images = WebDavPropfind.list(conn, dirUrl)
             .filter { it.isImage }
             .sortedWith { a, b -> a.name.compareToCaseInsensitiveNaturalOrder(b.name) }
-            .map { it.url }
         if (images.isEmpty()) throw IOException("目录内没有图片：$dirUrl")
-        return images.mapIndexed { i, url ->
+        return images.mapIndexed { i, entry ->
             ReaderPage(i).apply {
-                stream = { fetchBytes(url).inputStream() }
+                // issue #17：PROPFIND 已给出 getcontentlength，留给缩略图做分配前的准入判断。
+                sourceSize = entry.size
+                // 缩略图直通字节，避免从 stream 再复制一份整页（峰值 1 倍而非 2 倍）。
+                rawBytes = { fetchBytes(entry.url) }
+                stream = { fetchBytes(entry.url).inputStream() }
                 status = Page.State.Ready
             }
         }

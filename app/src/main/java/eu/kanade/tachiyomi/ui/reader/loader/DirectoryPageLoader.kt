@@ -20,6 +20,8 @@ internal class DirectoryPageLoader(val file: UniFile) : PageLoader() {
             ?.mapIndexed { i, file ->
                 val streamFn = { file.openInputStream() }
                 ReaderPage(i).apply {
+                    // issue #17：本地文件长度已知，缩略图可按精确长度一次分配（避免分块收集的 2 倍峰值）。
+                    sourceSize = file.length()
                     stream = streamFn
                     status = Page.State.Ready
                 }

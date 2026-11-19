@@ -162,10 +162,25 @@ fun ChapterNavigator(
     }
 
     // SY --> Komiho: 按压进度条（点击轨道或开始拖动）才展开缩略图条。
+    // gestureActive：从按下到松手全程为 true —— 这段时间内预览条只画占位，**一次取图请求都不发**。
+    // 原来用 sliderDragged 判断，按下但还没移动的那一瞬间仍是 false，会先发一批请求，
+    // 接着又被拖动取消（阻塞式 SMB 读取消不掉，白占内存，issue #17）。
+    var gestureActive by remember { mutableStateOf(false) }
     LaunchedEffect(interactionSource, previewSupported) {
         interactionSource.interactions.collect { interaction ->
-            if (previewSupported && interaction is PressInteraction.Press) {
-                previewOpen = true
+            when (interaction) {
+                is PressInteraction.Press -> {
+                    if (previewSupported) {
+                        previewOpen = true
+                        gestureActive = true
+                    }
+                }
+
+                is PressInteraction.Release, is PressInteraction.Cancel -> {
+                    gestureActive = false
+                }
+
+                else -> {}
             }
         }
     }
@@ -214,8 +229,8 @@ fun ChapterNavigator(
                         count = thumbnailCount,
                         totalPages = totalPages,
                         modelForPage = thumbnailModelForPage,
-                        // 拖动中不生成缩略图（只占位），松手后才加载。
-                        loadImages = !sliderDragged,
+                        // 按下/拖动中不生成缩略图（只占位），松手后才加载。
+                        loadImages = !gestureActive,
                         onPageClick = commitJump,
                         modifier = Modifier,
                     )
@@ -264,8 +279,8 @@ fun ChapterNavigator(
                     count = thumbnailCount,
                     totalPages = totalPages,
                     modelForPage = thumbnailModelForPage,
-                    // 拖动中不生成缩略图（只占位），松手后才加载。
-                    loadImages = !sliderDragged,
+                    // 按下/拖动中不生成缩略图（只占位），松手后才加载。
+                    loadImages = !gestureActive,
                     onPageClick = commitJump,
                     modifier = Modifier.align(Alignment.TopCenter),
                 )
