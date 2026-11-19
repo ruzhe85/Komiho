@@ -6151,6 +6151,22 @@ private fun LocalFileBrowser(
     val browseGridState = rememberLazyGridState()
     val scrollKey = remember(base, stack) { "${base.uri}|${stack.joinToString("/")}" }
 
+    // Komiho (2026-11-19): 当前视口位置（列表 / 网格统一取值）。
+    // 「离开目录」与「原地刷新」都必须先把它记进 localBrowseScrollMemory，否则加载结束后的
+    // 恢复逻辑拿不到记忆值会退回 (0,0) —— 表现就是删除/改名/移动后列表跳回第一行。
+    fun currentBrowsePosition(): Pair<Int, Int> = if (displayMode == LibraryDisplayMode.List) {
+        browseListState.firstVisibleItemIndex to browseListState.firstVisibleItemScrollOffset
+    } else {
+        browseGridState.firstVisibleItemIndex to browseGridState.firstVisibleItemScrollOffset
+    }
+
+    // Komiho (2026-11-19): 上一次「已加载完成」的目录键与排序。用来区分三种重列：
+    // - 键变了 = 换目录 → 不能把旧目录的位置写到新键上，交给恢复逻辑用新目录自己的记忆；
+    // - 键没变、排序没变 = 原地刷新（删除/改名/移动/新建文件夹，都是 refreshTick++）→ 必须保住视口；
+    // - 键没变、排序变了 = 旧下标已无意义（条目重排）→ 清掉记忆，让列表回到顶部。
+    var loadedScrollKey by remember { mutableStateOf<String?>(null) }
+    var loadedSort by remember { mutableStateOf(sort) }
+
     // SY --> Komiho: 全权限模式「记住上次访问路径」——除首次启用（localBrowseLastPath 为空
     // → 落在根目录），默认恢复到最后一次访问的目录；若上次路径在别的存储卷，自动切到那卷。
     // 仅在 base（卷）变化时触发：用户手动下钻/面包屑跳层只改 stack，不重跑，避免与导航打架。
@@ -6183,11 +6199,7 @@ private fun LocalFileBrowser(
     fun navigateTo(newStack: List<String>) {
         if (newStack != stack) {
             // 离开当前目录前记下滚动位置，返回这一级时恢复（见下方 LaunchedEffect）。
-            localBrowseScrollMemory[scrollKey] = if (displayMode == LibraryDisplayMode.List) {
-                browseListState.firstVisibleItemIndex to browseListState.firstVisibleItemScrollOffset
-            } else {
-                browseGridState.firstVisibleItemIndex to browseGridState.firstVisibleItemScrollOffset
-            }
+            localBrowseScrollMemory[scrollKey] = currentBrowsePosition()
         }
         stack = newStack
         if (hasAllFilesAccess) {
@@ -6559,6 +6571,18 @@ private fun LocalFileBrowser(
     }
 
     LaunchedEffect(current, sort, refreshTick) {
+        // Komiho (2026-11-19): 原地刷新（删除 / 改名 / 移动 / 新建文件夹）前先把当前视口记下来。
+        // 下面的恢复 effect 取的是 localBrowseScrollMemory，而它原来只在「离开目录」时写入，
+        // 原地刷新时通常为空 → 恢复成 (0,0) → 列表跳回第一行（用户反馈的「删除后回到首行」）。
+        // 换目录时不记：scrollKey 已经变了，写进去会污染新目录的记忆。
+        if (loadedScrollKey == scrollKey) {
+            if (loadedSort == sort) {
+                localBrowseScrollMemory[scrollKey] = currentBrowsePosition()
+            } else {
+                // 排序变了：条目顺序全变，旧下标指向别的文件，清掉记忆回到顶部。
+                localBrowseScrollMemory.remove(scrollKey)
+            }
+        }
         loading = true
         val list = withContext(Dispatchers.IO) {
             // 真实路径模式：base.uri 是 file:// 而非 SAF tree URI，走 DocumentsContract
@@ -6572,6 +6596,9 @@ private fun LocalFileBrowser(
         }
         entries = list
         loading = false
+        // 本次目录已加载完成：之后再对同一个目录重列（refreshTick 变化）就算「原地刷新」。
+        loadedScrollKey = scrollKey
+        loadedSort = sort
     }
 
     // Komiho: 目录加载完成后恢复该目录上次的滚动位置。必须等 loading 结束 —— 空列表上
