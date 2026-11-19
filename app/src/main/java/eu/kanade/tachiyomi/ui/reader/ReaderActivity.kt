@@ -2024,6 +2024,14 @@ class ReaderActivity : BaseActivity() {
         private var gammaRenderEffect: Any? = null
 
         /**
+         * Komiho: shader 编译失败的闩锁。
+         *
+         * SkSL 编译结果是确定的（同一份源码同一台设备要么能编、要么不能），
+         * 失败后再重试只会每拖一下滑杆就抛一次异常、刷一条日志 —— 拽住它，一次就够。
+         */
+        private var gammaShaderFailed = false
+
+        /**
          * Komiho: 显示层滤镜统一入口（灰度 / 图像亮度 / 图像对比度 / 反色 / 纸色 + 伽马）。
          *
          * 全部作用于 `viewerContainer` 的合成层：参数一变只重建 paint 后重绘，
@@ -2093,17 +2101,21 @@ class ReaderActivity : BaseActivity() {
                 }
                 return
             }
+            if (gammaShaderFailed) return
             try {
                 val shader = (gammaShader as? RuntimeShader)
                     ?: RuntimeShader(GAMMA_SHADER).also { gammaShader = it }
                 // 只更新 uniform，不重建 shader —— SkSL 在设备上要编译，频繁重建会卡。
                 shader.setFloatUniform("gamma", gamma)
-                val effect = RenderEffect.createRuntimeShaderEffect(shader, "input")
+                // 注意：child shader 的 uniform 名不能用 `input`（AGSL 保留字，
+                // 编译期直接报 "name 'input' is reserved"），这里用 `page`。
+                val effect = RenderEffect.createRuntimeShaderEffect(shader, "page")
                 view.setRenderEffect(effect)
                 gammaRenderEffect = effect
             } catch (e: Throwable) {
                 // 个别 ROM 的 RuntimeShader 不可用：退回无伽马，绝不因此让页面画不出来。
                 DiagLog.w("ReaderFilter", "伽马 shader 不可用: ${e.message}")
+                gammaShaderFailed = true
                 view.setRenderEffect(null)
                 gammaRenderEffect = null
             }
@@ -2143,11 +2155,11 @@ private const val GAMMA_MAX = 250
  * 语义不会互相污染：伽马挪中间调，对比度绕 128 拉伸，亮度平移。
  */
 private const val GAMMA_SHADER = """
-uniform shader input;
+uniform shader page;
 uniform float gamma;
 
 half4 main(float2 coord) {
-    half4 color = input.eval(coord);
+    half4 color = page.eval(coord);
     float3 rgb = clamp(float3(color.rgb), 0.0, 1.0);
     rgb = pow(rgb, float3(gamma));
     return half4(half3(rgb), color.a);
