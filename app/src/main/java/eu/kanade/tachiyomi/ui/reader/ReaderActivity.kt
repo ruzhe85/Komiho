@@ -12,6 +12,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.graphics.RenderEffect
+import android.graphics.RuntimeShader
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -25,6 +27,7 @@ import android.view.View.LAYER_TYPE_HARDWARE
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
+import androidx.annotation.RequiresApi
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
@@ -1774,19 +1777,40 @@ class ReaderActivity : BaseActivity() {
     private inner class ReaderConfig {
 
         /**
-         * Komiho: 页面图层滤镜。叠加顺序：先灰度/反色，后纸色坡道（纸色为最终视觉，
-         * 保证纸档下页面与容器衬底同色）。纸色走 ColorMatrix 坡道映射，不进解码通道。
+         * Komiho: 页面图层滤镜。叠加顺序：灰度 → 图像亮度/对比度 → 反色 → 纸色坡道
+         * （纸色为最终视觉，保证纸档下页面与容器衬底同色）。全部走 ColorMatrix，
+         * 不进解码通道、不改像素：调节即时生效，且不占额外内存。
          */
         private fun getCombinedPaint(
             grayscale: Boolean,
             invertedColors: Boolean,
             paperStyle: ReaderTheme.PaperStyle?,
+            brightness: Float,
+            contrast: Float,
         ): Paint {
             return Paint().apply {
                 colorFilter = ColorMatrixColorFilter(
                     ColorMatrix().apply {
                         if (grayscale) {
                             setSaturation(0f)
+                        }
+                        // Komiho: 图像亮度 / 对比度 —— 线性变换，ColorMatrix 可以精确表达：
+                        //   out = (in - 128) * contrast + 128 + brightness
+                        // 注意 ColorMatrix 的 offset 单位是 0..255（不是 0..1）。
+                        // 位置在灰度之后、反色/纸色之前：纸色是坡道映射，若在它之后再拉对比度，
+                        // 纸色会被一起拉偏。
+                        if (contrast != 1f || brightness != 0f) {
+                            val offset = 128f * (1f - contrast) + brightness
+                            postConcat(
+                                ColorMatrix(
+                                    floatArrayOf(
+                                        contrast, 0f, 0f, 0f, offset,
+                                        0f, contrast, 0f, 0f, offset,
+                                        0f, 0f, contrast, 0f, offset,
+                                        0f, 0f, 0f, 1f, 0f,
+                                    ),
+                                ),
+                            )
                         }
                         if (invertedColors) {
                             postConcat(
@@ -1861,15 +1885,28 @@ class ReaderActivity : BaseActivity() {
                 .onEach(::setCustomBrightness)
                 .launchIn(lifecycleScope)
 
+            // Komiho: 显示层滤镜的全部参数 —— 任一变化就重建 paint
+            //（灰度 / 反色 / 纸色 / 图像亮度 / 图像对比度）。setLayerPaint 内部直接读偏好，
+            // 这里只负责触发。
             combine(
                 readerPreferences.grayscale.changes(),
                 readerPreferences.invertedColors.changes(),
                 // Komiho: 背景档位也要进滤镜流——纸化档位（羊皮纸/牛皮纸）需要叠纸色矩阵。
                 readerPreferences.readerTheme.changes(),
-            ) { grayscale, invertedColors, theme -> Triple(grayscale, invertedColors, theme) }
-                .onEach { (grayscale, invertedColors, theme) ->
-                    setLayerPaint(grayscale, invertedColors, theme)
-                }
+                readerPreferences.brightnessFilter.changes(),
+                readerPreferences.brightnessFilterValue.changes(),
+            ) { _, _, _, _, _ -> Unit }
+                .combine(readerPreferences.contrastFilter.changes()) { _, _ -> Unit }
+                .combine(readerPreferences.contrastFilterValue.changes()) { _, _ -> Unit }
+                .onEach { setLayerPaint() }
+                .launchIn(lifecycleScope)
+
+            // Komiho: 伽马单独一条（Android 12 以下 applyGammaEffect 内部直接返回）。
+            combine(
+                readerPreferences.gammaFilter.changes(),
+                readerPreferences.gammaFilterValue.changes(),
+            ) { _, _ -> Unit }
+                .onEach { applyGammaEffect() }
                 .launchIn(lifecycleScope)
 
             combine(
@@ -1982,22 +2019,94 @@ class ReaderActivity : BaseActivity() {
             viewModel.setBrightnessOverlayValue(value)
         }
 
-        private fun setLayerPaint(grayscale: Boolean, invertedColors: Boolean, theme: Int) {
+        /** Komiho: 伽马 shader / effect（只创建一次，之后只改 uniform；用 Any 存避免低版本加载 API 31 类）。 */
+        private var gammaShader: Any? = null
+        private var gammaRenderEffect: Any? = null
+
+        /**
+         * Komiho: 显示层滤镜统一入口（灰度 / 图像亮度 / 图像对比度 / 反色 / 纸色 + 伽马）。
+         *
+         * 全部作用于 `viewerContainer` 的合成层：参数一变只重建 paint 后重绘，
+         * 不重新解码、不碰任何图片缓存 —— 所以拖动滑杆时外圈画面能实时跟着变。
+         */
+        private fun setLayerPaint() {
             // Komiho: E-Ink 灰阶化开启时，「灰度」这一项必须让位 ——
             // 我们的量化已经把像素压到面板的 16 级真实档位，再套一层
             // ColorMatrix.setSaturation(0) 就是**二次**非线性压缩，层次会塌掉
             // （表现是整页发灰、发闷）。反色（黑白墨水屏上的常用功能）不受影响，
             // 它作用在已量化的像素上且语义不同。
-            val effectiveGrayscale = grayscale && !Injekt.get<UiPreferences>().isEinkGrayscaleActive
+            val effectiveGrayscale = readerPreferences.grayscale.get() &&
+                !Injekt.get<UiPreferences>().isEinkGrayscaleActive
+            val invertedColors = readerPreferences.invertedColors.get()
+            // Komiho: 图像亮度 / 对比度（线性，所有 Android 版本可用）。
+            // 滑杆 −100…100 映射为：亮度 ±[BRIGHTNESS_MAX_OFFSET]、对比度 0.5…2.0 倍。
+            val brightness = if (readerPreferences.brightnessFilter.get()) {
+                readerPreferences.brightnessFilterValue.get().coerceIn(-100, 100) / 100f * BRIGHTNESS_MAX_OFFSET
+            } else {
+                0f
+            }
+            val contrast = if (readerPreferences.contrastFilter.get()) {
+                // 正负方向幅度不同：加对比最多 2.0 倍，减对比最多到 0.5 倍（再低就整片发灰）。
+                val raw = readerPreferences.contrastFilterValue.get().coerceIn(-100, 100) / 100f
+                if (raw >= 0f) 1f + raw else 1f + raw * 0.5f
+            } else {
+                1f
+            }
             // Komiho: 纸化档位（羊皮纸/牛皮纸）在既有滤镜之后再叠一层纸色坡道，
             // 白场漫画的纸面变为纸色；不进解码通道，仅合成层生效。
-            val paperStyle = ReaderTheme.paperStyleOf(theme)
-            val paint = if (effectiveGrayscale || invertedColors || paperStyle != null) {
-                getCombinedPaint(effectiveGrayscale, invertedColors, paperStyle)
+            val paperStyle = ReaderTheme.paperStyleOf(readerPreferences.readerTheme.get())
+            val paint = if (
+                effectiveGrayscale ||
+                invertedColors ||
+                paperStyle != null ||
+                brightness != 0f ||
+                contrast != 1f
+            ) {
+                getCombinedPaint(effectiveGrayscale, invertedColors, paperStyle, brightness, contrast)
             } else {
                 null
             }
             binding.viewerContainer.setLayerType(LAYER_TYPE_HARDWARE, paint)
+            applyGammaEffect()
+        }
+
+        /**
+         * Komiho: 伽马 —— 幂函数，`ColorMatrix`（仿射变换）表达不出来，只能走 RuntimeShader。
+         * Android 12 以下没有公开 API 能在显示层做，UI 侧直接置灰，这里也直接跳过。
+         */
+        private fun applyGammaEffect() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+            // 固定点存储：40…250 对应 0.40…2.50，100 = 1.00（中性）。用整数判中性，
+            // 避免浮点相等比较；夹取范围防偏好被写坏后 0 → 全白。
+            val raw = readerPreferences.gammaFilterValue.get().coerceIn(GAMMA_MIN, GAMMA_MAX)
+            val enabled = readerPreferences.gammaFilter.get() && raw != 100
+            applyGammaEffectS(enabled, raw / 100f)
+        }
+
+        @RequiresApi(Build.VERSION_CODES.S)
+        private fun applyGammaEffectS(enabled: Boolean, gamma: Float) {
+            val view = binding.viewerContainer
+            if (!enabled) {
+                if (gammaRenderEffect != null) {
+                    view.setRenderEffect(null)
+                    gammaRenderEffect = null
+                }
+                return
+            }
+            try {
+                val shader = (gammaShader as? RuntimeShader)
+                    ?: RuntimeShader(GAMMA_SHADER).also { gammaShader = it }
+                // 只更新 uniform，不重建 shader —— SkSL 在设备上要编译，频繁重建会卡。
+                shader.setFloatUniform("gamma", gamma)
+                val effect = RenderEffect.createRuntimeShaderEffect(shader, "input")
+                view.setRenderEffect(effect)
+                gammaRenderEffect = effect
+            } catch (e: Throwable) {
+                // 个别 ROM 的 RuntimeShader 不可用：退回无伽马，绝不因此让页面画不出来。
+                DiagLog.w("ReaderFilter", "伽马 shader 不可用: ${e.message}")
+                view.setRenderEffect(null)
+                gammaRenderEffect = null
+            }
         }
     }
 }
@@ -2010,6 +2119,40 @@ class ReaderActivity : BaseActivity() {
  */
 private val PAGE_NUMBER_EDGE_INSET = 28.dp
 private val PAGE_NUMBER_EDGE_LIFT = 10.dp
+
+/**
+ * Komiho: 图像亮度滑杆（−100…100）对应的最大像素偏移（255 制）。
+ *
+ * 取 ±40 是刻意保守的：墨水屏动态范围窄，再大就直接死黑或糊成一片。
+ * 用户觉得不够时再推到底，而不是一上手就把图调坏。
+ */
+private const val BRIGHTNESS_MAX_OFFSET = 40f
+
+/**
+ * Komiho: 伽马滑杆的定点取值范围（40…250 → 0.40…2.50，100 = 1.00 中性）。
+ *
+ * 用整数存储、整数判中性：`pow(v, 0)` 会把整页拉成纯白，偏好一旦被写坏就是黑屏级事故。
+ */
+private const val GAMMA_MIN = 40
+private const val GAMMA_MAX = 250
+
+/**
+ * Komiho: 伽马 AGSL（`RuntimeShader`，Android 12+）。
+ *
+ * 只做幂变换，端点 0/1 固定 —— 这样它和对比度/亮度（ColorMatrix 那一段）串联时
+ * 语义不会互相污染：伽马挪中间调，对比度绕 128 拉伸，亮度平移。
+ */
+private const val GAMMA_SHADER = """
+uniform shader input;
+uniform float gamma;
+
+half4 main(float2 coord) {
+    half4 color = input.eval(coord);
+    float3 rgb = clamp(float3(color.rgb), 0.0, 1.0);
+    rgb = pow(rgb, float3(gamma));
+    return half4(half3(rgb), color.a);
+}
+"""
 
 /**
  * Komiho (issue #17): 进阅读器后等多久再检查堆余量。

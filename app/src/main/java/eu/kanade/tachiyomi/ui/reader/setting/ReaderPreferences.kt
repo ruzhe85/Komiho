@@ -249,6 +249,25 @@ class ReaderPreferences(
 
     val invertedColors: Preference<Boolean> = preferenceStore.getBoolean("pref_inverted_colors", false)
 
+    // SY --> Komiho: 图像调节（亮度 / 对比度 / 伽马）—— 与上面的「屏幕亮度」「色彩滤镜」并列的
+    // 三条独立滤镜。亮度/对比度走显示层 ColorMatrix（所有版本可用），伽马走 RuntimeShader
+    // （Android 12+），因此只有伽马在低版本置灰。
+    val brightnessFilter: Preference<Boolean> = preferenceStore.getBoolean("pref_brightness_filter", false)
+
+    /** 图像亮度，−100…100（0 = 不调整）。 */
+    val brightnessFilterValue: Preference<Int> = preferenceStore.getInt("brightness_filter_value", 0)
+
+    val contrastFilter: Preference<Boolean> = preferenceStore.getBoolean("pref_contrast_filter", false)
+
+    /** 图像对比度，−100…100（0 = 不调整，以 128 为轴）。 */
+    val contrastFilterValue: Preference<Int> = preferenceStore.getInt("contrast_filter_value", 0)
+
+    val gammaFilter: Preference<Boolean> = preferenceStore.getBoolean("pref_gamma_filter", false)
+
+    /** 伽马，40…250 = 0.40…2.50（100 = 1.00，即不调整）。 */
+    val gammaFilterValue: Preference<Int> = preferenceStore.getInt("gamma_filter_value", 100)
+    // SY <--
+
     // endregion
 
     // region Controls

@@ -140,8 +140,12 @@
     <string name="page_number_position_right">右下</string>
     <string name="pref_crop_borders">裁剪边缘</string>
     <string name="pref_crop_borders_aggressive">深度裁剪边缘</string>
-    <string name="pref_custom_brightness">自定义亮度</string>
+    <string name="pref_custom_brightness">自定义屏幕亮度</string>
     <string name="pref_custom_color_filter">色彩滤镜</string>
+    <string name="pref_image_brightness">图像亮度</string>
+    <string name="pref_image_contrast">图像对比度</string>
+    <string name="pref_image_gamma">伽马</string>
+    <string name="filter_requires_android12">需要 Android 12 及以上</string>
     <string name="pref_keep_screen_on">保持屏幕常亮</string>
     <string name="pref_reader_navigation">翻页</string>
     <string name="pref_read_with_volume_keys">音量键翻页</string>
