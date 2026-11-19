@@ -217,11 +217,11 @@ fun UniFile.archiveReader(context: Context): ArchiveReader {
 }
 
 // SY --> issue #15：本地 ZIP 中央目录索引路径
-/** [RemoteZipReader] 只支持 ZIP 家族扩展名；rar/7z/tar 直接走 libarchive。 */
-private val ZIP_FAMILY_EXTENSIONS = setOf("zip", "cbz")
+/** [RemoteZipReader] 只支持 ZIP 家族扩展名；rar/7z/tar 直接走 libarchive。EPUB 本质也是 zip。 */
+private val ZIP_FAMILY_EXTENSIONS = setOf("zip", "cbz", "epub")
 
 /**
- * 本地归档句柄（issue #15）：zip/cbz 优先进中央目录索引（[RemoteZipReader]）。
+ * 本地归档句柄（issue #15）：zip/cbz/epub 优先进中央目录索引（[RemoteZipReader]）。
  *
  * 打开时只读尾部 EOCD + 中央目录建索引，之后每页直接定位读取（O(1)）；
  * 不再像 libarchive 路径那样「每次找条目从头扫一遍、打开时还要扫两次全包」。

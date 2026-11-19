@@ -27,7 +27,6 @@ import mihon.core.common.archive.ArchiveReader
 import mihon.core.common.archive.RemoteScheme
 import mihon.core.common.archive.RemoteZipReader
 import mihon.core.common.archive.WebDavRandomAccessSource
-import mihon.core.common.archive.archiveReader
 import mihon.core.common.archive.indexedArchiveHandle
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
@@ -155,7 +154,8 @@ class ChapterLoader(
                     // SY --> issue #15: 本地 zip/cbz 走中央目录索引（O(1) 取页），其余格式回落 libarchive。
                     is Format.Archive -> ArchivePageLoader(format.file.indexedArchiveHandle(context))
                     // SY <--
-                    is Format.Epub -> EpubPageLoader(format.file.archiveReader(context), context)
+                    // issue #15: EPUB 也是 zip，按名查条目走中央目录索引（O(1)），失败自动回落 libarchive。
+                    is Format.Epub -> EpubPageLoader(format.file.indexedArchiveHandle(context), context)
                     // SY --> Komiho: 本地 PDF（彩色扫描漫画常见）—— 自写提取内嵌图 + 系统渲染兜底。
                     is Format.Pdf -> PdfPageLoader(format.file, context)
                     // SY --> Komiho: 本地 MOBI/AZW3/AZW —— libmobi 纯抽图（文字书报无图片，同 EPUB）。
