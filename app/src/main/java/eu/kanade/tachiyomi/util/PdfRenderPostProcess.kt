@@ -1,10 +1,12 @@
 package eu.kanade.tachiyomi.util
 
 import android.graphics.Bitmap
+import android.os.Build
 import android.os.SystemClock
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.eink.EinkGray
+import eu.kanade.tachiyomi.util.image.ToneCurveLut
 import tachiyomi.core.common.util.system.ImageUtil
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -123,6 +125,15 @@ object PdfRenderPostProcess {
                         dither = false,
                     ),
                 )
+            }
+        }
+
+        // ④ 伽马（Android 12 以下）：PDF 页直接用渲染位图、不走 Coil 解码链，
+        // 所以必须在补一次，否则低版本上 PDF 的伽马不生效（12+ 由显示层 shader 兜住）。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            val gamma = Injekt.get<ReaderPreferences>().gammaValueOrNull()
+            if (gamma != null) {
+                runCatching { ToneCurveLut.apply(bmp, gamma) }
             }
         }
 

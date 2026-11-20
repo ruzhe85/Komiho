@@ -2084,11 +2084,9 @@ class ReaderActivity : BaseActivity() {
          */
         private fun applyGammaEffect() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-            // 固定点存储：40…250 对应 0.40…2.50，100 = 1.00（中性）。用整数判中性，
-            // 避免浮点相等比较；夹取范围防偏好被写坏后 0 → 全白。
-            val raw = readerPreferences.gammaFilterValue.get().coerceIn(GAMMA_MIN, GAMMA_MAX)
-            val enabled = readerPreferences.gammaFilter.get() && raw != 100
-            applyGammaEffectS(enabled, raw / 100f)
+            // 「是否启用 / 是否中性」统一由 gammaValueOrNull 判断（低版本的解码期 LUT 也用它）。
+            val gamma = readerPreferences.gammaValueOrNull()
+            applyGammaEffectS(gamma != null, gamma ?: 1f)
         }
 
         @RequiresApi(Build.VERSION_CODES.S)
@@ -2139,14 +2137,6 @@ private val PAGE_NUMBER_EDGE_LIFT = 10.dp
  * 用户觉得不够时再推到底，而不是一上手就把图调坏。
  */
 private const val BRIGHTNESS_MAX_OFFSET = 40f
-
-/**
- * Komiho: 伽马滑杆的定点取值范围（40…250 → 0.40…2.50，100 = 1.00 中性）。
- *
- * 用整数存储、整数判中性：`pow(v, 0)` 会把整页拉成纯白，偏好一旦被写坏就是黑屏级事故。
- */
-private const val GAMMA_MIN = 40
-private const val GAMMA_MAX = 250
 
 /**
  * Komiho: 伽马 AGSL（`RuntimeShader`，Android 12+）。

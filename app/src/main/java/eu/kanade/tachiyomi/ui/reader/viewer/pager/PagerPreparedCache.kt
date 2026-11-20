@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
+import android.os.Build
 import coil3.BitmapImage
 import coil3.imageLoader
 import coil3.request.CachePolicy
@@ -476,10 +477,14 @@ object PagerPagePreparer {
         // Komiho: E-Ink 灰阶化也要走预解码 —— 否则预热产出的位图与 holder 请求产出的
         // 不是同一张，首帧会先闪一下未灰阶化的图再跳一次。
         val einkGrayOn = Injekt.get<UiPreferences>().isEinkGrayscaleActive
-        if (isAnimated || (enhancementMode == 0 && !einkGrayOn)) return null
+        // Komiho: 12 以下的伽马走解码期 LUT，同样必须走这条链；否则预热出来的位图没套滤镜，
+        // 首帧会和 holder 自己解码的结果不一致（一页两张图）。
+        val gammaNeedsDecode = Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+            Injekt.get<ReaderPreferences>().gammaValueOrNull() != null
+        if (isAnimated || (enhancementMode == 0 && !einkGrayOn && !gammaNeedsDecode)) return null
         // Komiho: 系统渲染兜底产出的位图无需再做增强（避免无谓 2x 放大）。
         // 灰阶化与增强是两件事，兜底页仍然要转灰阶。
-        if (skipEnhance && !einkGrayOn) return null
+        if (skipEnhance && !einkGrayOn && !gammaNeedsDecode) return null
         if (!isStandardImageStream(source)) return null
         val width = viewer.pager.width
         val height = viewer.pager.height

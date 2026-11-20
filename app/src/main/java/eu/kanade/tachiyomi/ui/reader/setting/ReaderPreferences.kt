@@ -266,6 +266,18 @@ class ReaderPreferences(
 
     /** 伽马，40…250 = 0.40…2.50（100 = 1.00，即不调整）。 */
     val gammaFilterValue: Preference<Int> = preferenceStore.getInt("gamma_filter_value", 100)
+
+    /**
+     * Komiho: 当前生效的伽马（未启用或中性返回 null）。
+     *
+     * 12+ 的显示层 shader 与 12 以下的解码期 LUT 都从这里取值 —— 「是否启用 / 是否中性」
+     * 只在这一处判断，避免两套路径各写一遍、日后改了这头忘了那头。
+     */
+    fun gammaValueOrNull(): Float? {
+        if (!gammaFilter.get()) return null
+        val raw = gammaFilterValue.get().coerceIn(40, 250)
+        return if (raw == 100) null else raw / 100f
+    }
     // SY <--
 
     // endregion
@@ -485,6 +497,11 @@ class ReaderPreferences(
         append('|').append(if (einkPrefs.isEinkGrayscaleActive) 1 else 0)
         append('|').append(einkPrefs.einkGrayLevelsOrDefault())
         append('|').append(if (einkPrefs.einkKeepColorPages.get()) 1 else 0)
+        // Komiho: 12 以下的伽马走解码期 LUT，会改变像素 → 必须进指纹；
+        // 12+ 由显示层 shader 做，像素不变，不进指纹（否则改伽马会白扔已解码的页）。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            append('|').append(gammaValueOrNull() ?: 1f)
+        }
     }
     // MihonSY image enhancement <--
     // MihonSY <--

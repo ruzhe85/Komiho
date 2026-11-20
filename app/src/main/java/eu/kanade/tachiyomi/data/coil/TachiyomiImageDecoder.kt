@@ -19,6 +19,7 @@ import eu.kanade.tachiyomi.util.EnhanceTimings
 import eu.kanade.tachiyomi.util.MihonSyEnhancer
 import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import eu.kanade.tachiyomi.util.eink.EinkGray
+import eu.kanade.tachiyomi.util.image.ToneCurveLut
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
 import eu.kanade.tachiyomi.util.storage.CbzCrypto.getCoverStream
 import mihon.core.common.archive.archiveReader
@@ -400,6 +401,25 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                 einkGrayscaleApplied = false
             }
         }
+
+        // SY --> Komiho: 伽马（Android 12 以下）。12+ 由显示层 RuntimeShader 做（即改即见），
+        // 这里只负责无法用 ColorMatrix 表达幂函数的旧系统。
+        // 位置：灰阶量化**之后**（否则会被量化吸掉）、硬件位图转换**之前**（硬件位图禁止读写像素）。
+        // 只作用于阅读器的页面请求（customDecoder / enhanced）：封面、导出图片都不带这两个标记，
+        // 否则 AVIF 封面会被阅读器的伽马设置污染。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+            (options.customDecoder || options.enhanced)
+        ) {
+            val gamma = preferences.gammaValueOrNull()
+            if (gamma != null) {
+                try {
+                    ToneCurveLut.apply(bitmap, gamma)
+                } catch (e: Throwable) {
+                    // 滤镜失败就原样输出，绝不因此让整页读不出来。
+                }
+            }
+        }
+        // SY <--
 
         if (
             !einkGrayscaleApplied &&

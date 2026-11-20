@@ -120,7 +120,7 @@
     <string name="pref_image_brightness">影像亮度</string>
     <string name="pref_image_contrast">影像對比度</string>
     <string name="pref_image_gamma">伽馬</string>
-    <string name="filter_requires_android12">需要 Android 12 以上</string>
+    <string name="filter_applies_after_close">關閉設定後生效</string>
     <string name="pref_keep_screen_on">保持螢幕恆亮</string>
     <string name="double_tap_anim_speed_0">停用動畫</string>
     <string name="double_tap_anim_speed_normal">正常</string>

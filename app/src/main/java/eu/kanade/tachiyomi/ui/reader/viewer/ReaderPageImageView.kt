@@ -50,6 +50,7 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.EnhanceTimings
+import android.os.Build
 import eu.kanade.tachiyomi.util.system.EinkMotion
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
@@ -566,10 +567,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 // streams fall back to the original SSIV direct-decode path.
                 // Komiho: 深度裁剪边缘开启时也必须走这条链 —— SSIV 直解路径带不上
                 // aggressiveCrop 参数（它内部按纯白边算法裁边），会退回标准裁切。
+                // Komiho: 伽马在 12 以下走解码期 LUT，也必须走这条链，否则 SSIV 直解绕过像素处理，
+                // 滤镜静默失效。12+ 由显示层 shader 做，不需要为它改解码路径。
+                val gammaNeedsDecode = Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+                    preferences.gammaValueOrNull() != null
                 val enhancementOn = (
                     preferences.enhancementMode.get() != 0 ||
                         einkGrayOn ||
-                        config.cropBordersAggressive
+                        config.cropBordersAggressive ||
+                        gammaNeedsDecode
                     ) &&
                     isStandardImageStream(data)
                 if (!enhancementOn) {

@@ -162,19 +162,19 @@ internal fun ColumnScope.ColorFilterPage(screenModel: ReaderSettingsScreenModel)
         )
     }
 
-    val gammaSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    // 12+ 走显示层 shader（改即见）；12 以下走解码期 LUT，改完关掉设置页才重新出图。
+    val gammaImmediate = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val gammaLabel = stringResource(MR.strings.pref_image_gamma)
     val gammaOn by screenModel.preferences.gammaFilter.collectAsState()
     CheckboxItem(
-        label = if (gammaSupported) {
+        label = if (gammaImmediate) {
             gammaLabel
         } else {
-            "$gammaLabel (${stringResource(MR.strings.filter_requires_android12)})"
+            "$gammaLabel (${stringResource(MR.strings.filter_applies_after_close)})"
         },
         pref = screenModel.preferences.gammaFilter,
-        enabled = gammaSupported,
     )
-    if (gammaSupported && gammaOn) {
+    if (gammaOn) {
         val gammaValue by screenModel.preferences.gammaFilterValue.collectAsState()
         SliderItem(
             value = gammaValue,

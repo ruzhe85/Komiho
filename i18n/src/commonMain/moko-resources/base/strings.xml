@@ -460,7 +460,7 @@
     <string name="pref_image_brightness">Image brightness</string>
     <string name="pref_image_contrast">Image contrast</string>
     <string name="pref_image_gamma">Gamma</string>
-    <string name="filter_requires_android12">Requires Android 12+</string>
+    <string name="filter_applies_after_close">applies after closing settings</string>
     <string name="pref_color_filter_mode">Color filter blend mode</string>
     <string name="filter_mode_overlay">Overlay</string>
     <string name="filter_mode_multiply">Multiply</string>
