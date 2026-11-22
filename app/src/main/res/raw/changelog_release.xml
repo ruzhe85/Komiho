@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelog bulletedList="true">
+    <changelogversion versionName="1.8.0" changeDate="November 22,2026">
+        <changelogtext>[b]Komiho 1.8.0[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 阅读器滤镜：图像亮度、图像对比度和伽马</changelogtext>
+        <changelogtext>[b]优化[/b] 本地 ZIP/CBZ/EPUB 改用中央目录索引打开，提升打开速度</changelogtext>
+        <changelogtext>[b]优化[/b] 重做进度条缩略图取图链路</changelogtext>
+        <changelogtext>[b]优化[/b] 本地文件浏览器删除/改名/移动文件后列表不再跳回首行</changelogtext>
+        <changelogtext>[b]修复[/b] SMB归档超大图翻页 OOM</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.7.0" changeDate="November 7,2026">
         <changelogtext>[b]Komiho 1.7.0[/b]</changelogtext>
         <changelogtext>[b]新增[/b] 文件浏览器（本地）现在支持长按文件管理</changelogtext>

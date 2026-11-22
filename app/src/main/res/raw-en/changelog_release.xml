@@ -6,6 +6,14 @@
   Keep both files in sync when adding a release.
 -->
 <changelog bulletedList="true">
+    <changelogversion versionName="1.8.0" changeDate="November 22, 2026">
+        <changelogtext>[b]Komiho 1.8.0[/b]</changelogtext>
+        <changelogtext>[b]New[/b] Reader filters: image brightness, image contrast and gamma</changelogtext>
+        <changelogtext>[b]Improved[/b] Local ZIP/CBZ/EPUB now open via the central directory index for faster loading</changelogtext>
+        <changelogtext>[b]Improved[/b] Reworked the progress bar thumbnail loading pipeline</changelogtext>
+        <changelogtext>[b]Improved[/b] Local file browser no longer jumps back to the first row after deleting, renaming or moving files</changelogtext>
+        <changelogtext>[b]Fixed[/b] Out-of-memory error when turning pages of very large SMB/archive images</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.7.0" changeDate="November 7, 2026">
         <changelogtext>[b]Komiho 1.7.0[/b]</changelogtext>
         <changelogtext>[b]New[/b] Local file browser now supports long-press file management</changelogtext>

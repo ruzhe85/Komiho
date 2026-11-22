@@ -1,5 +1,13 @@
 # Komiho Changelog
 
+## v1.8.0 (2026-11-22)
+
+- New Reader filters: image brightness, image contrast and gamma
+- Improved Local ZIP/CBZ/EPUB now open via the central directory index for faster loading
+- Improved Reworked the progress bar thumbnail loading pipeline
+- Improved Local file browser no longer jumps back to the first row after deleting, renaming or moving files
+- Fixed Out-of-memory error when turning pages of very large SMB/archive images
+
 ## v1.7.0 (2026-11-07)
 
 - New Local file browser now supports long-press file management

@@ -5,6 +5,14 @@
   新增版本時三份都要同步。
 -->
 <changelog bulletedList="true">
+    <changelogversion versionName="1.8.0" changeDate="November 22, 2026">
+        <changelogtext>[b]Komiho 1.8.0[/b]</changelogtext>
+        <changelogtext>[b]新增[/b] 閱讀器濾鏡：影像亮度、影像對比度與伽馬</changelogtext>
+        <changelogtext>[b]優化[/b] 本機 ZIP/CBZ/EPUB 改用中央目錄索引開啟，提升開啟速度</changelogtext>
+        <changelogtext>[b]優化[/b] 重做進度條縮圖取圖流程</changelogtext>
+        <changelogtext>[b]優化[/b] 本機檔案瀏覽器刪除/重新命名/移動檔案後，列表不再跳回第一行</changelogtext>
+        <changelogtext>[b]修復[/b] SMB/歸檔超大圖翻頁 OOM</changelogtext>
+    </changelogversion>
     <changelogversion versionName="1.7.0" changeDate="November 7, 2026">
         <changelogtext>[b]Komiho 1.7.0[/b]</changelogtext>
         <changelogtext>[b]新增[/b] 檔案瀏覽器（本機）現在支援長按檔案管理</changelogtext>
