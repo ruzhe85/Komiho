@@ -31,9 +31,6 @@ object Cloud115Auth {
 
     private const val REFRESH_URL = "https://passportapi.115.com/open/refreshToken"
 
-    /** 提前 60 秒视为过期，避免「刚好在路上过期」。 */
-    private const val EXPIRE_SKEW_MS = 60_000L
-
     /** 拿不到 expires_in 时的保守默认值（官方约 7200 秒）。 */
     private const val DEFAULT_TTL_SECONDS = 7200L
 
@@ -44,6 +41,15 @@ object Cloud115Auth {
         "40140116",
         "40140119",
         "40140120",
+    )
+
+    /** 各失效码的人话解释（来自 Simple 115 的实测总结），直接展示给用户。 */
+    private val REAUTH_HINTS = mapOf(
+        "40140114" to "刷新令牌格式不对（多半是复制时被截断了，注意别漏字符）",
+        "40140115" to "刷新令牌签名校验失败（内容被改动过）",
+        "40140116" to "刷新令牌已失效（已在别处刷新过，或已解除授权）",
+        "40140119" to "刷新令牌已过期",
+        "40140120" to "刷新令牌校验失败",
     )
 
     private val locks = ConcurrentHashMap<String, Any>()
@@ -86,8 +92,13 @@ object Cloud115Auth {
         }
     }
 
-    private fun isFresh(conn: Cloud115Connection): Boolean =
-        conn.accessToken.isNotBlank() && conn.accessExpiresAt - System.currentTimeMillis() > EXPIRE_SKEW_MS
+    /**
+     * access_token 是否可直接复用。
+     *
+     * 不看「还剩多少秒」：保存时已经按 110 分钟记过期时刻（留了 10 分钟余量），
+     * 这里只判断有没有过期。提前判断只会诱发不必要的刷新（每次刷新都作废旧 refresh_token）。
+     */
+    private fun isFresh(conn: Cloud115Connection): Boolean = conn.isAccessUsable()
 
     private fun refreshBlocking(conn: Cloud115Connection): String {
         val refreshToken = Cloud115ConnectionStore.refreshTokenFor(conn.id)
@@ -128,12 +139,25 @@ object Cloud115Auth {
                 ?: obj["errno"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val message = obj["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val needsReauth = code in REAUTH_CODES
+            // 双写：logcat + 应用内 DiagLog（用户导出的是 DiagLog 缓冲，只有 logcat 等于没日志）。
+            eu.kanade.tachiyomi.diagnostic.DiagLog.w(
+                "Cloud115Auth",
+                "刷新令牌失败 conn=${conn.id} code=$code msg=$message",
+            )
             logcat(LogPriority.WARN) { "[Cloud115] 刷新令牌失败 code=$code msg=$message" }
             throw AuthException(
                 when {
-                    needsReauth -> "115 授权已失效，请重新获取刷新令牌"
-                    code == "40140117" -> "刷新过于频繁，请稍后再试"
-                    message.isNotBlank() -> "115 拒绝刷新令牌：$message"
+                    // 频控与服务端令牌状态无关，不要去重新授权（重取一份也一样会被限）。
+                    code == "40140117" ->
+                        "115 提示「刷新令牌过于频繁」（服务端频控，与令牌新旧无关），请等几分钟再试"
+                    needsReauth -> buildString {
+                        append("115 刷新令牌失败：")
+                        append(REAUTH_HINTS[code] ?: "刷新令牌已失效")
+                        append("\n请到 api.oplist.org 重新获取一份。")
+                        append("注意：同一份刷新令牌不要同时给 OpenList 和本程序用 —— ")
+                        append("谁先刷新，另一个手里的就作废了。")
+                    }
+                    message.isNotBlank() -> "115 拒绝刷新令牌：$message（code=$code）"
                     else -> "115 拒绝刷新令牌（code=$code）"
                 },
                 needsReauth = needsReauth,

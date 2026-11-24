@@ -28,4 +28,13 @@ data class Cloud115Connection(
     val accessExpiresAt: Long = 0L,
 ) {
     fun displayName(): String = if (name.isBlank()) "115（$rootCid）" else name
+
+    /**
+     * access_token 是否还在有效期内。
+     *
+     * 保存时按「现在 + 110 分钟」记（官方约 2 小时，留 10 分钟余量，与 Simple 115 同口径）。
+     * **只要这里为 true 就绝不刷新** —— refresh_token 一次性，能不动就不动。
+     */
+    fun isAccessUsable(now: Long = System.currentTimeMillis()): Boolean =
+        accessToken.isNotBlank() && accessExpiresAt > now
 }

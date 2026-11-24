@@ -1849,11 +1849,19 @@ private fun restartMainFlow(context: android.content.Context) {
 /**
  * Komiho: 115 连接表单。
  *
- * 认证走开放平台 OpenAPI：只需要一个 refresh_token。获取方式与 OpenList 官方一致 ——
- * 浏览器打开 api.oplist.org（勾选「使用 OpenList 提供的参数」）→ 扫码授权 → 复制
- * Refresh Token 粘回来。**不做应用内扫码**：OpenList 自己也没实现，手机端扫码体验更差。
+ * **两个令牌都要**（与 Simple 115 的 OpenAPI 接入完全一致，那边已把坑踩透）：
+ *  - `access_token`：api.oplist.org 页面上与 refresh_token 一起给出，**可留空**，有效期约 2 小时；
+ *  - `refresh_token`：**必填**，一次性 —— 每刷新一次，旧的那份立即作废。
  *
- * 「保存」= 落库 + 立刻列一次根目录验证授权；令牌无效时回滚，不留一条打不开的连接。
+ * 核心规则：**填了 access_token 就绝不刷新**。只有 access_token 缺失或过期时才拿
+ * refresh_token 去换新；否则每次保存/启动都刷一次，会撞 115 的「刷新令牌过于频繁」
+ * （40140117），还白扔掉一个有效的 refresh_token。
+ *
+ * 保存策略：
+ *  - 两个都填 → 落库后**直接用 access_token** 列一次根目录验证（不触发刷新）；
+ *  - 只填 refresh_token → 落库但**不发任何请求**，首次浏览时才换 access_token；
+ *  - 验证失败**不回滚删除**：万一刷新已经发生过，删掉连接会把刚换到的新令牌一起丢掉，
+ *    而用户手里那份旧的已经作废，等于彻底无解。
  */
 @Composable
 private fun Cloud115FormPage(
@@ -1868,6 +1876,9 @@ private fun Cloud115FormPage(
     }
     var name by remember(existing) { mutableStateOf(existing?.name.orEmpty()) }
     var rootCid by remember(existing) { mutableStateOf(existing?.rootCid ?: "0") }
+    // 两个都**不回显**（密码框留空 = 不修改）：既避免把运行期已换新的令牌又写回旧值，
+    // 也避免在界面上暴露令牌明文。
+    var accessToken by remember(existing) { mutableStateOf("") }
     var token by remember(existing) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -1887,38 +1898,58 @@ private fun Cloud115FormPage(
 
     fun save() {
         if (busy) return
+        val at = accessToken.trim()
         val rt = token.trim()
-        if (existing == null && rt.isBlank()) {
-            message = "请先获取并粘贴刷新令牌（Refresh Token）"
+        // 「填了新的 refresh_token」= 重新授权，这时 access_token 必然也是新的 → 必须一起填。
+        // 只填 refresh_token 会导致首次使用时拿它去换 access_token，而它是一次性的，
+        // 换的那一下就把手里这份消耗掉了，后续一旦失败就彻底无解。
+        val needBoth = existing == null || rt.isNotBlank()
+        if (needBoth && (at.isBlank() || rt.isBlank())) {
+            message = "请把 access_token 和 refresh_token 一起填上（两个都在 api.oplist.org 页面上）"
             messageIsError = true
             return
         }
         busy = true
         message = null
         scope.launch {
-            val error = withContext(Dispatchers.IO) {
+            val outcome = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (existing == null) {
-                        val conn = Cloud115ConnectionStore.add(name, rootCid, rt)
-                        try {
-                            Cloud115Api.testConnection(conn.id)
-                        } catch (e: Throwable) {
-                            // 令牌不可用 → 不留坏连接
-                            Cloud115ConnectionStore.remove(conn.id)
-                            throw e
-                        }
+                    // access_token 约 2 小时有效期，留 10 分钟余量（与 Simple 115 同口径）。
+                    val expiresAt = if (at.isNotBlank()) {
+                        System.currentTimeMillis() + 110 * 60_000L
                     } else {
-                        Cloud115ConnectionStore.update(existing.id, name, rootCid, rt)
-                        Cloud115Api.testConnection(existing.id)
+                        0L
                     }
-                }.exceptionOrNull()
+                    val id = if (existing == null) {
+                        Cloud115ConnectionStore.add(name, rootCid, rt, at, expiresAt).id
+                    } else {
+                        Cloud115ConnectionStore.update(existing.id, name, rootCid, rt, at, expiresAt)
+                        existing.id
+                    }
+                    // 只在「手上有新鲜 access_token」时验证 —— 这样保存永远不会消耗 refresh_token。
+                    val usable = Cloud115ConnectionStore.get(id)?.isAccessUsable() == true
+                    if (usable) Cloud115Api.testConnection(id)
+                    usable
+                }
             }
             busy = false
-            if (error == null) {
+            outcome.onSuccess { verified ->
+                if (!verified) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "已保存；首次浏览时会自动换取访问令牌",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
                 onSaved()
-            } else {
-                message = error.message ?: "连接 115 失败"
-                messageIsError = true
+            }.onFailure { e ->
+                // 连接已落库且**不删**（可能已刷新过令牌）；提示后就回列表，用户可点编辑重填。
+                android.widget.Toast.makeText(
+                    context,
+                    "已保存，但验证失败：" + (e.message ?: "未知错误"),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+                onSaved()
             }
         }
     }
@@ -1950,21 +1981,47 @@ private fun Cloud115FormPage(
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
+            value = accessToken,
+            onValueChange = { accessToken = it },
+            label = {
+                Text(
+                    if (existing == null) {
+                        "access_token（必填，约 2 小时过期）"
+                    } else {
+                        "access_token（不修改则留空；换了 refresh_token 时必须一起填）"
+                    },
+                )
+            },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
             value = token,
             onValueChange = { token = it },
             label = {
-                Text(if (existing == null) "刷新令牌（Refresh Token）" else "刷新令牌（留空 = 不修改）")
+                Text(
+                    if (existing == null) {
+                        "refresh_token（必填，一次性）"
+                    } else {
+                        "refresh_token（留空 = 不修改）"
+                    },
+                )
             },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedButton(onClick = openTokenPage, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text("获取刷新令牌（打开 api.oplist.org）")
+            Text("获取令牌（打开 api.oplist.org）")
         }
         Text(
-            text = "在 api.oplist.org 选择 115，勾选「使用 OpenList 提供的参数」，扫码授权后复制 " +
-                "Refresh Token 粘贴到上面。刷新令牌是一次性的，程序会自动续期并保存新的一份。",
+            text = "在 api.oplist.org 选择 115 并勾选「使用 OpenList 提供的参数」，扫码后页面会同时给出 " +
+                "Access Token 和 Refresh Token —— 填写授权时请把两个一起填上。填了 access_token 就不会去刷新，" +
+                "也就不会提前消耗 refresh_token。之后 access_token 过期（约 2 小时），程序会自动用 " +
+                "refresh_token 换新并保存，不需要你再来填。\n" +
+                "注意：refresh_token 是一次性的，同一份不要同时给 OpenList 和本程序用 —— " +
+                "谁先刷新，另一边的就作废了。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

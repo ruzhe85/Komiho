@@ -71,13 +71,27 @@ object Cloud115ConnectionStore {
         loadLocked().map { it.toPublic() }
     }
 
-    fun add(name: String, rootCid: String, refreshToken: String): Cloud115Connection =
+    /**
+     * 新增连接。
+     *
+     * [accessToken] 是 api.oplist.org 页面上一并给出的短期令牌：填了就**不必立刻刷新**
+     * （115 的 refresh_token 是一次性的，首次使用前不动它最安全）。
+     */
+    fun add(
+        name: String,
+        rootCid: String,
+        refreshToken: String,
+        accessToken: String = "",
+        accessExpiresAt: Long = 0L,
+    ): Cloud115Connection =
         synchronized(lock) {
             val conn = StoredConnection(
                 id = UUID.randomUUID().toString().replace("-", "").take(8),
                 name = name.trim(),
                 rootCid = normalizeCid(rootCid),
                 refreshTokenEnc = WebDavCredentialCrypto.encrypt(refreshToken.trim()),
+                accessToken = accessToken.trim(),
+                accessExpiresAt = accessExpiresAt,
             )
             val list = loadLocked()
             list.add(conn)
@@ -85,23 +99,38 @@ object Cloud115ConnectionStore {
             conn.toPublic()
         }
 
-    fun update(id: String, name: String, rootCid: String, refreshToken: String): Unit = synchronized(lock) {
+    fun update(
+        id: String,
+        name: String,
+        rootCid: String,
+        refreshToken: String,
+        accessToken: String = "",
+        accessExpiresAt: Long = 0L,
+    ): Unit = synchronized(lock) {
         val list = loadLocked()
         val idx = list.indexOfFirst { it.id == id }
         if (idx < 0) return
         val old = list[idx]
+        val newRefresh = if (refreshToken.isBlank()) old.refreshTokenEnc else {
+            WebDavCredentialCrypto.encrypt(refreshToken.trim())
+        }
         list[idx] = old.copy(
             name = name.trim(),
             rootCid = normalizeCid(rootCid),
             // 留空 = 不改（编辑框不回显已解密的令牌）
-            refreshTokenEnc = if (refreshToken.isBlank()) {
-                old.refreshTokenEnc
-            } else {
-                // 换了授权：旧 access_token 立即作废，避免拿旧令牌打新账号
-                WebDavCredentialCrypto.encrypt(refreshToken.trim())
+            refreshTokenEnc = newRefresh,
+            // 换了 refresh_token → 旧 access_token 作废（可能是别的账号的）；
+            // 没换 → 保留（避免"只改名字"顺手把还能用的 access_token 清掉）。
+            accessToken = when {
+                accessToken.isNotBlank() -> accessToken.trim()
+                refreshToken.isNotBlank() -> ""
+                else -> old.accessToken
             },
-            accessToken = if (refreshToken.isBlank()) old.accessToken else "",
-            accessExpiresAt = if (refreshToken.isBlank()) old.accessExpiresAt else 0L,
+            accessExpiresAt = when {
+                accessToken.isNotBlank() -> accessExpiresAt
+                refreshToken.isNotBlank() -> 0L
+                else -> old.accessExpiresAt
+            },
         )
         saveLocked(list)
     }
