@@ -6,6 +6,9 @@ import java.io.File
 import java.io.IOException
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
+import app.mihonsy.komga.data.cloud115.Cloud115Api
+import app.mihonsy.komga.data.cloud115.Cloud115ConnectionStore
+import app.mihonsy.komga.data.cloud115.Cloud115CoverCache
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavCoverCache
@@ -24,6 +27,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import logcat.LogPriority
 import mihon.core.common.archive.ArchiveHandle
 import mihon.core.common.archive.ArchiveReader
+import mihon.core.common.archive.Cloud115RandomAccessSource
 import mihon.core.common.archive.RemoteScheme
 import mihon.core.common.archive.RemoteZipReader
 import mihon.core.common.archive.WebDavRandomAccessSource
@@ -274,9 +278,13 @@ class ChapterLoader(
     private fun isRemoteEpubChapter(remoteUrl: String): Boolean =
         remoteUrl.substringBefore('?').lowercase().endsWith(".epub")
 
-    // SY --> Komiho Phase7: 远程归档按 URL 方案分派（webdav: / smb://）。
+    // SY --> Komiho Phase7: 远程归档按 URL 方案分派（webdav: / smb:// / 115://）。
     private fun remoteArchiveHandle(remoteUrl: String): ArchiveHandle =
-        if (RemoteScheme.isSmb(remoteUrl)) smbArchiveHandle(remoteUrl) else webDavArchiveHandle(remoteUrl)
+        when {
+            RemoteScheme.isSmb(remoteUrl) -> smbArchiveHandle(remoteUrl)
+            RemoteScheme.isCloud115(remoteUrl) -> cloud115ArchiveHandle(remoteUrl)
+            else -> webDavArchiveHandle(remoteUrl)
+        }
 
     // SY --> Komiho Phase7: 由 `smb://<connId>/<relPath>` 章节 url 构造 SMB 随机访问源。
     // 与 WebDAV 的差异：SMB 原生支持按偏移读，无 Range 探测、无 rar/7z 整本缓存回退；
@@ -339,4 +347,45 @@ class ChapterLoader(
         // SY <--
     }
     // SY <--
+
+    // Komiho: 115 原生来源（开放平台 OpenAPI）—— `115://<connId>/<parentCid>/<pickCode>/<fileName>`。
+    // 与 WebDAV 的差异只有「地址怎么来」：115 直链有时效且与 UA 绑定，所以这里不解析 URL，
+    // 而是把 pickCode 交给 source，在真正读数据前现取直链（403/断流时重取）。
+    // 页缓存与 WebDAV/SMB 共用 RemotePageCache：键 = 115 定位串 + 指纹，天然不冲突。
+    private fun cloud115ArchiveHandle(remoteUrl: String): ArchiveHandle {
+        val ref = Cloud115ConnectionStore.parseChapterUrl(remoteUrl)
+            ?: throw IOException("115 章节 URL 非法: $remoteUrl")
+        val conn = Cloud115ConnectionStore.match(remoteUrl)
+            ?: throw IOException("115 连接不存在（可能已删除）: $remoteUrl")
+        // 顺便生成历史/书签封面（缓存缺失时后台拉首图落盘，失败静默）。
+        Cloud115CoverCache.generateAsync(context, remoteUrl)
+        val source = Cloud115RandomAccessSource(
+            pickCode = ref.pickCode,
+            fileName = ref.fileName,
+            chapterUrl = remoteUrl,
+            // 章节 URL 不带 sha1；首次探测后写入 "size:"，同一文件后续会话可命中页缓存。
+            fingerprintHint = null,
+            userAgent = Cloud115Api.USER_AGENT,
+            resolve = { force -> Cloud115Api.downloadBlocking(conn.id, ref.pickCode, force) },
+            fallbackCacheDir = File(context.cacheDir, "cloud115_fallback"),
+            cacheMaxBytes = CacheLimits.maxBytes(context),
+            onProgress = onCacheProgress,
+        )
+        val delegate: ArchiveHandle = try {
+            RemoteZipReader(source)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "RemoteZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
+            ArchiveReader(source)
+        }
+        return CachingArchiveHandle(
+            delegate = delegate,
+            cache = RemotePageCache(
+                root = File(context.cacheDir, "remote_pages"),
+                maxBytes = CacheLimits.maxBytes(context),
+            ),
+            metaKey = {
+                source.remoteFingerprint?.let { fp -> "${source.normalizedUrl}|$fp" }
+            },
+        )
+    }
 }

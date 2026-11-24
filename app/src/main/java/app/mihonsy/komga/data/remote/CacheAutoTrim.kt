@@ -29,7 +29,7 @@ import java.io.File
  */
 object CacheAutoTrim {
 
-    private val DIRS = listOf("webdav_fallback", "remote_pages", "remote_pdf")
+    private val DIRS = listOf("webdav_fallback", "cloud115_fallback", "remote_pages", "remote_pdf")
 
     /**
      * 超限则按 lastModified 从最旧开始删，直到降到上限的 90%。

@@ -227,6 +227,11 @@ import app.mihonsy.komga.data.SourceVisibilityStore
 // SY --> Komiho: KomgaConnection.displayName()（名称空则回落 host），来源列表按连接展开时用。
 import app.mihonsy.komga.data.displayName
 // SY <--
+import app.mihonsy.komga.data.cloud115.Cloud115Api
+import app.mihonsy.komga.data.cloud115.Cloud115Connection
+import app.mihonsy.komga.data.cloud115.Cloud115ConnectionStore
+import app.mihonsy.komga.data.cloud115.Cloud115CoverCache
+import app.mihonsy.komga.data.cloud115.Cloud115Entry
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 // SY --> Komiho Phase7: SMB 来源接入。
 import app.mihonsy.komga.data.smb.SmbBrowse
@@ -425,6 +430,7 @@ internal enum class SourceKind {
     Komga,
     WebDav,
     Smb,
+    Cloud115,
     Local,
     ;
 
@@ -449,6 +455,8 @@ internal const val SOURCE_ID_WEBDAV_PREFIX = SourceVisibilityStore.ID_WEBDAV_PRE
 // `smb:<connId>`——单冒号，避免与章节 url 的 scheme 混淆）。
 internal const val SOURCE_ID_SMB_PREFIX = SourceVisibilityStore.ID_SMB_PREFIX
 // SY <--
+// Komiho: 115 来源条目 id 前缀（章节 url 是 `115://<connId>/...`，来源 id 是 `115:<connId>`）。
+internal const val SOURCE_ID_CLOUD115_PREFIX = SourceVisibilityStore.ID_CLOUD115_PREFIX
 
 /**
  * Komiho: 冷启动落点（「开始」区设置）诊断 TAG。
@@ -492,6 +500,10 @@ internal fun buildSourceEntries(komgaConns: List<KomgaConnection>, localName: St
         .sortedBy { it.displayName().lowercase() }
         .forEach { entries.add(SourceEntry(SOURCE_ID_SMB_PREFIX + it.id, SourceKind.Smb, it.displayName())) }
     // SY <--
+    // Komiho: 115 原生来源每条连接一个条目（排在 SMB 之后，同级按名称升序）。
+    Cloud115ConnectionStore.all()
+        .sortedBy { it.displayName().lowercase() }
+        .forEach { entries.add(SourceEntry(SOURCE_ID_CLOUD115_PREFIX + it.id, SourceKind.Cloud115, it.displayName())) }
     // 用户自定义顺序：已记录的 id 按记录序前置，未记录的新源按固定规则追加其后。
     // 单一权威点——顶栏来源菜单与「最近阅读」卡片读同一份，排序同步生效。
     val order = SourceVisibilityStore.sourceOrder()
@@ -686,6 +698,8 @@ private fun KomgaMainScreen(
     // SY --> Komiho Phase7: SMB 浏览的「打开文件位置」跳转请求（共享内相对路径）。
     var smbBrowseNavRequest by remember { mutableStateOf<String?>(null) }
     // SY <--
+    // Komiho: 115 浏览的「打开文件位置」跳转请求（目标目录 cid）。
+    var cloud115BrowseNavRequest by remember { mutableStateOf<String?>(null) }
 
     // SY --> Komiho: 首次需要选择本地目录时，若尚未授予 MANAGE_EXTERNAL_STORAGE，
     // 先弹授权提示对话框，而不是直接静默走 SAF；用户选「使用 SAF」才维持原流程。
@@ -886,6 +900,11 @@ private fun KomgaMainScreen(
             smbBrowseNavRequest = SmbConnectionStore.extractRelPath(chapterUrl).substringBeforeLast('/')
             selectSource(SourceEntry(SOURCE_ID_SMB_PREFIX + conn.id, SourceKind.Smb, conn.displayName()))
             // SY <--
+        } else if (chapterUrl.startsWith("115://")) {
+            // Komiho: 115 条目 → 对应连接浏览 tab 定位到父目录（章节 URL 里带 parentCid）。
+            val conn = Cloud115ConnectionStore.match(chapterUrl) ?: return
+            cloud115BrowseNavRequest = Cloud115ConnectionStore.parseChapterUrl(chapterUrl)?.parentCid
+            selectSource(SourceEntry(SOURCE_ID_CLOUD115_PREFIX + conn.id, SourceKind.Cloud115, conn.displayName()))
         } else {
             // chapterUrl 已是真实绝对路径；LocalFileBrowser 的 navRequest 按「相对当前根的路径」消费，
             // 这里转成相对段（不在当前根下时退化为原值，落到根目录）。
@@ -918,6 +937,8 @@ private fun KomgaMainScreen(
             SmbConnectionStore.matchConnection(url)?.let { SOURCE_ID_SMB_PREFIX + it.id }
         url.startsWith("webdav://") ->
             WebDavConnectionStore.match(url)?.let { SOURCE_ID_WEBDAV_PREFIX + it.id }
+        url.startsWith("115://") ->
+            Cloud115ConnectionStore.match(url)?.let { SOURCE_ID_CLOUD115_PREFIX + it.id }
         // 旧格式 webdav:<URL>（Phase3 遗留）：无法从 url 反查连接，放弃（回落到「最近」页）。
         url.startsWith("webdav:") -> null
         else -> SOURCE_ID_LOCAL
@@ -1547,6 +1568,31 @@ private fun KomgaMainScreen(
                             }
                         }
                         // SY <--
+
+                        // Komiho: 115 原生来源浏览（OpenAPI 直连，结构镜像 SMB 分支）。
+                        SourceKind.Cloud115 -> {
+                            val conn = remember(currentSourceId, sourceVersion) {
+                                Cloud115ConnectionStore.all()
+                                    .firstOrNull { it.id == currentSourceId.removePrefix(SOURCE_ID_CLOUD115_PREFIX) }
+                            }
+                            if (conn == null) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        composeStringResource(R.string.source_cloud115_missing),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            } else {
+                                Cloud115BrowsePane(
+                                    conn = conn,
+                                    onOpenFile = { entry, dirLabel ->
+                                        scope.launch { openCloud115File(context, conn, entry, dirLabel) }
+                                    },
+                                    navRequest = cloud115BrowseNavRequest,
+                                    onNavConsumed = { cloud115BrowseNavRequest = null },
+                                )
+                            }
+                        }
 
                         // Komga 不会出现（Browse 仅文件型来源可见）。
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -4478,6 +4524,8 @@ private fun KomgaBackupSettings(modifier: Modifier = Modifier) {
 @Composable
 private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.content.Context) {
     val webdavCacheDir = remember { File(context.cacheDir, "webdav_fallback") }
+    // Komiho: 115 整本回退缓存（rar/7z、非 Range 回退），统计与清除与 webdav_fallback 同口径。
+    val cloud115CacheDir = remember { File(context.cacheDir, "cloud115_fallback") }
     // SY --> Komiho Phase5/Phase7: 页级缓存目录（WebDAV/SMB 共用 remote_pages）并入
     // usage 统计与清除。旧 webdav_pages 目录已废弃移除。
     val remotePageCacheDir = remember { File(context.cacheDir, "remote_pages") }
@@ -4494,6 +4542,7 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             File(context.filesDir, eu.kanade.tachiyomi.data.coil.LocalCoverFetcher.DIR),
             File(context.filesDir, SmbCoverCache.DIR),
             File(context.filesDir, WebDavCoverCache.DIR),
+            File(context.filesDir, Cloud115CoverCache.DIR),
         )
     }
     var coverUsageBytes by remember { mutableStateOf(0L) }
@@ -4512,6 +4561,11 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                 ?.filter { it.isFile && it.name.startsWith("webdav_") && !it.name.endsWith(".part") }
                 ?.sumOf { it.length() }
                 ?: 0L
+            // Komiho: 115 整本回退缓存（cloud115_*.cbz 等）
+            val cloud115Bytes = cloud115CacheDir.listFiles()
+                ?.filter { it.isFile && !it.name.endsWith(".part") }
+                ?.sumOf { it.length() }
+                ?: 0L
             // SY --> Komiho Phase5/Phase7: 页缓存（每书一目录）计入占用
             val pageBytes = remotePageCacheDir.listFiles()?.toList().orEmpty()
                 .filter { it.isDirectory }
@@ -4524,7 +4578,7 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             // SY <--
             // SY: 封面缓存三套目录（本地/SMB/WebDAV，各含子目录）总占用。
             coverUsageBytes = coverCacheDirs.sumOf { dir -> dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
-            fallbackBytes + pageBytes + pdfBytes
+            fallbackBytes + cloud115Bytes + pageBytes + pdfBytes
         }
     }
     val scope = rememberCoroutineScope()
@@ -4638,7 +4692,13 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
                                 bytes
                             }
                             // SY <--
-                            fallbackTotal + pageTotal + pdfTotal
+                            // Komiho: 清除范围含 115 整本回退缓存
+                            val cloud115Total = cloud115CacheDir.let { dir ->
+                                val bytes = dir.listFiles()?.sumOf { it.length() } ?: 0L
+                                dir.listFiles()?.forEach { it.delete() }
+                                bytes
+                            }
+                            fallbackTotal + cloud115Total + pageTotal + pdfTotal
                         }
                         usageTick++
                         android.widget.Toast.makeText(
@@ -8713,6 +8773,8 @@ private fun chapterSourceLabel(
     chapterUrl: String,
     webDavConns: List<WebDavConnection>,
     smbConns: List<SmbConnection> = emptyList(),
+    // Komiho: 115 连接快照——**必须传快照**，逐行调 store 会每行读一次 DataStore。
+    cloud115Conns: List<Cloud115Connection> = emptyList(),
 ): String = when {
     // 新格式 connId 精确 / 旧格式 baseUrl 最长前缀（与 store 同规则，URL 里的旧 connId 能兜回来）。
     chapterUrl.startsWith("webdav:") ->
@@ -8722,6 +8784,9 @@ private fun chapterSourceLabel(
         SmbConnectionStore.matchIn(smbConns, chapterUrl)?.displayName() ?: "SMB"
     // SY <--
     chapterUrl.startsWith("smb:") -> "SMB"
+    // Komiho: 115 条目显示连接名（connId 精确匹配，失配回落第一个连接）。
+    chapterUrl.startsWith("115://") ->
+        Cloud115ConnectionStore.matchIn(cloud115Conns, chapterUrl)?.displayName() ?: "115"
     else -> composeStringResource(R.string.source_local)
 }
 
@@ -8968,6 +9033,109 @@ private suspend fun openWebDavTestFile(
     }
 }
 // SY <--
+
+/**
+ * Komiho: 打开 115 压缩包 —— manga = 所在目录（系列），同目录压缩包全部建为章节
+ * （翻完自动续卷，与 [openSmbFile] 同构）。
+ *
+ * 差异只有「兄弟归档来自 [Cloud115Api.listBlocking]」：打开时列一次目录拿同目录其余归档，
+ * 失败只影响续卷，不影响本次阅读。文件身份用列表接口给的 `size + 修改时间`，
+ * 与 WebDAV/SMB 同一套 `content_key` 机制，进度能跨入口恢复。
+ */
+private suspend fun openCloud115File(
+    context: android.content.Context,
+    conn: Cloud115Connection,
+    entry: Cloud115Entry,
+    dirLabel: String,
+) {
+    try {
+        val parentCid = entry.parentCid.ifBlank { conn.rootCid }
+        // manga.url = 系列目录（同一目录下的多个压缩包同属一个系列）
+        val mangaUrl = "115://${conn.id}/$parentCid"
+        // dirLabel 为 "…" 表示面包屑里是「按 cid 直接定位、名字未知」的占位（见 Cloud115BrowsePane），
+        // 这种时候用文件名兜底，别让书架/历史里出现一堆叫「…」的系列。
+        val seriesTitle = dirLabel.takeIf { it.isNotBlank() && it != "…" }
+            ?: entry.name.substringBeforeLast('.').ifBlank { entry.name }
+        val chapterUrl = Cloud115ConnectionStore.toChapterUrl(conn.id, parentCid, entry.pickCode, entry.name)
+        eu.kanade.tachiyomi.diagnostic.DiagLog.i(
+            "Cloud115Open",
+            "打开文件 name=${entry.name} pick=${entry.pickCode} mangaUrl=$mangaUrl chapterUrl=$chapterUrl",
+        )
+        val (mangaId, chapterId, initialPage) = withContext(Dispatchers.IO) {
+            val mangaRepo = Injekt.get<MangaRepository>()
+            val chapterRepo = Injekt.get<ChapterRepository>()
+            val manga = mangaRepo.getMangaByUrlAndSourceId(mangaUrl, LocalSource.ID)
+                ?: mangaRepo.insertNetworkManga(
+                    listOf(
+                        Manga.create().copy(
+                            source = LocalSource.ID,
+                            url = mangaUrl,
+                            ogTitle = seriesTitle,
+                            favorite = false,
+                            chapterFlags = Manga.CHAPTER_SORTING_NUMBER,
+                        ),
+                    ),
+                ).first()
+            if (manga.ogTitle != seriesTitle) {
+                mangaRepo.update(MangaUpdate(id = manga.id!!, title = seriesTitle))
+            }
+            // 同目录压缩包全部成章（排序 = 文件名自然序，翻完自动续卷）。
+            val siblings = runCatching { Cloud115Api.listBlocking(conn.id, parentCid).entries }
+                .onFailure { logcat(LogPriority.WARN) { "[Cloud115] 章节扫描失败: ${it.message}" } }
+                .getOrDefault(emptyList())
+                .filter { it.isArchive }
+                .let { list -> list.filterNot { it.pickCode == entry.pickCode } + entry }
+                .sortedWith { a, b -> a.name.compareToNaturalPinyin(b.name) }
+            val numbers = ChapterNumbering.assign(
+                siblings.map { it.name.substringBeforeLast('.').ifBlank { it.name } },
+                seriesTitle,
+            )
+            siblings.forEachIndexed { idx, sib ->
+                val url = Cloud115ConnectionStore.toChapterUrl(
+                    conn.id,
+                    sib.parentCid.ifBlank { parentCid },
+                    sib.pickCode,
+                    sib.name,
+                )
+                val key = FileIdentity.of(sib.size, sib.lastModified)
+                val existing = chapterRepo.getChapterByUrlAndMangaId(url, manga.id!!)
+                if (existing == null) {
+                    chapterRepo.addAll(
+                        listOf(
+                            Chapter.create().copy(
+                                mangaId = manga.id!!,
+                                url = url,
+                                name = sib.name.substringBeforeLast('.').ifBlank { sib.name },
+                                chapterNumber = numbers[idx],
+                                contentKey = key,
+                            ),
+                        ),
+                    )
+                } else {
+                    syncChapterNumber(chapterRepo, url, manga.id!!, numbers[idx])
+                    if (key != null && existing.contentKey != key) {
+                        existing.id?.let { chapterRepo.updateChapterContentKey(it, key) }
+                    }
+                }
+            }
+            val chapter = chapterRepo.getChapterByUrlAndMangaId(chapterUrl, manga.id!!)
+                ?: error("115 章节写入失败")
+            val key = FileIdentity.of(entry.size, entry.lastModified)
+            if (key != null && chapter.contentKey != key) {
+                chapterRepo.updateChapterContentKey(chapter.id!!, key)
+            }
+            Triple(manga.id!!, chapter.id!!.toLong(), chapter.lastPageRead.toInt())
+        }
+        context.startActivity(ReaderActivity.newIntent(context, mangaId, chapterId, initialPage))
+    } catch (e: Throwable) {
+        eu.kanade.tachiyomi.diagnostic.DiagLog.e("Cloud115Open", "打开文件失败 name=${entry.name}", e)
+        android.widget.Toast.makeText(
+            context,
+            context.getString(R.string.open_failed, e.message),
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
+}
 
 // SY --> Komiho Phase7：SMB 浏览页（镜像 WebDavBrowsePane）。
 //
@@ -10245,6 +10413,8 @@ private fun SourceDashboardPane(
     var deleteTick by remember { mutableIntStateOf(0) }
     // SY: WebDAV 封面档位>0 时摘要构建会触发补拉，落盘 bump 版本号后重算出封面。
     val webdavCoverTick by WebDavCoverCache.coverTick.collectAsState()
+    // Komiho: 115 封面的同一套「生成完即上屏」机制。
+    val cloud115CoverTick by Cloud115CoverCache.coverTick.collectAsState()
     val summaries by produceState<Map<String, SourceCardSummary>>(
         emptyMap(),
         entries,
@@ -10252,6 +10422,7 @@ private fun SourceDashboardPane(
         dashVersion,
         deleteTick,
         webdavCoverTick,
+        cloud115CoverTick,
     ) {
         value = withContext(Dispatchers.IO) {
             class Agg {
@@ -10278,6 +10449,8 @@ private fun SourceDashboardPane(
             // SY --> Komiho Phase7: SMB 摘要分桶（smb://<connId>/<relPath> → smb:<connId>）。
             val smb = mutableMapOf<String, Agg>()
             // SY <--
+            // Komiho: 115 摘要分桶（115://<connId>/... → 115:<connId>）。
+            val cloud115 = mutableMapOf<String, Agg>()
             val repo = Injekt.get<HistoryRepository>()
             val getManga = Injekt.get<GetManga>()
             val mangaRepo = Injekt.get<MangaRepository>()
@@ -10295,6 +10468,10 @@ private fun SourceDashboardPane(
                     url.startsWith("webdav://") ->
                         WebDavConnectionStore.match(url)?.let {
                             webdav.getOrPut("webdav:" + it.id) { Agg() }.add(item)
+                        }
+                    url.startsWith("115://") ->
+                        Cloud115ConnectionStore.match(url)?.let {
+                            cloud115.getOrPut(SOURCE_ID_CLOUD115_PREFIX + it.id) { Agg() }.add(item)
                         }
                     url.startsWith("webdav:") -> {
                         // 旧格式 webdav:<URL>（Phase3）：baseUrl 最长前缀匹配连接。
@@ -10324,6 +10501,8 @@ private fun SourceDashboardPane(
                         ?: item.thumbnailUrl?.takeIf { it.isNotBlank() }
                         ?: WebDavCoverCache.coverCachedOnly(context, url)
                         ?: SmbCoverCache.existingCoverFile(context, url)
+                        // Komiho: 115 只读缓存（不在摘要构建里触发生成，避免把整份历史灌进限流队列）。
+                        ?: Cloud115CoverCache.coverCachedOnly(context, url)
                 }
             }
             // SY: Komga 封面必须走 MangaCoverFetcher（按 source 解析 KomgaSource 带上鉴权头）。
@@ -10505,7 +10684,9 @@ private fun SourceDashboardPane(
             mapOf(SOURCE_ID_LOCAL to build(local, DashboardPreferences.limitFor(SOURCE_ID_LOCAL))) + komgaCards +
                 webdav.mapValues { (key, agg) -> build(agg, DashboardPreferences.limitFor(key)) } +
                 // SY --> Komiho Phase7: SMB 卡片摘要。
-                smb.mapValues { (key, agg) -> build(agg, DashboardPreferences.limitFor(key)) }
+                smb.mapValues { (key, agg) -> build(agg, DashboardPreferences.limitFor(key)) } +
+                // Komiho: 115 卡片摘要。
+                cloud115.mapValues { (key, agg) -> build(agg, DashboardPreferences.limitFor(key)) }
             // SY <--
         }
     }
@@ -10522,6 +10703,7 @@ private fun SourceDashboardPane(
                 SourceKind.Komga -> "Komga"
                 SourceKind.WebDav -> "WebDAV"
                 SourceKind.Smb -> "SMB"
+                SourceKind.Cloud115 -> "115"
                 SourceKind.Local -> composeStringResource(R.string.source_local)
             }
             // SY: 卡片不再区分「当前来源」底色——启动时当前来源恢复自上次浏览，
@@ -10821,6 +11003,10 @@ private fun HistoryTabLocal(
         value = withContext(Dispatchers.IO) { SmbConnectionStore.all() }
     }
     // SY <--
+    // Komiho: 来源名称（115 连接名）快照，同口径。
+    val cloud115Conns by produceState(emptyList<Cloud115Connection>(), refreshTick, queryTick) {
+        value = withContext(Dispatchers.IO) { Cloud115ConnectionStore.all() }
+    }
 
     // 按「卷/文件」(chapterUrl) 合并：每卷取最近一次阅读作为代表，保留全部阅读会话供「汇聚」对话框。
     // 注意：本地模型 series=manga、volume=chapter，用 mangaId 聚合会把整系列压成一行，故用 chapterUrl。
@@ -10859,6 +11045,8 @@ private fun HistoryTabLocal(
                     // SY: WebDAV/SMB 章节（无本地文件）→ 读打开时「顺便」生成的封面缓存（无则占位图标）。
                     ?: WebDavCoverCache.coverCachedOnly(context, rep.chapterUrl)
                     ?: SmbCoverCache.existingCoverFile(context, rep.chapterUrl)
+                    // Komiho: 115 章节同口径（只读缓存，不触发生成）。
+                    ?: Cloud115CoverCache.coverCachedOnly(context, rep.chapterUrl)
             }
             // SY <--
             // 标题取「卷名」（章节名 / chapterUrl 末段），而非系列名；副标题展示系列名。
@@ -10869,7 +11057,7 @@ private fun HistoryTabLocal(
                 context = context,
                 title = volumeTitle,
                 subtitle = subtitle,
-                sourceBadge = chapterSourceLabel(rep.chapterUrl, webDavConns, smbConns),
+                sourceBadge = chapterSourceLabel(rep.chapterUrl, webDavConns, smbConns, cloud115Conns),
                 fileSize = stat.size,
                 // 文件修改时间对远程章节无意义，行内改显最后阅读时间
                 dateTime = rep.readAt?.time ?: 0L,
@@ -11030,6 +11218,10 @@ private fun BookmarksTabLocal(
         value = withContext(Dispatchers.IO) { SmbConnectionStore.all() }
     }
     // SY <--
+    // Komiho: 来源名称（115 连接名）快照，同口径。
+    val cloud115Conns by produceState(emptyList<Cloud115Connection>(), refreshTick) {
+        value = withContext(Dispatchers.IO) { Cloud115ConnectionStore.all() }
+    }
 
     fun load() {
         scope.launch {
@@ -11100,6 +11292,8 @@ private fun BookmarksTabLocal(
                             // SY: WebDAV/SMB 章节 → 打开时「顺便」生成的封面缓存。
                             ?: WebDavCoverCache.coverCachedOnly(context, first.chapterUrl)
                             ?: SmbCoverCache.existingCoverFile(context, first.chapterUrl)
+                            // Komiho: 115 章节同口径。
+                            ?: Cloud115CoverCache.coverCachedOnly(context, first.chapterUrl)
                     }
                     // SY <--
                     // 标题取文件名（章节名 / chapterUrl 末段），副标题展示系列名 + 书签数，
@@ -11116,7 +11310,7 @@ private fun BookmarksTabLocal(
                         title = volumeTitle,
                         subtitle = composeStringResource(R.string.bookmarks_count_subtitle, first.mangaTitle, bms.size) +
                             (if (missing) " · 文件已删除" else ""),
-                        sourceBadge = chapterSourceLabel(first.chapterUrl, webDavConns, smbConns),
+                        sourceBadge = chapterSourceLabel(first.chapterUrl, webDavConns, smbConns, cloud115Conns),
                         enabled = !missing,
                         fileSize = stat.size,
                         // 文件修改时间对远程章节无意义，行内改显最后阅读时间
@@ -11524,6 +11718,163 @@ fun SeriesCard(client: KomgaApiClient, series: SeriesDto, onClick: () -> Unit) {
                 maxLines = 2,
                 modifier = Modifier.padding(horizontal = 2.dp),
             )
+        }
+    }
+}
+
+/**
+ * Komiho: 115 原生来源的浏览面板（OpenAPI 直连）。
+ *
+ * 结构是 SmbBrowsePane 的最小子集：面包屑（cid 栈）+ 列表 + 刷新，够用且不新增偏好键。
+ * 当前只支持压缩文件：非压缩包置灰、点按提示「暂不支持」；**不做封面缩略图**——
+ * 115 没有缩略图接口，逐项拉首图会白烧取链的频控预算（300ms 一条）。
+ */
+@Composable
+private fun Cloud115BrowsePane(
+    conn: Cloud115Connection,
+    onOpenFile: (Cloud115Entry, String) -> Unit,
+    navRequest: String? = null,
+    onNavConsumed: () -> Unit = {},
+) {
+    val context = LocalContext.current
+    // rootCid 也进 key：用户改了根目录后重新进来，栈要从新根重建（否则停在旧路径）。
+    var trail by remember(conn.id, conn.rootCid) {
+        mutableStateOf(listOf(conn.rootCid to conn.displayName()))
+    }
+    var entries by remember(conn.id) { mutableStateOf<List<Cloud115Entry>>(emptyList()) }
+    var loading by remember(conn.id) { mutableStateOf(false) }
+    var error by remember(conn.id) { mutableStateOf<String?>(null) }
+    var reloadTick by remember(conn.id) { mutableIntStateOf(0) }
+    val dirBrowseFailed = composeStringResource(R.string.dir_browse_failed)
+
+    val currentCid = trail.lastOrNull()?.first ?: conn.rootCid
+    val currentLabel = trail.lastOrNull()?.second ?: conn.displayName()
+
+    // 历史/书签「打开文件位置」：cid 在当前栈里就回退到它，否则直接定位。
+    LaunchedEffect(navRequest) {
+        val target = navRequest ?: return@LaunchedEffect
+        val idx = trail.indexOfFirst { it.first == target }
+        // 栈里没有（从历史/书签进入、或刚换了目录）→ 直接按 cid 定位，名字未知先占位。
+        // 以前这里直接忽略，表现成「点了打开文件位置却停在根目录」，等于跳转失效。
+        trail = if (idx >= 0) trail.take(idx + 1) else trail + (target to "…")
+        onNavConsumed()
+    }
+
+    LaunchedEffect(currentCid, reloadTick) {
+        loading = true
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching { Cloud115Api.listBlocking(conn.id, currentCid) }
+        }
+        result.onSuccess { page ->
+            entries = page.entries.sortedWith(
+                compareByDescending<Cloud115Entry> { it.isDir }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name },
+            )
+        }.onFailure { e ->
+            // 用资源字符串（与其它 pane 同口径），后接具体原因便于排查。
+            error = e.message?.let { "$dirBrowseFailed: $it" } ?: dirBrowseFailed
+        }
+        loading = false
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = { if (trail.size > 1) trail = trail.dropLast(1) },
+                enabled = trail.size > 1,
+            ) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = null)
+            }
+            Text(
+                text = currentLabel,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
+            if (loading) {
+                Text(composeStringResource(R.string.cloud115_loading), style = MaterialTheme.typography.bodySmall)
+            }
+            TextButton(onClick = { reloadTick++ }) { Text(composeStringResource(R.string.cloud115_refresh)) }
+        }
+        error?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+        if (entries.isEmpty() && !loading && error == null) {
+            Box(
+                Modifier.fillMaxWidth().padding(32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    composeStringResource(R.string.cloud115_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(entries, key = { it.fid.ifBlank { it.pickCode + it.name } }) { entry ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            when {
+                                entry.isDir -> trail = trail + (entry.fid to entry.name)
+                                entry.isArchive -> onOpenFile(entry, currentLabel)
+                                else -> android.widget.Toast.makeText(
+                                    context,
+                                    context.getString(R.string.cloud115_unsupported),
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = if (entry.isDir) Icons.Filled.Folder else Icons.Filled.Description,
+                        contentDescription = null,
+                        tint = when {
+                            entry.isDir -> MaterialTheme.colorScheme.primary
+                            entry.isArchive -> MaterialTheme.colorScheme.onSurface
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                        },
+                    )
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(
+                            text = entry.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 2,
+                            color = if (entry.isDir || entry.isArchive) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            },
+                        )
+                        if (!entry.isDir) {
+                            Text(
+                                text = android.text.format.Formatter.formatFileSize(context, entry.size),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (entry.isArchive) {
+                        Icon(
+                            Icons.Filled.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
     }
 }

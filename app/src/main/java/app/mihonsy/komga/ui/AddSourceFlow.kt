@@ -86,6 +86,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.mihonsy.komga.data.KomgaApiClient
+// Komiho: 115 原生来源（OpenAPI）表单。
+import app.mihonsy.komga.data.cloud115.Cloud115Api
+import app.mihonsy.komga.data.cloud115.Cloud115Connection
+import app.mihonsy.komga.data.cloud115.Cloud115ConnectionStore
 // SY --> Komiho Phase4: 来源拖拽排序依赖 sh.calvin.reorderable。
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
@@ -182,6 +186,8 @@ internal sealed interface AddSourceScreen {
     // SY --> Komiho Phase7: SMB 连接表单（host/port/share/path/domain/user/pass）。
     data class Smb(val connId: String?) : AddSourceScreen
     // SY <--
+    /** Komiho: 115 连接表单（名称 / 根目录 cid / 刷新令牌）。 */
+    data class Cloud115(val connId: String?) : AddSourceScreen
     data class Komga(val connId: String?) : AddSourceScreen
     data object Local : AddSourceScreen
 }
@@ -191,6 +197,7 @@ internal fun sourceIcon(kind: SourceKind): ImageVector = when (kind) {
     SourceKind.Komga -> Icons.Filled.Dns
     SourceKind.WebDav -> Icons.Filled.CloudQueue
     SourceKind.Smb -> Icons.Filled.Lan
+    SourceKind.Cloud115 -> Icons.Filled.CloudQueue
     SourceKind.Local -> Icons.Filled.Folder
 }
 
@@ -225,6 +232,8 @@ internal fun AddSourceFlow(
     // SY --> Komiho Phase7: SMB 连接删除确认状态。
     var deleteSmb by remember { mutableStateOf<SmbConnection?>(null) }
     // SY <--
+    // Komiho: 115 连接删除确认状态。
+    var deleteCloud115 by remember { mutableStateOf<Cloud115Connection?>(null) }
 
     // 返回键统一接管（本组合内后注册，优先于主界面的 BackHandler）：
     // 表单页 → 类型选择页；类型选择页 → 关闭整个流程。
@@ -252,6 +261,7 @@ internal fun AddSourceFlow(
                         AddSourceScreen.TypeSelect -> composeStringResource(R.string.addsrc_title)
                         is AddSourceScreen.WebDav -> "WebDAV"
                         is AddSourceScreen.Smb -> "SMB"
+                        is AddSourceScreen.Cloud115 -> "115"
                         is AddSourceScreen.Komga -> "Komga"
                         AddSourceScreen.Local -> composeStringResource(R.string.addsrc_type_local)
                     },
@@ -269,6 +279,7 @@ internal fun AddSourceFlow(
                     // SY --> Komiho Phase7: SMB 卡片编辑/删除回调。
                     onRequestDeleteSmb = { deleteSmb = it },
                     // SY <--
+                    onRequestDeleteCloud115 = { deleteCloud115 = it },
                 )
 
                 is AddSourceScreen.WebDav -> WebDavFormPage(
@@ -290,6 +301,15 @@ internal fun AddSourceFlow(
                     },
                 )
                 // SY <--
+
+                is AddSourceScreen.Cloud115 -> Cloud115FormPage(
+                    connId = s.connId,
+                    onBack = { screen = AddSourceScreen.TypeSelect },
+                    onSaved = {
+                        listTick++
+                        screen = AddSourceScreen.TypeSelect
+                    },
+                )
 
                 is AddSourceScreen.Komga -> KomgaFormPage(
                     prefs = prefs,
@@ -383,6 +403,28 @@ internal fun AddSourceFlow(
         )
     }
     // SY <--
+
+    // Komiho: 删除确认（115）：顺带清掉该连接的直链内存缓存。
+    deleteCloud115?.let { conn ->
+        AlertDialog(
+            onDismissRequest = { deleteCloud115 = null },
+            title = { Text(composeStringResource(R.string.addsrc_delete_title)) },
+            text = { Text(composeStringResource(R.string.addsrc_delete_msg, conn.displayName())) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteCloud115 = null
+                        Cloud115ConnectionStore.remove(conn.id)
+                        Cloud115Api.invalidateCache(conn.id)
+                        listTick++
+                    },
+                ) { Text(composeStringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteCloud115 = null }) { Text(composeStringResource(R.string.cancel)) }
+            },
+        )
+    }
 }
 
 // ------------------------------------------------------------ 类型选择页
@@ -397,12 +439,14 @@ private fun TypeSelectContent(
     // SY --> Komiho Phase7: SMB 卡片删除回调。
     onRequestDeleteSmb: (SmbConnection) -> Unit,
     // SY <--
+    onRequestDeleteCloud115: (Cloud115Connection) -> Unit,
 ) {
     val komgaConnected = prefs.hasConnection()
     val localName = composeStringResource(R.string.source_local)
     val komgaConns = remember(listTick, komgaConnected) { prefs.connections() }
     val webdavConns = remember(listTick) { WebDavConnectionStore.all() }
     val smbConns = remember(listTick) { SmbConnectionStore.all() }
+    val cloud115Conns = remember(listTick) { Cloud115ConnectionStore.all() }
 
     // 可拖拽顺序（与顶栏来源菜单、聚合页卡片同源，来自 buildSourceEntries）。
     // Komga 与 WebDAV / SMB 同构：一条连接 = 一条来源。
@@ -466,6 +510,20 @@ private fun TypeSelectContent(
                     label = "SMB",
                 ) { onSelect(AddSourceScreen.Smb(null)) }
             }
+            // Komiho: 115 另起一行（5 张挤一行会把每张压到 ~60dp，「WebDAV」「Komga」会被裁）。
+            // 用 1/4 宽 + 3/4 占位，与上一行等宽对齐。
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AddSourceCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Filled.CloudQueue,
+                    label = "115",
+                ) { onSelect(AddSourceScreen.Cloud115(null)) }
+                Spacer(Modifier.weight(3f))
+            }
         }
         item(key = "divider") { HorizontalDivider() }
         item(key = "added_label") {
@@ -485,17 +543,20 @@ private fun TypeSelectContent(
                     komgaConns = komgaConns,
                     webdavConns = webdavConns,
                     smbConns = smbConns,
+                    cloud115Conns = cloud115Conns,
                     onOpen = { connId ->
                         when (entry.kind) {
                             SourceKind.Local -> onSelect(AddSourceScreen.Local)
                             SourceKind.Komga -> onSelect(AddSourceScreen.Komga(connId))
                             SourceKind.WebDav -> onSelect(AddSourceScreen.WebDav(connId))
                             SourceKind.Smb -> onSelect(AddSourceScreen.Smb(connId))
+                            SourceKind.Cloud115 -> onSelect(AddSourceScreen.Cloud115(connId))
                         }
                     },
                     onRequestDeleteKomga = onRequestDeleteKomga,
                     onRequestDeleteWebDav = onRequestDeleteWebDav,
                     onRequestDeleteSmb = onRequestDeleteSmb,
+                    onRequestDeleteCloud115 = onRequestDeleteCloud115,
                     dragHandle = {
                         // 双横线拖拽手柄（落在 ReorderableCollectionItemScope）。
                         // 槽位尺寸固定 32dp，与前面显隐/编辑/删除三个槽一致，保证各行右对齐。
@@ -736,10 +797,12 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
     komgaConns: List<KomgaConnection>,
     webdavConns: List<WebDavConnection>,
     smbConns: List<SmbConnection>,
+    cloud115Conns: List<Cloud115Connection>,
     onOpen: (connId: String?) -> Unit,
     onRequestDeleteKomga: (KomgaConnection) -> Unit,
     onRequestDeleteWebDav: (WebDavConnection) -> Unit,
     onRequestDeleteSmb: (SmbConnection) -> Unit,
+    onRequestDeleteCloud115: (Cloud115Connection) -> Unit,
     dragHandle: @Composable ReorderableCollectionItemScope.() -> Unit,
 ) {
     val badgeSpec = when (entry.kind) {
@@ -747,12 +810,15 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
         SourceKind.Komga -> SourceBadgeSpec.Letter("K")
         SourceKind.WebDav -> SourceBadgeSpec.Icon(Icons.Filled.CloudQueue)
         SourceKind.Smb -> SourceBadgeSpec.Icon(Icons.Filled.Lan)
+        // 用文字徽章，避免和 WebDAV 的云图标在列表里分不出来。
+        SourceKind.Cloud115 -> SourceBadgeSpec.Letter("115")
     }
-    // 连接 id：Komga / WebDAV / SMB 一律从条目 id 剥掉各自前缀（条目 id = 前缀 + connId）。
+    // 连接 id：Komga / WebDAV / SMB / 115 一律从条目 id 剥掉各自前缀（条目 id = 前缀 + connId）。
     val connId = when (entry.kind) {
         SourceKind.Komga -> entry.id.removePrefix(SourceVisibilityStore.ID_KOMGA_CONN_PREFIX)
         SourceKind.WebDav -> entry.id.removePrefix(SourceVisibilityStore.ID_WEBDAV_PREFIX)
         SourceKind.Smb -> entry.id.removePrefix(SourceVisibilityStore.ID_SMB_PREFIX)
+        SourceKind.Cloud115 -> entry.id.removePrefix(SourceVisibilityStore.ID_CLOUD115_PREFIX)
         SourceKind.Local -> null
     }
     // 显隐开关 id：本地 = 内置 id；其余条目 id 本身就等于连接级开关 id（前缀 + connId）。
@@ -771,6 +837,10 @@ private fun ReorderableCollectionItemScope.SourceManageRow(
         SourceKind.Komga -> {
             val c = komgaConns.firstOrNull { it.id == connId }
             c?.let { { onRequestDeleteKomga(it) } }
+        }
+        SourceKind.Cloud115 -> {
+            val c = cloud115Conns.firstOrNull { it.id == connId }
+            c?.let { { onRequestDeleteCloud115(it) } }
         }
         SourceKind.Local -> null
     }
@@ -1773,3 +1843,156 @@ private fun restartMainFlow(context: android.content.Context) {
     (context as? android.app.Activity)?.finish()
 }
 // SY <--
+
+// ------------------------------------------------------------ 115 表单页
+
+/**
+ * Komiho: 115 连接表单。
+ *
+ * 认证走开放平台 OpenAPI：只需要一个 refresh_token。获取方式与 OpenList 官方一致 ——
+ * 浏览器打开 api.oplist.org（勾选「使用 OpenList 提供的参数」）→ 扫码授权 → 复制
+ * Refresh Token 粘回来。**不做应用内扫码**：OpenList 自己也没实现，手机端扫码体验更差。
+ *
+ * 「保存」= 落库 + 立刻列一次根目录验证授权；令牌无效时回滚，不留一条打不开的连接。
+ */
+@Composable
+private fun Cloud115FormPage(
+    connId: String?,
+    onBack: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val existing = remember(connId) {
+        connId?.let { id -> Cloud115ConnectionStore.all().firstOrNull { it.id == id } }
+    }
+    var name by remember(existing) { mutableStateOf(existing?.name.orEmpty()) }
+    var rootCid by remember(existing) { mutableStateOf(existing?.rootCid ?: "0") }
+    var token by remember(existing) { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var messageIsError by remember { mutableStateOf(false) }
+
+    val openTokenPage: () -> Unit = {
+        val intent = android.content.Intent(
+            android.content.Intent.ACTION_VIEW,
+            android.net.Uri.parse("https://api.oplist.org"),
+        )
+        runCatching { context.startActivity(intent) }
+            .onFailure {
+                message = "无法打开浏览器，请手动访问 https://api.oplist.org"
+                messageIsError = true
+            }
+    }
+
+    fun save() {
+        if (busy) return
+        val rt = token.trim()
+        if (existing == null && rt.isBlank()) {
+            message = "请先获取并粘贴刷新令牌（Refresh Token）"
+            messageIsError = true
+            return
+        }
+        busy = true
+        message = null
+        scope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (existing == null) {
+                        val conn = Cloud115ConnectionStore.add(name, rootCid, rt)
+                        try {
+                            Cloud115Api.testConnection(conn.id)
+                        } catch (e: Throwable) {
+                            // 令牌不可用 → 不留坏连接
+                            Cloud115ConnectionStore.remove(conn.id)
+                            throw e
+                        }
+                    } else {
+                        Cloud115ConnectionStore.update(existing.id, name, rootCid, rt)
+                        Cloud115Api.testConnection(existing.id)
+                    }
+                }.exceptionOrNull()
+            }
+            busy = false
+            if (error == null) {
+                onSaved()
+            } else {
+                message = error.message ?: "连接 115 失败"
+                messageIsError = true
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "115 网盘（开放平台 OpenAPI）",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("来源名称") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = rootCid,
+            onValueChange = { input -> rootCid = input.filter { it.isDigit() } },
+            label = { Text("根目录 ID（0 = 根目录）") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = token,
+            onValueChange = { token = it },
+            label = {
+                Text(if (existing == null) "刷新令牌（Refresh Token）" else "刷新令牌（留空 = 不修改）")
+            },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedButton(onClick = openTokenPage, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text("获取刷新令牌（打开 api.oplist.org）")
+        }
+        Text(
+            text = "在 api.oplist.org 选择 115，勾选「使用 OpenList 提供的参数」，扫码授权后复制 " +
+                "Refresh Token 粘贴到上面。刷新令牌是一次性的，程序会自动续期并保存新的一份。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        message?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (messageIsError) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedButton(onClick = onBack, enabled = !busy, modifier = Modifier.weight(1f)) {
+                Text(composeStringResource(R.string.cancel))
+            }
+            Button(onClick = { save() }, enabled = !busy, modifier = Modifier.weight(1f)) {
+                if (busy) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("保存")
+                }
+            }
+        }
+    }
+}

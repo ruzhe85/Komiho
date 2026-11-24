@@ -23,6 +23,8 @@ object SourceVisibilityStore {
     const val ID_KOMGA = "komga"
     const val ID_WEBDAV_PREFIX = "webdav:"
     const val ID_SMB_PREFIX = "smb:"
+    /** Komiho: 115 原生来源（章节 url 是 `115://...`，来源 id 是 `115:<connId>`）。 */
+    const val ID_CLOUD115_PREFIX = "115:"
     /**
      * Komga 连接级开关 id 前缀。聚合页 Komga 只有一张卡，但管理页按连接列出，
      * 故按连接记录：任一条连接可见 → 聚合页 Komga 卡片显示（全部关掉才隐藏）。

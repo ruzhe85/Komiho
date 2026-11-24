@@ -362,6 +362,13 @@
     <string name="source_unsupported">This source is not supported yet</string>
     <string name="source_webdav_missing">This WebDAV connection no longer exists. Pick a source from the top bar.</string>
     <string name="source_smb_missing">This SMB connection no longer exists. Pick a source from the top bar.</string>
+    <string name="source_cloud115_missing">This 115 connection no longer exists. Pick a source from the top bar.</string>
+    <string name="cloud115_loading">Loading…</string>
+    <string name="cloud115_refresh">Refresh</string>
+    <string name="cloud115_empty">This folder is empty</string>
+    <string name="cloud115_unsupported">Unsupported file type (only archives: zip/cbz/rar/cbr/7z/cb7)</string>
+    <string name="onboarding_cloud115">115 Cloud</string>
+    <string name="onboarding_cloud115_desc">Direct OpenAPI access: faster listing and archive reads, no Alist needed</string>
     <string name="perm_dialog_title">All-files access recommended</string>
     <string name="perm_dialog_body">For faster, steadier access to local manga, grant \"All-files access\".\nYou can also keep using the system folder picker (SAF) instead.</string>
     <string name="perm_grant">Grant</string>

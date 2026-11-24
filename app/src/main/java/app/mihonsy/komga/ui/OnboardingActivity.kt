@@ -221,6 +221,14 @@ private fun OnboardingWelcome(
             onClick = { onPick(AddSourceScreen.Smb(connId = null)) },
         )
         // SY <--
+        // Komiho: 第 5 张 115 卡（OpenAPI 直连，不再需要 Alist 挂 WebDAV）。
+        OnboardingSourceCard(
+            icon = sourceIcon(SourceKind.Cloud115),
+            title = composeStringResource(R.string.onboarding_cloud115),
+            desc = composeStringResource(R.string.onboarding_cloud115_desc),
+            ready = false,
+            onClick = { onPick(AddSourceScreen.Cloud115(connId = null)) },
+        )
 
         // SY --> Komiho: 去掉「随便逛逛」——本地源内置兜底，按钮固定为「开始使用」；
         // 什么都没配也能进主界面（客户端已改为懒构造，无 Komga 连接不会崩）。

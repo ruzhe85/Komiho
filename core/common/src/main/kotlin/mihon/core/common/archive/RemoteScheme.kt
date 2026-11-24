@@ -14,11 +14,20 @@ object RemoteScheme {
     /** SMB：`smb://<connId>/<共享内相对路径>`。 */
     const val SMB = "smb://"
 
+    /**
+     * Komiho：115 网盘原生来源（OpenAPI 直链，不再经 Alist/WebDAV）。
+     * `115://<connId>/<parentCid>/<pickCode>/<fileName>`
+     */
+    const val CLOUD115 = "115://"
+
     /** 是否为远程归档章节（本地文件系统解析会让它们直接失败，必须先分流）。 */
     fun isRemote(chapterUrl: String): Boolean =
-        chapterUrl.startsWith(WEBDAV) || chapterUrl.startsWith(SMB)
+        chapterUrl.startsWith(WEBDAV) || chapterUrl.startsWith(SMB) || chapterUrl.startsWith(CLOUD115)
 
     /** 是否为 SMB 章节（WEBDAV 之外的另一类远程）。 */
     fun isSmb(chapterUrl: String): Boolean = chapterUrl.startsWith(SMB)
+
+    /** 是否为 115 原生章节。 */
+    fun isCloud115(chapterUrl: String): Boolean = chapterUrl.startsWith(CLOUD115)
 }
 // SY <--
