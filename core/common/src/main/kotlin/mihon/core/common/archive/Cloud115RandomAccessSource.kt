@@ -125,6 +125,10 @@ class Cloud115RandomAccessSource(
     @Volatile
     private var fallbackApprovalDone = false
 
+    /** 用户已拒绝本次整本缓存；后续探测直接失败，不再询问。 */
+    @Volatile
+    private var fallbackDeclined = false
+
     private var total = -1L
     private var fallback: LocalRandomAccessSource? = null
 
@@ -226,10 +230,12 @@ class Cloud115RandomAccessSource(
         if (probed) return
         // 大文件确认最长要等用户两分钟，放在锁外做（与 WebDAV 同口径）；
         // 确认过就记住，避免并发探测重复弹窗。
+        if (fallbackDeclined) throw RemoteFallbackDeclined(displayName)
         if (forceFallback && !fallbackApprovalDone) {
             val probedSize = probeRemoteSize()
             if (!RemoteFallbackGate.requestApproval(displayName, probedSize)) {
-                throw IOException("已取消整本缓存：$displayName（${probedSize / 1024 / 1024}MB）")
+                fallbackDeclined = true
+                throw RemoteFallbackDeclined(displayName)
             }
             fallbackApprovalDone = true
         }
@@ -265,7 +271,8 @@ class Cloud115RandomAccessSource(
                         val totalLen = resp.header("Content-Length")?.toLongOrNull() ?: -1L
                         // 不支持 Range ⇒ 只能整本下载，同样要过大文件确认。
                         if (!RemoteFallbackGate.requestApproval(displayName, totalLen)) {
-                            throw IOException("已取消整本缓存：$displayName（${totalLen / 1024 / 1024}MB）")
+                            fallbackDeclined = true
+                            throw RemoteFallbackDeclined(displayName)
                         }
                         try {
                             resp.body?.byteStream()?.use { input ->

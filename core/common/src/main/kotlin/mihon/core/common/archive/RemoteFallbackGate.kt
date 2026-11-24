@@ -1,10 +1,21 @@
 package mihon.core.common.archive
 
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
+
+/**
+ * 用户在「大文件整本缓存确认」里点了取消（或超时没回应）。
+ *
+ * 单独成型是给上层一个**明确的停止信号**：阅读链路里 `RemoteZipReader` 失败后会回落
+ * `ArchiveReader` 再试一次，用户不区分类型就会看到同一个文件弹两次确认框。
+ * 上层见到它就应当直接失败，不要再换解析路径重试。
+ */
+class RemoteFallbackDeclined(fileName: String) :
+    IOException("已取消整本缓存：$fileName")
 
 /**
  * Komiho：远程大文件「整本缓存」前的确认闸门。
@@ -46,6 +57,17 @@ object RemoteFallbackGate {
     private var dialogShowing = false
 
     /**
+     * 最近被拒绝的文件（`文件名|字节数` → 拒绝时刻）。
+     *
+     * 阅读器、`ChapterLoader` 的回落分支、封面缓存会各自 new 一个 source 打开同一个文件 ——
+     * 不记住「刚被拒过」的话，用户点一次取消会被连着问好几次。
+     */
+    private val declinedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** 拒绝记忆的有效期：过了这段时间再打开会重新询问（用户可能改主意）。 */
+    private const val DECLINE_MEMORY_MS = 60_000L
+
+    /**
      * 请求批准整本缓存。返回 true = 允许下载。
      *
      * @param fileName 仅用于提示文案
@@ -55,6 +77,21 @@ object RemoteFallbackGate {
         if (sizeBytes <= 0L) return true
         val threshold = thresholdBytes
         if (threshold <= 0L || sizeBytes <= threshold) return true
+
+        // 刚被拒过就直接拒绝，不再弹窗：阅读器 + 回落分支 + 封面缓存会分别 new source
+        // 打开同一个文件，不记这一笔用户要点好几次取消。
+        val key = "$fileName|$sizeBytes"
+        val now = System.currentTimeMillis()
+        val lastDecline = declinedAt[key]
+        if (lastDecline != null) {
+            if (now - lastDecline < DECLINE_MEMORY_MS) {
+                logcat(LogPriority.DEBUG) {
+                    "[RemoteCache] 刚被拒绝，跳过询问 name=$fileName"
+                }
+                return false
+            }
+            declinedAt.remove(key)
+        }
 
         val handler = confirmHandler
         if (handler == null) {
@@ -86,6 +123,13 @@ object RemoteFallbackGate {
         logcat(LogPriority.DEBUG) {
             "[RemoteCache] 大文件缓存确认 name=$fileName size=$sizeBytes " +
                 "threshold=$threshold result=$result timeout=${!done}"
+        }
+        if (result) {
+            declinedAt.remove(key)
+        } else {
+            // 记「真正被拒的时刻」而不是开始询问的时刻：用户可能拖到第 29 秒才点取消，
+            // 用 now 会把记忆期凭空缩短一大截。
+            declinedAt[key] = System.currentTimeMillis()
         }
         return result
     }

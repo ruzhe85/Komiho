@@ -28,6 +28,7 @@ import logcat.LogPriority
 import mihon.core.common.archive.ArchiveHandle
 import mihon.core.common.archive.ArchiveReader
 import mihon.core.common.archive.Cloud115RandomAccessSource
+import mihon.core.common.archive.RemoteFallbackDeclined
 import mihon.core.common.archive.RemoteScheme
 import mihon.core.common.archive.RemoteZipReader
 import mihon.core.common.archive.WebDavRandomAccessSource
@@ -299,6 +300,11 @@ class ChapterLoader(
         val source = SmbRandomAccessSource(target.conn, target.password, target.relPath)
         val delegate: ArchiveHandle = try {
             RemoteZipReader(source)
+        } catch (e: RemoteFallbackDeclined) {
+            // 用户刚取消了「整本缓存」：直接失败。回落到 libarchive 只会再探测一次、
+            // 再弹一次确认框（用户反馈「要取消两次」就是这么来的）。
+            runCatching { source.close() }
+            throw e
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "RemoteZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
             ArchiveReader(source)
@@ -328,6 +334,11 @@ class ChapterLoader(
         // SY <--
         val delegate: ArchiveHandle = try {
             RemoteZipReader(source)
+        } catch (e: RemoteFallbackDeclined) {
+            // 用户刚取消了「整本缓存」：直接失败。回落到 libarchive 只会再探测一次、
+            // 再弹一次确认框（用户反馈「要取消两次」就是这么来的）。
+            runCatching { source.close() }
+            throw e
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "RemoteZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
             ArchiveReader(source)
@@ -373,6 +384,11 @@ class ChapterLoader(
         )
         val delegate: ArchiveHandle = try {
             RemoteZipReader(source)
+        } catch (e: RemoteFallbackDeclined) {
+            // 用户刚取消了「整本缓存」：直接失败。回落到 libarchive 只会再探测一次、
+            // 再弹一次确认框（用户反馈「要取消两次」就是这么来的）。
+            runCatching { source.close() }
+            throw e
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "RemoteZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
             ArchiveReader(source)
