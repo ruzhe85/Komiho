@@ -68,6 +68,7 @@ object RemoteFallbackGate {
         dialogShowing = true
         val latch = CountDownLatch(1)
         val approved = AtomicBoolean(false)
+        var done = false
         val result = try {
             val posted = runCatching {
                 handler(fileName, sizeBytes) { ok ->
@@ -76,7 +77,7 @@ object RemoteFallbackGate {
                 }
             }.isSuccess
             if (!posted) latch.countDown()
-            val done = runCatching { latch.await(CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS) }
+            done = runCatching { latch.await(CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS) }
                 .getOrDefault(false)
             done && approved.get()
         } finally {
