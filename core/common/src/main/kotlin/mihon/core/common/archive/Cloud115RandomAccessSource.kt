@@ -89,6 +89,9 @@ class Cloud115RandomAccessSource(
     /** 远程文件扩展名（小写）。 */
     private val ext: String = fileName.substringAfterLast('.', "").lowercase()
 
+    /** 文件名（只用于「大文件缓存确认」的提示文案；主构造参数不加 val 时成员函数不可见）。 */
+    private val displayName: String = fileName
+
     /**
      * rar/7z 等不支持随机访问的格式：跳过 Range 探测，直接整本缓存到 [fallbackCacheDir]。
      * 理由与 WebDAV 侧一致（条目头与数据交错，远程随机访问等于反复从头扫）。
@@ -117,6 +120,11 @@ class Cloud115RandomAccessSource(
 
     @Volatile
     private var probed = false
+
+    /** 大文件整本缓存是否已获得用户批准（避免重复弹窗）。 */
+    @Volatile
+    private var fallbackApprovalDone = false
+
     private var total = -1L
     private var fallback: LocalRandomAccessSource? = null
 
@@ -129,6 +137,13 @@ class Cloud115RandomAccessSource(
 
     private val chunks = ArrayDeque<Chunk>()
     private var cachedBytes = 0L
+
+    /**
+     * 在途请求。**必须是 @Volatile**：`close()` 刻意不抢 lock（避免退出时卡在网络等待），
+     * 它要靠锁外读这个字段来 cancel；不加 volatile 可能读到 null，导致整本缓存下载在
+     * 用户退出阅读器后继续跑（24MB 还能忍，2.4GB 就是事故）。
+     */
+    @Volatile
     private var currentCall: Call? = null
 
     private class Chunk(val start: Long, val bytes: ByteArray) {
@@ -185,8 +200,39 @@ class Cloud115RandomAccessSource(
 
     // ------------------------------------------------------------ 探测 / 整本回退
 
+    /**
+     * 用 `Range: bytes=0-0` 只探总大小（取 `Content-Range` 的 total）。
+     * 失败 / 不支持 Range 返回 -1，调用方按「大小未知」处理（不拦截）。
+     */
+    private fun probeRemoteSize(): Long = try {
+        val call = client.newCall(newRequestBuilder().header("Range", "bytes=0-0").build())
+        currentCall = call
+        try {
+            call.execute().use { resp ->
+                if (resp.code != 206) {
+                    -1L
+                } else {
+                    resp.header("Content-Range")?.substringAfterLast('/')?.toLongOrNull() ?: -1L
+                }
+            }
+        } finally {
+            currentCall = null
+        }
+    } catch (e: IOException) {
+        -1L
+    }
+
     private fun ensureProbed() {
         if (probed) return
+        // 大文件确认最长要等用户两分钟，放在锁外做（与 WebDAV 同口径）；
+        // 确认过就记住，避免并发探测重复弹窗。
+        if (forceFallback && !fallbackApprovalDone) {
+            val probedSize = probeRemoteSize()
+            if (!RemoteFallbackGate.requestApproval(displayName, probedSize)) {
+                throw IOException("已取消整本缓存：$displayName（${probedSize / 1024 / 1024}MB）")
+            }
+            fallbackApprovalDone = true
+        }
         synchronized(lock) {
             if (probed) return
             if (closed) throw IOException("115 source closed")
@@ -217,11 +263,20 @@ class Cloud115RandomAccessSource(
                         val file = fallbackFile(dir, ext)
                         val tmp = File(dir, file.name + ".part")
                         val totalLen = resp.header("Content-Length")?.toLongOrNull() ?: -1L
-                        resp.body?.byteStream()?.use { input ->
-                            tmp.outputStream().use { output ->
-                                copyWithProgress(input, output, totalLen) { p -> onProgress?.invoke(p) }
-                            }
-                        } ?: throw IOException("115 空响应体（$pickCode）")
+                        // 不支持 Range ⇒ 只能整本下载，同样要过大文件确认。
+                        if (!RemoteFallbackGate.requestApproval(displayName, totalLen)) {
+                            throw IOException("已取消整本缓存：$displayName（${totalLen / 1024 / 1024}MB）")
+                        }
+                        try {
+                            resp.body?.byteStream()?.use { input ->
+                                tmp.outputStream().use { output ->
+                                    copyWithProgress(input, output, totalLen) { p -> onProgress?.invoke(p) }
+                                }
+                            } ?: throw IOException("115 空响应体（$pickCode）")
+                        } catch (e: Throwable) {
+                            tmp.delete()
+                            throw e
+                        }
                         if (file.exists()) file.delete()
                         if (!tmp.renameTo(file)) {
                             tmp.delete()
@@ -244,6 +299,8 @@ class Cloud115RandomAccessSource(
      * 先写 `.part` 再原子改名，避免中断留下半包被误用。
      */
     private fun ensureFallbackFile(): File {
+        // 用户已经退出（close 置 closed）时不要再发起整本下载 —— 那是 2GB 级别的浪费。
+        if (closed) throw IOException("115 source closed")
         val dir = fallbackCacheDir ?: throw IOException("115 整本缓存需要回退缓存目录")
         dir.mkdirs()
         val file = fallbackFile(dir, ext)
@@ -268,6 +325,11 @@ class Cloud115RandomAccessSource(
                     }
                 } ?: throw IOException("115 空响应体（$pickCode）")
             }
+        } catch (e: Throwable) {
+            // 取消/失败都要删半包：文件名命中的判据是「存在且长度 > 0」，
+            // 留一个截断的 .part 不会命中，但会一直占着磁盘。
+            tmp.delete()
+            throw e
         } finally {
             currentCall = null
         }
@@ -399,19 +461,22 @@ class Cloud115RandomAccessSource(
         }
     }
 
+    /**
+     * 流式落盘（整本缓存）。
+     *
+     * 每块都检查 [closed]：`close()` 只能 cancel 在途 Call，取消不保证立刻打断底层 read，
+     * 这里再兜一道 —— 用户退出阅读器后必须尽快停下，并把 `.part` 留给调用方删掉。
+     */
     private fun copyWithProgress(input: InputStream, output: OutputStream, total: Long, onProgress: (Float) -> Unit) {
-        onProgress(0f)
-        if (total <= 0L) {
-            input.copyTo(output)
-            return
-        }
+        if (total > 0L) onProgress(0f)
         val buffer = ByteArray(256 * 1024)
         var written = 0L
         var read = input.read(buffer)
         while (read != -1) {
+            if (closed) throw IOException("115 整本缓存已取消（source closed）")
             output.write(buffer, 0, read)
             written += read
-            onProgress((written.toFloat() / total).coerceIn(0f, 1f))
+            if (total > 0L) onProgress((written.toFloat() / total).coerceIn(0f, 1f))
             read = input.read(buffer)
         }
         output.flush()

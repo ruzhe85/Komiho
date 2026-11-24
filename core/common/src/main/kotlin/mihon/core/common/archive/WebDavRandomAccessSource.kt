@@ -61,6 +61,9 @@ class WebDavRandomAccessSource(
     /** 规范化后的请求 URL（宽容中文/空格等未编码字符，逐段百分号编码补齐）。 */
     private val requestUrl = normalizeUrl(url)
 
+    /** 文件名（只用于「大文件整本缓存确认」的提示文案）。 */
+    private val displayName: String = requestUrl.substringAfterLast('/').ifBlank { "远程文件" }
+
     /**
      * rar/7z 等不支持随机访问的格式（Phase4-② 方案 B）：跳过 Range 探测，
      * 打开时直接整本缓存到 [fallbackCacheDir] 后按本地读。
@@ -109,6 +112,11 @@ class WebDavRandomAccessSource(
 
     @Volatile
     private var probed = false
+
+    /** 大文件整本缓存是否已获得用户批准（避免每次 ensureProbed 重复弹窗）。 */
+    @Volatile
+    private var fallbackApprovalDone = false
+
     private var total = -1L
     private var fallback: LocalRandomAccessSource? = null
 
@@ -174,10 +182,41 @@ class WebDavRandomAccessSource(
         }
     }
 
+    /**
+     * 只探总大小（`Range: bytes=0-0` 取 Content-Range 的 total）。
+     * 失败 / 不支持 Range 返回 -1，调用方按「大小未知」处理（不拦截）。
+     */
+    private fun probeRemoteSize(): Long = try {
+        val call = client.newCall(newRequestBuilder().header("Range", "bytes=0-0").build())
+        currentCall = call
+        try {
+            call.execute().use { resp ->
+                if (resp.code != 206) {
+                    -1L
+                } else {
+                    resp.header("Content-Range")?.substringAfterLast('/')?.toLongOrNull() ?: -1L
+                }
+            }
+        } finally {
+            currentCall = null
+        }
+    } catch (e: IOException) {
+        -1L
+    }
+
     /** 懒探测：一次 GET `Range: bytes=0-0` 同时完成「是否支持 Range」与「文件总大小」确认。
      *  [forceFallback]（rar/7z 等）跳过探测，直接整本缓存到本地再随机读。 */
     private fun ensureProbed() {
         if (probed) return
+        // 大文件确认最长要等用户两分钟，**必须在锁外做**：WebDAV 的 close() 要抢这把锁，
+        // 放在锁内会让「退出阅读器 / 切章」卡在等待用户点按钮上。确认过就记住，别重复问。
+        if (forceFallback && !fallbackApprovalDone) {
+            val probedSize = probeRemoteSize()
+            if (!RemoteFallbackGate.requestApproval(displayName, probedSize)) {
+                throw IOException("已取消整本缓存：$displayName（${probedSize / 1024 / 1024}MB）")
+            }
+            fallbackApprovalDone = true
+        }
         synchronized(lock) {
             if (probed) return
             if (closed) throw IOException("WebDAV source closed")
@@ -210,6 +249,10 @@ class WebDavRandomAccessSource(
                         val file = fallbackFile(dir)
                         val tmp = File(dir, file.name + ".part")
                         val totalLen = resp.header("Content-Length")?.toLongOrNull() ?: -1L
+                        // 不支持 Range ⇒ 只能整本下载，同样要过大文件确认。
+                        if (!RemoteFallbackGate.requestApproval(displayName, totalLen)) {
+                            throw IOException("已取消整本缓存：$displayName（${totalLen / 1024 / 1024}MB）")
+                        }
                         resp.body?.byteStream()?.use { input ->
                             tmp.outputStream().use { output ->
                                 // SY --> Komiho: 整本下载带进度（Content-Length 可得时上报百分比）。
@@ -237,6 +280,8 @@ class WebDavRandomAccessSource(
      * 磁盘缓存目录受 [cacheMaxBytes] 预算约束，超限淘汰最旧文件。
      */
     private fun ensureFallbackFile(): File {
+        // 已 close（用户退出）时不要再发起整本下载。
+        if (closed) throw IOException("WebDAV source closed")
         val dir = fallbackCacheDir ?: throw IOException("WebDAV 整本缓存需要回退缓存目录")
         dir.mkdirs()
         val file = fallbackFile(dir)

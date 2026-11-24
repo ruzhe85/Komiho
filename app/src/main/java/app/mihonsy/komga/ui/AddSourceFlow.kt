@@ -48,6 +48,8 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+// 115 的类型图标（与 WebDAV 的 CloudQueue 区分开）。
+import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -197,7 +199,8 @@ internal fun sourceIcon(kind: SourceKind): ImageVector = when (kind) {
     SourceKind.Komga -> Icons.Filled.Dns
     SourceKind.WebDav -> Icons.Filled.CloudQueue
     SourceKind.Smb -> Icons.Filled.Lan
-    SourceKind.Cloud115 -> Icons.Filled.CloudQueue
+    // 不能用 CloudQueue：那是 WebDAV 的图标，顶栏/最近卡片上两者会长得一模一样。
+    SourceKind.Cloud115 -> Icons.Outlined.Storage
     SourceKind.Local -> Icons.Filled.Folder
 }
 

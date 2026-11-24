@@ -367,6 +367,11 @@
     <string name="cloud115_refresh">Refresh</string>
     <string name="cloud115_empty">This folder is empty</string>
     <string name="cloud115_unsupported">Unsupported file type (only archives: zip/cbz/rar/cbr/7z/cb7)</string>
+    <string name="remote_cache_confirm_title">Full download required</string>
+    <string name="remote_cache_confirm_msg">\"%1$s\" is about %2$d MB. This format (or server) cannot be read page by page, so the whole file must be downloaded first.\n\nStart caching now?</string>
+    <string name="remote_cache_confirm_ok">Cache it</string>
+    <string name="storage_remote_confirm_title">Large-file cache confirmation</string>
+    <string name="storage_remote_confirm_hint">Ask before caching remote archives (WebDAV / 115) larger than this; 0 = never ask</string>
     <string name="onboarding_cloud115">115 Cloud</string>
     <string name="onboarding_cloud115_desc">Direct OpenAPI access: faster listing and archive reads, no Alist needed</string>
     <string name="perm_dialog_title">All-files access recommended</string>

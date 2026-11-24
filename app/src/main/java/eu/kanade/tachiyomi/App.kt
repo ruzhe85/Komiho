@@ -85,6 +85,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import logcat.LogPriority
 import logcat.LogcatLogger
+import mihon.core.common.archive.RemoteFallbackGate
 import mihon.core.firebase.FirebaseConfig
 import mihon.core.migration.Migrator
 import mihon.core.migration.migrations.migrations
@@ -102,6 +103,15 @@ import uy.kohesive.injekt.injectLazy
 import java.security.Security
 
 class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factory {
+
+    /**
+     * 当前处于 Resumed 的 Activity。
+     *
+     * Komiho: 从 `onCreate` 的局部变量提升为成员 —— 「大文件整本缓存确认」需要一个前台
+     * Activity 来弹窗，而那个确认发生在 IO 线程（`RemoteFallbackGate.requestApproval`）。
+     */
+    @Volatile
+    private var resumedActivity: Activity? = null
 
     private val basePreferences: BasePreferences by injectLazy()
     private val privacyPreferences: PrivacyPreferences by injectLazy()
@@ -196,6 +206,39 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             "cache-auto-trim",
         ).start()
 
+        // Komiho: WebDAV / 115 遇到 rar、7z（或不支持 Range 的服务器）必须整本缓存才能翻页。
+        // 超过「设置-存储」里的阈值（默认 300MB，0 = 不确认）时先问一句 —— 误点一个大包
+        // 就闷头下几 GB 是真实事故。SMB 原生按偏移读，不经过这里。
+        runCatching {
+            val komgaPrefs = KomgaPreferences(applicationContext)
+            RemoteFallbackGate.thresholdBytes = komgaPrefs.remoteFallbackConfirmMb.toLong() * 1024L * 1024L
+            RemoteFallbackGate.confirmHandler = { fileName, sizeBytes, onResult ->
+                val activity = resumedActivity
+                if (activity == null || activity.isFinishing) {
+                    // 没有前台界面：宁可不打开，也不在后台偷偷下大文件。
+                    onResult(false)
+                } else {
+                    activity.runOnUiThread {
+                        runCatching {
+                            androidx.appcompat.app.AlertDialog.Builder(activity)
+                                .setTitle(R.string.remote_cache_confirm_title)
+                                .setMessage(
+                                    activity.getString(
+                                        R.string.remote_cache_confirm_msg,
+                                        fileName,
+                                        sizeBytes / 1024L / 1024L,
+                                    ),
+                                )
+                                .setPositiveButton(R.string.remote_cache_confirm_ok) { _, _ -> onResult(true) }
+                                .setNegativeButton(R.string.cancel) { _, _ -> onResult(false) }
+                                .setOnCancelListener { onResult(false) }
+                                .show()
+                        }.onFailure { onResult(false) }
+                    }
+                }
+            }
+        }
+
         setupNotificationChannels()
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
@@ -272,7 +315,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 没有全 App 一处生效的入口，所以挂在生命周期回调上：PostCreated 兜住首次
         // 进入，Resumed 兜住运行中切开关 / 系统倍率变化（ContentObserver 会覆盖回
         // 系统值，靠这里收敛）。
-        var resumedActivity: Activity? = null
         registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityPostCreated(activity: Activity, savedInstanceState: Bundle?) {
                 EinkMotion.applyComposeDurationScale(activity)

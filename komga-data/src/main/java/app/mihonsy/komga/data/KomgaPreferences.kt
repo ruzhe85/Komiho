@@ -339,6 +339,16 @@ class KomgaPreferences(context: Context) {
         set(v) = prefs.edit().putInt(KEY_CACHE_LIMIT_MB, v.coerceIn(0, 1_048_576)).apply()
 
     /**
+     * Komiho: 远程大文件「整本缓存」前是否需要确认（MB，默认 300，0 = 从不确认）。
+     *
+     * 只对 **WebDAV / 115** 生效：rar、7z 以及不支持 Range 的服务器必须先整本下载才能翻页，
+     * 误点一个几 GB 的包会白烧流量与磁盘。SMB 是原生按偏移读，不需要整本缓存，不受此限。
+     */
+    var remoteFallbackConfirmMb: Int
+        get() = prefs.getInt(KEY_REMOTE_FALLBACK_CONFIRM_MB, 300)
+        set(v) = prefs.edit().putInt(KEY_REMOTE_FALLBACK_CONFIRM_MB, v.coerceIn(0, 102_400)).apply()
+
+    /**
      * Komiho (2026-11-04): 是否显示 Komga 的系列标题 / 书籍标题（设置-Komga，默认开）。
      *
      * 关掉后书架、主页、系列详情一律显示**原始文件夹名 / 原始文件名**（`url` 末段 / `BookDto.name`），
@@ -439,6 +449,9 @@ class KomgaPreferences(context: Context) {
         const val KEY_READER_DOUBLE_PAGE = "reader_double_page"
         /** Komiho: 远程缓存总量上限（MB，0 = 不限制），见 [cacheLimitMb]。 */
         const val KEY_CACHE_LIMIT_MB = "cache_limit_mb"
+
+        /** Komiho: 远程大文件整本缓存确认阈值（MB，0 = 从不确认），见 [remoteFallbackConfirmMb]。 */
+        const val KEY_REMOTE_FALLBACK_CONFIRM_MB = "remote_fallback_confirm_mb"
 
         /** Komiho: 是否显示系列/书籍标题（false = 显示原始文件夹/文件名），见 [showTitles]。 */
         const val KEY_SHOW_TITLES = "show_titles"

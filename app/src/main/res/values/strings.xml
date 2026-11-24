@@ -378,6 +378,11 @@
     <string name="cloud115_refresh">刷新</string>
     <string name="cloud115_empty">此目录为空</string>
     <string name="cloud115_unsupported">暂不支持该文件类型（当前仅支持压缩包：zip/cbz/rar/cbr/7z/cb7）</string>
+    <string name="remote_cache_confirm_title">需要整本缓存</string>
+    <string name="remote_cache_confirm_msg">「%1$s」约 %2$d MB。这个格式（或该服务器）不支持按页随机读取，必须先把整个文件下载到本地才能阅读。\n\n现在开始缓存？</string>
+    <string name="remote_cache_confirm_ok">开始缓存</string>
+    <string name="storage_remote_confirm_title">大文件缓存确认阈值</string>
+    <string name="storage_remote_confirm_hint">超过该大小的远程压缩包（WebDAV / 115）缓存前先询问；0 = 不再询问</string>
     <string name="onboarding_cloud115">115 网盘</string>
     <string name="onboarding_cloud115_desc">开放平台直连：列目录 / 读压缩包更快，不需要 Alist</string>
     <string name="perm_dialog_title">需要所有文件访问权限</string>

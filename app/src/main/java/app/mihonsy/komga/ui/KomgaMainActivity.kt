@@ -233,6 +233,7 @@ import app.mihonsy.komga.data.cloud115.Cloud115ConnectionStore
 import app.mihonsy.komga.data.cloud115.Cloud115CoverCache
 import app.mihonsy.komga.data.cloud115.Cloud115Entry
 import app.mihonsy.komga.data.download.KomgaDownloadStore
+import mihon.core.common.archive.RemoteFallbackGate
 // SY --> Komiho Phase7: SMB 来源接入。
 import app.mihonsy.komga.data.smb.SmbBrowse
 import app.mihonsy.komga.data.smb.SmbConnection
@@ -4555,6 +4556,10 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
     var cacheLimitMb by remember { mutableStateOf(komgaPrefs.cacheLimitMb) }
     var showCacheLimitDialog by remember { mutableStateOf(false) }
     var cacheLimitInput by remember { mutableStateOf("") }
+    // Komiho: 远程大文件整本缓存确认阈值（MB，0 = 不询问；WebDAV / 115 用，SMB 不涉及）。
+    var remoteConfirmMb by remember { mutableStateOf(komgaPrefs.remoteFallbackConfirmMb) }
+    var showRemoteConfirmDialog by remember { mutableStateOf(false) }
+    var remoteConfirmInput by remember { mutableStateOf("") }
     LaunchedEffect(usageTick) {
         usageBytes = withContext(Dispatchers.IO) {
             val fallbackBytes = webdavCacheDir.listFiles()
@@ -4643,6 +4648,34 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             }
         }
 
+        // Komiho: 远程大文件整本缓存确认阈值（WebDAV / 115 的 rar、7z 等必须整本下载的格式）。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    remoteConfirmInput = remoteConfirmMb.toString()
+                    showRemoteConfirmDialog = true
+                }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    composeStringResource(R.string.storage_remote_confirm_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    if (remoteConfirmMb <= 0) {
+                        composeStringResource(R.string.storage_cache_limit_unlimited)
+                    } else {
+                        "$remoteConfirmMb MB · " + composeStringResource(R.string.storage_remote_confirm_hint)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         // SY: 封面缓存（本地 / SMB / WebDAV 三套 filesDir 缓存）清除入口。
         // Komga 的 Coil 磁盘池不在此列——它独立存在，归「书库 → 预览图」管理。
         Row(
@@ -4711,6 +4744,50 @@ private fun KomgaLocalStorageSettings(modifier: Modifier, context: android.conte
             },
             dismissButton = {
                 TextButton(onClick = { showRemoteConfirm = false }) { Text(composeStringResource(R.string.storage_cancel)) }
+            },
+        )
+    }
+    if (showRemoteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showRemoteConfirmDialog = false },
+            title = { Text(composeStringResource(R.string.storage_remote_confirm_title)) },
+            text = {
+                Column {
+                    Text(
+                        composeStringResource(R.string.storage_remote_confirm_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = remoteConfirmInput,
+                        onValueChange = { input -> remoteConfirmInput = input.filter { it.isDigit() }.take(7) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = { Text("MB") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val value = remoteConfirmInput.toIntOrNull()?.coerceIn(0, 102_400) ?: 0
+                    komgaPrefs.remoteFallbackConfirmMb = value
+                    remoteConfirmMb = value
+                    // 立刻生效（gate 是进程内单例，不必重启）。
+                    RemoteFallbackGate.thresholdBytes = value.toLong() * 1024L * 1024L
+                    showRemoteConfirmDialog = false
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.storage_cache_limit_saved, value),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }) { Text(composeStringResource(R.string.storage_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoteConfirmDialog = false }) {
+                    Text(composeStringResource(R.string.storage_cancel))
+                }
             },
         )
     }
@@ -10730,9 +10807,10 @@ private fun SourceDashboardPane(
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
-                    // SY: 来源名与类型文案相同时不再渲染类型 chip——本地源名就叫「本地」，
-                    // 否则卡片头会显示成「本地 本地」。
-                    if (typeLabel != entry.name) {
+                    // 本地源名恒为「本地」，再挂一个同名 chip 会变成「本地 本地」，故跳过；
+                    // 其余来源一律显示类型 chip —— 否则用户把连接命名成「115」时，卡片头
+                    // 只剩一个「115」文本，看不出这是哪类来源。
+                    if (entry.kind != SourceKind.Local) {
                         Spacer(Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(6.dp),
