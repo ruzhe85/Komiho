@@ -3,6 +3,7 @@ package app.mihonsy.komga.data.cloud115
 import android.os.SystemClock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -42,6 +43,7 @@ object Cloud115Api {
 
     private const val BASE = "https://proapi.115.com"
     private const val FILES_URL = "$BASE/open/ufile/files"
+    private const val SEARCH_URL = "$BASE/open/ufile/search"
     private const val DOWN_URL = "$BASE/open/ufile/downurl"
 
     /** 取链最小间隔：115 对「取链」按请求频次风控（Simple 115 实测值 300ms）。 */
@@ -50,12 +52,20 @@ object Cloud115Api {
     /** 直链内存缓存时长：一次阅读会话内够用，且不落库（直链约 3 天过期）。 */
     private const val URL_CACHE_TTL_MS = 5 * 60 * 1000L
 
-    /**
-     * 单页条数：115 单页上限 1150（OpenList 默认 200）。
-     * 浏览面板只取第一页，取 1000 基本覆盖真实漫画目录；超出的情况留待后续加分页
-     * （比 200 先少一次「目录被截断」的投诉）。
-     */
-    private const val PAGE_LIMIT = 1000
+    /** 单页条数：115 单页上限 1150（OpenList 默认 200），翻页由 [listBlocking] 负责。 */
+    private const val PAGE_SIZE = 1150
+
+    /** 防御上限：单目录最多扫这么多条（正常漫画目录远小于此，防服务端 offset 异常时死循环）。 */
+    private const val MAX_SCAN_ENTRIES = 20_000
+
+    /** 搜索接口单页条数（官方默认 20；`offset + limit` 不允许超过 10000）。 */
+    private const val SEARCH_PAGE_SIZE = 200
+
+    /** 搜索接口的硬上限：`offset + limit ≤ 10000`。 */
+    private const val SEARCH_MAX = 10_000
+
+    /** 搜索翻页的最小间隔（搜索同样吃 115 的频率限制）。 */
+    private const val SEARCH_INTERVAL_MS = 200L
 
     private data class CachedUrl(val resolved: Cloud115Resolved, val at: Long)
 
@@ -68,41 +78,165 @@ object Cloud115Api {
 
     // ------------------------------------------------------------ 列目录
 
-    /** 列 [cid] 的直接子项（目录 + 文件）。目录在前、各自按名称自然序由调用方排序。 */
-    fun listBlocking(connId: String, cid: String, offset: Int = 0, limit: Int = PAGE_LIMIT): Cloud115Page =
-        withToken(connId) { token ->
-            val url = FILES_URL.toHttpUrl().newBuilder()
-                .addQueryParameter("cid", Cloud115ConnectionStore.normalizeCid(cid))
-                .addQueryParameter("limit", limit.toString())
-                .addQueryParameter("offset", offset.toString())
-                .addQueryParameter("show_dir", "1")
-                // 不传 cur：它的语义是「只显示当前文件夹内文件」，带上可能把子目录过滤掉。
-                .addQueryParameter("o", "file_name")
-                .addQueryParameter("asc", "1")
-                .build()
-            val request = Request.Builder()
-                .url(url)
-                .header("Authorization", "Bearer $token")
-                .header("User-Agent", USER_AGENT)
-                .get()
-                .build()
-            val text = execute(request, "列目录")
-            parseFiles(text, offset, limit)
+    /**
+     * 列 [cid] 的全部直接子项（目录 + 文件），自动翻页。
+     *
+     * Simple 115 踩过的两个坑，这里必须照做：
+     *  1. 单页上限约 1150，大目录要按 `offset` 累加，一次取全让文件浏览器一屏显示；
+     *  2. 服务端会**回显实际生效的 offset**，与请求值不一致说明没按 offset 翻页（被夹回首页），
+     *     此时必须**丢弃本页并停止** —— 否则既重复追加又可能无限翻页。
+     * 参数 `cur=1` + `count_folders=1` 也是它的取值：前者表示只看当前目录内，后者让 count 准确。
+     */
+    fun listBlocking(connId: String, cid: String): Cloud115Page = withToken(connId) { token ->
+        val all = mutableListOf<Cloud115Entry>()
+        var offset = 0
+        var total = 0
+        while (true) {
+            val page = fetchPage(token, cid, offset)
+            if (page.servedOffset != offset) {
+                logcat(LogPriority.WARN) {
+                    "[Cloud115] 翻页异常 cid=$cid 请求 offset=$offset 返回 ${page.servedOffset}，丢弃本页并停止"
+                }
+                break
+            }
+            all += page.entries
+            total = page.total
+            val got = page.entries.size
+            if (got == 0 || got < PAGE_SIZE || (total > 0 && offset + got >= total)) break
+            offset += got
+            if (offset >= MAX_SCAN_ENTRIES) {
+                logcat(LogPriority.WARN) { "[Cloud115] 目录条目超过 $MAX_SCAN_ENTRIES，停止翻页 cid=$cid" }
+                break
+            }
         }
+        Cloud115Page(entries = all, total = if (total > 0) total else all.size, offset = 0, limit = all.size)
+    }
 
-    private fun parseFiles(text: String, offset: Int, limit: Int): Cloud115Page {
-        val root = asObject(text, "列目录")
+    private class PageResult(
+        val entries: List<Cloud115Entry>,
+        val total: Int,
+        val servedOffset: Int,
+    )
+
+    private fun fetchPage(token: String, cid: String, offset: Int): PageResult {
+        val url = FILES_URL.toHttpUrl().newBuilder()
+            .addQueryParameter("cid", Cloud115ConnectionStore.normalizeCid(cid))
+            .addQueryParameter("limit", PAGE_SIZE.toString())
+            .addQueryParameter("offset", offset.toString())
+            .addQueryParameter("show_dir", "1")
+            .addQueryParameter("cur", "1")
+            .addQueryParameter("count_folders", "1")
+            .addQueryParameter("o", "file_name")
+            .addQueryParameter("asc", "1")
+            .build()
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $token")
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        val root = asObject(execute(request, "列目录"), "列目录")
         ensureOk(root, "列目录")
-        val data = root["data"] as? JsonArray ?: JsonArray(emptyList())
-        val entries = data.mapNotNull { element ->
-            (element as? JsonObject)?.let { Cloud115Entry.fromJson(it) }
-        }
-        return Cloud115Page(
+        val entries = flattenEntries(root["data"])
+        return PageResult(
             entries = entries,
             total = root.str("count")?.toIntOrNull() ?: entries.size,
-            offset = root.str("offset")?.toIntOrNull() ?: offset,
-            limit = root.str("limit")?.toIntOrNull() ?: limit,
+            servedOffset = root.str("offset")?.toIntOrNull() ?: offset,
         )
+    }
+
+    /**
+     * 把 `data` 摊平成条目数组。
+     *
+     * SDK 里 `GetFilesResp` 的 data 声明成**二维数组**（`[][]File`），而线上多数情况是一维；
+     * 两种都吃，避免哪天真的回了二维就把整页条目全丢掉（表现是「目录明明有文件却显示为空」）。
+     */
+    private fun flattenEntries(raw: JsonElement?): List<Cloud115Entry> {
+        val out = mutableListOf<Cloud115Entry>()
+        fun walk(el: JsonElement?) {
+            when (el) {
+                is JsonArray -> el.forEach { walk(it) }
+                is JsonObject -> {
+                    // 少数响应会再包一层 { list: [...] }；有 list 数组时展开它，
+                    // 否则把对象本身当条目解析（条目自身没有 list 字段，不会误判）。
+                    val list = el["list"]
+                    if (list is JsonArray) {
+                        walk(list)
+                    } else {
+                        Cloud115Entry.fromJson(el)?.let { out.add(it) }
+                    }
+                }
+                else -> Unit
+            }
+        }
+        walk(raw)
+        return out
+    }
+
+    // ------------------------------------------------------------ 搜索
+
+    /**
+     * 用官方搜索接口（`/open/ufile/search`）找文件，**不做本地扫描**。
+     *
+     * 与列目录的差异：
+     *  - 参数是 `search_value` + `cid`（cid 指定在哪个目录下递归搜，`0` = 全盘）；
+     *  - 返回条目字段名完全不同（`file_name/file_id/pick_code/parent_id/file_category`），
+     *    由 [Cloud115Entry.fromJson] 的两套字段名兼容；
+     *  - `offset + limit` 不能超过 10000。
+     */
+    fun searchBlocking(connId: String, keyword: String, cid: String = "0"): List<Cloud115Entry> {
+        val kw = keyword.trim()
+        if (kw.isBlank()) return emptyList()
+        return withToken(connId) { token ->
+            val all = mutableListOf<Cloud115Entry>()
+            var offset = 0
+            while (true) {
+                val (entries, total) = fetchSearchPage(token, kw, cid, offset)
+                all += entries
+                val next = offset + entries.size
+                // 终止条件优先看「本页是否满页」：count 缺失时 total 只有本页条数，
+                // 直接拿 `next >= total` 判断会导致永远只取到第一页。
+                if (entries.isEmpty() || entries.size < SEARCH_PAGE_SIZE) break
+                if (total > 0 && next >= total) break
+                if (next >= SEARCH_MAX) break
+                offset = next
+                sleepQuietly(SEARCH_INTERVAL_MS)
+            }
+            all
+        }
+    }
+
+    private fun fetchSearchPage(
+        token: String,
+        keyword: String,
+        cid: String,
+        offset: Int,
+    ): Pair<List<Cloud115Entry>, Int> {
+        val url = SEARCH_URL.toHttpUrl().newBuilder()
+            .addQueryParameter("search_value", keyword)
+            .addQueryParameter("cid", Cloud115ConnectionStore.normalizeCid(cid))
+            .addQueryParameter("limit", SEARCH_PAGE_SIZE.toString())
+            .addQueryParameter("offset", offset.toString())
+            .build()
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $token")
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        val root = asObject(execute(request, "搜索"), "搜索")
+        ensureOk(root, "搜索")
+        // 同样校验 offset 回显：服务端若忽略 offset 就会一直返回第一页，
+        // 不校验的话上层会重复累加同一页直到 1 万条上限（白打几十次请求）。
+        val served = root.str("offset")?.toIntOrNull() ?: offset
+        if (served != offset) {
+            logcat(LogPriority.WARN) {
+                "[Cloud115] 搜索翻页异常 请求 offset=$offset 返回 $served，丢弃本页并停止"
+            }
+            return emptyList<Cloud115Entry>() to 0
+        }
+        val entries = flattenEntries(root["data"])
+        return entries to (root.str("count")?.toIntOrNull() ?: entries.size)
     }
 
     // ------------------------------------------------------------ 取直链
@@ -188,10 +322,13 @@ object Cloud115Api {
 
     // ------------------------------------------------------------ 测试连接
 
-    /** 「测试连接」用：列一次根目录，能列出即授权有效。失败抛异常（含可读原因）。 */
-    fun testConnection(connId: String): Int {
-        val page = listBlocking(connId, Cloud115ConnectionStore.get(connId)?.rootCid ?: "0", limit = 20)
-        return page.entries.size
+    /**
+     * 「测试连接」用：只取根目录第一页，能列出即授权有效（不翻页，避免大根目录拖慢保存）。
+     * 失败抛异常（含可读原因）。
+     */
+    fun testConnection(connId: String): Int = withToken(connId) { token ->
+        val cid = Cloud115ConnectionStore.get(connId)?.rootCid ?: "0"
+        fetchPage(token, cid, 0).entries.size
     }
 
     // ------------------------------------------------------------ 内部
@@ -252,6 +389,16 @@ object Cloud115Api {
 
     private fun JsonObject.str(key: String): String? =
         runCatching { this[key]?.jsonPrimitive?.contentOrNull }.getOrNull()
+
+    /** 静默等待（被中断时保留中断标记，不吞异常）。 */
+    private fun sleepQuietly(ms: Long) {
+        if (ms <= 0L) return
+        try {
+            Thread.sleep(ms)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+    }
 
     /** 节流：两次取链至少隔 [FETCH_INTERVAL_MS]（跨线程全局串行）。 */
     private fun throttle() {

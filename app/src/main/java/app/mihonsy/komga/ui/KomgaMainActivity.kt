@@ -11723,14 +11723,15 @@ fun SeriesCard(client: KomgaApiClient, series: SeriesDto, onClick: () -> Unit) {
 }
 
 /**
- * Komiho: 115 原生来源的浏览面板（OpenAPI 直连）。
+ * Komiho: 115 极简浏览面板（**保底实现，不参与路由**）。
  *
- * 结构是 SmbBrowsePane 的最小子集：面包屑（cid 栈）+ 列表 + 刷新，够用且不新增偏好键。
- * 当前只支持压缩文件：非压缩包置灰、点按提示「暂不支持」；**不做封面缩略图**——
- * 115 没有缩略图接口，逐项拉首图会白烧取链的频控预算（300ms 一条）。
+ * 正式入口是 [Cloud115BrowsePane]（面包屑/搜索/排序/显示模式齐全）。这份只保留最朴素的一版：
+ * cid 栈 + 列表 + 刷新，用于排查「新面板出问题时到底是不是 UI 组件引起的」——
+ * 把 Browse 分支临时指到本函数即可对照，不必改数据层。
  */
+@Suppress("unused")
 @Composable
-private fun Cloud115BrowsePane(
+private fun Cloud115BrowsePaneMini(
     conn: Cloud115Connection,
     onOpenFile: (Cloud115Entry, String) -> Unit,
     navRequest: String? = null,
@@ -11878,3 +11879,596 @@ private fun Cloud115BrowsePane(
         }
     }
 }
+
+/**
+ * Komiho: 115 原生来源的文件浏览器（交互与 SMB / WebDAV 对齐）。
+ *
+ * 复用同一套外观与偏好（显示模式 / 列数 / 排序都用 `webdavBrowse*` 键，与 SMB 一致）：
+ * 面包屑可点回退、目录内搜索（可选递归子目录）、Tune 菜单。
+ *
+ * 与 SMB 版的三处差异：
+ *  1. 目录标识是 cid，无法从 cid 反查名字（反查要多打一次接口，正是 Simple 115 提到的
+ *     容易撞 770004 的地方），所以面包屑名字来自「进入时记下的名字」，跳转定位时用占位名；
+ *  2. 封面**只读缓存**（打开过的书才有），不在列表里触发生成 —— 115 每个文件都要先换直链，
+ *     列表级生成会把取链配额烧光；
+ *  3. 非压缩包置灰，点按提示暂不支持。
+ */
+@Composable
+private fun Cloud115BrowsePane(
+    conn: Cloud115Connection,
+    onOpenFile: (Cloud115Entry, String) -> Unit,
+    navRequest: String? = null,
+    onNavConsumed: () -> Unit = {},
+) {
+    val context = LocalContext.current
+    val prefs = remember { Injekt.get<StoragePreferences>() }
+    val dirBrowseFailed = composeStringResource(R.string.dir_browse_failed)
+    val loadingMsg = composeStringResource(R.string.cloud115_loading)
+    val readLabel = composeStringResource(R.string.book_status_read)
+
+    var displayMode by remember { mutableStateOf(LibraryDisplayMode.fromPref(prefs.webdavBrowseDisplayMode.get())) }
+    var sort by remember { mutableStateOf(LocalFileSort.fromPref(prefs.webdavBrowseSort.get())) }
+    var columnCount by remember { mutableStateOf(prefs.webdavBrowseColumns.get()) }
+    // 封面开关沿用 SMB 的键（同为「远程来源列表显示首图」语义），默认关。
+    var showCover by remember { mutableStateOf(prefs.smbBrowseShowCover.get()) }
+    var showOptions by remember { mutableStateOf(false) }
+
+    var searchQuery by remember { mutableStateOf("") }
+    var searchActive by remember { mutableStateOf(false) }
+    val searchResults = remember { mutableStateListOf<Cloud115Entry>() }
+    var searchScanning by remember { mutableStateOf(false) }
+    var searchError by remember { mutableStateOf<String?>(null) }
+    var searchTick by remember { mutableIntStateOf(0) }
+    val searchFocus = remember { FocusRequester() }
+
+    // 名字也进 key：连接改名后重新进来，面包屑首项要跟着变（只依赖 id 会一直是旧名）。
+    val rootLabel = remember(conn.id, conn.name) { conn.displayName() }
+    val memKey = remember(conn.id) { "115:" + conn.id }
+    // 面包屑栈：(显示名, cid)。cid 无名字语义，所以记忆里把名字一起存（`cid|name`）。
+    var trail by remember(conn.id, conn.rootCid, conn.name) {
+        val saved = prefs.webdavBrowseLastPaths.get()
+            .lines()
+            .firstOrNull { it.substringBefore(' ') == "115:${conn.id}" }
+            ?.substringAfter(' ', "")
+            ?.split('\u001F')
+            ?.filter { it.contains('|') }
+            .orEmpty()
+        mutableStateOf(
+            listOf(rootLabel to conn.rootCid) +
+                saved.map { item -> item.substringAfter('|') to item.substringBefore('|') },
+        )
+    }
+    val dirCid = trail.last().second
+
+    val browseListState = rememberLazyListState()
+    val browseGridState = rememberLazyGridState()
+    val scrollKey = remember(conn.id, dirCid) { "115:${conn.id}|$dirCid" }
+
+    fun rememberScrollPosition() {
+        remoteBrowseScrollMemory[scrollKey] = if (displayMode == LibraryDisplayMode.List) {
+            browseListState.firstVisibleItemIndex to browseListState.firstVisibleItemScrollOffset
+        } else {
+            browseGridState.firstVisibleItemIndex to browseGridState.firstVisibleItemScrollOffset
+        }
+    }
+
+    fun navigateTo(newTrail: List<Pair<String, String>>) {
+        if (newTrail != trail) rememberScrollPosition()
+        trail = newTrail
+    }
+
+    // 历史/书签「打开文件位置」：栈里有就回退，没有就按 cid 直接定位（名字用占位）。
+    LaunchedEffect(navRequest) {
+        val target = navRequest ?: return@LaunchedEffect
+        onNavConsumed()
+        if (target.isBlank()) return@LaunchedEffect
+        val idx = trail.indexOfFirst { it.second == target }
+        navigateTo(if (idx >= 0) trail.take(idx + 1) else trail + ("目录" to target))
+    }
+
+    // 记住上次目录（切来源/重启后回到原位置）。
+    LaunchedEffect(trail) {
+        val saved = trail.drop(1).joinToString("\u001F") { "${it.second}|${it.first}" }
+        prefs.webdavBrowseLastPaths.set(
+            prefs.webdavBrowseLastPaths.get()
+                .lines()
+                .filter { it.isNotBlank() && it.substringBefore(' ') != memKey }
+                .plus(if (saved.isEmpty()) null else "$memKey $saved")
+                .filterNotNull()
+                .joinToString("\n"),
+        )
+    }
+
+    var entries by remember { mutableStateOf<List<Cloud115Entry>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+    var retryTick by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(dirCid, retryTick) {
+        loading = true
+        errorText = null
+        try {
+            entries = withContext(Dispatchers.IO) { Cloud115Api.listBlocking(conn.id, dirCid).entries }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            errorText = e.message ?: dirBrowseFailed
+        }
+        loading = false
+    }
+
+    // 恢复上次滚动位置（列表加载完、状态就绪后再滚，否则空列表上 scrollToItem 无效）。
+    LaunchedEffect(scrollKey, loading, displayMode) {
+        if (loading) return@LaunchedEffect
+        val saved = remoteBrowseScrollMemory[scrollKey]
+        val index = saved?.first ?: 0
+        val offset = saved?.second ?: 0
+        if (displayMode == LibraryDisplayMode.List) {
+            browseListState.scrollToItem(index, offset)
+        } else {
+            browseGridState.scrollToItem(index, offset)
+        }
+    }
+
+    // 归档阅读进度（62/166）：size/mtime 来自列表，零额外请求。
+    val progressLifecycle = LocalLifecycleOwner.current.lifecycle
+    val fileProgress by produceState<Map<String, tachiyomi.domain.chapter.model.ChapterProgress>>(
+        initialValue = emptyMap(),
+        key1 = entries,
+        key2 = dirCid,
+    ) {
+        val queries = entries.filter { !it.isDir && it.isArchive }.map {
+            FileProgressQuery(
+                name = it.name,
+                size = it.size,
+                mtime = it.lastModified,
+                chapterUrl = Cloud115ConnectionStore.toChapterUrl(
+                    conn.id,
+                    it.parentCid.ifBlank { dirCid },
+                    it.pickCode,
+                    it.name,
+                ),
+            )
+        }
+        if (queries.isEmpty()) {
+            value = emptyMap()
+            return@produceState
+        }
+        val keyToName = HashMap<String, String>(queries.size)
+        val urlToName = HashMap<String, String>(queries.size)
+        for (q in queries) {
+            FileIdentity.of(q.size, q.mtime)?.let { key ->
+                if (!keyToName.containsKey(key)) keyToName[key] = q.name
+            }
+            if (q.chapterUrl.isNotBlank()) urlToName[q.chapterUrl] = q.name
+        }
+        progressLifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            Injekt.get<ChapterRepository>()
+                .getChapterProgressFlow(keyToName.keys.toList(), urlToName.keys.toList())
+                .collect { rows -> value = mapProgressRows(rows, keyToName, urlToName) }
+        }
+    }
+
+    // 搜索走官方接口 `/open/ufile/search`（在**当前目录下递归**搜，cid = 当前目录）。
+    // 不做本地扫描：115 的搜索接口就是为这个场景做的，扫目录既慢又容易撞 770004。
+    LaunchedEffect(searchActive, searchQuery, searchTick, dirCid) {
+        if (searchActive && searchQuery.isNotBlank()) {
+            delay(400) // 输入防抖
+            if (!(searchActive && searchQuery.isNotBlank())) return@LaunchedEffect
+            searchScanning = true
+            searchError = null
+            searchResults.clear()
+            val result = withContext(Dispatchers.IO) {
+                runCatching { Cloud115Api.searchBlocking(conn.id, searchQuery, dirCid) }
+            }
+            result.onSuccess { list -> searchResults.addAll(list) }
+                .onFailure { e ->
+                    searchError = e.message ?: dirBrowseFailed
+                    logcat(LogPriority.WARN) { "[Cloud115搜索] 失败: ${e.message}" }
+                }
+            searchScanning = false
+        } else {
+            searchResults.clear()
+            searchError = null
+            searchScanning = false
+        }
+    }
+
+    BackHandler(enabled = trail.size > 1) { navigateTo(trail.dropLast(1)) }
+
+    val unsupportedTip = composeStringResource(R.string.cloud115_unsupported)
+    val onItemOpen: (Cloud115Entry) -> Unit = { e ->
+        when {
+            e.isDir -> navigateTo(trail + (e.name to e.fid))
+            e.isArchive -> onOpenFile(e, trail.last().first)
+            else -> android.widget.Toast.makeText(context, unsupportedTip, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    val onSearchItemOpen: (Cloud115Entry) -> Unit = { e ->
+        when {
+            e.isDir -> {
+                val idx = trail.indexOfFirst { it.second == e.fid }
+                navigateTo(if (idx >= 0) trail.take(idx + 1) else trail + (e.name to e.fid))
+            }
+            // 递归命中项拿不到所在目录名（115 的 cid 无法反查名字），传空让系列名回落到文件名。
+            e.isArchive -> onOpenFile(e, "")
+            else -> android.widget.Toast.makeText(context, unsupportedTip, android.widget.Toast.LENGTH_SHORT).show()
+        }
+        searchActive = false
+        searchQuery = ""
+    }
+
+    val visible = remember(entries, sort) {
+        entries.sortedWith(cloud115EntryComparator(sort))
+    }
+    // 有关键词 = 搜索模式（结果来自接口，已含子目录）；否则显示当前目录。
+    val isSearching = searchActive && searchQuery.isNotBlank()
+    // 搜索结果同样按 Tune 里的排序规则展示（接口返回顺序不保证）。
+    // 注意**不能**包 remember：searchResults 是 SnapshotStateList，add 只改内容不改引用，
+    // 以它为 key 的 remember 永远不失效，列表会停在第一次（通常还是空）的快照上。
+    val displayList = if (isSearching) {
+        searchResults.sortedWith(cloud115EntryComparator(sort))
+    } else {
+        visible
+    }
+    val onOpenItem: (Cloud115Entry) -> Unit = if (isSearching) {
+        onSearchItemOpen
+    } else { e ->
+        onItemOpen(e)
+        if (searchActive) {
+            searchActive = false
+            searchQuery = ""
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        if (searchActive) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { searchActive = false; searchQuery = "" }) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowBack,
+                        contentDescription = composeStringResource(R.string.cd_close_search),
+                    )
+                }
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.weight(1f).focusRequester(searchFocus),
+                    placeholder = { Text(composeStringResource(R.string.search_current_dir_hint)) },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(20.dp))
+                    },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchActive = false; searchQuery = "" }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = composeStringResource(R.string.cd_close_search),
+                                )
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+            }
+            // 接口搜索本身就在当前目录下递归，不需要「搜索下级目录」开关。
+            LaunchedEffect(searchActive) { if (searchActive) searchFocus.requestFocus() }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 面包屑：每一级可点回退（与 SMB/WebDAV 同交互）。
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    trail.forEachIndexed { index, (name, _) ->
+                        if (index > 0) {
+                            Text(
+                                text = "/",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(
+                            onClick = { navigateTo(trail.take(index + 1)) },
+                            contentPadding = PaddingValues(horizontal = 0.dp),
+                        ) {
+                            Text(text = name, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                        }
+                    }
+                }
+                IconButton(onClick = { searchActive = true }) {
+                    Icon(Icons.Filled.Search, contentDescription = composeStringResource(R.string.cd_search))
+                }
+                IconButton(onClick = { showOptions = true }) {
+                    Icon(Icons.Filled.Tune, contentDescription = composeStringResource(R.string.display_mode_header))
+                }
+            }
+        }
+
+        if (isSearching && searchScanning) {
+            if (EinkMotion.isAnimationOff) {
+                LinearProgressIndicator(progress = { 0.25f }, modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+
+        when {
+            isSearching && searchScanning && displayList.isEmpty() -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = composeStringResource(R.string.searching),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CombinedCircularProgressIndicator(progress = { 0f }, reducedMotion = EinkMotion.isAnimationOff)
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = loadingMsg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            // 搜索失败与目录加载失败分开提示：搜索失败不该显示「目录加载失败」。
+            errorText != null || (isSearching && searchError != null) -> Column(
+                Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    composeStringResource(R.string.load_failed, (searchError ?: errorText).orEmpty()),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(
+                    onClick = {
+                        if (isSearching && searchError != null) searchTick++ else retryTick++
+                    },
+                ) {
+                    Text(composeStringResource(R.string.retry))
+                }
+            }
+            displayList.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = if (isSearching) {
+                        composeStringResource(R.string.no_match_results)
+                    } else {
+                        composeStringResource(R.string.cloud115_empty)
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            displayMode == LibraryDisplayMode.List -> {
+                LazyColumn(state = browseListState, modifier = Modifier.fillMaxSize()) {
+                    items(displayList, key = { it.fid.ifBlank { it.pickCode + it.name } }) { e ->
+                        Cloud115FileRow(
+                            conn = conn,
+                            entry = e,
+                            // 用条目自己的 pid（与 openCloud115File 生成 chapterUrl 的取值一致），
+                            // 这样封面缓存键和章节键严格对齐。
+                            parentCid = e.parentCid.ifBlank { dirCid },
+                            showCover = showCover,
+                            progressText = listProgressLabel(fileProgress[e.name], readLabel),
+                            onOpen = { onOpenItem(e) },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            }
+            else -> {
+                val isCompact = displayMode == LibraryDisplayMode.CompactGrid
+                val adaptiveMin = if (isCompact) 96.dp else 128.dp
+                val hSpace = if (isCompact) 4.dp else 8.dp
+                val vSpace = if (isCompact) 6.dp else 12.dp
+                val cells = if (columnCount > 0) {
+                    GridCells.Fixed(columnCount)
+                } else {
+                    GridCells.Adaptive(minSize = adaptiveMin)
+                }
+                LazyVerticalGrid(
+                    state = browseGridState,
+                    columns = cells,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(hSpace),
+                    verticalArrangement = Arrangement.spacedBy(vSpace),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(displayList, key = { it.fid.ifBlank { it.pickCode + it.name } }) { e ->
+                        Cloud115GridItem(
+                            conn = conn,
+                            entry = e,
+                            parentCid = e.parentCid.ifBlank { dirCid },
+                            showCover = showCover,
+                            titleInside = isCompact,
+                            progressText = gridProgressLabel(fileProgress[e.name], readLabel),
+                            onClick = { onOpenItem(e) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    LocalBrowseOptionsMenu(
+        expanded = showOptions,
+        onDismiss = { showOptions = false },
+        displayMode = displayMode,
+        onDisplayModeChange = { displayMode = it; prefs.webdavBrowseDisplayMode.set(it.prefValue) },
+        showCover = showCover,
+        onShowCoverChange = { showCover = it; prefs.smbBrowseShowCover.set(it) },
+        showCoverEnabled = true,
+        columnCount = columnCount,
+        onColumnChange = { columnCount = it; prefs.webdavBrowseColumns.set(it) },
+        sort = sort,
+        onSortModeChange = { sort = it; prefs.webdavBrowseSort.set(it.toPref()) },
+    )
+}
+
+/** 115 条目排序：目录恒置顶，再按所选字段/方向（与本地/WebDAV/SMB 同一套 [LocalFileSort]）。 */
+private fun cloud115EntryComparator(sort: LocalFileSort): Comparator<Cloud115Entry> {
+    val dirFirst = compareBy<Cloud115Entry> { !it.isDir }
+    val field: Comparator<Cloud115Entry> = when (sort.sortBy) {
+        LocalFileSortBy.Name -> Comparator<Cloud115Entry> { a, b -> a.name.compareToNaturalPinyin(b.name) }
+        LocalFileSortBy.DateModified -> compareBy { it.lastModified }
+        LocalFileSortBy.Size -> compareBy { if (it.isDir) 0L else it.size }
+    }
+    return if (sort.descending) dirFirst.then(field.reversed()) else dirFirst.then(field)
+}
+
+@Composable
+private fun Cloud115FileRow(
+    conn: Cloud115Connection,
+    entry: Cloud115Entry,
+    parentCid: String,
+    showCover: Boolean,
+    progressText: String? = null,
+    onOpen: () -> Unit,
+) {
+    FileListRow(name = entry.name, clickable = true, progressText = progressText, onOpen = onOpen) {
+        Cloud115CoverThumb(
+            conn = conn,
+            entry = entry,
+            parentCid = parentCid,
+            showCover = showCover,
+            modifier = Modifier.size(width = 40.dp, height = 56.dp),
+            iconSize = 24.dp,
+        )
+    }
+}
+
+@Composable
+private fun Cloud115GridItem(
+    conn: Cloud115Connection,
+    entry: Cloud115Entry,
+    parentCid: String,
+    showCover: Boolean,
+    progressText: String? = null,
+    titleInside: Boolean = false,
+    onClick: () -> Unit,
+) {
+    if (!showCover) {
+        FileGridCell(
+            name = entry.name,
+            icon = fileKindIcon(entry.isDir, entry.isArchive),
+            iconTint = fileKindTint(entry.isDir, entry.isArchive),
+            iconSize = 56.dp,
+            clickable = true,
+            progressText = progressText,
+            onClick = onClick,
+        )
+        return
+    }
+    Column(
+        modifier = Modifier.clickable(onClick = onClick).padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().aspectRatio(0.7f),
+            contentAlignment = Alignment.Center,
+        ) {
+            Cloud115CoverThumb(
+                conn = conn,
+                entry = entry,
+                parentCid = parentCid,
+                showCover = true,
+                modifier = Modifier.fillMaxSize(),
+                iconSize = 56.dp,
+            )
+            if (progressText != null) {
+                GridProgressBadge(progressText, Modifier.align(Alignment.TopStart).zIndex(1f))
+            }
+            if (titleInside) {
+                GridTitleInside(entry.name, Modifier.align(Alignment.BottomCenter).fillMaxWidth())
+            }
+        }
+        if (!titleInside) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = entry.name,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/**
+ * 115 条目缩略：**只读封面缓存**（打开过的书才有），拿不到就回落文件图标。
+ *
+ * 不在列表里触发生成：115 每个文件都要先换直链，列表几十行会把取链配额烧光
+ * （取链 300ms 一条 + 风控）。封面在打开章节时由 Cloud115CoverCache 顺便生成。
+ */
+@Composable
+private fun Cloud115CoverThumb(
+    conn: Cloud115Connection,
+    entry: Cloud115Entry,
+    parentCid: String,
+    showCover: Boolean,
+    modifier: Modifier = Modifier,
+    iconSize: Dp,
+) {
+    val context = LocalContext.current
+    // 文件名参与 chapterUrl（也就是封面缓存键），所以 key 里必须有 name，
+    // 否则 115 上改名后（pickCode 不变）封面会一直指向旧键、永远不出来。
+    val chapterUrl = remember(conn.id, parentCid, entry.pickCode, entry.name) {
+        Cloud115ConnectionStore.toChapterUrl(
+            conn.id,
+            parentCid.ifBlank { "0" },
+            entry.pickCode,
+            entry.name,
+        )
+    }
+    val cover = remember(showCover, chapterUrl) {
+        if (!showCover || entry.isDir || entry.pickCode.isBlank()) {
+            null
+        } else {
+            Cloud115CoverCache.coverCachedOnly(context, chapterUrl)
+        }
+    }
+    // 先把 ImageRequest 记住再交给 painter：直接在参数位置 new 的话，每次重组都会造一个
+    // 新请求对象，Coil 认得是新 model，缩略图会反复重载（滚动时明显闪烁）。
+    val model = remember(cover) {
+        cover?.let { ImageRequest.Builder(context).data(it).build() }
+    }
+    val painter = rememberAsyncImagePainter(model)
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (cover != null) {
+            Image(
+                painter = painter,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                imageVector = fileKindIcon(entry.isDir, entry.isArchive),
+                contentDescription = null,
+                tint = fileKindTint(entry.isDir, entry.isArchive),
+                modifier = Modifier.size(iconSize),
+            )
+        }
+    }
+}
+
+

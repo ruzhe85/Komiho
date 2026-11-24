@@ -34,15 +34,23 @@ data class Cloud115Entry(
     companion object {
         val ARCHIVE_EXTS = setOf("zip", "cbz", "rar", "cbr", "7z", "cb7")
 
-        /** 解析 `/open/ufile/files` 的 data 元素；字段缺失时尽量降级而不是抛异常。 */
+        /**
+         * 解析一个条目对象。
+         *
+         * **两套字段名都要吃**，因为列表和搜索是两个接口、结构不等价：
+         *  - `/open/ufile/files`：`fid / pid / pc / fn / fc / fs / upt`（短名，数值型）
+         *  - `/open/ufile/search`：`file_id / parent_id / pick_code / file_name / file_category`
+         *    （长名，`file_size` / `user_utime` 还是**字符串**）
+         * 缺字段时尽量降级，不抛异常。
+         */
         fun fromJson(obj: JsonObject): Cloud115Entry? {
-            val name = obj.str("fn") ?: obj.str("n") ?: return null
-            val fid = obj.str("fid").orEmpty()
-            val parent = obj.str("pid").orEmpty()
-            // fc：0 = 文件夹、1 = 文件。缺省时用「有没有 pickcode / 大小」兜底判断。
-            val fc = obj.str("fc")
-            val pick = obj.str("pc").orEmpty()
-            val size = obj.long("fs") ?: obj.long("s") ?: 0L
+            val name = obj.str("fn") ?: obj.str("file_name") ?: obj.str("n") ?: return null
+            val fid = obj.str("fid") ?: obj.str("file_id").orEmpty()
+            val parent = obj.str("pid") ?: obj.str("parent_id").orEmpty()
+            // fc / file_category：0 = 文件夹、1 = 文件。
+            val fc = obj.str("fc") ?: obj.str("file_category")
+            val pick = obj.str("pc") ?: obj.str("pick_code").orEmpty()
+            val size = obj.long("fs") ?: obj.str("file_size")?.toLongOrNull() ?: obj.long("s") ?: 0L
             val isDir = when (fc) {
                 "0" -> true
                 "1" -> false
@@ -50,7 +58,10 @@ data class Cloud115Entry(
                 // （不要用「扩展名是否为空」判断：目录名带点会让 "Vol.01" 被当成文件。）
                 else -> pick.isBlank() && size <= 0L
             }
-            val upt = obj.long("upt") ?: obj.long("uet") ?: 0L
+            val upt = obj.long("upt")
+                ?: obj.str("user_utime")?.toLongOrNull()
+                ?: obj.long("uet")
+                ?: 0L
             return Cloud115Entry(
                 name = name,
                 isDir = isDir,
