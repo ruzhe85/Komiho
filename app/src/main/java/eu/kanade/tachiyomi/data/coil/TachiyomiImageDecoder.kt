@@ -17,7 +17,6 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.EnhanceTimings
 import eu.kanade.tachiyomi.util.MihonSyEnhancer
-import eu.kanade.tachiyomi.util.waifu2x.Waifu2x
 import eu.kanade.tachiyomi.util.eink.EinkGray
 import eu.kanade.tachiyomi.util.image.ToneCurveLut
 import eu.kanade.tachiyomi.util.storage.CbzCrypto
@@ -328,13 +327,15 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                                 enhanced = downscaled
                             }
                         }
-                        // Komiho (2026-10-25): 只有**真出了 AI 结果**才登记计时。
-                        // CPU 兜底（Lanczos）也会返回一张新位图，以前据此登记，于是上层把
-                        // 「CPU 放大」当成「已增强」（timing != null ⇒ currentImageEnhanced
-                        // = true）⇒ 停顿补算永远不触发 —— 用户看到的就是「停在 CPU OK
-                        // 的那一页再也不会重建」。
-                        val aiEngine = Waifu2x.engineFor(options.pageIndex)
-                        if (enhanceOk && aiEngine != Waifu2x.EngineKind.NONE) {
+                        // Komiho (2026-11-24): 只要**真产出了增强图**就登记计时。
+                        // 旧条件还要求 `Waifu2x.engineFor() != NONE`，初衷是挡掉「AI 失败后回
+                        // 落 CPU Lanczos 却冒充成功」——那条兜底已于 2026-10-25 删除，这个附加
+                        // 条件于是只剩副作用：CPU 重采样档（mode 2/3）与 E-Ink 收敛到 CPU 的档位
+                        // 都不经过原生引擎，engineFor 恒为 NONE，计时**永远不登记** ⇒
+                        // `PagerPreparedCache.finishLayout` 判 enhancedOk=false、enhanceElapsed
+                        // -Millis<0、enhanced=false ⇒ 预解码路径的角标恒显示「跳过」，该页还被
+                        // 当成「未增强」反复补算。表现就是「CPU 增强偶然一直 skip」。
+                        if (enhanceOk) {
                             EnhanceTimings.put(
                                 options.pageIndex,
                                 (android.os.SystemClock.uptimeMillis() - decodeStart) -
