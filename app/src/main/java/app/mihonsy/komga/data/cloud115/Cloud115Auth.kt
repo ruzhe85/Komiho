@@ -1,9 +1,10 @@
 package app.mihonsy.komga.data.cloud115
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import logcat.LogPriority
 import mihon.core.common.archive.Cloud115AuthFailure
 import mihon.core.common.archive.Cloud115RandomAccessSource
@@ -129,20 +130,27 @@ object Cloud115Auth {
 
         val obj = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
             ?: throw AuthException("115 刷新响应无法解析", needsReauth = false)
-        val access = obj["access_token"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        val newRefresh = obj["refresh_token"]?.jsonPrimitive?.contentOrNull
-        val expiresIn = obj["expires_in"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-            ?: DEFAULT_TTL_SECONDS
+
+        // **必须在 data 里取**：115 的成功响应是
+        //   {"state":1,"data":{"access_token":"…","refresh_token":"…","expires_in":7200}}
+        // 旧实现只读顶层 access_token（永远为空），于是把「刷新成功」误判成失败 →
+        // 新令牌被丢弃、服务端旧令牌已作废 ⇒ 用户第二天直接打不开（真实事故）。
+        // 顶层也兼容一下：少数代理/中间层会摊平。
+        val payload = (obj["data"] as? JsonObject) ?: obj
+        val access = payload.strOrNull("access_token").orEmpty()
+        val newRefresh = payload.strOrNull("refresh_token")
+        val expiresIn = payload.strOrNull("expires_in")?.toLongOrNull() ?: DEFAULT_TTL_SECONDS
 
         if (access.isBlank()) {
-            val code = obj["code"]?.jsonPrimitive?.contentOrNull
-                ?: obj["errno"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val message = obj["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val code = obj.strOrNull("code") ?: payload.strOrNull("code")
+                ?: obj.strOrNull("errno") ?: payload.strOrNull("errno").orEmpty()
+            val message = obj.strOrNull("message") ?: payload.strOrNull("message").orEmpty()
             val needsReauth = code in REAUTH_CODES
             // 双写：logcat + 应用内 DiagLog（用户导出的是 DiagLog 缓冲，只有 logcat 等于没日志）。
             eu.kanade.tachiyomi.diagnostic.DiagLog.w(
                 "Cloud115Auth",
-                "刷新令牌失败 conn=${conn.id} code=$code msg=$message",
+                "刷新令牌失败 conn=${conn.id} code=$code msg=$message " +
+                    "state=${obj.strOrNull("state")} raw=${text.take(200)}",
             )
             logcat(LogPriority.WARN) { "[Cloud115] 刷新令牌失败 code=$code msg=$message" }
             throw AuthException(
@@ -158,7 +166,8 @@ object Cloud115Auth {
                         append("谁先刷新，另一个手里的就作废了。")
                     }
                     message.isNotBlank() -> "115 拒绝刷新令牌：$message（code=$code）"
-                    else -> "115 拒绝刷新令牌（code=$code）"
+                    // 既没错误码也没消息：多半是响应结构变了，别谎称「令牌被拒」。
+                    else -> "115 刷新响应里没有 access_token（state=${obj.strOrNull("state")}），请重新获取令牌"
                 },
                 needsReauth = needsReauth,
             )
@@ -173,3 +182,7 @@ object Cloud115Auth {
         return access
     }
 }
+
+/** 115 的字段值可能是字符串也可能是数字，统一取「非空文本」；空串按缺失处理。 */
+private fun JsonObject.strOrNull(key: String): String? =
+    (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }

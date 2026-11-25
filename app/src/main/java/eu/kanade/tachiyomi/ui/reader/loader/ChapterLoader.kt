@@ -27,6 +27,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import logcat.LogPriority
 import mihon.core.common.archive.ArchiveHandle
 import mihon.core.common.archive.ArchiveReader
+import mihon.core.common.archive.Cloud115AuthFailure
 import mihon.core.common.archive.Cloud115RandomAccessSource
 import mihon.core.common.archive.RemoteFallbackDeclined
 import mihon.core.common.archive.RemoteScheme
@@ -305,6 +306,11 @@ class ChapterLoader(
             // 再弹一次确认框（用户反馈「要取消两次」就是这么来的）。
             runCatching { source.close() }
             throw e
+        } catch (e: Cloud115AuthFailure) {
+            // 授权类失败（令牌失效 / 刷新被拒）：回落没有意义 —— 它会再打一次刷新接口，
+            // 既不可能成功，还会撞上 115 的 40140117「刷新过于频繁」。
+            runCatching { source.close() }
+            throw e
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "RemoteZipReader 解析失败，回落 libarchive 路径: ${e.message}" }
             ArchiveReader(source)
@@ -337,6 +343,11 @@ class ChapterLoader(
         } catch (e: RemoteFallbackDeclined) {
             // 用户刚取消了「整本缓存」：直接失败。回落到 libarchive 只会再探测一次、
             // 再弹一次确认框（用户反馈「要取消两次」就是这么来的）。
+            runCatching { source.close() }
+            throw e
+        } catch (e: Cloud115AuthFailure) {
+            // 授权类失败（令牌失效 / 刷新被拒）：回落没有意义 —— 它会再打一次刷新接口，
+            // 既不可能成功，还会撞上 115 的 40140117「刷新过于频繁」。
             runCatching { source.close() }
             throw e
         } catch (e: Exception) {
@@ -387,6 +398,11 @@ class ChapterLoader(
         } catch (e: RemoteFallbackDeclined) {
             // 用户刚取消了「整本缓存」：直接失败。回落到 libarchive 只会再探测一次、
             // 再弹一次确认框（用户反馈「要取消两次」就是这么来的）。
+            runCatching { source.close() }
+            throw e
+        } catch (e: Cloud115AuthFailure) {
+            // 授权类失败（令牌失效 / 刷新被拒）：回落没有意义 —— 它会再打一次刷新接口，
+            // 既不可能成功，还会撞上 115 的 40140117「刷新过于频繁」。
             runCatching { source.close() }
             throw e
         } catch (e: Exception) {
