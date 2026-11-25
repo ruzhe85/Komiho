@@ -266,8 +266,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
      * Komiho: 只有「一整张跨页扫描」才自动放大。
      *
      * 原来是 `sWidth > sHeight`（任何横图），于是竖屏看一张 2:1 的插图/标题 logo 也会被
-     * 放大到「填满屏幕高度」（约 3 倍），只能左右平移，观感很差。跨页扫描（左右并排两页）
-     * 的宽高比通常在 1.3~1.8 之间，这个区间之外一律不自动放大。
+     * 放大到「填满屏幕高度」（约 3 倍），只能左右平移，观感很差。随后改成按比例区间判断，
+     * 但区间取宽了（1.3~1.8），把 1920×1080 这类**单页横图**也算了进去 —— 见 issue #18。
+     * 现在的区间是 [SPREAD_MIN_RATIO]..[SPREAD_MAX_RATIO]（1.4~1.55），区间外一律不放大。
      *
      * 注意它判断的始终是**图片**比例，跟设备横竖屏无关 —— 名字里的 landscape 指的是「横向的图」。
      */
@@ -819,9 +820,21 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
 private const val MAX_ZOOM_SCALE = 5F
 
-/** Komiho: 「跨页扫描」的宽高比区间 —— 只有落在这个区间才做自动放大（见 isSpreadAspectRatio）。 */
-private const val SPREAD_MIN_RATIO = 1.3F
-private const val SPREAD_MAX_RATIO = 1.8F
+/**
+ * 「跨页扫描」的宽高比区间。
+ *
+ * 只有落在这个区间的图才被当成「左右并排两页」自动放大到填满高度（见 [isSpreadAspectRatio]）。
+ *
+ * 原来是 `1.3..1.8`，把常见**单页横图**也圈了进去 —— 最典型的是 1920×1080（1.78），
+ * 于是「适应屏幕」先完整显示、500ms 后又被放大成「适应高度」的样子，左右被裁掉
+ * （issue #18）。相邻的 16:10（1.6）和 4:3（1.33）同样会被误伤。
+ *
+ * 收紧到 `1.4..1.55`：两页 3:4 并排 ≈ 1.5、A4 双页 ≈ 1.414 仍会放大，
+ * 而 4:3 / 16:10 / 16:9 的单页横图不再触发。比例在这个区间之外的跨页扫描
+ * 只是不自动放大，双击仍可手动放。
+ */
+private const val SPREAD_MIN_RATIO = 1.4F
+private const val SPREAD_MAX_RATIO = 1.55F
 
 /**
  * MihonSY: true when the stream begins with a known image magic number
