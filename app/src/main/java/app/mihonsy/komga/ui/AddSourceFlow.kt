@@ -1929,6 +1929,19 @@ private fun Cloud115FormPage(
                         Cloud115ConnectionStore.update(existing.id, name, rootCid, rt, at, expiresAt)
                         existing.id
                     }
+                    // 取账号 id 作为跨设备标识（章节 URL 主键）。
+                    // 新增、或这次换了 refresh_token（可能是另一个账号）时都要重新取。
+                    val knownUserId = Cloud115ConnectionStore.get(id)?.userId.orEmpty()
+                    if (knownUserId.isBlank() || rt.isNotBlank()) {
+                        val user = Cloud115Api.userInfoBlocking(id)
+                        Cloud115ConnectionStore.update(
+                            id = id,
+                            name = name,
+                            rootCid = rootCid,
+                            refreshToken = "",
+                            userId = user.userId,
+                        )
+                    }
                     // 只在「手上有新鲜 access_token」时验证 —— 这样保存永远不会消耗 refresh_token。
                     val usable = Cloud115ConnectionStore.get(id)?.isAccessUsable() == true
                     if (usable) Cloud115Api.testConnection(id)

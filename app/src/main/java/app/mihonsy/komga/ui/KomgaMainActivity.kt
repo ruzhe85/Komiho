@@ -9127,13 +9127,15 @@ private suspend fun openCloud115File(
 ) {
     try {
         val parentCid = entry.parentCid.ifBlank { conn.rootCid }
+        // URL 主键用账号级 userId（不是本机 connId）：多设备各自授权时也能对上同一份历史/进度。
+        val owner = conn.urlOwnerId()
         // manga.url = 系列目录（同一目录下的多个压缩包同属一个系列）
-        val mangaUrl = "115://${conn.id}/$parentCid"
+        val mangaUrl = "115://$owner/$parentCid"
         // dirLabel 为 "…" 表示面包屑里是「按 cid 直接定位、名字未知」的占位（见 Cloud115BrowsePane），
         // 这种时候用文件名兜底，别让书架/历史里出现一堆叫「…」的系列。
         val seriesTitle = dirLabel.takeIf { it.isNotBlank() && it != "…" }
             ?: entry.name.substringBeforeLast('.').ifBlank { entry.name }
-        val chapterUrl = Cloud115ConnectionStore.toChapterUrl(conn.id, parentCid, entry.pickCode, entry.name)
+        val chapterUrl = Cloud115ConnectionStore.toChapterUrl(owner, parentCid, entry.pickCode, entry.name)
         eu.kanade.tachiyomi.diagnostic.DiagLog.i(
             "Cloud115Open",
             "打开文件 name=${entry.name} pick=${entry.pickCode} mangaUrl=$mangaUrl chapterUrl=$chapterUrl",
@@ -9169,7 +9171,7 @@ private suspend fun openCloud115File(
             )
             siblings.forEachIndexed { idx, sib ->
                 val url = Cloud115ConnectionStore.toChapterUrl(
-                    conn.id,
+                    owner,
                     sib.parentCid.ifBlank { parentCid },
                     sib.pickCode,
                     sib.name,
@@ -12101,7 +12103,7 @@ private fun Cloud115BrowsePane(
                 size = it.size,
                 mtime = it.lastModified,
                 chapterUrl = Cloud115ConnectionStore.toChapterUrl(
-                    conn.id,
+                    conn.urlOwnerId(),
                     it.parentCid.ifBlank { dirCid },
                     it.pickCode,
                     it.name,
@@ -12509,9 +12511,9 @@ private fun Cloud115CoverThumb(
     val context = LocalContext.current
     // 文件名参与 chapterUrl（也就是封面缓存键），所以 key 里必须有 name，
     // 否则 115 上改名后（pickCode 不变）封面会一直指向旧键、永远不出来。
-    val chapterUrl = remember(conn.id, parentCid, entry.pickCode, entry.name) {
+    val chapterUrl = remember(conn.id, conn.userId, parentCid, entry.pickCode, entry.name) {
         Cloud115ConnectionStore.toChapterUrl(
-            conn.id,
+            conn.urlOwnerId(),
             parentCid.ifBlank { "0" },
             entry.pickCode,
             entry.name,

@@ -45,6 +45,7 @@ object Cloud115Api {
     private const val FILES_URL = "$BASE/open/ufile/files"
     private const val SEARCH_URL = "$BASE/open/ufile/search"
     private const val DOWN_URL = "$BASE/open/ufile/downurl"
+    private const val USER_INFO_URL = "$BASE/open/user/info"
 
     /** 取链最小间隔：115 对「取链」按请求频次风控（Simple 115 实测值 300ms）。 */
     private const val FETCH_INTERVAL_MS = 300L
@@ -329,6 +330,32 @@ object Cloud115Api {
     fun testConnection(connId: String): Int = withToken(connId) { token ->
         val cid = Cloud115ConnectionStore.get(connId)?.rootCid ?: "0"
         fetchPage(token, cid, 0).entries.size
+    }
+
+    /**
+     * 取 115 账号 id（`/open/user/info`）。
+     *
+     * 这个 id 是**账号级**的：章节 URL、跨设备同步合并都以它为键 ——
+     * 多设备各自授权（不同 token）时，只有它能认出「同一个 115」。
+     */
+    fun userInfoBlocking(connId: String): Cloud115User = withToken(connId) { token ->
+        val request = Request.Builder()
+            .url(USER_INFO_URL.toHttpUrl())
+            .header("Authorization", "Bearer $token")
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        val root = asObject(execute(request, "获取账号信息"), "获取账号信息")
+        ensureOk(root, "获取账号信息")
+        val data = (root["data"] as? JsonObject) ?: root
+        val userId = data.str("user_id") ?: data.str("uid") ?: data.str("userid")
+        if (userId.isNullOrBlank()) {
+            throw IOException("115 账号信息里没有 user_id（无法作为跨设备标识）")
+        }
+        Cloud115User(
+            userId = userId,
+            userName = data.str("user_name") ?: data.str("user_nickname").orEmpty(),
+        )
     }
 
     // ------------------------------------------------------------ 内部

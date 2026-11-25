@@ -9,6 +9,8 @@ import app.mihonsy.komga.data.KomgaConnection
 import app.mihonsy.komga.data.KomgaCredentialCrypto
 import app.mihonsy.komga.data.KomgaPreferences
 import app.mihonsy.komga.data.SourceVisibilityStore
+import app.mihonsy.komga.data.cloud115.Cloud115ConnectionStore
+import app.mihonsy.komga.data.cloud115.Cloud115SyncConn
 import app.mihonsy.komga.data.smb.SmbConnectionStore
 import app.mihonsy.komga.data.webdav.WebDavConnection
 import app.mihonsy.komga.data.webdav.WebDavConnectionStore
@@ -284,8 +286,9 @@ object KomihoBackup {
         val includeSourceConfig = KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_SOURCE_CONFIG)
         val includeWebdavHistory = KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_WEBDAV_HISTORY)
         val includeSmbHistory = KomihoSync.contentEnabled(prefStore, KomihoSync.CONTENT_SMB_HISTORY)
+        // 115 与 WebDAV 同属「远程阅读历史」，共用同一个开关（不额外增加 UI 项）。
         fun wantChapterUrl(url: String): Boolean =
-            (includeWebdavHistory && url.startsWith("webdav:")) ||
+            (includeWebdavHistory && (url.startsWith("webdav:") || url.startsWith("115://"))) ||
                 (includeSmbHistory && url.startsWith("smb://"))
 
         // 1) Komga 设置（komga_connection 是个大杂烩：连接数据 + 各类偏好）。
@@ -392,6 +395,12 @@ object KomihoBackup {
             komgaPrefs = komgaPrefs,
             smbConnections = smbConns,
             webDavConnections = webDavConns,
+            // 与 SMB/WebDAV 同口径：受「来源配置」开关控制（关掉就不同步来源）。
+            cloud115Connections = if (includeSourceConfig) {
+                Cloud115ConnectionStore.exportForSync()
+            } else {
+                emptyList()
+            },
             sourceVisibility = sourceVisibility,
             dashboard = dashboard,
             localMangas = localMangas.map { m ->
@@ -415,9 +424,13 @@ object KomihoBackup {
         )
     }
 
-    /** 章节/书 URL 是否为 SMB 或 WebDAV（非本地）。本地/WebDAV/SMB 共用 LocalSource.ID，只能靠前缀区分。 */
+    /**
+     * 章节/书 URL 是否为远程来源（SMB / WebDAV / 115，非本地）。
+     * 本地/NAS/115 共用 LocalSource.ID，只能靠 URL 前缀区分。
+     */
     private fun isRemoteSourceUrl(url: String): Boolean =
-        url.startsWith("smb://") || url.startsWith("webdav://") || url.startsWith("webdav:")
+        url.startsWith("smb://") || url.startsWith("webdav://") || url.startsWith("webdav:") ||
+            url.startsWith("115://")
 
     private fun readRawPrefs(context: Context, name: String): List<PrefEntry> {
         val all = context.getSharedPreferences(name, Context.MODE_PRIVATE).all
@@ -517,6 +530,9 @@ object KomihoBackup {
         // 供第 5 步改写备份里内嵌旧 id 的章节/历史/书签 URL。
         val smbIdRemap = restoreSmbConnections(payload.smbConnections, fileEncrypted)
         val webdavIdRemap = restoreWebDavConnections(payload.webDavConnections, fileEncrypted)
+        // Komiho: 115 连接（只含 userId / 名称 / 根目录，**不含令牌**）。
+        // 章节 URL 的主键本来就是 userId，所以这里不需要像 SMB/WebDAV 那样改写 connId。
+        Cloud115ConnectionStore.mergeFromSync(payload.cloud115Connections)
 
         // 3) 来源显隐 / 排序
         restoreSourceVisibility(payload.sourceVisibility)
@@ -887,6 +903,14 @@ object KomihoBackup {
         val komgaPrefs: List<PrefEntry> = emptyList(),
         val smbConnections: List<SmbConn> = emptyList(),
         val webDavConnections: List<WebDavConn> = emptyList(),
+        /**
+         * Komiho: 115 原生来源的连接（**只含 userId / 名称 / 根目录，不含任何令牌**）。
+         *
+         * refresh_token 是一次性的：放进备份等于复制到多台设备，谁先刷新谁把别人作废。
+         * 因此同步只带账号身份，另一台设备按 [Cloud115SyncConn.userId] 合并成同一条来源，
+         * 令牌缺省时提示各自去 api.oplist.org 授权。
+         */
+        val cloud115Connections: List<Cloud115SyncConn> = emptyList(),
         val sourceVisibility: SourceVisibilityBackup? = null,
         val dashboard: DashboardBackup? = null,
         val localMangas: List<BkManga> = emptyList(),

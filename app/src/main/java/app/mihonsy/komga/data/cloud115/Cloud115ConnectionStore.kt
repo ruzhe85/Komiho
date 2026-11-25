@@ -31,6 +31,8 @@ object Cloud115ConnectionStore {
     private data class StoredConnection(
         val id: String,
         val name: String,
+        /** 115 账号 id（`/open/user/info`）；章节 URL 与同步合并都用它。空 = 旧数据未取到。 */
+        val userId: String = "",
         val rootCid: String = "0",
         val refreshTokenEnc: String,
         val accessToken: String = "",
@@ -39,7 +41,8 @@ object Cloud115ConnectionStore {
 
     /** 章节 URL 拆解结果。 */
     data class ChapterRef(
-        val connId: String,
+        /** URL 第一段：账号级 userId（旧数据是本机 connId）。 */
+        val ownerId: String,
         val parentCid: String,
         val pickCode: String,
         val fileName: String,
@@ -83,11 +86,13 @@ object Cloud115ConnectionStore {
         refreshToken: String,
         accessToken: String = "",
         accessExpiresAt: Long = 0L,
+        userId: String = "",
     ): Cloud115Connection =
         synchronized(lock) {
             val conn = StoredConnection(
                 id = UUID.randomUUID().toString().replace("-", "").take(8),
                 name = name.trim(),
+                userId = userId.trim(),
                 rootCid = normalizeCid(rootCid),
                 refreshTokenEnc = WebDavCredentialCrypto.encrypt(refreshToken.trim()),
                 accessToken = accessToken.trim(),
@@ -106,6 +111,7 @@ object Cloud115ConnectionStore {
         refreshToken: String,
         accessToken: String = "",
         accessExpiresAt: Long = 0L,
+        userId: String = "",
     ): Unit = synchronized(lock) {
         val list = loadLocked()
         val idx = list.indexOfFirst { it.id == id }
@@ -116,6 +122,7 @@ object Cloud115ConnectionStore {
         }
         list[idx] = old.copy(
             name = name.trim(),
+            userId = if (userId.isBlank()) old.userId else userId.trim(),
             rootCid = normalizeCid(rootCid),
             // 留空 = 不改（编辑框不回显已解密的令牌）
             refreshTokenEnc = newRefresh,
@@ -179,11 +186,17 @@ object Cloud115ConnectionStore {
 
     // ------------------------------------------------------------ 章节 URL
 
-    fun toChapterUrl(connId: String, parentCid: String, pickCode: String, fileName: String): String =
-        "$CONN_URL_PREFIX$connId/$parentCid/$pickCode/" +
+    /**
+     * 构造章节 URL。
+     *
+     * [ownerId] 传**账号级 userId**（[Cloud115Connection.urlOwnerId]），不要传本机 id ——
+     * 这是跨设备对齐历史/进度/缓存的前提。
+     */
+    fun toChapterUrl(ownerId: String, parentCid: String, pickCode: String, fileName: String): String =
+        "$CONN_URL_PREFIX$ownerId/$parentCid/$pickCode/" +
             URLEncoder.encode(fileName, "UTF-8").replace("+", "%20")
 
-    /** 章节 URL → 连接；connId 失配时回落第一个连接（与 WebDAV 相同的兜底方向）。 */
+    /** 章节 URL → 连接；先按 userId 精确匹配，再兼容旧数据的本机 id。 */
     fun match(chapterUrl: String): Cloud115Connection? = synchronized(lock) {
         matchLocked(loadLocked(), chapterUrl)?.toPublic()
     }
@@ -194,17 +207,21 @@ object Cloud115ConnectionStore {
      */
     fun matchIn(conns: List<Cloud115Connection>, chapterUrl: String): Cloud115Connection? {
         if (!chapterUrl.startsWith(CONN_URL_PREFIX)) return null
-        val connId = chapterUrl.removePrefix(CONN_URL_PREFIX).substringBefore('/')
-        return conns.firstOrNull { it.id == connId } ?: conns.firstOrNull()
+        val ownerId = chapterUrl.removePrefix(CONN_URL_PREFIX).substringBefore('/')
+        return conns.firstOrNull { it.userId.isNotBlank() && it.userId == ownerId }
+            ?: conns.firstOrNull { it.id == ownerId }
+            ?: conns.firstOrNull()
     }
 
     private fun matchLocked(list: List<StoredConnection>, chapterUrl: String): StoredConnection? {
         if (!chapterUrl.startsWith(CONN_URL_PREFIX)) return null
-        val connId = chapterUrl.removePrefix(CONN_URL_PREFIX).substringBefore('/')
-        return list.firstOrNull { it.id == connId } ?: list.firstOrNull()
+        val ownerId = chapterUrl.removePrefix(CONN_URL_PREFIX).substringBefore('/')
+        return list.firstOrNull { it.userId.isNotBlank() && it.userId == ownerId }
+            ?: list.firstOrNull { it.id == ownerId }
+            ?: list.firstOrNull()
     }
 
-    /** 章节 URL → 五元组（connId + 父目录 + pickCode + 文件名）；格式不对返回 null。 */
+    /** 章节 URL → 四元组（ownerId + 父目录 + pickCode + 文件名）；格式不对返回 null。 */
     fun parseChapterUrl(chapterUrl: String): ChapterRef? {
         if (!chapterUrl.startsWith(CONN_URL_PREFIX)) return null
         val rest = chapterUrl.removePrefix(CONN_URL_PREFIX)
@@ -213,7 +230,7 @@ object Cloud115ConnectionStore {
         if (parts.size < 4) return null
         val fileName = runCatching { URLDecoder.decode(parts[3], "UTF-8") }.getOrDefault(parts[3])
         return ChapterRef(
-            connId = parts[0],
+            ownerId = parts[0],
             parentCid = parts[1],
             pickCode = parts[2],
             fileName = fileName,
@@ -229,9 +246,84 @@ object Cloud115ConnectionStore {
     private fun StoredConnection.toPublic() = Cloud115Connection(
         id = id,
         name = name,
+        userId = userId,
         rootCid = normalizeCid(rootCid),
         refreshTokenEnc = refreshTokenEnc,
         accessToken = accessToken,
         accessExpiresAt = accessExpiresAt,
     )
+
+    // ------------------------------------------------------------ 同步（跨设备）
+
+    /**
+     * 导出给备份/同步用的连接视图：**只含身份与目录，不含任何令牌**。
+     *
+     * 按方案 A（每设备独立授权）：令牌进备份等于把「一次性 refresh_token」复制到多台设备上，
+     * 谁先刷新谁把对方作废。同步只带 [userId]，另一台设备按它合并成同一条来源，
+     * 令牌缺失时提示用户各自去 api.oplist.org 授权。
+     */
+    fun exportForSync(): List<Cloud115SyncConn> = synchronized(lock) {
+        loadLocked().map {
+            Cloud115SyncConn(
+                id = it.id,
+                name = it.name,
+                userId = it.userId,
+                rootCid = normalizeCid(it.rootCid),
+            )
+        }
+    }
+
+    /**
+     * 合并来自备份/同步的连接。
+     *
+     * 主键是 [Cloud115SyncConn.userId]（账号级）：命中就保留本机 id 与令牌，只更新名称/根目录；
+     * 本机没有则新建一条**无令牌**的连接（用户需要重新授权才能用）。
+     *
+     * 因为章节 URL 用的是 userId，历史/进度不需要改写 connId —— 这一点与 WebDAV/SMB 不同。
+     */
+    fun mergeFromSync(items: List<Cloud115SyncConn>) {
+        if (items.isEmpty()) return
+        synchronized(lock) {
+            val list = loadLocked()
+            items.forEach { item ->
+                val key = item.userId.ifBlank { item.id }
+                // 主键优先 userId；再加一条「id 相同也算同一条」的兜底 ——
+                // 本机是旧数据（userId 还没取到）时，靠 id 也能命中，不会合并出重复来源。
+                val idx = list.indexOfFirst { s ->
+                    (s.userId.isNotBlank() && s.userId == key) || s.id == item.id
+                }
+                if (idx >= 0) {
+                    val old = list[idx]
+                    list[idx] = old.copy(
+                        name = item.name.takeIf { it.isNotBlank() } ?: old.name,
+                        userId = item.userId.ifBlank { old.userId },
+                        rootCid = normalizeCid(item.rootCid),
+                    )
+                } else {
+                    list.add(
+                        StoredConnection(
+                            id = item.id.ifBlank { UUID.randomUUID().toString().replace("-", "").take(8) },
+                            name = item.name,
+                            userId = item.userId,
+                            rootCid = normalizeCid(item.rootCid),
+                            // 空凭据 = 「已同步到来源，但本机还没授权」。
+                            refreshTokenEnc = "",
+                        ),
+                    )
+                }
+            }
+            saveLocked(list)
+        }
+    }
 }
+
+/**
+ * 备份/同步里的 115 连接（**不含令牌**，见 [Cloud115ConnectionStore.exportForSync]）。
+ */
+@Serializable
+data class Cloud115SyncConn(
+    val id: String = "",
+    val name: String = "",
+    val userId: String = "",
+    val rootCid: String = "0",
+)

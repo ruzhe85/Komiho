@@ -4,6 +4,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
+/** 115 账号信息（用于跨设备识别「同一个 115」）。 */
+data class Cloud115User(
+    val userId: String,
+    val userName: String = "",
+)
+
 /**
  * Komiho：115 目录里的一个条目（目录或文件）。
  *
