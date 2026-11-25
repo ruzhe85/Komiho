@@ -1074,7 +1074,7 @@
     <string name="komiho_sync_back">返回</string>
     <string name="komiho_sync_content">內容選擇</string>
     <string name="komiho_sync_content_source">來源設定</string>
-    <string name="komiho_sync_content_webdav">WebDAV 閱讀歷史/書籤</string>
+    <string name="komiho_sync_content_webdav">WebDAV/115 閱讀歷史/書籤</string>
     <string name="komiho_sync_content_smb">SMB 閱讀歷史/書籤</string>
     <string name="komiho_sync_content_display">外觀與語言</string>
     <string name="komiho_sync_content_komga_home">Komga 主頁</string>

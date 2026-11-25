@@ -56,7 +56,9 @@ object SettingsKomihoBackupScreen : SearchableSettings {
         val scope = rememberCoroutineScope()
         val prefs = remember { Injekt.get<PreferenceStore>() }
 
-        val triggersPref = remember { prefs.getStringSet(KomihoSync.KEY_TRIGGERS, emptySet()) }
+        // 默认与 [KomihoSync.triggerEnabled] 的读侧保持一致（全开）：
+        // 两处默认值不同的话，界面会显示「一个都没勾」而实际四个都在跑，用户一勾一保存就只剩那个。
+        val triggersPref = remember { prefs.getStringSet(KomihoSync.KEY_TRIGGERS, KomihoSync.ALL_TRIGGERS.toSet()) }
         val contentPref = remember { prefs.getStringSet(KomihoSync.KEY_CONTENT, KomihoSync.DEFAULT_CONTENT) }
         // 同步默认关闭：未显式开启前开关显示为关（与 KomihoSync.syncEnabled 的缺省一致）。
         val enabledPref = remember { prefs.getBoolean(KomihoSync.KEY_ENABLED, false) }

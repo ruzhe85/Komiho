@@ -11,7 +11,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import logcat.LogPriority
 import mihon.core.common.archive.WebDavRandomAccessSource
 import okhttp3.OkHttpClient
@@ -57,6 +61,14 @@ object KomihoSync {
     const val TRIGGER_CHAPTER_OPEN = "chapter_open"
     const val TRIGGER_APP_START = "app_start"
     const val TRIGGER_FOREGROUND = "foreground"
+
+    /**
+     * 两次「自动同步」之间至少隔这么久。
+     *
+     * 退出阅读器时 `onPause` 与 `onCleared` 会各触发一次；反复息屏/切后台也会连着来。
+     * 备份是全量快照，跳过某次不会丢数据（下次带上），所以这里宁可少刷一次网络。
+     */
+    private const val AUTO_SYNC_MIN_INTERVAL_MS = 20_000L
 
     /** 触发条件全集（键；展示文案由 UI 侧本地化）。 */
     val ALL_TRIGGERS = listOf(
@@ -161,8 +173,15 @@ object KomihoSync {
 
     fun configured(prefs: PreferenceStore): Boolean = readConfig(prefs) != null
 
+    /**
+     * 触发条件是否启用。
+     *
+     * **缺省全开**：以前缺省是空集合，用户不手动勾就永远不同步 —— 而「同步」这件事
+     * 本来就该开箱即用（关掉才是例外）。老用户如果真的清空过多选，读到空集合后
+     * 会把「用户显式清空」当成默认全开，属于可接受的取舍（内容选择优先级更高）。
+     */
     fun triggerEnabled(prefs: PreferenceStore, trigger: String): Boolean =
-        prefs.getStringSet(KEY_TRIGGERS, emptySet()).get().contains(trigger)
+        prefs.getStringSet(KEY_TRIGGERS, ALL_TRIGGERS.toSet()).get().contains(trigger)
 
     data class Outcome(val ok: Boolean, val message: String)
 
@@ -217,6 +236,8 @@ object KomihoSync {
         }
 
         record(prefs, action, ok = true, detail = "")
+        // 通知正开着的阅读器：DB 里的进度可能已被远端更新，必要时跟随跳页。
+        _progressSynced.tryEmit(Unit)
         return Outcome(
             true,
             context.stringResource(if (push) MR.strings.komiho_sync_push_ok else MR.strings.komiho_sync_pull_ok),
@@ -234,7 +255,36 @@ object KomihoSync {
         return Outcome(false, context.stringResource(MR.strings.komiho_sync_fail_prefix, reason))
     }
 
-    /** 自动触发（触发条件命中时调用）：总开关关闭/未启用/未配置直接忽略；成功静默，失败 toast。 */
+    /**
+     * 同步成功后发出一次。
+     *
+     * 阅读器订阅它：若同步把**当前章节**的进度更新到更靠后，且用户这次还没翻过页，
+     * 就跟着跳到新页（否则「B 机切回仍在阅读器里」会一直停在旧页，看着像没同步）。
+     * `extraBufferCapacity = 1`：阅读器不在前台时丢掉一次信号也无所谓 —— onResume 还会再查一遍。
+     */
+    private val _progressSynced = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val progressSynced: SharedFlow<Unit> = _progressSynced
+
+    /** 自动同步的串行锁：阅读器 onPause 与 onCleared 会各触发一次，并发跑会同时读写远端快照。 */
+    private val autoSyncMutex = Mutex()
+
+    /**
+     * 上次自动同步**尝试**的时刻（无论成败）。
+     *
+     * 失败也记：节流若只看成功，一直失败时（令牌失效、WebDAV 不可达）每次息屏/切后台
+     * 都会重试并弹一次 toast，用户会被反复打搅。
+     */
+    @Volatile
+    private var lastAutoSyncAttemptAt = 0L
+
+    /**
+     * 自动触发（触发条件命中时调用）：总开关关闭/未启用/未配置直接忽略；成功静默，失败 toast。
+     *
+     * 两道保护：
+     *  1. **串行**：同一时刻只跑一个自动同步（退出阅读器时 onPause + onCleared 会各来一次）；
+     *  2. **节流**：距上次尝试 [AUTO_SYNC_MIN_INTERVAL_MS] 内不再重复（成败都算）。备份是全量
+     *     快照，跳过不会丢数据 —— 只是晚一点带上，换来「反复息屏/切后台」时不刷网络、不刷提示。
+     */
     fun autoSync(context: Context, trigger: String) {
         val prefs = Injekt.get<PreferenceStore>()
         if (!syncEnabled(prefs)) return
@@ -242,16 +292,31 @@ object KomihoSync {
         if (!configured(prefs)) return
         val app = context.applicationContext
         autoScope.launch {
-            // 「章节阅读后」带短延迟：退出阅读器时的最后一次进度写库是异步的，等它落地再导出。
+            // 「章节阅读后」带短延迟：退出阅读器/息屏时的最后一次进度写库是异步的，等它落地再导出。
             if (trigger == TRIGGER_CHAPTER_READ) delay(2_000)
-            val outcome = sync(app, push = true)
-            if (!outcome.ok) {
-                runCatching {
-                    withUIContext { app.toast(outcome.message) }
+            autoSyncMutex.withLock {
+                val now = System.currentTimeMillis()
+                if (now - lastAutoSyncAttemptAt < AUTO_SYNC_MIN_INTERVAL_MS) return@withLock
+                lastAutoSyncAttemptAt = now
+                val outcome = sync(app, push = true)
+                if (!outcome.ok) {
+                    runCatching {
+                        withUIContext { app.toast(outcome.message) }
+                    }
                 }
             }
         }
     }
+
+    /**
+     * 该章节 URL 的阅读进度是否会进同步备份（WebDAV / SMB / 115）。
+     *
+     * 阅读器里的「章节阅读后」「章节打开时」两个自动触发**必须**用它判断。
+     * 以前这两处直接写死 `webdav://`/`smb://` 前缀 —— 新增 115 时漏了，
+     * 表现为「A 机读完退出、B 机打开还是旧进度」（115 章节压根没触发推送）。
+     */
+    fun syncableSourceUrl(url: String): Boolean =
+        url.startsWith("webdav:") || url.startsWith("smb://") || url.startsWith("115://")
 
     /** 注册「应用回到前台」触发（含息屏亮屏解锁；进程内只注册一次）。 */
     fun registerForegroundTrigger(context: Context) {

@@ -139,6 +139,7 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import app.mihonsy.komga.data.KomgaApiClient
 import app.mihonsy.komga.data.KomgaPreferences
+import app.mihonsy.komga.data.backup.KomihoSync
 import app.mihonsy.komga.data.download.KomgaBookDownloader
 import app.mihonsy.komga.data.download.KomgaDownloadStore
 import app.mihonsy.komga.data.download.KomgaDownloadEvent
@@ -392,6 +393,11 @@ class ReaderActivity : BaseActivity() {
                         displayRefreshHost.flash()
                     }
 
+                    // Komiho: 同步拉到更靠后的进度 → 跟随跳页（是否该跳由 ViewModel 判断）。
+                    is ReaderViewModel.Event.JumpToPage -> {
+                        moveToPageIndex(event.page)
+                    }
+
                     is ReaderViewModel.Event.SetOrientation -> {
                         setOrientation(event.orientation)
                     }
@@ -414,6 +420,15 @@ class ReaderActivity : BaseActivity() {
                 }
             }
             .launchIn(lifecycleScope)
+        // Komiho: 同步完成后若远端进度更靠后，跟随跳页（守卫见 ReaderViewModel.maybeFollowRemoteProgress）。
+        // 与 onResume 的那次检查互补：onResume 兜「同步早已完成」，这里兜「同步晚于恢复」。
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                KomihoSync.progressSynced.collect {
+                    viewModel.maybeFollowRemoteProgress()
+                }
+            }
+        }
     }
 
     // SY --> Komiho (issue #17): 阅读器是内存大头，进阅读器时按需让出书库封面占用的缓存。
@@ -817,6 +832,9 @@ class ReaderActivity : BaseActivity() {
         lifecycleScope.launchNonCancellable {
             viewModel.updateHistory()
         }
+        // Komiho: 息屏 / 切后台也要推一次进度（onCleared 只在真正退出时才走）。
+        // updateHistory 是异步的，KomihoSync 那边对「章节阅读后」有 2 秒延迟等它落库。
+        viewModel.syncReadingProgress()
         super.onPause()
     }
 
@@ -828,6 +846,9 @@ class ReaderActivity : BaseActivity() {
         super.onResume()
         viewModel.restartReadTimer()
         setMenuVisibility(viewModel.state.value.menuVisible)
+        // Komiho: 回到前台时检查一次远端是否已有更靠后的进度（多设备场景：
+        // 同步通常在本 Activity 恢复前就完成了，光等 progressSynced 信号会错过）。
+        viewModel.maybeFollowRemoteProgress()
     }
 
     /**

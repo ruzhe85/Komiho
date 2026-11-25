@@ -204,6 +204,14 @@ class ReaderViewModel @JvmOverloads constructor(
      * The visible page index of the currently loaded chapter. Used to restore from process kill.
      */
     private var chapterPageIndex = savedState.get<Int>("page_index") ?: -1
+
+    /**
+     * Komiho: 本次进入章节后「第一次上报的页」。
+     *
+     * 用来判断用户有没有真的开始读：仍停在这一页，才允许被远端同步来的进度带着跳页；
+     * 已经翻过页就绝不跳（读到一半被拽走会很突兀）。-1 = 还没上报过。
+     */
+    private var sessionStartPage = -1
         set(value) {
             savedState["page_index"] = value
             field = value
@@ -377,10 +385,60 @@ class ReaderViewModel @JvmOverloads constructor(
         }
         // SY --> Komiho: 关闭阅读器清空 PDF 密码（session 级记忆）
         PdfPasswordHolder.current = null
-        // Komiho: 触发条件「章节阅读后」（退出阅读器）——仅 WebDAV/SMB 来源（其进度才进同步备份）。
-        val readUrl = currentChapters?.currChapter?.chapter?.url
-        if (readUrl != null && (readUrl.startsWith("webdav://") || readUrl.startsWith("smb://"))) {
-            runCatching { KomihoSync.autoSync(Injekt.get<Application>(), KomihoSync.TRIGGER_CHAPTER_READ) }
+        syncReadingProgress()
+    }
+
+    /**
+     * Komiho: 触发条件「章节阅读后」——把当前章节的进度推去 WebDAV 同步备份。
+     *
+     * 只有 WebDAV / SMB / 115 的进度会进备份（本地文件不参与）。
+     *
+     * **`onPause` 与 `onCleared` 都要调用**：用户「看完放一边、屏幕自动熄灭」时
+     * Activity 只走 onPause，ViewModel 不清理 —— 只在 onCleared 里推的话，进度根本没上传，
+     * 换台设备打开还是旧页。内部有节流/串行，重复调用不会重复上传。
+     */
+    fun syncReadingProgress() {
+        val readUrl = state.value.viewerChapters?.currChapter?.chapter?.url ?: return
+        if (!KomihoSync.syncableSourceUrl(readUrl)) return
+        runCatching { KomihoSync.autoSync(Injekt.get<Application>(), KomihoSync.TRIGGER_CHAPTER_READ) }
+    }
+
+    /**
+     * Komiho: 同步把进度更新到更靠后时，让阅读器跟随跳页。
+     *
+     * 触发时机有两处（都必要）：`onResume`（多设备切前台，同步可能早已完成）与
+     * `KomihoSync.progressSynced`（同步晚于恢复时才补上）。
+     *
+     * 三个守卫，缺一个都会变成「读着读着被拽走」：
+     *  1. 只在**用户这次还没翻页**时生效（`chapterPageIndex == sessionStartPage`）；
+     *  2. 只**前进**不后退（`latest > 当前页`）；
+     *  3. 落点必须在**本章页数范围内**（远端记的页可能比本地版本多）。
+     */
+    fun maybeFollowRemoteProgress() {
+        val viewerChapters = state.value.viewerChapters ?: return
+        val readerChapter = viewerChapters.currChapter
+        if (!KomihoSync.syncableSourceUrl(readerChapter.chapter.url)) return
+        if (sessionStartPage < 0 || chapterPageIndex != sessionStartPage) return
+        val pages = readerChapter.pages ?: return
+        val chapterId = readerChapter.chapter.id ?: return
+        viewModelScope.launchIO {
+            val latest = runCatching {
+                Injekt.get<tachiyomi.domain.chapter.repository.ChapterRepository>()
+                    .getChapterById(chapterId)
+                    ?.lastPageRead
+                    ?.toInt()
+            }.getOrNull() ?: return@launchIO
+            // 协程恢复时用户可能已经翻页（或换了章），二次确认再决定跳不跳。
+            if (chapterPageIndex != sessionStartPage) return@launchIO
+            if (latest <= chapterPageIndex || latest >= pages.size) return@launchIO
+            // 就地更新内存里的进度，随后让 viewer 跳过去（落库仍由正常翻页流程负责）。
+            readerChapter.chapter.last_page_read = latest
+            readerChapter.requestedPage = latest
+            eventChannel.send(Event.JumpToPage(latest))
+            logcat {
+                "[ReaderSync] 跟随远端进度：chapter=${readerChapter.chapter.name} " +
+                    "$chapterPageIndex -> $latest"
+            }
         }
     }
 
@@ -533,6 +591,8 @@ class ReaderViewModel @JvmOverloads constructor(
         _openingChapterId = chapter.chapter.id
         // SY <--
         loader.loadChapter(chapter /* SY --> */, page/* SY <-- */)
+        // Komiho: 换章后重置「会话起始页」——每一章都重新判断用户是否已开始阅读。
+        sessionStartPage = -1
         // SY --> Komiho: 整本下载已在 loader.loadChapter 内完成，其后只剩页面解码，不再属于「缓存中」。
         _chapterCaching.value = false
         // SY <--
@@ -585,9 +645,9 @@ class ReaderViewModel @JvmOverloads constructor(
                 )
             }
         }
-        // SY --> Komiho: 触发条件「章节打开时」——仅 WebDAV/SMB 来源（其进度才进同步备份）。
+        // SY --> Komiho: 触发条件「章节打开时」——WebDAV / SMB / 115（其进度才进同步备份）。
         val openUrl = chapter.chapter.url
-        if (openUrl.startsWith("webdav://") || openUrl.startsWith("smb://")) {
+        if (KomihoSync.syncableSourceUrl(openUrl)) {
             runCatching { KomihoSync.autoSync(Injekt.get<Application>(), KomihoSync.TRIGGER_CHAPTER_OPEN) }
         }
         // SY <--
@@ -769,6 +829,8 @@ class ReaderViewModel @JvmOverloads constructor(
 
         // SY -->
         mutableState.update { it.copy(currentPageText = currentPageText) }
+        // Komiho: 记录本次会话的起始页（只在第一次上报时写），供「远端进度跟随」判断用户是否已开始阅读。
+        if (sessionStartPage < 0) sessionStartPage = page.index
         // SY <--
 
         val selectedChapter = page.chapter
@@ -2139,6 +2201,9 @@ class ReaderViewModel @JvmOverloads constructor(
         // MihonSY: 自动模式切换（内存生效，不落库）后按当前解析模式重建 viewer
         data object RecreateViewer : Event
         data object PageChanged : Event
+
+        /** Komiho: 同步拉到更靠后的进度 → 跟随跳页（只在用户还没翻页时发出）。 */
+        data class JumpToPage(val page: Int) : Event
         data class SetOrientation(val orientation: Int) : Event
         data class SetCoverResult(val result: SetAsCoverResult) : Event
 
